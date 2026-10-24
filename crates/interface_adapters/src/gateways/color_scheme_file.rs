@@ -199,26 +199,3 @@ fn hsl_to_rgb(hue: f32, saturation: f32, lightness: f32) -> (u8, u8, u8) {
     let to_byte = |v: f32| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8;
     (to_byte(r), to_byte(g), to_byte(b))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolves_variables_alpha_and_hsl() {
-        let scheme = parse(
-            r##"{
-                "variables": { "red": "#ff0000", "alias": "var(red)" },
-                "globals": { "background": "hsl(0, 0%, 100%)", "selection": "color(var(alias) alpha(0.5))" },
-                "rules": [{ "scope": "comment", "foreground": "rgb(1, 2, 3)", "font_style": "italic" }]
-            }"##,
-            "Test",
-        )
-        .unwrap();
-        assert_eq!(scheme.name, "Test");
-        assert_eq!(scheme.globals["background"], Rgba { r: 255, g: 255, b: 255, a: 255 });
-        assert_eq!(scheme.globals["selection"], Rgba { r: 255, g: 0, b: 0, a: 128 });
-        assert!(scheme.rules[0].italic);
-        assert_eq!(scheme.rules[0].foreground, Some(Rgba { r: 1, g: 2, b: 3, a: 255 }));
-    }
-}

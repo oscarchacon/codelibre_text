@@ -96,21 +96,3 @@ impl SettingsLayers {
         self.set_override(key, Value::Bool(!current));
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn later_layers_and_syntax_settings_win() {
-        let mut layers = SettingsLayers::default();
-        layers.add_preferences(&json!({ "tab_size": 4, "word_wrap": false }));
-        layers.add_preferences(&json!({ "tab_size": 2 }));
-        layers.add_syntax_layer("Python", json!({ "tab_size": 8 }));
-        assert_eq!(layers.global().usize("tab_size", 0), 2);
-        assert_eq!(layers.for_syntax("Python").usize("tab_size", 0), 8);
-        layers.toggle_override("word_wrap");
-        assert!(layers.for_syntax("Python").bool("word_wrap", false));
-    }
-}

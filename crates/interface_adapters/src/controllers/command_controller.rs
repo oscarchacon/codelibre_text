@@ -145,8 +145,9 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "expand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true }),
         "unexpand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false }),
         "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace),
-        "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort { case_sensitive: command.bool_arg("case_sensitive", false) }),
-        ),
+        "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort {
+            case_sensitive: command.bool_arg("case_sensitive", false),
+        })),
         "permute_lines" => match command.str_arg("operation") {
             "reverse" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Reverse)),
             "unique" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Unique)),
@@ -254,14 +255,4 @@ fn strip_snippet_fields(snippet: &str) -> String {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::strip_snippet_fields;
-
-    #[test]
-    fn strips_snippet_fields() {
-        assert_eq!(strip_snippet_fields("fn ${1:name}() {$0}"), "fn name() {}");
-    }
 }

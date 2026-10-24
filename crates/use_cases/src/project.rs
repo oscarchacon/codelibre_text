@@ -90,15 +90,3 @@ pub fn matches_pattern(pattern: &str, name: &str) -> bool {
     let n: Vec<char> = name.chars().collect();
     matches(&p, &n)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::matches_pattern;
-
-    #[test]
-    fn matches_wildcards() {
-        assert!(matches_pattern("*.pyc", "a.pyc"));
-        assert!(matches_pattern("node_modules", "node_modules"));
-        assert!(!matches_pattern("*.o", "a.obj"));
-    }
-}

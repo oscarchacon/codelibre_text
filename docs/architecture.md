@@ -54,7 +54,7 @@ The editor's business rules, true for any editor regardless of how it is shown:
 | `settings.rs` | Layered settings (defaults → packages → User → syntax → runtime). |
 | `menu.rs`, `command.rs`, `symbol.rs` | Menus, palette entries, command invocations, Goto Symbol entries. |
 
-No I/O, no UI. Everything here is unit-tested.
+No I/O, no UI. Tested in `crates/entities/tests/`.
 
 ### 2. Use Cases — `crates/use_cases`
 What the application does. `Editor` holds the application state (`EditorState`) and the gateways;
@@ -77,7 +77,7 @@ each module adds the use cases of one area as methods:
 `SessionGateway`, `FileIndexGateway`, `ShellGateway`. They are *declared* here and *implemented*
 in the outer circles — that is how an inner circle uses something outer without depending on it.
 
-Use cases are tested with in-memory gateways (`crates/use_cases/tests/document_workflow.rs`).
+Use cases are tested with in-memory gateways from `crates/test_support` (`crates/use_cases/tests/`).
 
 ### 3. Interface Adapters — `crates/interface_adapters`
 Converts data between the use cases and the outside:
@@ -95,7 +95,8 @@ Everything tied to a library or the OS:
 
 | Path | Role |
 |---|---|
-| `main.rs` | Composition root: builds every gateway implementation and starts the `Editor`. |
+| `lib.rs` | `compose()`, the composition root: builds every gateway implementation and starts the `Editor`. |
+| `main.rs` | Thin binary: command line and window. (Library + thin `main.rs` so `tests/` can use the code.) |
 | `app.rs` | The eframe loop (see below). |
 | `views/` | egui views. They draw view models and return `UiEvent`s. |
 | `input.rs` | egui keys → `KeyCombo`. |
@@ -147,11 +148,40 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
 | Add a text transformation | `entities/src/text_commands.rs` (+ a `TextCommand` variant in `use_cases/src/editing.rs`) |
 | Add a Sublime command | an arm in `interface_adapters/src/controllers/command_controller.rs`, then the keymap/menu/palette in `assets/Default/` |
 | Add application behavior | a method in the matching `use_cases/src/*.rs` module |
-| Talk to a new external system | a trait in `use_cases/src/gateways.rs`, its implementation in `frameworks/src/gateways/`, wired in `frameworks/src/main.rs` |
+| Talk to a new external system | a trait in `use_cases/src/gateways.rs`, its implementation in `frameworks/src/gateways/`, wired in `compose()` in `frameworks/src/lib.rs` |
 | Support another Sublime file format | `interface_adapters/src/gateways/` |
 | Change how something looks | a presenter (what is shown) or a view (how it is drawn) |
 
 ## Tests
 
-`cargo test --workspace` runs the entity unit tests, the format-gateway tests and the use case
-tests with in-memory gateways. The egui layer is verified by running the app.
+```bash
+cargo test --workspace
+```
+
+Tests follow Cargo's convention: each crate has a `tests/` folder next to `src/`, with **one file
+per module it tests** (e.g. `crates/entities/tests/text_commands.rs` tests
+`crates/entities/src/text_commands.rs`). Each file is compiled as its own crate, so tests only use
+the public API, just like the next circle out does. There are no `#[cfg(test)]` modules in `src/`.
+
+| Crate | What its `tests/` check | Test doubles |
+|---|---|---|
+| `entities` | Text commands, find, documents (encodings, line endings), keymap, settings, menus | none needed: pure functions |
+| `use_cases` | Every use case module: documents, saving, editing, find, preferences, packages, project, search, session | `test_support::World` (in-memory gateways) |
+| `interface_adapters` | Controllers, presenters, view state, and the Sublime file-format gateways | `test_support::World`; real temporary folders (`tempfile`) for the file formats |
+| `frameworks` | Key translation, syntect engine, theme colors, file system, folder index, platform paths | real temporary folders |
+
+**`crates/test_support`** is not part of the application. It implements every gateway trait in
+memory (disk, dialogs, clipboard, resources, syntaxes, session, file index, shell) behind a
+`World`: prepare the world, build an `Editor` from it, run use cases, then inspect what happened.
+
+```rust
+let world = World::new().with_file("/p/a.txt", "one\r\ntwo");
+let mut editor = world.editor();
+editor.open_file(Path::new("/p/a.txt"));
+editor.run_text_command(TextCommand::DuplicateLine);
+editor.save_active(false);
+assert_eq!(world.file_text("/p/a.txt"), "one\r\none\r\ntwo");
+```
+
+Not covered by automated tests: drawing (egui views and `app.rs`), native dialogs, the clipboard
+and opening the file manager. Those are checked by running the app.

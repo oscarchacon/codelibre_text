@@ -73,15 +73,3 @@ fn to_strict_json(source: &str) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn accepts_comments_and_trailing_commas() {
-        let value = parse("{ // comment\n \"a\": [1, 2, /* x */ ], \"b\": \"//not a comment\", }").unwrap();
-        assert_eq!(value["a"], serde_json::json!([1, 2]));
-        assert_eq!(value["b"], "//not a comment");
-    }
-}

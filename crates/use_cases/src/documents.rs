@@ -88,6 +88,7 @@ impl Editor {
         if replaces_pristine {
             let old = std::mem::replace(&mut self.state.documents[0], doc);
             self.gateways.syntaxes.forget(old.id);
+            self.state.recently_used.retain(|id| *id != old.id);
             self.activate(0);
         } else {
             let index = (self.state.active + 1).min(self.state.documents.len());

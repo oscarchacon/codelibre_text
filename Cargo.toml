@@ -11,6 +11,8 @@ members = [
     "crates/use_cases",
     "crates/interface_adapters",
     "crates/frameworks",
+    # Test doubles shared by the tests of the other crates (not part of the application).
+    "crates/test_support",
 ]
 # `cargo run` / `cargo build` from the root build the application.
 default-members = ["crates/frameworks"]
@@ -24,11 +26,14 @@ license = "MIT"
 entities = { path = "crates/entities" }
 use_cases = { path = "crates/use_cases" }
 interface_adapters = { path = "crates/interface_adapters" }
+test_support = { path = "crates/test_support" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 fuzzy-matcher = "0.3"
+# Tests only
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

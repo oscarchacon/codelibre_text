@@ -182,23 +182,3 @@ fn parse_palette_command(item: &Value) -> Option<PaletteCommand> {
         command: command_from(item.get("command"), item.get("args"))?,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_the_builtin_resources() {
-        let keymap = sublime_json::parse(builtin_resources::KEYMAP).unwrap();
-        let bindings: Vec<Binding> = keymap.as_array().unwrap().iter().filter_map(parse_binding).collect();
-        assert!(bindings.iter().any(|b| b.command.name == "show_overlay"));
-
-        let menu = sublime_json::parse(builtin_resources::MAIN_MENU).unwrap();
-        let menu: Vec<MenuItem> = menu.as_array().unwrap().iter().filter_map(parse_menu_item).collect();
-        assert_eq!(menu[0].caption, "File");
-
-        let palette = sublime_json::parse(builtin_resources::PALETTE_COMMANDS).unwrap();
-        assert!(palette.as_array().unwrap().iter().filter_map(parse_palette_command).count() > 40);
-        assert!(sublime_json::parse(builtin_resources::PREFERENCES).is_ok());
-    }
-}

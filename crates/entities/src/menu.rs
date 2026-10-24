@@ -40,26 +40,3 @@ pub struct PaletteCommand {
     pub caption: String,
     pub command: Command,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(caption: &str, id: Option<&str>, children: Vec<MenuItem>) -> MenuItem {
-        MenuItem {
-            caption: caption.into(),
-            id: id.map(String::from),
-            command: None,
-            checkbox: false,
-            children,
-        }
-    }
-
-    #[test]
-    fn merges_children_by_id() {
-        let mut menu = vec![item("Tools", Some("tools"), vec![item("A", None, vec![])])];
-        merge_menu(&mut menu, vec![item("", Some("tools"), vec![item("B", None, vec![])]), item("Extra", None, vec![])]);
-        assert_eq!(menu.len(), 2);
-        assert_eq!(menu[0].children.len(), 2);
-    }
-}

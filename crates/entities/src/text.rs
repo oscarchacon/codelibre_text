@@ -67,26 +67,3 @@ pub fn word_at(text: &str, position: usize) -> Selection {
 pub fn selected_text(text: &str, selection: Selection) -> &str {
     &text[char_to_byte(text, selection.start())..char_to_byte(text, selection.end())]
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn converts_between_chars_and_bytes() {
-        let text = "año\nb";
-        assert_eq!(char_to_byte(text, 2), 3);
-        assert_eq!(byte_to_char(text, 3), 2);
-    }
-
-    #[test]
-    fn reports_line_and_column() {
-        assert_eq!(line_col("ab\ncd", 4), (1, 1));
-        assert_eq!(line_to_char("ab\ncd\nef", 2), 6);
-    }
-
-    #[test]
-    fn finds_word_around_caret() {
-        assert_eq!(word_at("let foo_bar = 1", 6), Selection::new(4, 11));
-    }
-}

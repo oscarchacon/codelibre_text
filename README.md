@@ -88,12 +88,16 @@ crates/
 ├── entities/            # Entities: Document, Selection, text commands, find, keymap, settings, menus
 ├── use_cases/           # Use Cases: Editor + use cases (open, save, find…) + gateway traits
 ├── interface_adapters/  # Controllers, presenters, view models, Sublime file-format gateways
-└── frameworks/          # Frameworks & Drivers: egui views, syntect, dialogs, disk, main() (binary)
+├── frameworks/          # Frameworks & Drivers: egui views, syntect, dialogs, disk, main() (binary)
+└── test_support/        # Test doubles: in-memory gateways (tests only)
 assets/Default/          # Built-in keymap, menu, commands, preferences and color schemes
 ```
 
+Each crate keeps its tests in `crates/<crate>/tests/`, one file per module it tests.
+
 See [docs/architecture.md](docs/architecture.md) for the circles, the flow of a frame, an
-end-to-end example (pressing Ctrl+S) and where each kind of change belongs.
+end-to-end example (pressing Ctrl+S), where each kind of change belongs, and how the tests are
+organized.
 
 ## Roadmap
 
