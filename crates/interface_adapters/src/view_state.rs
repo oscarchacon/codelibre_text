@@ -1,0 +1,143 @@
+//! Presentation-only state: what is open on screen. It is not part of the application state
+//! (the use cases neither know nor care whether the side bar is visible).
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
+
+use entities::command::Command;
+use use_cases::search::{Candidate, SearchKind};
+
+/// The quick panel at the top of the window (Command Palette, Goto Anything, pickers).
+pub struct QuickPanel {
+    pub kind: SearchKind,
+    pub query: String,
+    pub selected: usize,
+    /// Results for `results_query`; recomputed when the query changes.
+    pub results: Vec<Candidate>,
+    pub results_query: Option<String>,
+    /// Color scheme to restore if the color scheme picker is cancelled.
+    pub color_scheme_before: Option<String>,
+    /// The query field should take keyboard focus (set when the panel opens).
+    pub focus_requested: bool,
+}
+
+impl QuickPanel {
+    pub fn new(kind: SearchKind, query: String) -> Self {
+        Self {
+            kind,
+            query,
+            selected: 0,
+            results: Vec::new(),
+            results_query: None,
+            color_scheme_before: None,
+            focus_requested: true,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct FindPanelState {
+    pub visible: bool,
+    pub replace_mode: bool,
+    /// The query field should take keyboard focus on the next frame.
+    pub focus_requested: bool,
+}
+
+/// Edits the text widget performs itself (they must join its undo history).
+#[derive(Debug, Clone, PartialEq)]
+pub enum WidgetEdit {
+    Undo,
+    Redo,
+    SelectAll,
+    Copy,
+    Cut,
+    Paste(String),
+}
+
+/// Requests from the controllers to the window / widgets, carried out by the framework layer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewRequest {
+    WidgetEdit(WidgetEdit),
+    SetFullscreen(bool),
+    CloseWindow,
+}
+
+pub struct ViewState {
+    pub show_side_bar: bool,
+    pub show_status_bar: bool,
+    pub fullscreen: bool,
+    pub quick_panel: Option<QuickPanel>,
+    pub find_panel: FindPanelState,
+    pub show_about: bool,
+    pub show_load_errors: bool,
+    pub expanded_folders: HashSet<PathBuf>,
+    /// The text area should take keyboard focus on the next frame.
+    pub focus_editor: bool,
+    /// The user already agreed to quit with unsaved changes.
+    pub exit_confirmed: bool,
+    /// Side bar folder contents, read once per folder (cleared by "Refresh Folders").
+    pub(crate) folder_listings: HashMap<PathBuf, Vec<(PathBuf, bool)>>,
+    pub(crate) commands: VecDeque<Command>,
+    pub(crate) requests: Vec<ViewRequest>,
+}
+
+impl Default for ViewState {
+    fn default() -> Self {
+        Self {
+            show_side_bar: true,
+            show_status_bar: true,
+            fullscreen: false,
+            quick_panel: None,
+            find_panel: FindPanelState::default(),
+            show_about: false,
+            show_load_errors: false,
+            expanded_folders: HashSet::new(),
+            focus_editor: true,
+            exit_confirmed: false,
+            folder_listings: HashMap::new(),
+            commands: VecDeque::new(),
+            requests: Vec::new(),
+        }
+    }
+}
+
+impl ViewState {
+    /// Queues a command to run before the next frame is drawn.
+    pub fn queue_command(&mut self, command: Command) {
+        self.commands.push_back(command);
+    }
+
+    pub fn take_commands(&mut self) -> VecDeque<Command> {
+        std::mem::take(&mut self.commands)
+    }
+
+    pub fn request(&mut self, request: ViewRequest) {
+        self.requests.push(request);
+    }
+
+    pub fn take_requests(&mut self) -> Vec<ViewRequest> {
+        std::mem::take(&mut self.requests)
+    }
+
+    pub fn forget_folder_listings(&mut self) {
+        self.folder_listings.clear();
+    }
+
+    /// Flags saved with the session.
+    pub fn layout(&self) -> Vec<(String, bool)> {
+        vec![
+            ("side_bar".into(), self.show_side_bar),
+            ("status_bar".into(), self.show_status_bar),
+        ]
+    }
+
+    pub fn apply_layout(&mut self, layout: &[(String, bool)]) {
+        for (key, value) in layout {
+            match key.as_str() {
+                "side_bar" => self.show_side_bar = *value,
+                "status_bar" => self.show_status_bar = *value,
+                _ => {}
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "use_cases"
+description = "Clean Architecture: Use Cases. Application rules; talks to the outside only through gateway traits."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+entities.workspace = true
+serde_json.workspace = true
+fuzzy-matcher.workspace = true

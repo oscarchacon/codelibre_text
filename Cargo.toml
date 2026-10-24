@@ -1,65 +1,40 @@
-[package]
-name = "codelibre_text"
+# CodeLibre Text follows Clean Architecture. Each circle is a crate, so the compiler enforces the
+# Dependency Rule: a crate can only depend on the crates of the circles inside it.
+#
+#   entities  <-  use_cases  <-  interface_adapters  <-  frameworks (binary)
+#
+# See docs/architecture.md.
+[workspace]
+resolver = "2"
+members = [
+    "crates/entities",
+    "crates/use_cases",
+    "crates/interface_adapters",
+    "crates/frameworks",
+]
+# `cargo run` / `cargo build` from the root build the application.
+default-members = ["crates/frameworks"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "CodeLibre Text - An open-source, native text editor built with Rust and egui"
 license = "MIT"
 
-[dependencies]
-# UI framework - fast, native, no browser
-egui = "0.31"
-eframe = { version = "0.31", features = ["wgpu"] }
-egui_extras = "0.31"
-# Syntax highlighting
-tree-sitter = "0.24"
-tree-sitter-rust = "0.23"
-tree-sitter-python = "0.23"
-tree-sitter-javascript = "0.23"
-tree-sitter-typescript = "0.23"
-tree-sitter-cpp = "0.23"
-tree-sitter-html = "0.23"
-tree-sitter-css = "0.23"
-tree-sitter-json = "0.23"
-# File system
-ignore = "0.4"
-directories = "5.0"
-# Config and serialization
+[workspace.dependencies]
+entities = { path = "crates/entities" }
+use_cases = { path = "crates/use_cases" }
+interface_adapters = { path = "crates/interface_adapters" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Git integration
-git2 = { version = "0.20", features = ["vendored-libgit2"] }
-# Threading
-crossbeam = "0.8"
-# Regular expressions
 regex = "1"
-# UUIDs
-uuid = { version = "1", features = ["v4"] }
-# Logging
-tracing = "0.1"
-tracing-subscriber = "0.3"
-# Clipboard
-arboard = "3.4"
-# Command line parsing
-clap = { version = "4", features = ["derive"] }
-# Fuzzy search
 fuzzy-matcher = "0.3"
-# Encoding detection
-encoding_rs = "0.8"
-# Time
-chrono = { version = "0.4", features = ["serde"] }
-# HTTP client for LSP/marketplace
-reqwest = { version = "0.12", features = ["json"] }
-# LSP types
-lsp-types = "0.97"
-# SHA256 for package verification
-sha2 = "0.10"
-
-[features]
-default = []
-dev = ["eframe/wgpu"]
-wgpu = ["eframe/wgpu"]
 
 [profile.release]
-opt-level = 2
+opt-level = 3
 lto = true
 strip = true
+
+# syntect's regex engine is very slow unoptimized; keep dependencies fast in debug builds
+[profile.dev.package."*"]
+opt-level = 2

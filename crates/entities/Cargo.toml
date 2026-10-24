@@ -1,0 +1,11 @@
+[package]
+name = "entities"
+description = "Clean Architecture: Entities. Editor business rules with no I/O and no frameworks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Plain data utilities only: JSON values for settings/command arguments and regex for find.
+serde_json.workspace = true
+regex.workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "interface_adapters"
+description = "Clean Architecture: Interface Adapters. Controllers, presenters, view models and the Sublime Text file-format gateways."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+entities.workspace = true
+use_cases.workspace = true
+serde.workspace = true
+serde_json.workspace = true

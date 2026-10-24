@@ -1,0 +1,146 @@
+[
+	{
+		"caption": "File", "mnemonic": "F", "id": "file",
+		"children": [
+			{ "command": "new_file", "caption": "New File" },
+			{ "command": "prompt_open_file", "caption": "Open File…" },
+			{ "command": "prompt_open_folder", "caption": "Open Folder…" },
+			{ "command": "reopen_last_file", "caption": "Reopen Closed File" },
+			{ "caption": "-" },
+			{ "command": "save", "caption": "Save" },
+			{ "command": "prompt_save_as", "caption": "Save As…" },
+			{ "command": "save_all", "caption": "Save All" },
+			{ "command": "revert", "caption": "Revert File" },
+			{ "caption": "-" },
+			{ "command": "close", "caption": "Close File" },
+			{ "command": "close_all", "caption": "Close All Files" },
+			{ "command": "close_folder_list", "caption": "Close Folder" },
+			{ "caption": "-" },
+			{ "command": "exit", "caption": "Exit" }
+		]
+	},
+	{
+		"caption": "Edit", "id": "edit",
+		"children": [
+			{ "command": "undo", "caption": "Undo" },
+			{ "command": "redo", "caption": "Redo" },
+			{ "caption": "-" },
+			{ "command": "cut", "caption": "Cut" },
+			{ "command": "copy", "caption": "Copy" },
+			{ "command": "paste", "caption": "Paste" },
+			{ "caption": "-" },
+			{
+				"caption": "Line", "id": "line",
+				"children": [
+					{ "command": "indent", "caption": "Indent" },
+					{ "command": "unindent", "caption": "Unindent" },
+					{ "command": "swap_line_up", "caption": "Swap Line Up" },
+					{ "command": "swap_line_down", "caption": "Swap Line Down" },
+					{ "command": "duplicate_line", "caption": "Duplicate Line" },
+					{ "command": "run_macro_file", "args": { "file": "res://Packages/Default/Delete Line.sublime-macro" }, "caption": "Delete Line" },
+					{ "command": "join_lines", "caption": "Join Lines" }
+				]
+			},
+			{
+				"caption": "Comment", "id": "comment",
+				"children": [
+					{ "command": "toggle_comment", "args": { "block": false }, "caption": "Toggle Comment" },
+					{ "command": "toggle_comment", "args": { "block": true }, "caption": "Toggle Block Comment" }
+				]
+			},
+			{
+				"caption": "Convert Case", "id": "convert_case",
+				"children": [
+					{ "command": "title_case", "caption": "Title Case" },
+					{ "command": "upper_case", "caption": "Upper Case" },
+					{ "command": "lower_case", "caption": "Lower Case" },
+					{ "command": "swap_case", "caption": "Swap Case" }
+				]
+			},
+			{ "caption": "-" },
+			{ "command": "sort_lines", "args": { "case_sensitive": false }, "caption": "Sort Lines" },
+			{ "command": "permute_lines", "args": { "operation": "unique" }, "caption": "Unique Lines" },
+			{ "command": "trim_trailing_white_space", "caption": "Trim Trailing White Space" }
+		]
+	},
+	{
+		"caption": "Selection", "id": "selection",
+		"children": [
+			{ "command": "select_all", "caption": "Select All" },
+			{ "command": "expand_selection", "args": { "to": "line" }, "caption": "Expand Selection to Line" },
+			{ "command": "find_under_expand", "caption": "Expand Selection to Word" }
+		]
+	},
+	{
+		"caption": "Find", "id": "find",
+		"children": [
+			{ "command": "show_panel", "args": { "panel": "find" }, "caption": "Find…" },
+			{ "command": "find_next", "caption": "Find Next" },
+			{ "command": "find_prev", "caption": "Find Previous" },
+			{ "command": "show_panel", "args": { "panel": "replace" }, "caption": "Replace…" },
+			{ "command": "replace_all", "caption": "Replace All" },
+			{ "caption": "-" },
+			{ "command": "find_under", "caption": "Quick Find" },
+			{ "command": "slurp_find_string", "caption": "Use Selection for Find" }
+		]
+	},
+	{
+		"caption": "View", "id": "view",
+		"children": [
+			{ "command": "toggle_side_bar", "caption": "Side Bar" },
+			{ "command": "toggle_status_bar", "caption": "Status Bar" },
+			{ "command": "toggle_full_screen", "caption": "Enter Full Screen" },
+			{ "caption": "-" },
+			{
+				"caption": "Font", "id": "font",
+				"children": [
+					{ "command": "increase_font_size", "caption": "Larger" },
+					{ "command": "decrease_font_size", "caption": "Smaller" },
+					{ "command": "reset_font_size", "caption": "Reset" }
+				]
+			},
+			{ "caption": "-" },
+			{ "command": "toggle_setting", "args": { "setting": "word_wrap" }, "caption": "Word Wrap", "checkbox": true },
+			{ "command": "toggle_setting", "args": { "setting": "line_numbers" }, "caption": "Line Numbers", "checkbox": true },
+			{ "command": "toggle_setting", "args": { "setting": "highlight_line" }, "caption": "Highlight Line", "checkbox": true },
+			{ "command": "show_overlay", "args": { "overlay": "command_palette", "text": "Set Syntax: " }, "caption": "Syntax…" }
+		]
+	},
+	{
+		"caption": "Goto", "id": "goto",
+		"children": [
+			{ "command": "show_overlay", "args": { "overlay": "goto", "show_files": true }, "caption": "Goto Anything…" },
+			{ "command": "show_overlay", "args": { "overlay": "goto", "text": "@" }, "caption": "Goto Symbol…" },
+			{ "command": "show_overlay", "args": { "overlay": "goto", "text": ":" }, "caption": "Goto Line…" },
+			{ "caption": "-" },
+			{ "command": "next_view", "caption": "Next File" },
+			{ "command": "prev_view", "caption": "Previous File" }
+		]
+	},
+	{
+		"caption": "Tools", "id": "tools",
+		"children": [
+			{ "command": "show_overlay", "args": { "overlay": "command_palette" }, "caption": "Command Palette…" },
+			{ "caption": "-", "id": "packages" }
+		]
+	},
+	{
+		"caption": "Preferences", "id": "preferences",
+		"children": [
+			{ "command": "open_dir", "args": { "dir": "${packages}" }, "caption": "Browse Packages…" },
+			{ "caption": "-" },
+			{ "command": "edit_settings", "args": { "base_file": "${packages}/Default/Preferences.sublime-settings", "default": "{\n\t$0\n}\n" }, "caption": "Settings" },
+			{ "command": "edit_settings", "args": { "base_file": "${packages}/Default/Default (${platform}).sublime-keymap", "default": "[\n\t$0\n]\n" }, "caption": "Key Bindings" },
+			{ "command": "select_color_scheme", "caption": "Select Color Scheme…" },
+			{ "command": "reload_packages", "caption": "Reload Packages" },
+			{ "caption": "-", "id": "package-settings" }
+		]
+	},
+	{
+		"caption": "Help", "id": "help",
+		"children": [
+			{ "command": "show_load_errors", "caption": "Package Load Errors" },
+			{ "command": "show_about_window", "caption": "About CodeLibre Text" }
+		]
+	}
+]
