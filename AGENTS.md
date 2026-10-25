@@ -12,6 +12,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
   syntect engine, OS/library gateways) + thin `main.rs` (CLI + window).
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
 - `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
+- `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
+  `packaging/linux` (`.desktop` + `install.sh`) and `packaging/macos` (`Info.plist` + `make_app.sh`). `.gitattributes` keeps them LF.
 
 Never add an outer-circle dependency to an inner crate's `Cargo.toml`; use a gateway trait instead.
 Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, View Models, Gateways.
@@ -40,6 +42,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
 - `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1").
+- Multiple selections (Ctrl+D): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
+  by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
+  → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
 - Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`.
 - `persist_setting` re-serializes the user's `Preferences.sublime-settings` (comments are lost), as Sublime does.
 
@@ -49,5 +54,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
 
 ## Not implemented
-Multiple cursors (`find_under_expand` moves a single selection), Python plugins, `.sublime-package` zips,
+Multiple cursors other than Ctrl+D (no Ctrl+click, column selection, Up/Down or copy of all selections), Python plugins, `.sublime-package` zips,
 split groups, minimap, folding, auto-complete, find in files. Highlighting is skipped above 4 MB.

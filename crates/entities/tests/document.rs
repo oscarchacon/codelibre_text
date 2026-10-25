@@ -223,6 +223,56 @@ fn edit_that_does_nothing_keeps_the_selection_revision() {
 }
 
 #[test]
+fn added_selections_are_kept_until_the_caret_is_moved_by_hand() {
+    let mut doc = from_bytes(b"ab ab ab");
+    doc.set_selection(Selection::new(0, 2));
+    doc.add_selection(Selection::new(3, 5));
+    assert_eq!(doc.selection(), Selection::new(3, 5));
+    assert_eq!(doc.extra_selections(), &[Selection::new(0, 2)]);
+    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(3, 5)]);
+    doc.sync_selection_from_view(Selection::new(3, 5));
+    assert_eq!(doc.extra_selections().len(), 1, "the view reporting the same caret changes nothing");
+    doc.sync_selection_from_view(Selection::caret(7));
+    assert!(doc.extra_selections().is_empty());
+}
+
+#[test]
+fn single_selection_and_commands_drop_the_extra_selections() {
+    let mut doc = from_bytes(b"ab ab");
+    doc.set_selection(Selection::new(0, 2));
+    doc.add_selection(Selection::new(3, 5));
+    doc.single_selection();
+    assert!(doc.extra_selections().is_empty());
+    assert_eq!(doc.selection(), Selection::new(3, 5));
+    doc.add_selection(Selection::new(0, 2));
+    doc.set_selection(Selection::caret(1));
+    assert!(doc.extra_selections().is_empty());
+}
+
+#[test]
+fn edit_all_changes_every_selection_and_keeps_the_primary_one() {
+    let mut doc = from_bytes(b"ab ab");
+    doc.set_selection(Selection::new(3, 5));
+    doc.add_selection(Selection::new(0, 2));
+    assert!(doc.edit_all(|text, selections| {
+        assert_eq!(selections, &[Selection::new(0, 2), Selection::new(3, 5)]);
+        *text = "x x".into();
+        vec![Selection::caret(1), Selection::caret(3)]
+    }));
+    assert_eq!(doc.selection(), Selection::caret(1));
+    assert_eq!(doc.extra_selections(), &[Selection::caret(3)]);
+}
+
+#[test]
+fn edit_all_merges_carets_that_meet() {
+    let mut doc = from_bytes(b"abc");
+    doc.set_selection(Selection::caret(1));
+    doc.add_selection(Selection::caret(2));
+    doc.edit_all(|_, _| vec![Selection::caret(1), Selection::caret(1)]);
+    assert!(doc.extra_selections().is_empty());
+}
+
+#[test]
 fn read_only_documents_cannot_be_edited() {
     let mut doc = Document::scratch(1, "Defaults", "{}", "JSON", true);
     assert!(!doc.edit(|text, sel| {

@@ -2,7 +2,7 @@
 
 use entities::selection::Selection;
 use entities::text::{line_to_char, word_at};
-use entities::text_commands::{self as tc, Case, LineOrder};
+use entities::text_commands::{self as tc, Case, CaretMotion, LineOrder};
 
 use crate::editor::Editor;
 
@@ -65,6 +65,40 @@ impl Editor {
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
             TextCommand::Insert(characters) => Some(tc::replace_selection(text, sel, &characters)),
         });
+    }
+
+    /// Typing while there are several selections (Ctrl+D): the text goes into every one.
+    pub fn insert_at_selections(&mut self, insert: &str) {
+        let settings = self.view_settings();
+        let insert = if insert == "\t" && settings.bool("translate_tabs_to_spaces", false) {
+            " ".repeat(settings.usize("tab_size", 4).max(1))
+        } else {
+            insert.to_string()
+        };
+        if let Some(doc) = self.active_document_mut() {
+            doc.edit_all(|text, selections| tc::replace_selections(text, selections, &insert));
+        }
+    }
+
+    /// Backspace (Delete when `forward`) at every selection.
+    pub fn delete_at_selections(&mut self, forward: bool) {
+        if let Some(doc) = self.active_document_mut() {
+            doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, forward));
+        }
+    }
+
+    /// Arrow keys, Home and End while there are several selections: every caret moves.
+    pub fn move_carets(&mut self, motion: CaretMotion) {
+        if let Some(doc) = self.active_document_mut() {
+            doc.edit_all(|text, selections| tc::move_carets(text, selections, motion));
+        }
+    }
+
+    /// `single_selection` (Escape): keeps only the primary selection.
+    pub fn single_selection(&mut self) {
+        if let Some(doc) = self.active_document_mut() {
+            doc.single_selection();
+        }
     }
 
     /// Moves the caret to the start of a zero-based line.

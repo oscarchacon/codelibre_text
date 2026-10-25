@@ -7,6 +7,7 @@ use entities::command::Command;
 use entities::document::{DocumentId, LineEnding};
 use entities::find::FindOptions;
 use entities::selection::Selection;
+use entities::text_commands::CaretMotion;
 use use_cases::editing::TextCommand;
 use use_cases::editor::CloseChoice;
 use use_cases::search::SearchKind;
@@ -51,6 +52,10 @@ pub enum UiEvent {
     TabPressed,
     ShiftTabPressed,
     EnterPressed,
+    /// Keys the editor applies at every selection while there are several (Ctrl+D).
+    TypedAtSelections(String),
+    DeleteAtSelections { forward: bool },
+    MoveCarets(CaretMotion),
 
     CloseDialogAnswered(CloseChoice),
     AboutClosed,
@@ -145,6 +150,9 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::TabPressed => editor.run_text_command(TextCommand::InsertTab),
         UiEvent::ShiftTabPressed => editor.run_text_command(TextCommand::Unindent),
         UiEvent::EnterPressed => editor.run_text_command(TextCommand::NewlineAutoIndent),
+        UiEvent::TypedAtSelections(text) => editor.insert_at_selections(&text),
+        UiEvent::DeleteAtSelections { forward } => editor.delete_at_selections(forward),
+        UiEvent::MoveCarets(motion) => editor.move_carets(motion),
 
         UiEvent::CloseDialogAnswered(choice) => {
             if editor.resolve_pending_close(choice) {

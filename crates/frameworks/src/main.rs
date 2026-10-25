@@ -17,8 +17,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("CodeLibre Text")
+        // Wayland matches the window to packaging/linux/codelibre_text.desktop (and its icon) by this id.
+        .with_app_id("codelibre_text")
         .with_inner_size([1300.0, 860.0])
         .with_min_inner_size([480.0, 320.0]);
+    // Window/taskbar icon on every platform; the .exe file icon comes from build.rs (Windows).
+    match eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icons/codelibre_text.png")) {
+        Ok(icon) => viewport = viewport.with_icon(icon),
+        Err(e) => tracing::warn!("could not load the window icon: {e}"),
+    }
     if cli.fullscreen {
         viewport = viewport.with_fullscreen(true);
     }

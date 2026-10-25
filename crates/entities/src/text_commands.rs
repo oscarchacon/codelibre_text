@@ -516,6 +516,77 @@ pub fn convert_indentation(text: &mut String, selection: Selection, tab_size: us
     apply_edits(text, edits, selection)
 }
 
+/// Typing with several selections (Ctrl+D): each one is replaced by `insert`.
+/// `selections` are sorted by position; the carets come back in the same order.
+pub fn replace_selections(text: &mut String, selections: &[Selection], insert: &str) -> Vec<Selection> {
+    let ranges: Vec<(usize, usize)> = selections.iter().map(|s| (s.start(), s.end())).collect();
+    replace_char_ranges(text, &ranges, insert)
+}
+
+/// Backspace (Delete when `forward`) at every selection: removes the selected text, or the
+/// character before (after) an empty selection.
+pub fn delete_at_selections(text: &mut String, selections: &[Selection], forward: bool) -> Vec<Selection> {
+    let len = text.chars().count();
+    let ranges: Vec<(usize, usize)> = selections
+        .iter()
+        .map(|s| match (s.is_empty(), forward) {
+            (false, _) => (s.start(), s.end()),
+            (true, false) => (s.head.saturating_sub(1), s.head),
+            (true, true) => (s.head, (s.head + 1).min(len)),
+        })
+        .collect();
+    replace_char_ranges(text, &ranges, "")
+}
+
+/// Replaces sorted char ranges with `insert`; a range overlapping the previous one is cut to fit.
+fn replace_char_ranges(text: &mut String, ranges: &[(usize, usize)], insert: &str) -> Vec<Selection> {
+    let inserted = insert.chars().count();
+    let mut out = String::with_capacity(text.len() + insert.len() * ranges.len());
+    let mut carets = Vec::with_capacity(ranges.len());
+    let (mut copied_char, mut copied_byte) = (0, 0);
+    let mut shift = 0isize;
+    for &(start, end) in ranges {
+        let start = start.max(copied_char);
+        let end = end.max(start);
+        let (start_byte, end_byte) = (char_to_byte(text, start), char_to_byte(text, end));
+        out.push_str(&text[copied_byte..start_byte]);
+        out.push_str(insert);
+        carets.push(Selection::caret((start as isize + shift) as usize + inserted));
+        shift += inserted as isize - (end - start) as isize;
+        (copied_char, copied_byte) = (end, end_byte);
+    }
+    out.push_str(&text[copied_byte..]);
+    *text = out;
+    carets
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretMotion {
+    Left,
+    Right,
+    LineStart,
+    LineEnd,
+}
+
+/// Moves every caret one step; a non-empty selection collapses to its start (Left) or end (Right).
+pub fn move_carets(text: &str, selections: &[Selection], motion: CaretMotion) -> Vec<Selection> {
+    let len = text.chars().count();
+    selections
+        .iter()
+        .map(|s| {
+            let head = char_to_byte(text, s.head);
+            Selection::caret(match motion {
+                CaretMotion::Left if s.is_empty() => s.head.saturating_sub(1),
+                CaretMotion::Left => s.start(),
+                CaretMotion::Right if s.is_empty() => (s.head + 1).min(len),
+                CaretMotion::Right => s.end(),
+                CaretMotion::LineStart => byte_to_char(text, line_start(text, head)),
+                CaretMotion::LineEnd => byte_to_char(text, line_end(text, head)),
+            })
+        })
+        .collect()
+}
+
 pub fn ensure_trailing_newline(text: &mut String) {
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');

@@ -13,6 +13,8 @@ compatible with Sublime Text's resource formats.
 - Line commands: duplicate, swap up/down, delete, join, add line before/after, toggle comment,
   case conversion, sort/unique/reverse lines, trim trailing whitespace, tabs <-> spaces
 - Find & replace panel: regex, case sensitive, whole word, wrap, match highlighting
+- Multiple selections with Ctrl+D: typing, Backspace/Delete, Enter, Tab, paste, Left/Right/Home/End
+  act on every selection; Escape goes back to one
 - Files: UTF-8 (with/without BOM) and Latin-1, CRLF/LF preserved, reload on external changes
 - Hot exit: open folders and unsaved buffers are restored on the next start
 
@@ -32,7 +34,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | `.sublime-syntax` | Yes (via syntect; some Sublime Text 4-only features may fail, see Help > Package Load Errors) |
 | `.tmTheme`, `.sublime-color-scheme` | Yes (`variables`, `globals`, `rules`, `color(... alpha())`) |
 | `.sublime-settings` | Yes, layered: defaults -> packages -> `User`, plus per-syntax files |
-| `.sublime-keymap` | Yes: chords, args, and `overlay_visible`/`panel_visible`/`setting.*`/`selection_empty` contexts |
+| `.sublime-keymap` | Yes: chords, args, and `overlay_visible`/`panel_visible`/`setting.*`/`selection_empty`/`num_selections` contexts |
 | `Main.sublime-menu` | Yes, merged by `id` |
 | `.sublime-commands` | Yes |
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, …) |
@@ -48,7 +50,8 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | Ctrl+Shift+P | Command Palette |
 | Ctrl+P / Ctrl+G / Ctrl+R | Goto Anything / Line / Symbol |
 | Ctrl+F / Ctrl+H / F3 / Shift+F3 | Find / Replace / Next / Previous |
-| Ctrl+D / Ctrl+F3 | Select word, then next occurrence / Quick find |
+| Ctrl+D / Ctrl+F3 | Select word, then add the next occurrence / Quick find |
+| Escape | Back to a single selection |
 | Ctrl+/ / Ctrl+Shift+/ | Toggle line / block comment |
 | Ctrl+Shift+D / Ctrl+Shift+K | Duplicate / Delete line |
 | Ctrl+Shift+Up / Down | Swap line up / down |
@@ -78,6 +81,17 @@ cargo run -- path/to/folder path/to/file.rs
 cargo test --workspace
 ```
 
+## Installing
+
+The icon lives in `assets/icons/`. The window and taskbar use it on every platform; each system
+also needs it where it shows installed applications:
+
+- **Windows**: `cargo build --release` embeds it in `codelibre_text.exe` (`crates/frameworks/build.rs`).
+- **Linux**: `packaging/linux/install.sh` installs the binary, the icon and a `.desktop` menu entry
+  in `~/.local` (`sudo PREFIX=/usr/local packaging/linux/install.sh` for every user).
+- **macOS**: `packaging/macos/make_app.sh` creates `target/release/CodeLibre Text.app` with the
+  `.icns` icon; drag it to Applications.
+
 ## Architecture
 
 The project follows **Clean Architecture**. Each circle is a crate of the Cargo workspace, so the
@@ -101,7 +115,7 @@ organized.
 
 ## Roadmap
 
-- [ ] Multiple cursors / multiple selections
+- [ ] Multiple cursors beyond Ctrl+D (Ctrl+click, column selection, Up/Down with several carets)
 - [ ] Python plugin host implementing the `sublime` / `sublime_plugin` API
 - [ ] `.sublime-package` (zip) loading and Package Control
 - [ ] Split layouts (groups)

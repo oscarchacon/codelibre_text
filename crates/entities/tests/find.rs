@@ -130,6 +130,16 @@ fn replace_all_understands_newline_escapes_in_regex_mode() {
 }
 
 #[test]
+fn next_unselected_skips_selected_matches_and_wraps() {
+    let opts = options("ab");
+    let text = "ab ab ab";
+    let selected = [Selection::new(3, 5), Selection::new(6, 8)];
+    assert_eq!(next_unselected(&pattern(&opts), text, Selection::new(3, 5), &selected), Some(Selection::new(0, 2)));
+    let all = [Selection::new(0, 2), Selection::new(3, 5), Selection::new(6, 8)];
+    assert_eq!(next_unselected(&pattern(&opts), text, Selection::new(0, 2), &all), None);
+}
+
+#[test]
 fn replace_all_with_no_matches_changes_nothing() {
     let opts = options("zzz");
     let mut text = "abc".to_string();

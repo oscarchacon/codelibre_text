@@ -237,7 +237,9 @@ fn slurp_find_string_and_find_under_expand() {
     run(&mut editor, &mut view, &cmd("slurp_find_string"));
     assert_eq!(editor.state().find.query, "ab");
     run(&mut editor, &mut view, &cmd("find_under_expand"));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(3, 5));
+    assert_eq!(editor.active_document().unwrap().selections(), vec![Selection::new(0, 2), Selection::new(3, 5)]);
+    run(&mut editor, &mut view, &cmd("single_selection"));
+    assert!(editor.active_document().unwrap().extra_selections().is_empty());
 }
 
 #[test]

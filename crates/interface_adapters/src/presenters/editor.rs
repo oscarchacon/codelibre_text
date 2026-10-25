@@ -23,6 +23,7 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
         syntax: doc.syntax.clone(),
         color_scheme,
         selection: doc.selection(),
+        extra_selections: doc.extra_selections().to_vec(),
         selection_revision: doc.selection_revision(),
         font_size: settings.f32("font_size", 11.0).clamp(4.0, 72.0),
         tab_size: settings.usize("tab_size", 4).max(1),

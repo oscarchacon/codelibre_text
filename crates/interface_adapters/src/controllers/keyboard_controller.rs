@@ -28,6 +28,7 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         overlay_visible: view.quick_panel.is_some(),
         panel_visible: view.find_panel.visible,
         selection_empty: editor.active_document().is_none_or(|d| d.selection().is_empty()),
+        num_selections: editor.active_document().map_or(1, |d| d.extra_selections().len() + 1),
         settings: editor.view_settings(),
     };
     let was_waiting = editor.state().keymap.is_waiting_for_chord();
@@ -56,6 +57,7 @@ struct ViewKeyContext {
     overlay_visible: bool,
     panel_visible: bool,
     selection_empty: bool,
+    num_selections: usize,
     settings: Settings,
 }
 
@@ -65,7 +67,7 @@ impl KeyContext for ViewKeyContext {
             "overlay_visible" | "overlay_has_focus" => Value::Bool(self.overlay_visible),
             "panel_visible" | "panel_has_focus" => Value::Bool(self.panel_visible),
             "selection_empty" => Value::Bool(self.selection_empty),
-            "num_selections" => Value::from(1),
+            "num_selections" => Value::from(self.num_selections),
             "auto_complete_visible" | "has_next_field" | "has_prev_field" | "is_recording" | "popup_visible" => {
                 Value::Bool(false)
             }

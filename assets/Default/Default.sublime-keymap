@@ -19,6 +19,7 @@
 	{ "keys": ["ctrl+p"], "command": "show_overlay", "args": { "overlay": "goto", "show_files": true } },
 	{ "keys": ["ctrl+g"], "command": "show_overlay", "args": { "overlay": "goto", "text": ":" } },
 	{ "keys": ["ctrl+r"], "command": "show_overlay", "args": { "overlay": "goto", "text": "@" } },
+	{ "keys": ["escape"], "command": "single_selection", "context": [{ "key": "num_selections", "operator": "not_equal", "operand": 1 }] },
 	{ "keys": ["escape"], "command": "hide_overlay", "context": [{ "key": "overlay_visible", "operator": "equal", "operand": true }] },
 
 	{ "keys": ["ctrl+f"], "command": "show_panel", "args": { "panel": "find" } },

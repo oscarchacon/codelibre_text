@@ -94,6 +94,8 @@ pub struct EditorViewModel {
     pub syntax: String,
     pub color_scheme: String,
     pub selection: Selection,
+    /// Selections besides the primary one (Ctrl+D); the view paints them itself.
+    pub extra_selections: Vec<Selection>,
     pub selection_revision: u64,
     /// Font size in points (Sublime's unit).
     pub font_size: f32,

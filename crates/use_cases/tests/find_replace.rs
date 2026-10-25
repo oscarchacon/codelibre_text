@@ -99,13 +99,66 @@ fn an_invalid_regex_is_shown_as_a_find_error() {
 }
 
 #[test]
-fn ctrl_d_selects_the_word_then_the_next_occurrence() {
+fn ctrl_d_selects_the_word_then_adds_the_next_occurrences() {
     let world = World::new();
     let mut editor = editor_with(&world, "x = x + x", Selection::caret(0));
     editor.select_word_or_next_occurrence();
     assert_eq!(selection(&editor), Selection::new(0, 1));
     editor.select_word_or_next_occurrence();
     assert_eq!(selection(&editor), Selection::new(4, 5));
+    editor.select_word_or_next_occurrence();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.selections(), vec![Selection::new(0, 1), Selection::new(4, 5), Selection::new(8, 9)]);
+    editor.select_word_or_next_occurrence();
+    assert_eq!(editor.active_document().unwrap().selections().len(), 3, "every occurrence is already selected");
+}
+
+#[test]
+fn ctrl_d_from_a_word_matches_whole_words_and_case() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo Foo foobar foo", Selection::caret(1));
+    editor.select_word_or_next_occurrence();
+    editor.select_word_or_next_occurrence();
+    assert_eq!(selection(&editor), Selection::new(15, 18));
+}
+
+#[test]
+fn ctrl_d_from_part_of_a_word_matches_inside_words() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo foobar", Selection::new(0, 3));
+    editor.select_word_or_next_occurrence();
+    assert_eq!(selection(&editor), Selection::new(0, 3), "a whole-word selection skips foobar");
+    let mut editor = editor_with(&world, "fo foobar", Selection::new(0, 1));
+    editor.select_word_or_next_occurrence();
+    assert_eq!(selection(&editor), Selection::new(3, 4), "part of a word also matches inside words");
+}
+
+#[test]
+fn typing_deleting_and_moving_with_several_selections() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "ab ab", Selection::caret(0));
+    editor.select_word_or_next_occurrence();
+    editor.select_word_or_next_occurrence();
+    editor.insert_at_selections("xyz");
+    assert_eq!(active_text(&editor), "xyz xyz");
+    editor.delete_at_selections(false);
+    assert_eq!(active_text(&editor), "xy xy");
+    editor.move_carets(entities::text_commands::CaretMotion::LineStart);
+    editor.delete_at_selections(true);
+    assert_eq!(active_text(&editor), "y xy", "both carets went to the line start and merged");
+    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+}
+
+#[test]
+fn escape_keeps_only_the_primary_selection() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "a a", Selection::caret(0));
+    editor.select_word_or_next_occurrence();
+    editor.select_word_or_next_occurrence();
+    editor.single_selection();
+    let doc = editor.active_document().unwrap();
+    assert!(doc.extra_selections().is_empty());
+    assert_eq!(doc.selection(), Selection::new(2, 3));
 }
 
 #[test]

@@ -1,0 +1,7 @@
+# Packaging files run on Linux / macOS: keep LF line endings even on Windows checkouts.
+*.sh text eol=lf
+*.desktop text eol=lf
+*.plist text eol=lf
+*.ico binary
+*.icns binary
+*.png binary

@@ -81,15 +81,33 @@ impl Editor {
         true
     }
 
-    /// `find_under_expand` (Ctrl+D): selects the word under the caret, then the next occurrence.
-    /// (Single selection: the next occurrence replaces the selection instead of adding a cursor.)
+    /// `find_under_expand` (Ctrl+D): selects the word under the caret, then adds the next
+    /// occurrence of the selected text as another selection. Like Sublime, the search is case
+    /// sensitive, and a selection that is a whole word only matches whole words.
     pub fn select_word_or_next_occurrence(&mut self) {
-        let selection_empty = self.active_document().is_some_and(|d| d.selection().is_empty());
-        if selection_empty {
-            self.run_text_command(crate::editing::TextCommand::SelectWord);
-        } else {
-            self.use_selection_as_query(false);
-            self.find_next(true);
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let selection = doc.selection();
+        if selection.is_empty() {
+            let word = word_at(&doc.text, selection.head);
+            if !word.is_empty() {
+                doc.set_selection(word);
+            }
+            return;
+        }
+        let word = word_at(&doc.text, selection.start());
+        let options = FindOptions {
+            query: selected_text(&doc.text, selection).to_string(),
+            case_sensitive: true,
+            whole_word: word.start() == selection.start() && word.end() == selection.end(),
+            ..FindOptions::default()
+        };
+        let Ok(Some(pattern)) = options.pattern() else {
+            return;
+        };
+        if let Some(next) = find::next_unselected(&pattern, &doc.text, selection, &doc.selections()) {
+            doc.add_selection(next);
         }
     }
 

@@ -71,7 +71,10 @@ pub struct Document {
     pub syntax: String,
     /// When the file was last read or written; used to notice changes made by other programs.
     pub modified_at: Option<SystemTime>,
+    /// The primary selection: the one the text widget shows and edits.
     selection: Selection,
+    /// More selections added by `find_under_expand` (Ctrl+D). Any other selection change drops them.
+    extra_selections: Vec<Selection>,
     /// Increases whenever the selection is changed by a command (not by the user typing),
     /// so the view knows it has to move its caret.
     selection_revision: u64,
@@ -92,6 +95,7 @@ impl Document {
             syntax: "Plain Text".into(),
             modified_at: None,
             selection: Selection::caret(0),
+            extra_selections: Vec::new(),
             selection_revision: 1,
         }
     }
@@ -213,15 +217,48 @@ impl Document {
         self.selection_revision
     }
 
+    /// The selections besides the primary one, in the order they were added.
+    pub fn extra_selections(&self) -> &[Selection] {
+        &self.extra_selections
+    }
+
+    /// Every selection (primary and extra), sorted by position.
+    pub fn selections(&self) -> Vec<Selection> {
+        let mut all = self.extra_selections.clone();
+        all.push(self.selection);
+        all.sort_by_key(|s| (s.start(), s.end()));
+        all
+    }
+
     /// Moves the selection on behalf of a command; the view will follow it.
+    /// Leaves a single selection.
     pub fn set_selection(&mut self, selection: Selection) {
+        self.extra_selections.clear();
         self.selection = selection.clamped(self.char_count());
         self.selection_revision += 1;
     }
 
+    /// Keeps the current selections and makes `selection` the new primary one (Ctrl+D).
+    pub fn add_selection(&mut self, selection: Selection) {
+        let mut extra = std::mem::take(&mut self.extra_selections);
+        extra.push(self.selection);
+        self.set_selection(selection);
+        self.extra_selections = extra;
+    }
+
+    /// Drops the extra selections, keeping the primary one (Sublime's `single_selection`).
+    pub fn single_selection(&mut self) {
+        self.extra_selections.clear();
+    }
+
     /// Records where the user put the caret in the view (the view already shows it).
+    /// Moving the caret by hand leaves a single selection.
     pub fn sync_selection_from_view(&mut self, selection: Selection) {
-        self.selection = selection.clamped(self.char_count());
+        let selection = selection.clamped(self.char_count());
+        if selection != self.selection {
+            self.extra_selections.clear();
+        }
+        self.selection = selection;
     }
 
     /// Runs a text command on this document. The command returns the new selection, or `None`
@@ -238,6 +275,29 @@ impl Document {
             }
             None => false,
         }
+    }
+
+    /// Runs a text command on every selection at once. The command gets the selections sorted
+    /// by position and returns the new ones in the same order.
+    pub fn edit_all(&mut self, command: impl FnOnce(&mut String, &[Selection]) -> Vec<Selection>) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let len = self.char_count();
+        let selections: Vec<Selection> = self.selections().iter().map(|s| s.clamped(len)).collect();
+        let primary = self.selection.clamped(len);
+        let primary_index = selections.iter().position(|s| *s == primary).unwrap_or(0);
+        let mut new = command(&mut self.text, &selections);
+        if new.len() != selections.len() {
+            return false;
+        }
+        let new_primary = new.remove(primary_index);
+        self.set_selection(new_primary);
+        // Carets that met (e.g. deleting the text between them) become one.
+        new.dedup();
+        new.retain(|s| *s != self.selection);
+        self.extra_selections = new;
+        true
     }
 }
 

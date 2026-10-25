@@ -84,6 +84,19 @@ pub fn find_from(pattern: &Regex, text: &str, selection: Selection, forward: boo
     found.map(to_selection)
 }
 
+/// `find_under_expand`: the first match after `after` (wrapping around) that is not already one
+/// of the `selected` ranges.
+pub fn next_unselected(pattern: &Regex, text: &str, after: Selection, selected: &[Selection]) -> Option<Selection> {
+    let from = char_to_byte(text, after.end());
+    let matches = find_all(pattern, text);
+    let split = matches.partition_point(|r| r.start < from);
+    matches[split..]
+        .iter()
+        .chain(&matches[..split])
+        .map(|r| Selection::new(byte_to_char(text, r.start), byte_to_char(text, r.end)))
+        .find(|m| !selected.iter().any(|s| s.start() == m.start() && s.end() == m.end()))
+}
+
 /// Sublime writes groups as `\1` or `$1`; the regex crate expects `${1}`.
 fn replacement_template(replacement: &str) -> String {
     let mut out = String::new();

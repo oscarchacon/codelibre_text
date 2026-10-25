@@ -95,6 +95,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "slurp_find_string" => editor.use_selection_as_query(false),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
+        "single_selection" => editor.single_selection(),
         "replace_next" => editor.replace_next(),
         "replace_all" => editor.replace_all(),
 

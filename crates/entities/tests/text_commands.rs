@@ -363,6 +363,43 @@ fn convert_indentation_between_tabs_and_spaces() {
     assert_eq!(run("      x", caret(0), |t, s| convert_indentation(t, s, 4, false)).0, "\t  x");
 }
 
+// ----- several selections (Ctrl+D) ----------------------------------------------------------------
+
+#[test]
+fn replace_selections_types_at_every_selection() {
+    let mut text = "ab ab\nab".to_string();
+    let carets = replace_selections(&mut text, &[sel(0, 2), sel(3, 5), sel(6, 8)], "héllo");
+    assert_eq!(text, "héllo héllo\nhéllo");
+    assert_eq!(carets, vec![caret(5), caret(11), caret(17)]);
+}
+
+#[test]
+fn delete_at_selections_removes_selected_text_or_one_char() {
+    let mut text = "abc abc".to_string();
+    let carets = delete_at_selections(&mut text, &[caret(1), sel(4, 6)], false);
+    assert_eq!((text.as_str(), carets), ("bc c", vec![caret(0), caret(3)]));
+    let mut text = "abc abc".to_string();
+    let carets = delete_at_selections(&mut text, &[caret(1), caret(7)], true);
+    assert_eq!((text.as_str(), carets), ("ac abc", vec![caret(1), caret(6)]));
+}
+
+#[test]
+fn deleting_at_adjacent_carets_does_not_remove_a_char_twice() {
+    let mut text = "abc".to_string();
+    let carets = delete_at_selections(&mut text, &[caret(0), caret(1)], true);
+    assert_eq!((text.as_str(), carets), ("c", vec![caret(0), caret(0)]));
+}
+
+#[test]
+fn move_carets_collapses_and_moves_every_selection() {
+    let text = "ab\ncd";
+    let selections = [sel(0, 2), caret(4)];
+    assert_eq!(move_carets(text, &selections, CaretMotion::Left), vec![caret(0), caret(3)]);
+    assert_eq!(move_carets(text, &selections, CaretMotion::Right), vec![caret(2), caret(5)]);
+    assert_eq!(move_carets(text, &selections, CaretMotion::LineStart), vec![caret(0), caret(3)]);
+    assert_eq!(move_carets(text, &selections, CaretMotion::LineEnd), vec![caret(2), caret(5)]);
+}
+
 #[test]
 fn ensure_trailing_newline_adds_one_only_when_missing() {
     for (input, expected) in [("a", "a\n"), ("a\n", "a\n"), ("", "")] {

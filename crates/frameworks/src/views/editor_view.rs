@@ -11,10 +11,11 @@ use std::collections::HashMap;
 
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
-use egui::{Align2, Color32, FontId, Id, Key, Modifiers, Rect, Shape, Stroke, TextEdit, Vec2};
+use egui::{Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, Shape, Stroke, TextEdit, Vec2};
 use entities::document::DocumentId;
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
+use entities::text_commands::CaretMotion;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::EditorViewModel;
 
@@ -65,22 +66,24 @@ pub fn show(
     }
 
     // Tab, Shift+Tab and Enter follow Sublime's indentation settings, so the use cases handle them.
+    // With several selections (Ctrl+D) the widget only knows the primary one, so typing, deleting
+    // and moving the carets go to the use cases too.
     let has_focus = ctx.memory(|m| m.has_focus(id));
-    let indentation_key = if has_focus && matches!(text, EditorText::Editable(_)) {
+    let mut key_events = Vec::new();
+    if has_focus && matches!(text, EditorText::Editable(_)) {
         ui.input_mut(|i| {
-            if i.consume_key(Modifiers::NONE, Key::Tab) {
-                Some(UiEvent::TabPressed)
-            } else if i.consume_key(Modifiers::SHIFT, Key::Tab) {
-                Some(UiEvent::ShiftTabPressed)
-            } else if model.auto_indent && i.consume_key(Modifiers::NONE, Key::Enter) {
-                Some(UiEvent::EnterPressed)
-            } else {
-                None
+            if !model.extra_selections.is_empty() {
+                key_events.extend(take_multi_selection_keys(i));
             }
-        })
-    } else {
-        None
-    };
+            if i.consume_key(Modifiers::NONE, Key::Tab) {
+                key_events.push(UiEvent::TabPressed);
+            } else if i.consume_key(Modifiers::SHIFT, Key::Tab) {
+                key_events.push(UiEvent::ShiftTabPressed);
+            } else if model.auto_indent && i.consume_key(Modifiers::NONE, Key::Enter) {
+                key_events.push(UiEvent::EnterPressed);
+            }
+        });
+    }
 
     let font = FontId::monospace(model.font_size * POINTS_TO_PIXELS);
     let row_height = ui.fonts(|f| f.row_height(&font));
@@ -180,7 +183,17 @@ pub fn show(
                     ));
                 }
                 shapes.extend(find_match_shapes(model, text, galley, origin, viewport, char_width, colors.find_highlight));
+                for extra in &model.extra_selections {
+                    for rect in range_rects(galley, extra.start(), extra.end()) {
+                        shapes.push(Shape::rect_filled(rect.translate(origin.to_vec2()), 0.0, colors.selection));
+                    }
+                }
                 ui.painter().set(background, Shape::Vec(shapes));
+                // The widget draws the primary caret; the extra ones are drawn here, over the text.
+                for extra in &model.extra_selections {
+                    let caret = galley.pos_from_ccursor(CCursor::new(extra.head)).translate(origin.to_vec2());
+                    ui.painter().line_segment([caret.left_top(), caret.left_bottom()], Stroke::new(2.0_f32, colors.caret));
+                }
 
                 paint_gutter(ui, model, text, galley, origin, viewport, gutter_width, char_width, row_height, &font, &colors, selection);
 
@@ -191,9 +204,52 @@ pub fn show(
         });
 
     // After SelectionChanged, so the command sees the caret it was pressed at.
-    if let Some(event) = indentation_key {
-        events.push(event);
+    events.extend(key_events);
+}
+
+/// Takes the typing, deleting and caret keys out of the input when there are several selections.
+fn take_multi_selection_keys(input: &mut egui::InputState) -> Vec<UiEvent> {
+    let mut taken = Vec::new();
+    input.events.retain(|event| {
+        let ui_event = match event {
+            Event::Text(text) | Event::Paste(text) => Some(UiEvent::TypedAtSelections(text.clone())),
+            Event::Key { key, pressed: true, modifiers, .. } if modifiers.is_none() => match key {
+                Key::Backspace => Some(UiEvent::DeleteAtSelections { forward: false }),
+                Key::Delete => Some(UiEvent::DeleteAtSelections { forward: true }),
+                Key::Enter => Some(UiEvent::TypedAtSelections("\n".into())),
+                Key::Tab => Some(UiEvent::TypedAtSelections("\t".into())),
+                Key::ArrowLeft => Some(UiEvent::MoveCarets(CaretMotion::Left)),
+                Key::ArrowRight => Some(UiEvent::MoveCarets(CaretMotion::Right)),
+                Key::Home => Some(UiEvent::MoveCarets(CaretMotion::LineStart)),
+                Key::End => Some(UiEvent::MoveCarets(CaretMotion::LineEnd)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let keep = ui_event.is_none();
+        taken.extend(ui_event);
+        keep
+    });
+    taken
+}
+
+/// Rectangles covering the chars `start..end`, one per row of the galley.
+fn range_rects(galley: &egui::Galley, start: usize, end: usize) -> Vec<Rect> {
+    if start == end {
+        return Vec::new();
     }
+    let a = galley.pos_from_ccursor(CCursor::new(start));
+    let b = galley.pos_from_ccursor(CCursor::new(end));
+    galley
+        .rows
+        .iter()
+        .filter(|row| row.rect.bottom() > a.top() + 0.5 && row.rect.top() < b.bottom() - 0.5)
+        .map(|row| {
+            let left = if (row.rect.top() - a.top()).abs() < 0.5 { a.left() } else { row.rect.left() };
+            let right = if (row.rect.top() - b.top()).abs() < 0.5 { b.left() } else { row.rect.right() };
+            Rect::from_min_max(egui::pos2(left, row.rect.top()), egui::pos2(right, row.rect.bottom()))
+        })
+        .collect()
 }
 
 fn set_widget_selection(ctx: &egui::Context, id: Id, selection: Selection) {
