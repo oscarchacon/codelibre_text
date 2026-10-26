@@ -57,9 +57,10 @@ impl Editor {
         true
     }
 
-    /// Shows the native "Open File" dialog.
-    pub fn prompt_open_files(&mut self) {
-        let start = self.current_directory();
+    /// Shows the native "Open File" dialog, in `initial_directory` (Sublime's argument, which may
+    /// use `${packages}`) or else the active file's folder.
+    pub fn prompt_open_files(&mut self, initial_directory: Option<&str>) {
+        let start = self.dialog_start(initial_directory);
         for path in self.gateways.dialogs.pick_files(start.as_deref()) {
             self.open_file(&path);
         }
@@ -277,6 +278,14 @@ impl Editor {
     pub fn sync_selection_from_view(&mut self, id: DocumentId, selection: Selection) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].sync_selection_from_view(selection);
+        }
+    }
+
+    /// Where a file or folder dialog opens: the `initial_directory` argument if given.
+    pub(crate) fn dialog_start(&self, initial_directory: Option<&str>) -> Option<std::path::PathBuf> {
+        match initial_directory.filter(|d| !d.is_empty()) {
+            Some(dir) => Some(self.gateways.resources.paths().expand(dir)),
+            None => self.current_directory(),
         }
     }
 

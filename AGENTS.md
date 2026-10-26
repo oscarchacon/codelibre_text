@@ -43,7 +43,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
 - Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
-  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`).
+  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
+  (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
+  whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
 - `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1").
@@ -67,6 +69,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `docs/plugins.md` — Python plugins: phase A done; phases B (events, panels, async) and C (Package Control,
   `.sublime-package`, scopes) are checklists with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
+- `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
+  settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, plugin phases B and C

@@ -7,7 +7,7 @@
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
-use use_cases::editing::TextCommand;
+use use_cases::editing::{Expansion, TextCommand};
 use use_cases::search::SearchKind;
 use use_cases::Editor;
 
@@ -17,14 +17,14 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     match command.name.as_str() {
         // ----- files ---------------------------------------------------------------------------
         "new_file" => editor.new_file(),
-        "prompt_open_file" => editor.prompt_open_files(),
+        "prompt_open_file" => editor.prompt_open_files(Some(command.str_arg("initial_directory"))),
         "prompt_open_folder" | "prompt_add_folder" => {
-            if let Some(folder) = editor.prompt_add_folder() {
+            if let Some(folder) = editor.prompt_add_folder(Some(command.str_arg("initial_directory"))) {
                 view.expanded_folders.insert(folder);
                 view.show_side_bar = true;
             }
         }
-        "open_file" => editor.open_package_file(command.str_arg("file")),
+        "open_file" => editor.open_package_file(command.str_arg("file"), command.bool_arg("encoded_position", false)),
         "open_dir" => editor.open_package_folder(command.str_arg("dir")),
         "save" => {
             editor.save_active(false);
@@ -72,13 +72,20 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "show_panel" => {
             let panel = command.str_arg("panel").trim_start_matches("output.");
+            let toggle = command.bool_arg("toggle", false);
             match panel {
+                "find" | "incremental_find" | "find_in_files" | "replace"
+                    if toggle && view.find_panel.visible && view.find_panel.replace_mode == (panel == "replace") =>
+                {
+                    view.find_panel.visible = false;
+                }
                 "find" | "incremental_find" | "find_in_files" | "replace" => {
                     view.find_panel.visible = true;
                     view.find_panel.replace_mode = panel == "replace";
                     view.find_panel.focus_requested = true;
                     editor.use_selection_as_query_if_single_line();
                 }
+                "console" if toggle => editor.toggle_console(),
                 "console" => editor.show_console(),
                 other => editor.notify(format!("Panel not supported: {other}")),
             }
@@ -137,6 +144,11 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "expand_selection" => match command.str_arg("to") {
             "line" => editor.run_text_command(TextCommand::ExpandSelectionToLine),
             "word" => editor.run_text_command(TextCommand::SelectWord),
+            "line_prev" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineUpward)),
+            "line_without_eol" | "line_strict" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineContent)),
+            "brackets" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets)),
+            "indentation" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation)),
+            "smart" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Smart)),
             other => editor.notify(format!("expand_selection to {other} is not supported")),
         },
         "indent" => editor.run_text_command(TextCommand::Indent),
@@ -149,7 +161,10 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "transpose" => editor.run_text_command(TextCommand::Transpose),
         "expand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true }),
         "unexpand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false }),
-        "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace),
+        "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace {
+            only_modified: command.bool_arg("only_modified", false),
+            trim_on_caret: command.bool_arg("trim_on_caret", true),
+        }),
         "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort {
             case_sensitive: command.bool_arg("case_sensitive", false),
         })),
@@ -167,8 +182,11 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
         "redo" | "redo_or_repeat" | "soft_redo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo)),
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
+        // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
+        "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
         "copy" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy)),
         "cut" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut)),
+        "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
         "paste" | "paste_and_indent" => {
             if let Some(text) = editor.clipboard_text() {
                 view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));

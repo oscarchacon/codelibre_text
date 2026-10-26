@@ -14,8 +14,12 @@ impl DialogGateway for NativeDialogs {
         dialog.pick_files().unwrap_or_default()
     }
 
-    fn pick_folder(&self) -> Option<PathBuf> {
-        rfd::FileDialog::new().pick_folder()
+    fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf> {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(dir) = start_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_folder()
     }
 
     fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf> {

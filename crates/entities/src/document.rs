@@ -182,6 +182,11 @@ impl Document {
         self.text = text;
     }
 
+    /// The text as it was last read from or written to disk.
+    pub fn saved_text(&self) -> &str {
+        &self.saved_text
+    }
+
     pub fn is_dirty(&self) -> bool {
         !self.read_only
             && (self.text != self.saved_text || (self.path.is_some() && self.line_ending != self.saved_line_ending))

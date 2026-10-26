@@ -53,8 +53,10 @@ impl Editor {
         self.persist_setting("font_size", Value::from(size.clamp(4.0, 72.0)));
     }
 
+    /// Back to `default_font_size` if set (as in Sublime), otherwise to the default `font_size`.
     pub fn reset_font_size(&mut self) {
-        self.persist_setting("font_size", Value::Null);
+        let default = self.global_settings().get("default_font_size").cloned().unwrap_or(Value::Null);
+        self.persist_setting("font_size", default);
     }
 
     /// File stem of the `color_scheme` setting (e.g. `Monokai`).

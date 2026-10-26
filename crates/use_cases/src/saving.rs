@@ -1,6 +1,6 @@
 //! Use cases: save, save as, save all.
 
-use entities::text_commands;
+use entities::text_commands::{self, TrimOptions};
 
 use crate::editor::Editor;
 
@@ -37,11 +37,19 @@ impl Editor {
 
         let index = self.state.active;
         let doc = &mut self.state.documents[index];
-        let trim = settings
-            .get("trim_trailing_white_space_on_save")
-            .is_some_and(|v| v.as_bool() == Some(true) || v.as_str() == Some("all"));
-        if trim {
-            doc.edit(|text, sel| Some(text_commands::trim_trailing_whitespace(text, sel)));
+        // `trim_trailing_white_space_on_save`: "none" / false, "all" / true, or "not_on_caret".
+        let trim_on_caret = match settings.get("trim_trailing_white_space_on_save") {
+            Some(v) if v.as_bool() == Some(true) || v.as_str() == Some("all") => Some(true),
+            Some(v) if v.as_str() == Some("not_on_caret") => Some(false),
+            _ => None,
+        };
+        if let Some(trim_on_caret) = trim_on_caret {
+            let saved = doc.saved_text().to_string();
+            let options = TrimOptions {
+                only_modified_since: settings.bool("trim_only_modified_white_space", true).then_some(saved.as_str()),
+                trim_on_caret,
+            };
+            doc.edit(|text, sel| Some(text_commands::trim_trailing_whitespace_with(text, sel, &options)));
         }
         if settings.bool("ensure_newline_at_eof_on_save", false) {
             text_commands::ensure_trailing_newline(&mut doc.text);

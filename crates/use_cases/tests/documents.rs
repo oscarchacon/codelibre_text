@@ -95,7 +95,7 @@ fn prompt_open_files_opens_every_picked_file_starting_in_the_current_folder() {
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     *world.dialogs.files_to_open.borrow_mut() = vec![PathBuf::from("/p/b.txt")];
-    editor.prompt_open_files();
+    editor.prompt_open_files(None);
     assert_eq!(names(&editor), vec!["a.txt", "b.txt"]);
     assert_eq!(*world.dialogs.last_open_dir.borrow(), Some(PathBuf::from("/p")));
 }

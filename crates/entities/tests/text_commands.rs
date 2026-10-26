@@ -1,6 +1,7 @@
 //! Tests for `entities::text_commands` (Sublime's text commands as pure functions).
 
 use entities::selection::Selection;
+use entities::text::selected_text;
 use entities::text_commands::*;
 
 /// Runs a command on `text` with `selection` and returns the new text and selection.
@@ -439,4 +440,64 @@ fn carets_on_next_line_keep_the_column_across_short_lines() {
 fn carets_on_next_line_skip_lines_that_already_have_a_selection() {
     assert_eq!(carets_on_next_line("a\nb\nc\nd", &[caret(0), caret(4)], true), vec![caret(2), caret(6)]);
     assert_eq!(carets_on_next_line("a\nb\nc", &[caret(0), caret(2)], true), vec![caret(4)]);
+}
+
+#[test]
+fn expand_selection_to_line_upward_puts_the_caret_on_top_and_grows_up() {
+    let text = "a\nb\nc";
+    let first = expand_selection_to_line_upward(text, caret(4));
+    assert_eq!(first, sel(5, 4));
+    assert_eq!(expand_selection_to_line_upward(text, first), sel(5, 2));
+}
+
+#[test]
+fn expand_selection_to_line_content_leaves_the_newline_out() {
+    assert_eq!(expand_selection_to_line_content("ab\ncd\n", sel(1, 4)), sel(0, 5));
+}
+
+#[test]
+fn expand_selection_to_brackets_inside_then_with_the_brackets_then_out() {
+    let text = "f(a, [b, c])";
+    let inside = expand_selection_to_brackets(text, caret(7));
+    assert_eq!(inside, sel(6, 10));
+    let with_brackets = expand_selection_to_brackets(text, inside);
+    assert_eq!(with_brackets, sel(5, 11));
+    assert_eq!(expand_selection_to_brackets(text, with_brackets), sel(2, 11));
+    assert_eq!(expand_selection_to_brackets("no brackets", caret(3)), caret(3));
+    assert_eq!(expand_selection_to_brackets("(a) (b)", caret(5)), sel(5, 6), "not fooled by a closed pair before");
+}
+
+#[test]
+fn expand_selection_to_indentation_takes_the_block_then_goes_out() {
+    let text = "fn f() {\n    if x {\n        a\n\n        b\n    }\n}";
+    let block = expand_selection_to_indentation(text, caret(30), 4);
+    assert_eq!(selected_text(text, block), "        a\n\n        b");
+    let outer = expand_selection_to_indentation(text, block, 4);
+    assert_eq!(selected_text(text, outer), "    if x {\n        a\n\n        b\n    }");
+}
+
+#[test]
+fn smart_expansion_grows_step_by_step() {
+    let text = "call(\"hello world\", x)";
+    let mut selection = caret(8);
+    let mut steps = Vec::new();
+    for _ in 0..5 {
+        selection = expand_selection_smart(text, selection, 4);
+        steps.push(selected_text(text, selection).to_string());
+    }
+    assert_eq!(steps, ["hello", "hello world", "\"hello world\"", "\"hello world\", x", "(\"hello world\", x)"]);
+}
+
+#[test]
+fn trim_only_modified_lines_and_not_on_the_caret() {
+    let saved = "a  \nb  ";
+    let mut text = "a  \nb  \nc  ".to_string();
+    let options = TrimOptions { only_modified_since: Some(saved), trim_on_caret: true };
+    trim_trailing_whitespace_with(&mut text, caret(0), &options);
+    assert_eq!(text, "a  \nb  \nc", "only the new line");
+
+    let mut text = "a  \nb  ".to_string();
+    let options = TrimOptions { only_modified_since: None, trim_on_caret: false };
+    trim_trailing_whitespace_with(&mut text, caret(7), &options);
+    assert_eq!(text, "a\nb  ", "the caret's line is kept");
 }

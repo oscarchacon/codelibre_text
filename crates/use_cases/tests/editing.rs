@@ -44,7 +44,7 @@ fn every_text_command_reaches_its_entity_function() {
         ("abc", 1, TextCommand::ChangeCase(Case::Upper), "ABC"),
         ("ab", 1, TextCommand::Transpose, "ba"),
         ("\tx", 0, TextCommand::ConvertIndentation { to_spaces: true }, "    x"),
-        ("a  ", 0, TextCommand::TrimTrailingWhitespace, "a"),
+        ("a  ", 0, TextCommand::TrimTrailingWhitespace { only_modified: false, trim_on_caret: true }, "a"),
         ("b\na", 0, TextCommand::ReorderLines(LineOrder::Sort { case_sensitive: true }), "a\nb"),
         ("x", 0, TextCommand::ToggleComment { block: false }, "x"),
     ];

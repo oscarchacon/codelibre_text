@@ -369,8 +369,74 @@ fn expand_selection_to_line_and_word() {
     assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 2));
     run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "line" })));
     assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 6));
-    run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "brackets" })));
-    assert_eq!(status(&editor), "expand_selection to brackets is not supported");
+    run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "scope" })));
+    assert_eq!(status(&editor), "expand_selection to scope is not supported");
+}
+
+#[test]
+fn expand_selection_to_brackets_indentation_smart_and_line_variants() {
+    let expand = |to: &str, text: &str, selection: Selection| {
+        let world = World::new();
+        let (mut editor, mut view) = setup(&world, text, selection);
+        run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": to })));
+        editor.active_document().unwrap().selection()
+    };
+    assert_eq!(expand("brackets", "f(a, b)", Selection::caret(3)), Selection::new(2, 6));
+    assert_eq!(expand("smart", "f(abc)", Selection::caret(3)), Selection::new(2, 5), "the word first");
+    assert_eq!(expand("line_prev", "a\nb", Selection::caret(3)), Selection::new(3, 2));
+    assert_eq!(expand("line_without_eol", "ab\nc", Selection::caret(1)), Selection::new(0, 2));
+    assert_eq!(expand("line_strict", "ab\nc", Selection::caret(1)), Selection::new(0, 2));
+    assert_eq!(expand("indentation", "a\n  b\n  c\nd", Selection::caret(4)), Selection::new(2, 9));
+}
+
+#[test]
+fn trim_trailing_white_space_arguments() {
+    let world = World::new().with_file("/p/a.txt", "old  \nkeep  ");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.txt");
+    editor.run_text_command(TextCommand::Insert("new  \n".into()));
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(17));
+    run(&mut editor, &mut view, &cmd_with("trim_trailing_white_space", json!({ "only_modified": true })));
+    assert_eq!(active_text(&editor), "new\nold  \nkeep  ", "only the line typed since the save");
+    run(&mut editor, &mut view, &cmd_with("trim_trailing_white_space", json!({ "trim_on_caret": false })));
+    assert_eq!(active_text(&editor), "new\nold\nkeep  ", "not the caret's line");
+}
+
+#[test]
+fn show_panel_toggle_hides_an_open_panel_and_the_console() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    let find = cmd_with("show_panel", json!({ "panel": "find", "toggle": true }));
+    run(&mut editor, &mut view, &find);
+    assert!(view.find_panel.visible);
+    run(&mut editor, &mut view, &find);
+    assert!(!view.find_panel.visible);
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    assert!(view.find_panel.visible, "without toggle it stays open");
+
+    let console = cmd_with("show_panel", json!({ "panel": "console", "toggle": true }));
+    run(&mut editor, &mut view, &console);
+    assert_eq!(editor.active_document().unwrap().name(), "Console");
+    run(&mut editor, &mut view, &console);
+    assert!(editor.state().documents.iter().all(|d| d.name() != "Console"));
+}
+
+#[test]
+fn file_dialogs_start_in_initial_directory_and_open_file_goes_to_a_position() {
+    let world = World::new().with_file("/p/a.txt", "one\ntwo\nthree");
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    run(&mut editor, &mut view, &cmd_with("prompt_open_file", json!({ "initial_directory": "${packages}/User" })));
+    assert_eq!(world.dialogs.last_open_dir.borrow().as_deref(), Some(std::path::Path::new("/packages/User")));
+    run(&mut editor, &mut view, &cmd_with("prompt_open_folder", json!({ "initial_directory": "/p" })));
+    assert_eq!(world.dialogs.last_folder_dir.borrow().as_deref(), Some(std::path::Path::new("/p")));
+
+    run(&mut editor, &mut view, &cmd_with("open_file", json!({ "file": "/p/a.txt:2:3", "encoded_position": true })));
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(6));
+    run(&mut editor, &mut view, &cmd_with("open_file", json!({ "file": "/p/a.txt:3", "encoded_position": true })));
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(8));
 }
 
 #[test]
@@ -414,7 +480,7 @@ fn goto_line_is_one_based() {
 
 #[test]
 fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
-    let world = World::new();
+    let world = World::new().with_preferences(json!({ "copy_with_empty_selection": false }));
     *world.clipboard.borrow_mut() = Ok("clip".into());
     let mut editor = world.editor();
     let mut view = ViewState::default();
@@ -435,6 +501,40 @@ fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
         vec![Undo, Undo, Redo, Redo, Redo, SelectAll, Copy, Cut, Paste("clip".into()), Paste("clip".into())]
     );
     assert!(view.focus_editor);
+}
+
+#[test]
+fn copy_and_cut_with_nothing_selected_take_the_whole_line_and_paste_puts_it_above() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "one\ntwo", Selection::caret(5));
+    run(&mut editor, &mut view, &cmd("copy"));
+    assert_eq!(*world.clipboard.borrow(), Ok("two\n".to_string()));
+    assert_eq!(active_text(&editor), "one\ntwo");
+
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("paste"));
+    assert_eq!(active_text(&editor), "two\none\ntwo", "inserted above the caret's line");
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(5), "the caret stays on its line");
+
+    run(&mut editor, &mut view, &cmd("cut"));
+    assert_eq!(active_text(&editor), "two\ntwo");
+    assert_eq!(*world.clipboard.borrow(), Ok("one\n".to_string()));
+    assert!(view.take_requests().is_empty(), "the text widget did nothing");
+
+    // Something else on the clipboard is pasted normally.
+    *world.clipboard.borrow_mut() = Ok("x".into());
+    run(&mut editor, &mut view, &cmd("paste"));
+    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("x".into()))]);
+}
+
+#[test]
+fn reset_font_size_uses_default_font_size() {
+    let world = World::new().with_preferences(json!({ "default_font_size": 13 }));
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    run(&mut editor, &mut view, &cmd("increase_font_size"));
+    run(&mut editor, &mut view, &cmd("reset_font_size"));
+    assert_eq!(world.resources.user_settings.borrow()["font_size"], json!(13));
 }
 
 #[test]

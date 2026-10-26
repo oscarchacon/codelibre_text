@@ -73,6 +73,8 @@ pub struct ViewState {
     pub expanded_folders: HashSet<PathBuf>,
     /// The text area should take keyboard focus on the next frame.
     pub focus_editor: bool,
+    /// The text area had the keyboard focus last frame (set by the framework before keys are handled).
+    pub text_has_focus: bool,
     /// The user already agreed to quit with unsaved changes.
     pub exit_confirmed: bool,
     /// Side bar folder contents, read once per folder (cleared by "Refresh Folders").
@@ -93,6 +95,7 @@ impl Default for ViewState {
             show_load_errors: false,
             expanded_folders: HashSet::new(),
             focus_editor: true,
+            text_has_focus: false,
             exit_confirmed: false,
             folder_listings: HashMap::new(),
             commands: VecDeque::new(),

@@ -72,8 +72,12 @@
 			{ "command": "single_selection", "caption": "Single Selection" },
 			{ "caption": "-" },
 			{ "command": "select_all", "caption": "Select All" },
+			{ "command": "expand_selection", "args": { "to": "smart" }, "caption": "Expand Selection" },
 			{ "command": "expand_selection", "args": { "to": "line" }, "caption": "Expand Selection to Line" },
-			{ "command": "find_under_expand", "caption": "Expand Selection to Word" }
+			{ "command": "expand_selection", "args": { "to": "line_prev" }, "caption": "Expand Selection to Line Upward" },
+			{ "command": "find_under_expand", "caption": "Expand Selection to Word" },
+			{ "command": "expand_selection", "args": { "to": "brackets" }, "caption": "Expand Selection to Brackets" },
+			{ "command": "expand_selection", "args": { "to": "indentation" }, "caption": "Expand Selection to Indentation" }
 		]
 	},
 	{

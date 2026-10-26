@@ -60,6 +60,17 @@ impl App {
                 }
                 // A consumed key must not also type its character (e.g. Alt+1 typing "1").
                 Event::Text(_) if index > 0 && consumed.last() == Some(&(index - 1)) => consumed.push(index),
+                // egui turns Ctrl+C/X/V into these events, without a key event.
+                Event::Copy | Event::Cut | Event::Paste(_) => {
+                    let command = match event {
+                        Event::Copy => "copy",
+                        Event::Cut => "cut",
+                        _ => "paste",
+                    };
+                    if let KeyHandling::Consumed = keyboard_controller::clipboard_shortcut(&mut self.editor, &mut self.view, command) {
+                        consumed.push(index);
+                    }
+                }
                 _ => {}
             }
         }
@@ -228,6 +239,8 @@ impl eframe::App for App {
         self.editor.check_external_changes();
         self.handle_close_request(ctx);
 
+        let text_area = self.editor.active_document().map(|d| editor_view::widget_id(d.id));
+        self.view.text_has_focus = text_area.is_some() && ctx.memory(|m| m.focused()) == text_area;
         self.dispatch_keys(ctx);
         self.run_queued_commands();
         self.carry_out_view_requests(ctx);

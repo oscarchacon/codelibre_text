@@ -14,9 +14,11 @@ impl Editor {
         }
     }
 
-    /// Shows the native "Open Folder" dialog. Returns the folder that was added.
-    pub fn prompt_add_folder(&mut self) -> Option<PathBuf> {
-        let folder = self.gateways.dialogs.pick_folder()?;
+    /// Shows the native "Open Folder" dialog (in `initial_directory` if given). Returns the folder
+    /// that was added.
+    pub fn prompt_add_folder(&mut self, initial_directory: Option<&str>) -> Option<PathBuf> {
+        let start = initial_directory.filter(|d| !d.is_empty()).map(|d| self.gateways.resources.paths().expand(d));
+        let folder = self.gateways.dialogs.pick_folder(start.as_deref())?;
         self.add_folder(folder.clone());
         Some(self.gateways.file_system.canonicalize(&folder))
     }

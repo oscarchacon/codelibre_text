@@ -35,8 +35,19 @@
 	// Allow scrolling past the last line
 	"scroll_past_end": true,
 
-	// Remove trailing white space on save: false, true / "all"
+	// Remove trailing white space on save: false / "none", true / "all", or
+	// "not_on_caret" (keep the white space of the line with the caret).
 	"trim_trailing_white_space_on_save": false,
+
+	// Trim on save only the lines changed since the file was last saved.
+	"trim_only_modified_white_space": true,
+
+	// Copy and cut with nothing selected take the whole line; pasting that line
+	// puts it above the caret's line.
+	"copy_with_empty_selection": true,
+
+	// The font size set by "Reset Font Size" (unset: the default "font_size").
+	// "default_font_size": 11,
 
 	// Make sure the file ends with a newline on save
 	"ensure_newline_at_eof_on_save": false,

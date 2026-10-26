@@ -80,14 +80,39 @@ fn write_errors_are_reported_and_the_document_stays_dirty() {
 #[test]
 fn trailing_white_space_is_trimmed_on_save_when_enabled() {
     for setting in [json!(true), json!("all")] {
-        let world = World::new()
-            .with_file("/p/a.txt", "a  \nb\t")
-            .with_preferences(json!({ "trim_trailing_white_space_on_save": setting }));
+        let world = World::new().with_file("/p/a.txt", "a  \nb\t").with_preferences(json!({
+            "trim_trailing_white_space_on_save": setting,
+            "trim_only_modified_white_space": false,
+        }));
         let mut editor = world.editor();
         open(&mut editor, "/p/a.txt");
         editor.save_active(false);
         assert_eq!(world.file_text("/p/a.txt"), "a\nb");
     }
+}
+
+#[test]
+fn by_default_only_the_lines_changed_since_the_last_save_are_trimmed() {
+    let world = World::new()
+        .with_file("/p/a.txt", "old  \n")
+        .with_preferences(json!({ "trim_trailing_white_space_on_save": "all" }));
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    editor.run_text_command(TextCommand::Insert("new  \n".into()));
+    editor.save_active(false);
+    assert_eq!(world.file_text("/p/a.txt"), "new\nold  \n");
+}
+
+#[test]
+fn not_on_caret_keeps_the_white_space_where_the_caret_is() {
+    let world = World::new().with_file("/p/a.txt", "").with_preferences(json!({
+        "trim_trailing_white_space_on_save": "not_on_caret",
+    }));
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    editor.run_text_command(TextCommand::Insert("a  \nb  ".into()));
+    editor.save_active(false);
+    assert_eq!(world.file_text("/p/a.txt"), "a\nb  ");
 }
 
 #[test]

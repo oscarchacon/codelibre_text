@@ -36,9 +36,9 @@ fn a_folder_is_only_added_once() {
 fn prompt_add_folder_uses_the_folder_dialog() {
     let world = World::new().with_dir("/p");
     let mut editor = world.editor();
-    assert_eq!(editor.prompt_add_folder(), None);
+    assert_eq!(editor.prompt_add_folder(None), None);
     *world.dialogs.folder_to_open.borrow_mut() = Some(PathBuf::from("/p"));
-    assert_eq!(editor.prompt_add_folder(), Some(PathBuf::from("/p")));
+    assert_eq!(editor.prompt_add_folder(None), Some(PathBuf::from("/p")));
     assert_eq!(editor.state().folders, vec![PathBuf::from("/p")]);
 }
 

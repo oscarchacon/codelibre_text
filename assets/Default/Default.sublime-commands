@@ -13,6 +13,10 @@
 	{ "caption": "Project: Refresh Folders", "command": "refresh_folder_list" },
 
 	{ "caption": "Selection: Split into Lines", "command": "split_selection_into_lines" },
+	{ "caption": "Selection: Expand", "command": "expand_selection", "args": { "to": "smart" } },
+	{ "caption": "Selection: Expand to Line Upward", "command": "expand_selection", "args": { "to": "line_prev" } },
+	{ "caption": "Selection: Expand to Brackets", "command": "expand_selection", "args": { "to": "brackets" } },
+	{ "caption": "Selection: Expand to Indentation", "command": "expand_selection", "args": { "to": "indentation" } },
 	{ "caption": "Selection: Add Previous Line", "command": "select_lines", "args": { "forward": false } },
 	{ "caption": "Selection: Add Next Line", "command": "select_lines", "args": { "forward": true } },
 	{ "caption": "Selection: Select All Occurrences", "command": "find_all_under" },

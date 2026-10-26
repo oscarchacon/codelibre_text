@@ -72,6 +72,8 @@ pub struct EditorState {
     pub pending_close: Option<PendingClose>,
     /// What plugins printed, and their errors (View > Show Console).
     pub console: String,
+    /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
+    pub(crate) line_clipboard: Option<String>,
     pub(crate) plugins: PluginState,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
@@ -104,6 +106,7 @@ impl Editor {
                 status: None,
                 pending_close: None,
                 console: String::new(),
+                line_clipboard: None,
                 plugins: PluginState::default(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),

@@ -1,5 +1,6 @@
 //! Resolves key presses through the keymap and queues the bound commands.
 
+use entities::command::Command;
 use entities::keymap::{KeyCombo, KeyContext, KeyResult};
 use entities::settings::Settings;
 use serde_json::Value;
@@ -35,6 +36,7 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
     let handling = match editor.press_key(alternatives, &context) {
         KeyResult::Unbound => KeyHandling::PassThrough,
         KeyResult::WaitingForChord => KeyHandling::Consumed,
+        // (Whole-line copy/paste is decided once, on the clipboard event: see `clipboard_shortcut`.)
         KeyResult::Command(command) if WIDGET_COMMANDS.contains(&command.name.as_str()) => KeyHandling::PassThrough,
         KeyResult::Command(command) => {
             view.queue_command(command);
@@ -50,6 +52,29 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         editor.clear_status();
     }
     handling
+}
+
+/// The system's copy / cut / paste shortcut (`command` is `copy`, `cut` or `paste`). The text
+/// widget does it, except for whole lines (see below): then the command is queued and the event
+/// must not reach the widget (returns `Consumed`).
+pub fn clipboard_shortcut(editor: &mut Editor, view: &mut ViewState, command: &str) -> KeyHandling {
+    if takes_over_from_widget(editor, view, command) {
+        view.queue_command(Command::new(command));
+        KeyHandling::Consumed
+    } else {
+        KeyHandling::PassThrough
+    }
+}
+
+/// Copy, cut and paste of a whole line (nothing selected, `copy_with_empty_selection`) are done by
+/// the use cases, not the text widget, but only while the text has the focus.
+fn takes_over_from_widget(editor: &mut Editor, view: &ViewState, command: &str) -> bool {
+    view.text_has_focus
+        && match command {
+            "copy" | "cut" => editor.copies_whole_line(),
+            "paste" => editor.pastes_whole_line(),
+            _ => false,
+        }
 }
 
 /// Answers keymap `context` conditions from the current screen state.

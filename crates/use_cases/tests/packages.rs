@@ -82,7 +82,7 @@ fn loading_packages_rescans_the_folders() {
 fn open_package_file_expands_the_packages_variable() {
     let world = World::new().with_file("/packages/User/notes.txt", "hi");
     let mut editor = world.editor();
-    editor.open_package_file("${packages}/User/notes.txt");
+    editor.open_package_file("${packages}/User/notes.txt", false);
     assert_eq!(editor.active_document().unwrap().text, "hi");
 }
 

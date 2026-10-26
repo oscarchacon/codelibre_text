@@ -1,5 +1,13 @@
 # Sublime Text gap analysis (2026-10-26)
 
+> **Update (Ghidra):** the binary was decompiled with Ghidra 12.1.4. `docs/sublime-native-commands.md` lists the
+> 208 native command classes with the arguments and settings each one reads, and which ones CodeLibre Text has.
+> New findings: hidden native commands with no menu/keymap entry in Sublime (`invert_selection`, `set_user_setting`,
+> `run_inline_macro`, `resize_window`, `close_by_indices`, spelling `add_word` / `ignore_word` / `correct_spelling`),
+> and arguments missing from commands that are already implemented — most of them are now supported
+> (`expand_selection {to: smart…}`, `copy_with_empty_selection`, `trim_trailing_white_space {only_modified}`,
+> `show_panel {toggle}`…); what is still ignored is listed in that file.
+
 Compared against the installed Sublime Text 4 (`C:\Program Files\Sublime Text`):
 
 - `sublime_text.exe` (PE x64, sha256 `b3bba60b…88f2`) — identifier strings (`snake_case`) extracted from the binary
@@ -21,7 +29,7 @@ cannot be told apart by the string scan and are listed under native.
 | Feature | Missing commands | Origin |
 |---|---|---|
 | Multiple cursors | ~~`select_lines`, `split_selection_into_lines`, `find_all_under`~~ (done), `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `find_all` | native |
-| Selection | `expand_selection_to_paragraph`, `expand_selection` with `to: brackets/indentation/scope/tag` | native |
+| Selection | `expand_selection_to_paragraph`, `expand_selection` with `to: scope/tag` (brackets, indentation, smart: done) | native |
 | Code folding | `fold`, `unfold`, `fold_by_level`, `unfold_all`, `fold_tag_attributes`, `fold_unfold` | native / py |
 | Bookmarks | `toggle_bookmark`, `next_bookmark`, `prev_bookmark`, `clear_bookmarks`, `select_all_bookmarks`, `select_bookmark` | native |
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |

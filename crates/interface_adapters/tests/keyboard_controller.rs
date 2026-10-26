@@ -2,7 +2,7 @@
 
 use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo};
-use interface_adapters::controllers::keyboard_controller::{key_pressed, KeyHandling};
+use interface_adapters::controllers::keyboard_controller::{clipboard_shortcut, key_pressed, KeyHandling};
 use interface_adapters::view_state::{QuickPanel, ViewState};
 use serde_json::{json, Value};
 use test_support::{status, World};
@@ -53,6 +53,28 @@ fn bindings_to_text_widget_commands_let_the_key_through() {
     assert!(!press(&mut editor, &mut view, "ctrl+z"));
     assert!(!press(&mut editor, &mut view, "ctrl+v"));
     assert!(queued(&mut view).is_empty(), "the widget undoes/pastes itself");
+}
+
+#[test]
+fn clipboard_shortcuts_go_to_the_widget_unless_a_whole_line_is_copied() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let consumed = |editor: &mut Editor, view: &mut ViewState, command: &str| {
+        matches!(clipboard_shortcut(editor, view, command), KeyHandling::Consumed)
+    };
+    // Empty selection, but the text area does not have the focus (e.g. the find field does).
+    assert!(!consumed(&mut editor, &mut view, "copy"));
+    view.text_has_focus = true;
+    assert!(consumed(&mut editor, &mut view, "copy"));
+    assert!(consumed(&mut editor, &mut view, "cut"));
+    assert!(!consumed(&mut editor, &mut view, "paste"), "nothing was copied as a line yet");
+    assert_eq!(queued(&mut view), vec!["copy", "cut"]);
+
+    let world = World::new().with_preferences(json!({ "copy_with_empty_selection": false }));
+    let mut editor = world.editor();
+    view.text_has_focus = true;
+    assert!(!consumed(&mut editor, &mut view, "copy"));
 }
 
 #[test]

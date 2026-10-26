@@ -54,10 +54,16 @@ impl Editor {
         self.state.load_errors.extend(errors);
     }
 
-    /// `open_file` with a package path, e.g. `${packages}/User/Foo.sublime-settings`.
-    pub fn open_package_file(&mut self, file: &str) {
+    /// `open_file` with a package path, e.g. `${packages}/User/Foo.sublime-settings`. With
+    /// `encoded_position` the name may end in `:line` or `:line:column` (one-based).
+    pub fn open_package_file(&mut self, file: &str, encoded_position: bool) {
+        let (file, position) = if encoded_position { split_position(file) } else { (file, None) };
         let path = self.gateways.resources.paths().expand(file);
-        self.open_file(&path);
+        if self.open_file(&path) {
+            if let Some((line, column)) = position {
+                self.go_to_position(line.saturating_sub(1), column.saturating_sub(1));
+            }
+        }
     }
 
     /// `open_dir`, e.g. Preferences > Browse Packages.
@@ -70,4 +76,20 @@ impl Editor {
         let paths = self.gateways.resources.paths();
         (paths.packages.clone(), paths.sublime_packages.clone())
     }
+}
+
+/// `C:\a.txt:12:3` → (`C:\a.txt`, Some((12, 3))); `a.txt:12` → (`a.txt`, Some((12, 1))).
+fn split_position(file: &str) -> (&str, Option<(usize, usize)>) {
+    let number = |s: &str| s.parse::<usize>().ok().filter(|_| s.bytes().all(|b| b.is_ascii_digit()));
+    if let Some((rest, last)) = file.rsplit_once(':') {
+        if let Some(last) = number(last) {
+            if let Some((name, line)) = rest.rsplit_once(':') {
+                if let Some(line) = number(line) {
+                    return (name, Some((line, last)));
+                }
+            }
+            return (rest, Some((last, 1)));
+        }
+    }
+    (file, None)
 }

@@ -2,7 +2,8 @@
 
 use entities::selection::Selection;
 use entities::text::{line_to_char, word_at};
-use entities::text_commands::{self as tc, Case, CaretMotion, LineOrder};
+use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
+use entities::text_commands::{self as tc, Case, CaretMotion, LineOrder, TrimOptions};
 
 use crate::editor::Editor;
 
@@ -16,6 +17,7 @@ pub enum TextCommand {
     AddLine { before: bool },
     DeleteToLineEdge { to_end: bool },
     ExpandSelectionToLine,
+    ExpandSelection(Expansion),
     SelectWord,
     Indent,
     Unindent,
@@ -27,9 +29,22 @@ pub enum TextCommand {
     ChangeCase(Case),
     Transpose,
     ConvertIndentation { to_spaces: bool },
-    TrimTrailingWhitespace,
+    /// `only_modified`: only lines changed since the last save; `trim_on_caret`: also the caret's line.
+    TrimTrailingWhitespace { only_modified: bool, trim_on_caret: bool },
     ReorderLines(LineOrder),
     Insert(String),
+}
+
+/// The `to` values of `expand_selection` besides `line` and `word`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expansion {
+    /// `line_prev`
+    LineUpward,
+    /// `line_without_eol` / `line_strict`
+    LineContent,
+    Brackets,
+    Indentation,
+    Smart,
 }
 
 impl Editor {
@@ -42,6 +57,7 @@ impl Editor {
             return;
         };
         let syntax = doc.syntax.clone();
+        let saved = doc.saved_text().to_string();
         doc.edit(|text, sel| match command {
             TextCommand::ToggleComment { block } => tc::toggle_comment(text, sel, &syntax, block),
             TextCommand::DuplicateLine => Some(tc::duplicate_line(text, sel)),
@@ -50,6 +66,13 @@ impl Editor {
             TextCommand::AddLine { before } => Some(tc::add_line(text, sel, before)),
             TextCommand::DeleteToLineEdge { to_end } => Some(tc::delete_to_line_edge(text, sel, to_end)),
             TextCommand::ExpandSelectionToLine => Some(tc::expand_selection_to_line(text, sel)),
+            TextCommand::ExpandSelection(to) => Some(match to {
+                Expansion::LineUpward => tc::expand_selection_to_line_upward(text, sel),
+                Expansion::LineContent => tc::expand_selection_to_line_content(text, sel),
+                Expansion::Brackets => tc::expand_selection_to_brackets(text, sel),
+                Expansion::Indentation => tc::expand_selection_to_indentation(text, sel, tab_size),
+                Expansion::Smart => tc::expand_selection_smart(text, sel, tab_size),
+            }),
             TextCommand::SelectWord => Some(word_at(text, sel.head)),
             TextCommand::Indent => Some(tc::indent(text, sel, tab_size, spaces)),
             TextCommand::Unindent => Some(tc::unindent(text, sel, tab_size)),
@@ -61,7 +84,10 @@ impl Editor {
             TextCommand::ConvertIndentation { to_spaces } => {
                 Some(tc::convert_indentation(text, sel, tab_size, to_spaces))
             }
-            TextCommand::TrimTrailingWhitespace => Some(tc::trim_trailing_whitespace(text, sel)),
+            TextCommand::TrimTrailingWhitespace { only_modified, trim_on_caret } => {
+                let options = TrimOptions { only_modified_since: only_modified.then_some(saved.as_str()), trim_on_caret };
+                Some(tc::trim_trailing_whitespace_with(text, sel, &options))
+            }
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
             TextCommand::Insert(characters) => Some(tc::replace_selection(text, sel, &characters)),
         });
@@ -131,9 +157,67 @@ impl Editor {
 
     /// Moves the caret to the start of a zero-based line.
     pub fn go_to_line(&mut self, line: usize) {
+        self.go_to_position(line, 0);
+    }
+
+    /// Moves the caret to a zero-based line and column (clamped to the line's length).
+    pub fn go_to_position(&mut self, line: usize, column: usize) {
         if let Some(doc) = self.active_document_mut() {
-            let position = line_to_char(&doc.text, line);
-            doc.set_selection(Selection::caret(position));
+            let start = line_to_char(&doc.text, line);
+            let start_byte = char_to_byte(&doc.text, start);
+            let length = doc.text[start_byte..line_end(&doc.text, start_byte)].chars().count();
+            doc.set_selection(Selection::caret(start + column.min(length)));
+        }
+    }
+
+    /// With `copy_with_empty_selection` (on by default, as in Sublime), copy and cut with nothing
+    /// selected take the whole line.
+    pub fn copies_whole_line(&self) -> bool {
+        self.view_settings().bool("copy_with_empty_selection", true)
+            && self
+                .active_document()
+                .is_some_and(|d| d.selection().is_empty() && d.extra_selections().is_empty())
+    }
+
+    /// `copy` / `cut` of the caret's line (see [`Self::copies_whole_line`]).
+    pub fn copy_whole_line(&mut self, cut: bool) {
+        let Some(doc) = self.active_document() else {
+            return;
+        };
+        let caret = char_to_byte(&doc.text, doc.selection().head);
+        let (start, end) = (line_start(&doc.text, caret), line_end(&doc.text, caret));
+        let line = format!("{}\n", &doc.text[start..end]);
+        if let Err(e) = self.gateways.clipboard.write_text(&line) {
+            self.notify(format!("Clipboard unavailable: {e}"));
+            return;
+        }
+        self.state.line_clipboard = Some(line);
+        if cut {
+            self.run_text_command(TextCommand::DeleteLine);
+        }
+    }
+
+    /// Pasting a line copied with nothing selected inserts it above the caret's line, as in
+    /// Sublime. Returns false when the paste is an ordinary one (left to the text widget).
+    pub fn pastes_whole_line(&mut self) -> bool {
+        let Some(line) = self.state.line_clipboard.clone() else {
+            return false;
+        };
+        let empty_selection = self
+            .active_document()
+            .is_some_and(|d| d.selection().is_empty() && d.extra_selections().is_empty());
+        empty_selection && self.gateways.clipboard.read_text().is_ok_and(|text| text == line)
+    }
+
+    /// `paste` of a whole line (see [`Self::pastes_whole_line`]); the caret stays where it was.
+    pub fn paste_whole_line(&mut self) {
+        let Some(line) = self.state.line_clipboard.clone() else {
+            return;
+        };
+        if let Some(doc) = self.active_document_mut() {
+            let caret = char_to_byte(&doc.text, doc.selection().head);
+            let start = byte_to_char(&doc.text, line_start(&doc.text, caret));
+            doc.replace_range(start, start, &line);
         }
     }
 

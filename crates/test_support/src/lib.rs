@@ -136,6 +136,8 @@ pub struct DialogScript {
     pub save_requests: RefCell<Vec<String>>,
     /// Start folder of the last "Open File" dialog.
     pub last_open_dir: RefCell<Option<PathBuf>>,
+    /// Start folder of the last "Open Folder" dialog.
+    pub last_folder_dir: RefCell<Option<PathBuf>>,
 }
 
 struct FakeDialogs(Rc<DialogScript>);
@@ -146,7 +148,8 @@ impl DialogGateway for FakeDialogs {
         self.0.files_to_open.borrow().clone()
     }
 
-    fn pick_folder(&self) -> Option<PathBuf> {
+    fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf> {
+        *self.0.last_folder_dir.borrow_mut() = start_dir.map(Path::to_path_buf);
         self.0.folder_to_open.borrow().clone()
     }
 

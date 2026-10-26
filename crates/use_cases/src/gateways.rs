@@ -71,7 +71,7 @@ pub trait FileSystemGateway {
 /// Native file pickers.
 pub trait DialogGateway {
     fn pick_files(&self, start_dir: Option<&Path>) -> Vec<PathBuf>;
-    fn pick_folder(&self) -> Option<PathBuf>;
+    fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf>;
     fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf>;
 }
 

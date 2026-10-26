@@ -266,6 +266,181 @@ pub fn expand_selection_to_line(text: &str, selection: Selection) -> Selection {
     Selection::new(start, end)
 }
 
+/// `expand_selection {"to": "line_prev"}` (Alt+L): whole lines with the caret at the top;
+/// repeating adds the line above.
+pub fn expand_selection_to_line_upward(text: &str, selection: Selection) -> Selection {
+    let (s, e) = selected_lines(text, selection);
+    let full_end = if e < text.len() { e + 1 } else { e };
+    let (start, end) = (byte_to_char(text, s), byte_to_char(text, full_end));
+    if selection.start() == start && selection.end() == end && s > 0 {
+        return Selection::new(end, byte_to_char(text, line_start(text, s - 1)));
+    }
+    Selection::new(end, start)
+}
+
+/// `expand_selection {"to": "line_without_eol"}` (and `line_strict`): the selected lines without
+/// their final newline.
+pub fn expand_selection_to_line_content(text: &str, selection: Selection) -> Selection {
+    let (s, e) = selected_lines(text, selection);
+    Selection::new(byte_to_char(text, s), byte_to_char(text, e))
+}
+
+const BRACKETS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+
+/// The innermost brackets around the chars `start..end`: the positions of the opening and the
+/// closing bracket. (Brackets inside strings and comments count too: there are no scopes here.)
+fn enclosing_brackets(chars: &[char], start: usize, end: usize) -> Option<(usize, usize)> {
+    let mut closed = Vec::new();
+    for open in (0..start.min(chars.len())).rev() {
+        let c = chars[open];
+        if BRACKETS.iter().any(|&(_, close)| close == c) {
+            closed.push(c);
+        } else if let Some(&(_, close)) = BRACKETS.iter().find(|&&(o, _)| o == c) {
+            if closed.last() == Some(&close) {
+                closed.pop();
+            } else if let Some(close_at) = matching_close(chars, open) {
+                if close_at >= end {
+                    return Some((open, close_at));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The bracket that closes the one at `open`.
+fn matching_close(chars: &[char], open: usize) -> Option<usize> {
+    let (o, c) = *BRACKETS.iter().find(|&&(o, _)| o == chars[open])?;
+    let mut depth = 0usize;
+    for (i, &ch) in chars.iter().enumerate().skip(open + 1) {
+        if ch == o {
+            depth += 1;
+        } else if ch == c {
+            if depth == 0 {
+                return Some(i);
+            }
+            depth -= 1;
+        }
+    }
+    None
+}
+
+/// `expand_selection {"to": "brackets"}` (Ctrl+Shift+M): the text inside the nearest brackets,
+/// then the brackets too, then the next brackets out.
+pub fn expand_selection_to_brackets(text: &str, selection: Selection) -> Selection {
+    let chars: Vec<char> = text.chars().collect();
+    let (start, end) = (selection.start(), selection.end());
+    match enclosing_brackets(&chars, start, end) {
+        Some((open, close)) if (start, end) == (open + 1, close) => Selection::new(open, close + 1),
+        Some((open, close)) => Selection::new(open + 1, close),
+        None => selection,
+    }
+}
+
+/// `expand_selection {"to": "indentation"}`: the lines around the selection indented at least as
+/// much as it (blank lines in between included); repeating goes out one indentation level.
+pub fn expand_selection_to_indentation(text: &str, selection: Selection, tab_size: usize) -> Selection {
+    let lines: Vec<(usize, usize)> = line_starts(text, 0, text.len()).into_iter().map(|s| (s, line_end(text, s))).collect();
+    let indent = |i: usize| {
+        let line = &text[lines[i].0..lines[i].1];
+        (!line.trim().is_empty()).then(|| visual_column(leading_whitespace(line), tab_size))
+    };
+    let line_of = |byte: usize| lines.partition_point(|&(s, _)| s <= byte) - 1;
+    let (s, e) = selected_lines(text, selection);
+    let (first, last) = (line_of(s), line_of(e));
+    // On blank lines only, the next line with text (or else the previous one) decides.
+    let mut level = (first..=last)
+        .filter_map(indent)
+        .min()
+        .or_else(|| (last + 1..lines.len()).find_map(indent))
+        .or_else(|| (0..first).rev().find_map(indent))
+        .unwrap_or(0);
+    loop {
+        let fits = |i: usize| indent(i).is_none_or(|n| n >= level);
+        let (mut top, mut bottom) = (first, last);
+        while top > 0 && fits(top - 1) {
+            top -= 1;
+        }
+        while bottom + 1 < lines.len() && fits(bottom + 1) {
+            bottom += 1;
+        }
+        while top < bottom && indent(top).is_none() {
+            top += 1;
+        }
+        while bottom > top && indent(bottom).is_none() {
+            bottom -= 1;
+        }
+        let block = Selection::new(byte_to_char(text, lines[top].0), byte_to_char(text, lines[bottom].1));
+        if (block.start(), block.end()) != (selection.start(), selection.end()) || level == 0 {
+            return block;
+        }
+        // Already the whole block: go out to the indentation of the lines around it.
+        let outer = [top.checked_sub(1), Some(bottom + 1).filter(|&b| b < lines.len())]
+            .into_iter()
+            .flatten()
+            .filter_map(indent)
+            .filter(|&n| n < level)
+            .max();
+        level = outer.unwrap_or(0);
+    }
+}
+
+/// The quotes around the chars `start..end` on one line, as (opening quote, closing quote).
+fn enclosing_quotes(chars: &[char], start: usize, end: usize) -> Option<(usize, usize)> {
+    let line_begin = chars[..start].iter().rposition(|&c| c == '\n').map_or(0, |i| i + 1);
+    let line_end = chars[end..].iter().position(|&c| c == '\n').map_or(chars.len(), |i| end + i);
+    let mut best: Option<(usize, usize)> = None;
+    for quote in ['"', '\'', '`'] {
+        let mut open = None;
+        let mut i = line_begin;
+        while i < line_end {
+            if chars[i] == '\\' {
+                i += 2;
+                continue;
+            }
+            if chars[i] == quote {
+                match open {
+                    None => open = Some(i),
+                    Some(o) => {
+                        if o < start && i >= end && best.is_none_or(|(b, _)| o > b) {
+                            best = Some((o, i));
+                        }
+                        open = None;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    best
+}
+
+/// `expand_selection {"to": "smart"}` (Ctrl+Shift+A): the next bigger unit around the selection:
+/// word, the inside of quotes or brackets, then with the quotes or brackets, the line, the
+/// indentation block, the whole text.
+pub fn expand_selection_smart(text: &str, selection: Selection, tab_size: usize) -> Selection {
+    let chars: Vec<char> = text.chars().collect();
+    let (start, end) = (selection.start(), selection.end());
+    let mut candidates = vec![word_at(text, start), word_at(text, end)];
+    if let Some((open, close)) = enclosing_quotes(&chars, start, end) {
+        candidates.extend([Selection::new(open + 1, close), Selection::new(open, close + 1)]);
+    }
+    let (mut from, mut to) = (start, end);
+    while let Some((open, close)) = enclosing_brackets(&chars, from, to) {
+        candidates.extend([Selection::new(open + 1, close), Selection::new(open, close + 1)]);
+        (from, to) = (open, close + 1);
+    }
+    candidates.push(expand_selection_to_line_content(text, selection));
+    candidates.push(expand_selection_to_line(text, selection));
+    candidates.push(expand_selection_to_indentation(text, selection, tab_size));
+    candidates.push(Selection::new(0, chars.len()));
+    candidates
+        .into_iter()
+        .filter(|c| c.start() <= start && c.end() >= end && c.len() > selection.len())
+        .min_by_key(|c| c.len())
+        .unwrap_or(selection)
+}
+
 /// Joins the selected lines (or the current line with the next one) with single spaces.
 pub fn join_lines(text: &mut String, selection: Selection) -> Selection {
     let (s, mut e) = selected_lines(text, selection);
@@ -487,9 +662,51 @@ pub fn reorder_lines(text: &mut String, selection: Selection, order: LineOrder) 
 }
 
 pub fn trim_trailing_whitespace(text: &mut String, selection: Selection) -> Selection {
+    trim_trailing_whitespace_with(text, selection, &TrimOptions::default())
+}
+
+/// Which lines `trim_trailing_white_space` may change (Sublime's `only_modified` and
+/// `trim_on_caret` arguments).
+#[derive(Debug, Clone, Copy)]
+pub struct TrimOptions<'a> {
+    /// Only lines that are not in this text (the last saved version), i.e. lines the user changed.
+    pub only_modified_since: Option<&'a str>,
+    /// Also trim the line with the caret.
+    pub trim_on_caret: bool,
+}
+
+impl Default for TrimOptions<'_> {
+    fn default() -> Self {
+        Self { only_modified_since: None, trim_on_caret: true }
+    }
+}
+
+/// Indices of the lines of `text` that are not in `saved` (each saved line matches once).
+fn modified_lines(text: &str, saved: &str) -> HashSet<usize> {
+    let mut unmatched: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for line in saved.split('\n') {
+        *unmatched.entry(line).or_default() += 1;
+    }
+    text.split('\n')
+        .enumerate()
+        .filter_map(|(i, line)| match unmatched.get_mut(line) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                None
+            }
+            _ => Some(i),
+        })
+        .collect()
+}
+
+pub fn trim_trailing_whitespace_with(text: &mut String, selection: Selection, options: &TrimOptions) -> Selection {
+    let modified = options.only_modified_since.map(|saved| modified_lines(text, saved));
+    let caret_line = text[..char_to_byte(text, selection.head)].matches('\n').count();
     let edits = line_starts(text, 0, text.len())
         .into_iter()
-        .filter_map(|pos| {
+        .enumerate()
+        .filter(|&(i, _)| modified.as_ref().is_none_or(|m| m.contains(&i)) && (options.trim_on_caret || i != caret_line))
+        .filter_map(|(_, pos)| {
             let le = line_end(text, pos);
             let kept = text[pos..le].trim_end_matches([' ', '\t']).len();
             (pos + kept < le).then(|| Edit { start: pos + kept, end: le, insert: String::new() })

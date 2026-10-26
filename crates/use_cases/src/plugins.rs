@@ -148,6 +148,18 @@ impl Editor {
         }
     }
 
+    /// `show_panel {"panel": "console", "toggle": true}` (Ctrl+`): closes the console when it is the
+    /// active tab, shows it otherwise.
+    pub fn toggle_console(&mut self) {
+        match self.active_document() {
+            Some(doc) if doc.scratch_name.as_deref() == Some(CONSOLE_NAME) && doc.read_only => {
+                let id = doc.id;
+                self.close_documents(vec![id]);
+            }
+            _ => self.show_console(),
+        }
+    }
+
     /// Answers the host's calls until it finishes the current request (`Loaded` or `Done`).
     fn converse(&mut self, run_command: &mut CommandRunner) -> Result<PluginMessage, String> {
         loop {
