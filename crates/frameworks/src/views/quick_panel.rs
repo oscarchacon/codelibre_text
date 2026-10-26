@@ -97,6 +97,21 @@ fn results(
     max_height: f32,
     events: &mut Vec<UiEvent>,
 ) {
+    // An Area lays out its contents within last frame's size, so after showing a single result
+    // the list could never grow back. Give it room for `max_height` explicitly.
+    let room = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), max_height));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| result_list(ui, chrome, panel, selected, scroll_to_selected, max_height, events));
+}
+
+fn result_list(
+    ui: &mut egui::Ui,
+    chrome: &Chrome,
+    panel: &QuickPanelViewModel,
+    selected: usize,
+    scroll_to_selected: bool,
+    max_height: f32,
+    events: &mut Vec<UiEvent>,
+) {
     egui::ScrollArea::vertical()
         .max_height(max_height)
         .auto_shrink([false, true])
