@@ -77,7 +77,7 @@ impl Editor {
         };
         match find::find_from(&pattern, &doc.text, doc.selection(), forward, options.wrap) {
             Some(selection) => doc.set_selection(selection),
-            None => self.notify(format!("Unable to find {}", options.query)),
+            None => self.notify(self.tr_args("Unable to find {query}", &[("query", &options.query)])),
         }
         true
     }
@@ -152,7 +152,7 @@ impl Editor {
                 Some(sel.clamped(text.chars().count()))
             });
         }
-        self.notify(format!("Replaced {count} occurrences"));
+        self.notify(self.tr_n("Replaced {count} occurrence", "Replaced {count} occurrences", count, &[]));
     }
 
     /// Byte ranges of every match in the active document (cached between calls).

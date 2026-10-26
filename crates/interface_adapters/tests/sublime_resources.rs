@@ -277,3 +277,72 @@ fn sublime_text_packages_add_palette_entries_only_when_included() {
     assert!(has_git(true));
     assert!(!has_git(false));
 }
+
+// ----- translations --------------------------------------------------------------------------------
+
+const PACKAGE_SPANISH: &str = r#"msgid ""
+msgstr ""
+"Language: es\n"
+"X-Language-Name: Español (paquete)\n"
+
+msgid "Save"
+msgstr "Grabar"
+
+msgid "My Command"
+msgstr "Mi comando"
+"#;
+
+const KLINGON: &str = r#"msgid ""
+msgstr ""
+"X-Language-Name: tlhIngan Hol\n"
+"#;
+
+#[test]
+fn the_builtin_languages_are_listed_by_their_own_names() {
+    let packages = Packages::new();
+    let languages = packages.gateway().languages(false);
+    let names: Vec<&str> = languages.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["Deutsch", "Español", "Français", "Português (Brasil)"]);
+}
+
+#[test]
+fn packages_add_languages_with_localization_files() {
+    let packages = Packages::new();
+    packages.file("Klingon", "Localization/tlh.po", KLINGON);
+    packages.file("Klingon", "tlh.po", "not in a Localization folder");
+    let languages = packages.gateway().languages(false);
+    assert!(languages.iter().any(|l| l.code == "tlh" && l.name == "tlhIngan Hol"));
+    assert_eq!(languages.iter().filter(|l| l.code == "tlh").count(), 1);
+}
+
+#[test]
+fn package_translations_extend_and_override_the_builtin_ones() {
+    let packages = Packages::new();
+    packages.file("User", "Localization/es.po", PACKAGE_SPANISH);
+    let mut errors = Vec::new();
+    let catalog = packages.gateway().load_translations("es", false, &mut errors);
+    assert!(errors.is_empty(), "{errors:?}");
+    let es = entities::localization::Translations::new("es", catalog);
+    assert_eq!(es.tr("Save"), "Grabar");
+    assert_eq!(es.tr("My Command"), "Mi comando");
+    assert_eq!(es.tr("Cancel"), "Cancelar");
+}
+
+#[test]
+fn broken_translation_files_are_reported() {
+    let packages = Packages::new();
+    packages.file("Broken", "Localization/es.po", "msgid \"a\"\nmsgstr \"unterminated\n");
+    let mut errors = Vec::new();
+    let catalog = packages.gateway().load_translations("es", false, &mut errors);
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("Broken"), "{errors:?}");
+    assert!(!catalog.is_empty(), "the built-in Spanish is still loaded");
+}
+
+#[test]
+fn the_system_language_comes_from_the_caller() {
+    let packages = Packages::new();
+    assert_eq!(packages.gateway().system_language(), None);
+    let gateway = packages.gateway().with_system_language(Some("es-CL".into()));
+    assert_eq!(gateway.system_language().as_deref(), Some("es-CL"));
+}

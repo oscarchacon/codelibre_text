@@ -42,7 +42,7 @@ pub fn compose(paths: Vec<PathBuf>) -> (Editor, ViewState, SharedSyntaxEngine) {
         file_system: Box::new(StdFileSystem),
         dialogs: Box::new(NativeDialogs),
         clipboard: Box::new(SystemClipboard),
-        resources: Box::new(SublimeResourceGateway::new(package_paths)),
+        resources: Box::new(SublimeResourceGateway::new(package_paths).with_system_language(sys_locale::get_locale())),
         syntaxes: Box::new(SyntectSyntaxes(engine.clone())),
         sessions: Box::new(SessionFileGateway::new(session_file)),
         file_index: Box::new(FolderIndex::default()),

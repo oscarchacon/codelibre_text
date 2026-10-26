@@ -12,7 +12,7 @@ pub fn present_close_dialog(editor: &Editor) -> Option<DialogViewModel> {
             let document_name = ids
                 .first()
                 .and_then(|id| state.documents.iter().find(|d| d.id == *id))
-                .map(|d| d.name())
+                .map(|d| editor.document_name(d))
                 .unwrap_or_default();
             Some(DialogViewModel::SaveChanges { document_name })
         }

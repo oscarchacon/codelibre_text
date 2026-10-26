@@ -1,13 +1,15 @@
-//! Use cases: the quick panel searches (Command Palette, Goto Anything, color scheme picker).
+//! Use cases: the quick panel searches (Command Palette, Goto Anything, color scheme and language pickers).
 
 use std::path::PathBuf;
 
 use entities::command::Command;
 use entities::document::DocumentId;
+use entities::localization::Translations;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 
 use crate::editor::Editor;
+use crate::localization::AUTOMATIC;
 
 const MAX_RESULTS: usize = 200;
 
@@ -18,6 +20,8 @@ pub enum SearchKind {
     /// Goto Anything: files (`name`), lines (`:42`) and symbols (`@name`).
     Goto,
     ColorSchemes,
+    /// The interface language picker.
+    Languages,
 }
 
 /// What choosing a result does.
@@ -28,6 +32,8 @@ pub enum CandidateTarget {
     Document(DocumentId),
     Line(usize),
     ColorScheme(String),
+    /// A language code, or `auto`.
+    Language(String),
 }
 
 #[derive(Debug, Clone)]
@@ -66,16 +72,20 @@ impl Editor {
 
         match kind {
             SearchKind::Commands => {
+                // Captions are shown translated but also match in English, the language of
+                // Sublime's documentation and of prefilled queries such as `Set Syntax: `.
+                let score_both = |caption: &str, english: &str| score(caption, query).max(score(english, query));
                 for entry in &self.state.palette {
-                    if let Some(s) = score(&entry.caption, query) {
-                        let mut c = Candidate::new(&entry.caption, CandidateTarget::Command(entry.command.clone()));
+                    let caption = self.tr(&entry.caption);
+                    if let Some(s) = score_both(caption, &entry.caption) {
+                        let mut c = Candidate::new(caption, CandidateTarget::Command(entry.command.clone()));
                         c.hint = self.state.keymap.binding_for(&entry.command).unwrap_or_default();
                         scored.push((s, c));
                     }
                 }
                 for syntax in self.gateways.syntaxes.syntax_names() {
-                    let caption = format!("Set Syntax: {syntax}");
-                    if let Some(s) = score(&caption, query) {
+                    let caption = self.tr_args("Set Syntax: {syntax}", &[("syntax", &syntax)]);
+                    if let Some(s) = score_both(&caption, &format!("Set Syntax: {syntax}")) {
                         let command = Command::with_args("set_file_type", serde_json::json!({ "syntax": syntax }));
                         scored.push((s, Candidate::new(caption, CandidateTarget::Command(command))));
                     }
@@ -88,9 +98,22 @@ impl Editor {
                     }
                 }
             }
+            SearchKind::Languages => {
+                let automatic = self.tr("Automatic (system language)").to_string();
+                let languages = std::iter::once((automatic, AUTOMATIC.to_string()))
+                    .chain(self.languages().into_iter().map(|l| (l.name, l.code)));
+                for (name, code) in languages {
+                    if let Some(s) = score(&name, query).max(score(&code, query)) {
+                        let mut c = Candidate::new(name, CandidateTarget::Language(code.clone()));
+                        c.hint = if code == AUTOMATIC { String::new() } else { code };
+                        // An empty query keeps the order: automatic, English, then the others.
+                        scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
+                    }
+                }
+            }
             SearchKind::Goto => {
                 if let Some(line) = query.strip_prefix(':') {
-                    return vec![goto_line_candidate(line)];
+                    return vec![goto_line_candidate(line, &self.state.translations)];
                 }
                 if let Some(symbol_query) = query.strip_prefix('@') {
                     return self.symbol_candidates(symbol_query.trim(), &matcher);
@@ -127,12 +150,12 @@ impl Editor {
     fn file_candidates(&self, query: &str, matcher: &SkimMatcherV2, scored: &mut Vec<(i64, Candidate)>) {
         let open_paths: Vec<&PathBuf> = self.state.documents.iter().filter_map(|d| d.path.as_ref()).collect();
         for doc in &self.state.documents {
-            let name = doc.name();
+            let name = self.document_name(doc);
             let s = if query.is_empty() { Some(0) } else { matcher.fuzzy_match(&name, query) };
             if let Some(s) = s {
                 let mut c = Candidate::new(name, CandidateTarget::Document(doc.id));
                 c.detail = doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-                c.hint = "open".into();
+                c.hint = self.tr("open").to_string();
                 // Open files rank slightly above other files.
                 scored.push((s + 10, c));
             }
@@ -175,6 +198,7 @@ impl Editor {
             CandidateTarget::Document(id) => self.activate_document(id),
             CandidateTarget::Line(line) => self.go_to_line(line),
             CandidateTarget::ColorScheme(name) => self.apply_color_scheme(&name),
+            CandidateTarget::Language(code) => self.select_language(&code),
         }
         None
     }
@@ -189,9 +213,9 @@ impl Editor {
     }
 }
 
-fn goto_line_candidate(line: &str) -> Candidate {
+fn goto_line_candidate(line: &str, translations: &Translations) -> Candidate {
     match line.trim().parse::<usize>() {
-        Ok(n) => Candidate::new(format!("Go to line {n}"), CandidateTarget::Line(n.saturating_sub(1))),
-        Err(_) => Candidate::new("Type a line number", CandidateTarget::Line(0)),
+        Ok(n) => Candidate::new(translations.tr_args("Go to line {line}", &[("line", &n)]), CandidateTarget::Line(n.saturating_sub(1))),
+        Err(_) => Candidate::new(translations.tr("Type a line number"), CandidateTarget::Line(0)),
     }
 }

@@ -24,12 +24,12 @@ impl Editor {
             return false;
         };
         if doc.read_only {
-            self.notify("This view is read only");
+            self.notify(self.tr("This view is read only").to_string());
             return false;
         }
         let path = match (&doc.path, save_as) {
             (Some(path), false) => path.clone(),
-            _ => match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &doc.name()) {
+            _ => match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc)) {
                 Some(path) => path,
                 None => return false,
             },
@@ -68,7 +68,7 @@ impl Editor {
         }
 
         self.after_save(&path);
-        self.notify(format!("Saved {}", path.display()));
+        self.notify(self.tr_args("Saved {path}", &[("path", &path.display())]));
         true
     }
 

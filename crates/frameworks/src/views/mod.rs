@@ -1,7 +1,8 @@
 //! egui views. Each one draws a view model and reports what the user did as
 //! [`UiEvent`](interface_adapters::controllers::ui_controller::UiEvent)s; views never change
 //! application state themselves (the one exception, typing into the text area, is explained in
-//! [`editor_view`]).
+//! [`editor_view`]). Fixed labels come from the read-only
+//! [`Translations`](entities::localization::Translations) they receive, in the interface language.
 
 pub mod dialogs;
 pub mod editor_view;

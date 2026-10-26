@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use entities::document::DocumentId;
 use entities::keymap::{Binding, Keymap};
+use entities::localization::{Catalog, Language};
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
@@ -205,6 +206,10 @@ pub struct Resources {
     pub bindings: RefCell<Vec<Binding>>,
     pub menu: RefCell<Vec<MenuItem>>,
     pub palette: RefCell<Vec<PaletteCommand>>,
+    /// Interface languages and their translations (`Localization/<language>.po`).
+    pub translations: RefCell<Vec<(Language, Catalog)>>,
+    /// The operating system's language.
+    pub system_language: RefCell<Option<String>>,
     /// Errors reported while loading.
     pub errors: RefCell<Vec<String>>,
     pub settings_loads: Cell<usize>,
@@ -272,6 +277,19 @@ impl ResourceGateway for FakeResources {
     fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String> {
         self.0.user_settings_files.borrow_mut().insert(file_name.to_string(), values.clone());
         Ok(())
+    }
+
+    fn languages(&self, _include_sublime: bool) -> Vec<Language> {
+        self.0.translations.borrow().iter().map(|(language, _)| language.clone()).collect()
+    }
+
+    fn load_translations(&self, language: &str, _include_sublime: bool, _errors: &mut Vec<String>) -> Catalog {
+        let translations = self.0.translations.borrow();
+        translations.iter().find(|(l, _)| l.code == language).map(|(_, c)| c.clone()).unwrap_or_default()
+    }
+
+    fn system_language(&self) -> Option<String> {
+        self.0.system_language.borrow().clone()
     }
 }
 
@@ -506,6 +524,8 @@ impl World {
                 bindings: RefCell::default(),
                 menu: RefCell::default(),
                 palette: RefCell::default(),
+                translations: RefCell::default(),
+                system_language: RefCell::default(),
                 errors: RefCell::default(),
                 settings_loads: Cell::new(0),
                 ui_loads: RefCell::default(),
@@ -558,6 +578,22 @@ impl World {
 
     pub fn with_palette(self, entry: PaletteCommand) -> Self {
         self.resources.palette.borrow_mut().push(entry);
+        self
+    }
+
+    /// A language "found in packages", with `(English, translation)` pairs.
+    pub fn with_language(self, code: &str, name: &str, messages: &[(&str, &str)]) -> Self {
+        let mut catalog = Catalog::default();
+        for (msgid, translation) in messages {
+            catalog.insert(None, msgid, vec![translation.to_string()]);
+        }
+        let language = Language { code: code.into(), name: name.into() };
+        self.resources.translations.borrow_mut().push((language, catalog));
+        self
+    }
+
+    pub fn with_system_language(self, code: &str) -> Self {
+        *self.resources.system_language.borrow_mut() = Some(code.into());
         self
     }
 

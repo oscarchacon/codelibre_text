@@ -143,6 +143,7 @@
 			{ "command": "edit_settings", "args": { "base_file": "${packages}/Default/Preferences.sublime-settings", "default": "{\n\t$0\n}\n" }, "caption": "Settings" },
 			{ "command": "edit_settings", "args": { "base_file": "${packages}/Default/Default (${platform}).sublime-keymap", "default": "[\n\t$0\n]\n" }, "caption": "Key Bindings" },
 			{ "command": "select_color_scheme", "caption": "Select Color Scheme…" },
+			{ "command": "select_language", "caption": "Language…" },
 			{ "command": "reload_packages", "caption": "Reload Packages" },
 			{ "caption": "-", "id": "package-settings" }
 		]

@@ -5,3 +5,6 @@
 *.ico binary
 *.icns binary
 *.png binary
+# Translations: keep LF so Poedit and the generated template diff cleanly.
+*.po text eol=lf
+*.pot text eol=lf

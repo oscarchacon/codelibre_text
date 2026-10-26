@@ -14,6 +14,7 @@ impl Editor {
         self.state.main_menu = resources.main_menu;
         self.state.palette = resources.palette;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
+        self.load_translations(&mut errors);
         self.state.load_errors = errors;
 
         // Documents whose syntax no longer exists fall back to a known one.
@@ -27,12 +28,14 @@ impl Editor {
     pub fn reload_packages(&mut self) {
         self.load_packages();
         self.load_plugins();
-        self.notify(format!(
-            "Packages reloaded: {} syntaxes, {} color schemes, {} key bindings, {} plugin commands",
-            self.gateways.syntaxes.syntax_names().len(),
-            self.gateways.syntaxes.color_scheme_names().len(),
-            self.state.keymap.bindings.len(),
-            self.state.plugins.commands.len()
+        self.notify(self.tr_args(
+            "Packages reloaded: {syntaxes} syntaxes, {schemes} color schemes, {bindings} key bindings, {commands} plugin commands",
+            &[
+                ("syntaxes", &self.gateways.syntaxes.syntax_names().len()),
+                ("schemes", &self.gateways.syntaxes.color_scheme_names().len()),
+                ("bindings", &self.state.keymap.bindings.len()),
+                ("commands", &self.state.plugins.commands.len()),
+            ],
         ));
     }
 
@@ -41,16 +44,31 @@ impl Editor {
         self.load_plugins();
         let failed = self.state.plugins.errors.len();
         if failed > 0 {
-            self.notify(format!("{failed} plugin errors (View > Show Console)"));
+            self.notify(self.tr_n(
+                "{count} plugin error (View > Show Console)",
+                "{count} plugin errors (View > Show Console)",
+                failed,
+                &[],
+            ));
         } else {
-            self.notify(format!("Plugins reloaded: {} commands", self.state.plugins.commands.len()));
+            self.notify(self.tr_n(
+                "Plugins reloaded: {count} command",
+                "Plugins reloaded: {count} commands",
+                self.state.plugins.commands.len(),
+                &[],
+            ));
         }
     }
 
-    /// Reloads only the settings layers (after a settings file changed).
+    /// Reloads only the settings layers (after a settings file changed), and the translations
+    /// when the `language` setting changed.
     pub fn reload_settings(&mut self) {
+        let language = self.language_setting();
         let mut errors = Vec::new();
         self.state.settings = self.gateways.resources.load_settings(&mut errors);
+        if self.language_setting() != language {
+            self.load_translations(&mut errors);
+        }
         self.state.load_errors.extend(errors);
     }
 

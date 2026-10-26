@@ -9,8 +9,8 @@ pub fn present(editor: &Editor) -> Vec<TabViewModel> {
         .iter()
         .enumerate()
         .map(|(index, doc)| TabViewModel {
-            title: doc.name(),
-            tooltip: doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| doc.name()),
+            title: editor.document_name(doc),
+            tooltip: doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| editor.document_name(doc)),
             dirty: doc.is_dirty(),
             active: index == state.active,
         })

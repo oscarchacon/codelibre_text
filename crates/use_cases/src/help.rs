@@ -9,7 +9,7 @@ impl Editor {
     /// `open_url`: opens a link in the default browser.
     pub fn open_url(&mut self, url: &str) {
         if url.is_empty() {
-            self.notify("open_url: no url given");
+            self.notify(self.tr("open_url: no url given").to_string());
             return;
         }
         self.gateways.shell.open_url(url);

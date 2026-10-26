@@ -25,6 +25,8 @@ rfd = "0.15"
 arboard = "3"
 # Platform directories and .gitignore-aware folder walking
 directories = "5.0"
+# The operating system language, for `"language": "auto"`
+sys-locale = "0.3"
 ignore = "0.4"
 # Command line and logging
 clap = { version = "4", features = ["derive"] }

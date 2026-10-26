@@ -188,7 +188,7 @@ impl Editor {
         let (start, end) = (line_start(&doc.text, caret), line_end(&doc.text, caret));
         let line = format!("{}\n", &doc.text[start..end]);
         if let Err(e) = self.gateways.clipboard.write_text(&line) {
-            self.notify(format!("Clipboard unavailable: {e}"));
+            self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
             return;
         }
         self.state.line_clipboard = Some(line);
@@ -226,7 +226,7 @@ impl Editor {
         match self.gateways.clipboard.read_text() {
             Ok(text) => Some(text),
             Err(e) => {
-                self.notify(format!("Clipboard unavailable: {e}"));
+                self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
                 None
             }
         }

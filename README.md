@@ -52,6 +52,23 @@
 - Console (`` Ctrl+` ``) for plugin output and errors
 - Window chrome colors adapt to the active color scheme
 
+### Languages
+Unlike Sublime Text, the interface can be shown in several languages. It follows the operating
+system by default, and **Preferences > Language…** changes it. The editor ships with:
+
+| Language | Code |
+|----------|------|
+| English | `en` |
+| Deutsch | `de` |
+| Español | `es` |
+| Français | `fr` |
+| Português (Brasil) | `pt_BR` |
+
+Translations are standard gettext `.po` files, and packages can add more languages. Command
+names, settings and key bindings stay the same in every language, so Sublime packages keep
+working, and the Command Palette also matches what you type in English. Your language is
+missing or a text sounds wrong? See [Translating CodeLibre Text](docs/translating.md).
+
 ### Sublime Text compatibility
 Resources are loaded from `Packages/<Package>/` in Sublime's order (`Default`, other packages,
 `User` last). Packages live in `%APPDATA%\codelibre_text\data\Packages` (Windows); if Sublime Text
@@ -203,7 +220,7 @@ crates/
 ├── interface_adapters/  # Controllers, presenters, view models, Sublime file-format gateways
 ├── frameworks/          # Frameworks & Drivers: egui views, syntect, dialogs, disk, plugin host, main() (binary)
 └── test_support/        # Test doubles: in-memory gateways (tests only)
-assets/Default/          # Built-in keymap, menu, commands, preferences and color schemes
+assets/Default/          # Built-in keymap, menu, commands, preferences, color schemes and translations
 assets/python/           # Python plugin host and the sublime / sublime_plugin modules
 ```
 
@@ -215,7 +232,8 @@ organized.
 
 ## Contributing
 
-Pull requests are welcome. Please run these before sending one:
+Pull requests are welcome, and so are translations: no Rust is needed to translate the
+interface ([docs/translating.md](docs/translating.md)). Please run these before sending a pull request:
 
 ```bash
 cargo test --workspace

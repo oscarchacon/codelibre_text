@@ -1,0 +1,878 @@
+# CodeLibre Text: translation of the interface (Deutsch).
+# Update it from messages.pot (Poedit: Translation > Update from POT File); see docs/translating.md.
+msgid ""
+msgstr ""
+"Language: de\n"
+"X-Language-Name: Deutsch\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: assets/Default/Main.sublime-menu
+msgid "File"
+msgstr "Datei"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/app.rs
+msgid "New File"
+msgstr "Neue Datei"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open File…"
+msgstr "Datei öffnen…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Folder…"
+msgstr "Ordner öffnen…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Reopen Closed File"
+msgstr "Geschlossene Datei wieder öffnen"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Save"
+msgstr "Speichern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Save As…"
+msgstr "Speichern unter…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Save All"
+msgstr "Alle speichern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Revert File"
+msgstr "Datei zurücksetzen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Close File"
+msgstr "Datei schließen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Close All Files"
+msgstr "Alle Dateien schließen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Folder"
+msgstr "Ordner schließen"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Exit"
+msgstr "Beenden"
+
+#: assets/Default/Main.sublime-menu
+msgid "Edit"
+msgstr "Bearbeiten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Undo"
+msgstr "Rückgängig"
+
+#: assets/Default/Main.sublime-menu
+msgid "Redo"
+msgstr "Wiederholen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cut"
+msgstr "Ausschneiden"
+
+#: assets/Default/Main.sublime-menu
+msgid "Copy"
+msgstr "Kopieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Paste"
+msgstr "Einfügen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Line"
+msgstr "Zeile"
+
+#: assets/Default/Main.sublime-menu
+msgid "Indent"
+msgstr "Einrücken"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unindent"
+msgstr "Ausrücken"
+
+#: assets/Default/Main.sublime-menu
+msgid "Swap Line Up"
+msgstr "Zeile nach oben verschieben"
+
+#: assets/Default/Main.sublime-menu
+msgid "Swap Line Down"
+msgstr "Zeile nach unten verschieben"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Duplicate Line"
+msgstr "Zeile duplizieren"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Delete Line"
+msgstr "Zeile löschen"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Join Lines"
+msgstr "Zeilen verbinden"
+
+#: assets/Default/Main.sublime-menu
+msgid "Comment"
+msgstr "Kommentar"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Toggle Comment"
+msgstr "Kommentar umschalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Toggle Block Comment"
+msgstr "Blockkommentar umschalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Convert Case"
+msgstr "Groß-/Kleinschreibung"
+
+#: assets/Default/Main.sublime-menu
+msgid "Title Case"
+msgstr "Wortanfänge groß"
+
+#: assets/Default/Main.sublime-menu
+msgid "Upper Case"
+msgstr "Großbuchstaben"
+
+#: assets/Default/Main.sublime-menu
+msgid "Lower Case"
+msgstr "Kleinbuchstaben"
+
+#: assets/Default/Main.sublime-menu
+msgid "Swap Case"
+msgstr "Groß-/Kleinschreibung umkehren"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Sort Lines"
+msgstr "Zeilen sortieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unique Lines"
+msgstr "Doppelte Zeilen entfernen"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Trim Trailing White Space"
+msgstr "Leerzeichen am Zeilenende entfernen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Selection"
+msgstr "Auswahl"
+
+#: assets/Default/Main.sublime-menu
+msgid "Split into Lines"
+msgstr "In Zeilen aufteilen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Add Previous Line"
+msgstr "Vorherige Zeile hinzufügen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Add Next Line"
+msgstr "Nächste Zeile hinzufügen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Single Selection"
+msgstr "Einzelne Auswahl"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select All"
+msgstr "Alles auswählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection"
+msgstr "Auswahl erweitern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection to Line"
+msgstr "Auswahl auf Zeile erweitern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection to Line Upward"
+msgstr "Auswahl auf Zeile nach oben erweitern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection to Word"
+msgstr "Auswahl auf Wort erweitern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection to Brackets"
+msgstr "Auswahl auf Klammern erweitern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Expand Selection to Indentation"
+msgstr "Auswahl auf Einrückung erweitern"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Find"
+msgstr "Suchen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find…"
+msgstr "Suchen…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Next"
+msgstr "Weitersuchen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Previous"
+msgstr "Rückwärts suchen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Replace…"
+msgstr "Ersetzen…"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Replace All"
+msgstr "Alle ersetzen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Quick Find"
+msgstr "Schnellsuche"
+
+#: assets/Default/Main.sublime-menu
+msgid "Quick Find All"
+msgstr "Schnellsuche (alle)"
+
+#: assets/Default/Main.sublime-menu
+msgid "Use Selection for Find"
+msgstr "Auswahl als Suchbegriff verwenden"
+
+#: assets/Default/Main.sublime-menu
+msgid "View"
+msgstr "Ansicht"
+
+#: assets/Default/Main.sublime-menu
+msgid "Side Bar"
+msgstr "Seitenleiste"
+
+#: assets/Default/Main.sublime-menu
+msgid "Status Bar"
+msgstr "Statusleiste"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Console"
+msgstr "Konsole anzeigen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Enter Full Screen"
+msgstr "Vollbild"
+
+#: assets/Default/Main.sublime-menu
+msgid "Font"
+msgstr "Schrift"
+
+#: assets/Default/Main.sublime-menu
+msgid "Larger"
+msgstr "Größer"
+
+#: assets/Default/Main.sublime-menu
+msgid "Smaller"
+msgstr "Kleiner"
+
+#: assets/Default/Main.sublime-menu
+msgid "Reset"
+msgstr "Zurücksetzen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Word Wrap"
+msgstr "Zeilenumbruch"
+
+#: assets/Default/Main.sublime-menu
+msgid "Line Numbers"
+msgstr "Zeilennummern"
+
+#: assets/Default/Main.sublime-menu
+msgid "Highlight Line"
+msgstr "Aktuelle Zeile hervorheben"
+
+#: assets/Default/Main.sublime-menu
+msgid "Syntax…"
+msgstr "Syntax…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Goto"
+msgstr "Gehe zu"
+
+#: assets/Default/Main.sublime-menu
+msgid "Goto Anything…"
+msgstr "Gehe zu beliebiger Stelle…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Goto Symbol…"
+msgstr "Gehe zu Symbol…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Goto Line…"
+msgstr "Gehe zu Zeile…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Next File"
+msgstr "Nächste Datei"
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous File"
+msgstr "Vorherige Datei"
+
+#: assets/Default/Main.sublime-menu
+msgid "Tools"
+msgstr "Werkzeuge"
+
+#: assets/Default/Main.sublime-menu
+msgid "Command Palette…"
+msgstr "Befehlspalette…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Preferences"
+msgstr "Einstellungen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Browse Packages…"
+msgstr "Pakete durchsuchen…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Settings"
+msgstr "Einstellungen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Key Bindings"
+msgstr "Tastenkürzel"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select Color Scheme…"
+msgstr "Farbschema auswählen…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Language…"
+msgstr "Sprache…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Reload Packages"
+msgstr "Pakete neu laden"
+
+#: assets/Default/Main.sublime-menu
+msgid "Help"
+msgstr "Hilfe"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Package Load Errors"
+msgstr "Fehler beim Laden der Pakete"
+
+#: assets/Default/Main.sublime-menu
+msgid "Report an Issue…"
+msgstr "Problem melden…"
+
+#: assets/Default/Main.sublime-menu
+#: crates/frameworks/src/views/dialogs.rs
+msgid "About CodeLibre Text"
+msgstr "Über CodeLibre Text"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: New File"
+msgstr "Datei: Neue Datei"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Open File…"
+msgstr "Datei: Datei öffnen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Open Folder…"
+msgstr "Datei: Ordner öffnen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Save"
+msgstr "Datei: Speichern"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Save As…"
+msgstr "Datei: Speichern unter…"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Save All"
+msgstr "Datei: Alle speichern"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Revert"
+msgstr "Datei: Zurücksetzen"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Close"
+msgstr "Datei: Schließen"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Close All"
+msgstr "Datei: Alle schließen"
+
+#: assets/Default/Default.sublime-commands
+msgid "File: Reopen Closed File"
+msgstr "Datei: Geschlossene Datei wieder öffnen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Close Folder"
+msgstr "Projekt: Ordner schließen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Refresh Folders"
+msgstr "Projekt: Ordner aktualisieren"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Split into Lines"
+msgstr "Auswahl: In Zeilen aufteilen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Expand"
+msgstr "Auswahl: Erweitern"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Expand to Line Upward"
+msgstr "Auswahl: Auf Zeile nach oben erweitern"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Expand to Brackets"
+msgstr "Auswahl: Auf Klammern erweitern"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Expand to Indentation"
+msgstr "Auswahl: Auf Einrückung erweitern"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Add Previous Line"
+msgstr "Auswahl: Vorherige Zeile hinzufügen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Add Next Line"
+msgstr "Auswahl: Nächste Zeile hinzufügen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Selection: Select All Occurrences"
+msgstr "Auswahl: Alle Vorkommen auswählen"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Side Bar"
+msgstr "Ansicht: Seitenleiste ein-/ausblenden"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Show Console"
+msgstr "Ansicht: Konsole anzeigen"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Status Bar"
+msgstr "Ansicht: Statusleiste ein-/ausblenden"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Full Screen"
+msgstr "Ansicht: Vollbild umschalten"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Word Wrap"
+msgstr "Ansicht: Zeilenumbruch umschalten"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Line Numbers"
+msgstr "Ansicht: Zeilennummern umschalten"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Highlight Line"
+msgstr "Ansicht: Hervorhebung der aktuellen Zeile umschalten"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Font Size Larger"
+msgstr "Ansicht: Schrift vergrößern"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Font Size Smaller"
+msgstr "Ansicht: Schrift verkleinern"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Font Size Reset"
+msgstr "Ansicht: Schriftgröße zurücksetzen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Goto: Anything"
+msgstr "Gehe zu: Beliebige Stelle"
+
+#: assets/Default/Default.sublime-commands
+msgid "Goto: Line"
+msgstr "Gehe zu: Zeile"
+
+#: assets/Default/Default.sublime-commands
+msgid "Goto: Symbol"
+msgstr "Gehe zu: Symbol"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Find…"
+msgstr "Suchen: Suchen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Replace…"
+msgstr "Suchen: Ersetzen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Indentation: Convert to Spaces"
+msgstr "Einrückung: In Leerzeichen umwandeln"
+
+#: assets/Default/Default.sublime-commands
+msgid "Indentation: Convert to Tabs"
+msgstr "Einrückung: In Tabulatoren umwandeln"
+
+#: assets/Default/Default.sublime-commands
+msgid "Indentation: Toggle Translate Tabs to Spaces"
+msgstr "Einrückung: Tabulatoren als Leerzeichen umschalten"
+
+#: assets/Default/Default.sublime-commands
+msgid "Line Endings: Windows (CRLF)"
+msgstr "Zeilenenden: Windows (CRLF)"
+
+#: assets/Default/Default.sublime-commands
+msgid "Line Endings: Unix (LF)"
+msgstr "Zeilenenden: Unix (LF)"
+
+#: assets/Default/Default.sublime-commands
+msgid "Convert Case: Upper Case"
+msgstr "Groß-/Kleinschreibung: Großbuchstaben"
+
+#: assets/Default/Default.sublime-commands
+msgid "Convert Case: Lower Case"
+msgstr "Groß-/Kleinschreibung: Kleinbuchstaben"
+
+#: assets/Default/Default.sublime-commands
+msgid "Convert Case: Title Case"
+msgstr "Groß-/Kleinschreibung: Wortanfänge groß"
+
+#: assets/Default/Default.sublime-commands
+msgid "Convert Case: Swap Case"
+msgstr "Groß-/Kleinschreibung: Umkehren"
+
+#: assets/Default/Default.sublime-commands
+msgid "Permute Lines: Reverse"
+msgstr "Zeilen umordnen: Umkehren"
+
+#: assets/Default/Default.sublime-commands
+msgid "Permute Lines: Unique"
+msgstr "Zeilen umordnen: Doppelte entfernen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Sort Lines (Case Sensitive)"
+msgstr "Zeilen sortieren (Groß-/Kleinschreibung beachten)"
+
+#: assets/Default/Default.sublime-commands
+msgid "Set Syntax…"
+msgstr "Syntax festlegen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "UI: Select Color Scheme"
+msgstr "Oberfläche: Farbschema auswählen"
+
+#: assets/Default/Default.sublime-commands
+msgid "UI: Select Language"
+msgstr "Oberfläche: Sprache auswählen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Preferences: Settings"
+msgstr "Einstellungen: Einstellungen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Preferences: Key Bindings"
+msgstr "Einstellungen: Tastenkürzel"
+
+#: assets/Default/Default.sublime-commands
+msgid "Preferences: Browse Packages"
+msgstr "Einstellungen: Pakete durchsuchen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Preferences: Reload Packages"
+msgstr "Einstellungen: Pakete neu laden"
+
+#: assets/Default/Default.sublime-commands
+msgid "Help: Show Package Load Errors"
+msgstr "Hilfe: Fehler beim Laden der Pakete anzeigen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Help: Report an Issue"
+msgstr "Hilfe: Problem melden"
+
+#: assets/Default/Default.sublime-commands
+msgid "Help: About CodeLibre Text"
+msgstr "Hilfe: Über CodeLibre Text"
+
+#: crates/use_cases/src/documents.rs
+msgid "{path} looks like a binary file"
+msgstr "{path} scheint eine Binärdatei zu sein"
+
+#: crates/use_cases/src/documents.rs
+msgid "{name} changed on disk; you have unsaved changes"
+msgstr "{name} wurde auf der Festplatte geändert; Sie haben ungespeicherte Änderungen"
+
+#: crates/use_cases/src/editing.rs
+msgid "Clipboard unavailable: {error}"
+msgstr "Zwischenablage nicht verfügbar: {error}"
+
+#: crates/use_cases/src/editor.rs
+msgid "{count} package resource failed to load (Help > Package Load Errors)"
+msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"
+msgstr[0] "{count} Paketressource konnte nicht geladen werden (Hilfe > Fehler beim Laden der Pakete)"
+msgstr[1] "{count} Paketressourcen konnten nicht geladen werden (Hilfe > Fehler beim Laden der Pakete)"
+
+#: crates/use_cases/src/find_replace.rs
+msgid "Unable to find {query}"
+msgstr "{query} nicht gefunden"
+
+#: crates/use_cases/src/find_replace.rs
+msgid "Replaced {count} occurrence"
+msgid_plural "Replaced {count} occurrences"
+msgstr[0] "{count} Vorkommen ersetzt"
+msgstr[1] "{count} Vorkommen ersetzt"
+
+#: crates/use_cases/src/help.rs
+msgid "open_url: no url given"
+msgstr "open_url: keine URL angegeben"
+
+#: crates/use_cases/src/localization.rs
+msgid "Language: {name}"
+msgstr "Sprache: {name}"
+
+#: crates/use_cases/src/localization.rs
+msgid "untitled"
+msgstr "unbenannt"
+
+#: crates/use_cases/src/packages.rs
+msgid "Packages reloaded: {syntaxes} syntaxes, {schemes} color schemes, {bindings} key bindings, {commands} plugin commands"
+msgstr "Pakete neu geladen: {syntaxes} Syntaxen, {schemes} Farbschemata, {bindings} Tastenkürzel, {commands} Plugin-Befehle"
+
+#: crates/use_cases/src/packages.rs
+msgid "{count} plugin error (View > Show Console)"
+msgid_plural "{count} plugin errors (View > Show Console)"
+msgstr[0] "{count} Plugin-Fehler (Ansicht > Konsole anzeigen)"
+msgstr[1] "{count} Plugin-Fehler (Ansicht > Konsole anzeigen)"
+
+#: crates/use_cases/src/packages.rs
+msgid "Plugins reloaded: {count} command"
+msgid_plural "Plugins reloaded: {count} commands"
+msgstr[0] "Plugins neu geladen: {count} Befehl"
+msgstr[1] "Plugins neu geladen: {count} Befehle"
+
+#: crates/use_cases/src/plugins.rs
+msgid "{name} failed: {error} (View > Show Console)"
+msgstr "{name} ist fehlgeschlagen: {error} (Ansicht > Konsole anzeigen)"
+
+#: crates/use_cases/src/saving.rs
+msgid "This view is read only"
+msgstr "Diese Ansicht ist schreibgeschützt"
+
+#: crates/use_cases/src/saving.rs
+msgid "Saved {path}"
+msgstr "Gespeichert: {path}"
+
+#: crates/use_cases/src/search.rs
+msgid "Set Syntax: {syntax}"
+msgstr "Syntax festlegen: {syntax}"
+
+#: crates/use_cases/src/search.rs
+msgid "Automatic (system language)"
+msgstr "Automatisch (Systemsprache)"
+
+#: crates/use_cases/src/search.rs
+msgid "open"
+msgstr "geöffnet"
+
+#: crates/use_cases/src/search.rs
+msgid "Go to line {line}"
+msgstr "Gehe zu Zeile {line}"
+
+#: crates/use_cases/src/search.rs
+msgid "Type a line number"
+msgstr "Zeilennummer eingeben"
+
+#: crates/use_cases/src/session.rs
+msgid "Could not save the session: {error}"
+msgstr "Die Sitzung konnte nicht gespeichert werden: {error}"
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "Overlay not supported: {name}"
+msgstr "Overlay nicht unterstützt: {name}"
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "Panel not supported: {name}"
+msgstr "Bereich nicht unterstützt: {name}"
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "expand_selection to {target} is not supported"
+msgstr "expand_selection auf {target} wird nicht unterstützt"
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "Command not available: {name}"
+msgstr "Befehl nicht verfügbar: {name}"
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "Macro not supported: {file}"
+msgstr "Makro nicht unterstützt: {file}"
+
+#: crates/interface_adapters/src/controllers/keyboard_controller.rs
+msgid "{keys} was pressed. Waiting for second key…"
+msgstr "{keys} wurde gedrückt. Warte auf die zweite Taste…"
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Error: {error}"
+msgstr "Fehler: {error}"
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "{count} match"
+msgid_plural "{count} matches"
+msgstr[0] "{count} Treffer"
+msgstr[1] "{count} Treffer"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+#: crates/frameworks/src/app.rs
+msgid "Command Palette"
+msgstr "Befehlspalette"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Goto Anything — file name, :line, @symbol"
+msgstr "Gehe zu beliebiger Stelle — Dateiname, :Zeile, @Symbol"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Select Color Scheme"
+msgstr "Farbschema auswählen"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Select Language"
+msgstr "Sprache auswählen"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "No matches"
+msgstr "Keine Treffer"
+
+#: crates/interface_adapters/src/presenters/status_bar.rs
+msgid "Line {line}, Column {column}"
+msgstr "Zeile {line}, Spalte {column}"
+
+#: crates/interface_adapters/src/presenters/status_bar.rs
+msgid "{count} character selected"
+msgid_plural "{count} characters selected"
+msgstr[0] "{count} Zeichen ausgewählt"
+msgstr[1] "{count} Zeichen ausgewählt"
+
+#: crates/interface_adapters/src/presenters/status_bar.rs
+msgid "Spaces: {size}"
+msgstr "Leerzeichen: {size}"
+
+#: crates/interface_adapters/src/presenters/status_bar.rs
+msgid "Tab Size: {size}"
+msgstr "Tabulatorbreite: {size}"
+
+#: crates/frameworks/src/app.rs
+msgid "Open File"
+msgstr "Datei öffnen"
+
+#: crates/frameworks/src/app.rs
+msgid "Open Folder"
+msgstr "Ordner öffnen"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Save changes to {name} before closing?"
+msgstr "Änderungen an {name} vor dem Schließen speichern?"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Don't Save"
+msgstr "Nicht speichern"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Some files have unsaved changes. Exit anyway?"
+msgstr "Einige Dateien haben ungespeicherte Änderungen. Trotzdem beenden?"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Unsaved changes"
+msgstr "Ungespeicherte Änderungen"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Version {version}"
+msgstr "Version {version}"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "An open-source native editor written in Rust,\ncompatible with Sublime Text packages (syntaxes, color schemes,\nkey bindings, menus, command palette and settings)."
+msgstr "Ein nativer Open-Source-Editor, geschrieben in Rust,\nkompatibel mit Sublime-Text-Paketen (Syntaxen, Farbschemata,\nTastenkürzel, Menüs, Befehlspalette und Einstellungen)."
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Packages: {path}"
+msgstr "Pakete: {path}"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Sublime Text packages: {path}"
+msgstr "Sublime-Text-Pakete: {path}"
+
+#: crates/frameworks/src/views/dialogs.rs
+msgid "No errors."
+msgstr "Keine Fehler."
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Regular expression"
+msgstr "Regulärer Ausdruck"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Case sensitive"
+msgstr "Groß-/Kleinschreibung beachten"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Whole word"
+msgstr "Ganzes Wort"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Wrap"
+msgstr "Am Anfang fortsetzen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Close (Esc)"
+msgstr "Schließen (Esc)"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Find Prev"
+msgstr "Zurück"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Replace"
+msgstr "Ersetzen"
+
+#: crates/frameworks/src/views/side_bar.rs
+msgid "OPEN FILES"
+msgstr "GEÖFFNETE DATEIEN"
+
+#: crates/frameworks/src/views/side_bar.rs
+msgid "FOLDERS"
+msgstr "ORDNER"
+
+#: crates/frameworks/src/views/side_bar.rs
+msgid "Remove Folder from Project"
+msgstr "Ordner aus dem Projekt entfernen"
+
+#: crates/frameworks/src/views/status_bar.rs
+msgid "Set syntax"
+msgstr "Syntax festlegen"
+
+#: crates/frameworks/src/views/status_bar.rs
+msgid "Toggle line endings"
+msgstr "Zeilenenden umschalten"
+
+#: crates/frameworks/src/views/status_bar.rs
+msgid "Toggle translate tabs to spaces"
+msgstr "Tabulatoren als Leerzeichen umschalten"

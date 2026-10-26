@@ -66,7 +66,9 @@ pub struct QuickPanelItemViewModel {
 }
 
 pub struct QuickPanelViewModel {
-    pub placeholder: &'static str,
+    pub placeholder: String,
+    /// Shown instead of the list when nothing matches.
+    pub no_matches: String,
     pub query: String,
     pub selected: usize,
     pub items: Vec<QuickPanelItemViewModel>,

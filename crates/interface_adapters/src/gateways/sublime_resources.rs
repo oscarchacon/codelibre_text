@@ -1,27 +1,43 @@
 //! [`ResourceGateway`] for Sublime Text's settings, key bindings, menus and command palette files.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo, Keymap};
+use entities::localization::{normalize_language_code, Catalog, Language};
 use entities::menu::{merge_menu, MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
 use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResources};
 
 use super::package_files::{find_resources, is_in_default_package};
-use super::{builtin_resources, sublime_json};
+use super::{builtin_resources, po_file, sublime_json};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 
 pub struct SublimeResourceGateway {
     paths: PackagePaths,
+    system_language: Option<String>,
 }
 
 impl SublimeResourceGateway {
     pub fn new(paths: PackagePaths) -> Self {
         let _ = std::fs::create_dir_all(paths.user_dir());
-        Self { paths }
+        Self { paths, system_language: None }
+    }
+
+    /// The operating system's language, read by the caller (it is not a file).
+    pub fn with_system_language(mut self, language: Option<String>) -> Self {
+        self.system_language = language;
+        self
+    }
+
+    /// `Localization/<language>.po` files of every package, in load order.
+    fn translation_files(&self, include_sublime: bool) -> Vec<PathBuf> {
+        find_resources(&self.paths, include_sublime, |n| n.ends_with(".po"))
+            .into_iter()
+            .filter(|p| p.parent().and_then(|d| d.file_name()).is_some_and(|d| d == "Localization"))
+            .collect()
     }
 
     /// Built-in file followed by the matching files of every package (except Sublime's `Default`).
@@ -160,6 +176,57 @@ impl ResourceGateway for SublimeResourceGateway {
         } else {
             None
         }
+    }
+
+    fn languages(&self, include_sublime: bool) -> Vec<Language> {
+        let mut languages: Vec<Language> = Vec::new();
+        let mut add = |code: String, text: &str| {
+            if languages.iter().any(|l| l.code == code) {
+                return;
+            }
+            let name = po_file::parse(text).ok().and_then(|po| po.language_name).unwrap_or_else(|| code.clone());
+            languages.push(Language { code, name });
+        };
+        for (code, text) in builtin_resources::TRANSLATIONS {
+            add(code.to_string(), text);
+        }
+        for path in self.translation_files(include_sublime) {
+            let code = path.file_stem().map(|s| normalize_language_code(&s.to_string_lossy())).unwrap_or_default();
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                add(code, &text);
+            }
+        }
+        languages.sort_by_key(|l| l.name.to_lowercase());
+        languages
+    }
+
+    fn load_translations(&self, language: &str, include_sublime: bool, errors: &mut Vec<String>) -> Catalog {
+        let mut sources: Vec<(String, String)> = builtin_resources::TRANSLATIONS
+            .iter()
+            .filter(|(code, _)| *code == language)
+            .map(|(code, text)| (format!("Default/Localization/{code}.po"), text.to_string()))
+            .collect();
+        for path in self.translation_files(include_sublime) {
+            let code = path.file_stem().map(|s| normalize_language_code(&s.to_string_lossy()));
+            if code.as_deref() == Some(language) {
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => sources.push((path.display().to_string(), text)),
+                    Err(e) => errors.push(format!("{}: {e}", path.display())),
+                }
+            }
+        }
+        let mut catalog = Catalog::default();
+        for (origin, text) in sources {
+            match po_file::parse(&text) {
+                Ok(po) => catalog.merge(po.catalog),
+                Err(e) => errors.push(format!("{origin}: {e}")),
+            }
+        }
+        catalog
+    }
+
+    fn system_language(&self) -> Option<String> {
+        self.system_language.clone()
     }
 }
 

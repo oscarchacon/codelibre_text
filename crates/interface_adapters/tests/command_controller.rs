@@ -185,6 +185,19 @@ fn select_color_scheme_starts_on_the_current_scheme_and_cancelling_restores_it()
 }
 
 #[test]
+fn select_language_starts_on_the_current_language() {
+    let world = World::new()
+        .with_language("es", "Español", &[])
+        .with_preferences(serde_json::json!({ "language": "es" }));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(&mut editor, &mut view, &cmd("select_language"));
+    let panel = view.quick_panel.as_ref().unwrap();
+    assert_eq!(panel.kind, SearchKind::Languages);
+    assert_eq!(panel.results[panel.selected].caption, "Español");
+}
+
+#[test]
 fn closing_a_normal_quick_panel_changes_no_setting() {
     let world = World::new();
     let mut editor = world.editor();

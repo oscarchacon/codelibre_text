@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use entities::document::DocumentId;
 use entities::keymap::Keymap;
+use entities::localization::{Catalog, Language};
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
@@ -110,6 +111,13 @@ pub trait ResourceGateway {
     fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String>;
     /// Contents of a built-in default resource (e.g. `Preferences.sublime-settings`).
     fn default_resource(&self, file_name: &str) -> Option<String>;
+    /// Interface languages: the built-in ones plus those of `Localization/<language>.po` files in packages.
+    fn languages(&self, include_sublime_packages: bool) -> Vec<Language>;
+    /// Translations into `language`: the built-in ones, then every package's in load order (`User`
+    /// last), later ones replacing earlier ones. Problems are appended to `errors`.
+    fn load_translations(&self, language: &str, include_sublime_packages: bool, errors: &mut Vec<String>) -> Catalog;
+    /// The operating system's language (e.g. `es-CL`), used when the `language` setting is `auto`.
+    fn system_language(&self) -> Option<String>;
 }
 
 /// Syntax definitions and color schemes.

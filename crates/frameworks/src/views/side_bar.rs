@@ -1,6 +1,7 @@
 //! Side bar: OPEN FILES and the FOLDERS tree.
 
 use egui::{RichText, Sense, Ui};
+use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{SideBarViewModel, TreeRowKind};
 
@@ -8,13 +9,13 @@ use super::theme::{mix, Chrome};
 
 const ROW_HEIGHT: f32 = 22.0;
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, side_bar: &SideBarViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBarViewModel, events: &mut Vec<UiEvent>) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.add_space(6.0);
 
         if !side_bar.open_files.is_empty() {
-            section_header(ui, chrome, "OPEN FILES");
+            section_header(ui, chrome, text.tr("OPEN FILES"));
             for (index, file) in side_bar.open_files.iter().enumerate() {
                 let response = row(ui, chrome, 0, None, &file.name, file.active);
                 if file.dirty {
@@ -32,7 +33,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, side_bar: &SideBarViewModel, events: &
         }
 
         if !side_bar.folders.is_empty() {
-            section_header(ui, chrome, "FOLDERS");
+            section_header(ui, chrome, text.tr("FOLDERS"));
             for entry in &side_bar.folders {
                 let folder = match entry.kind {
                     TreeRowKind::Folder { expanded, .. } => Some(expanded),
@@ -47,7 +48,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, side_bar: &SideBarViewModel, events: &
                 }
                 if let TreeRowKind::Folder { is_root: true, .. } = entry.kind {
                     response.context_menu(|ui| {
-                        if ui.button("Remove Folder from Project").clicked() {
+                        if ui.button(text.tr("Remove Folder from Project")).clicked() {
                             events.push(UiEvent::RemoveFolder(entry.path.clone()));
                             ui.close_menu();
                         }

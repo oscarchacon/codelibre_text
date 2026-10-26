@@ -13,7 +13,7 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
         .iter()
         .enumerate()
         .map(|(index, doc)| OpenFileViewModel {
-            name: doc.name(),
+            name: editor.document_name(doc),
             dirty: doc.is_dirty(),
             active: index == state.active,
         })

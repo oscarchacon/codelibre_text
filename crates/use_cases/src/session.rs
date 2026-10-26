@@ -61,7 +61,7 @@ impl Editor {
             layout,
         };
         if let Err(e) = self.gateways.sessions.save(&session) {
-            self.notify(format!("Could not save the session: {e}"));
+            self.notify(self.tr_args("Could not save the session: {error}", &[("error", &e)]));
         }
     }
 

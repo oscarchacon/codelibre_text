@@ -17,3 +17,15 @@ pub const COLOR_SCHEMES: &[(&str, &str)] = &[
     ("Monokai", asset!("Monokai.sublime-color-scheme")),
     ("Daylight", asset!("Daylight.sublime-color-scheme")),
 ];
+
+/// Built-in translations of the interface (`assets/Default/Localization/<language>.po`), by
+/// language code. Add new ones here; `messages.pot` next to them is the template.
+pub const TRANSLATIONS: &[(&str, &str)] = &[
+    ("de", asset!("Localization/de.po")),
+    ("es", asset!("Localization/es.po")),
+    ("fr", asset!("Localization/fr.po")),
+    ("pt_BR", asset!("Localization/pt_BR.po")),
+];
+
+/// The template every translation starts from: all the interface's English text.
+pub const TRANSLATION_TEMPLATE: &str = asset!("Localization/messages.pot");

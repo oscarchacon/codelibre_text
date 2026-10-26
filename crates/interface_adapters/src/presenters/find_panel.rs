@@ -11,9 +11,9 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<FindPanelVie
     let state = editor.state();
     let find = &state.find;
     let (status, has_error) = match (&state.find_error, find.query.is_empty()) {
-        (Some(error), _) => (format!("Error: {error}"), true),
+        (Some(error), _) => (editor.tr_args("Error: {error}", &[("error", error)]), true),
         (None, true) => (String::new(), false),
-        (None, false) => (format!("{match_count} matches"), false),
+        (None, false) => (editor.tr_n("{count} match", "{count} matches", match_count, &[]), false),
     };
     Some(FindPanelViewModel {
         query: find.query.clone(),

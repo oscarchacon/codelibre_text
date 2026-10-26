@@ -43,7 +43,7 @@ impl Editor {
             match Document::from_bytes(id, &path, bytes, modified) {
                 Ok(doc) => doc,
                 Err(DocumentError::Binary) => {
-                    self.notify(format!("{} looks like a binary file", path.display()));
+                    self.notify(self.tr_args("{path} looks like a binary file", &[("path", &path.display())]));
                     return false;
                 }
             }
@@ -245,7 +245,7 @@ impl Editor {
             .map_err(|e| format!("{}: {e}", path.display()))?;
         let modified = self.gateways.file_system.modified(&path);
         let fresh = Document::from_bytes(doc.id, &path, bytes, modified)
-            .map_err(|_| format!("{} looks like a binary file", path.display()))?;
+            .map_err(|_| self.tr_args("{path} looks like a binary file", &[("path", &path.display())]))?;
         self.state.documents[index].reload_from(fresh);
         Ok(())
     }
@@ -265,9 +265,9 @@ impl Editor {
                 continue;
             }
             if doc.is_dirty() {
-                let name = doc.name();
+                let name = self.document_name(doc);
                 self.state.documents[index].modified_at = on_disk;
-                self.notify(format!("{name} changed on disk; you have unsaved changes"));
+                self.notify(self.tr_args("{name} changed on disk; you have unsaved changes", &[("name", &name)]));
             } else if let Err(e) = self.reload_document(index) {
                 self.notify(e);
             }

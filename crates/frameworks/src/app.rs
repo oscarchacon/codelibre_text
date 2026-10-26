@@ -142,6 +142,8 @@ impl App {
 
     fn draw(&mut self, ctx: &egui::Context, chrome: &Chrome) -> Vec<UiEvent> {
         let mut events = Vec::new();
+        // Views look up their fixed labels in the interface language.
+        let translations = self.editor.translations();
 
         let menu = presenters::menu::present(&self.editor);
         egui::TopBottomPanel::top("menu_bar")
@@ -153,7 +155,7 @@ impl App {
             egui::TopBottomPanel::bottom("status_bar")
                 .exact_height(24.0)
                 .frame(egui::Frame::new().fill(chrome.panel_bg))
-                .show(ctx, |ui| status_bar::show(ui, chrome, &status, &mut events));
+                .show(ctx, |ui| status_bar::show(ui, chrome, &translations, &status, &mut events));
         }
 
         if let Some(find) = presenters::find_panel::present(&mut self.editor, &mut self.view) {
@@ -164,7 +166,7 @@ impl App {
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
-                .show(ctx, |ui| find_panel::show(ui, chrome, &find, &mut events));
+                .show(ctx, |ui| find_panel::show(ui, chrome, &translations, &find, &mut events));
         }
 
         if self.view.show_side_bar {
@@ -173,7 +175,7 @@ impl App {
                 .default_width(230.0)
                 .width_range(120.0..=600.0)
                 .frame(egui::Frame::new().fill(chrome.panel_bg))
-                .show(ctx, |ui| side_bar::show(ui, chrome, &side, &mut events));
+                .show(ctx, |ui| side_bar::show(ui, chrome, &translations, &side, &mut events));
         }
 
         let tab_list = presenters::tabs::present(&self.editor);
@@ -187,12 +189,15 @@ impl App {
                     .show(ui, |ui| tabs::show(ui, chrome, &tab_list, &mut events));
 
                 let Some(model) = editor_model else {
+                    let hints = [
+                        ("Ctrl+N", translations.tr("New File")),
+                        ("Ctrl+O", translations.tr("Open File")),
+                        ("Ctrl+K, Ctrl+O", translations.tr("Open Folder")),
+                        ("Ctrl+Shift+P", translations.tr("Command Palette")),
+                    ];
+                    let hints: Vec<String> = hints.iter().map(|(keys, action)| format!("{keys}  {action}")).collect();
                     ui.centered_and_justified(|ui| {
-                        ui.label(
-                            RichText::new("Ctrl+N  New File\nCtrl+O  Open File\nCtrl+K, Ctrl+O  Open Folder\nCtrl+Shift+P  Command Palette")
-                                .color(chrome.fg_dim)
-                                .size(14.0),
-                        );
+                        ui.label(RichText::new(hints.join("\n")).color(chrome.fg_dim).size(14.0));
                     });
                     return;
                 };
@@ -214,13 +219,13 @@ impl App {
             quick_panel::show(ctx, chrome, &panel, &mut events);
         }
         if let Some(dialog) = presenters::dialogs::present_close_dialog(&self.editor) {
-            dialogs::show_close_dialog(ctx, &dialog, &mut events);
+            dialogs::show_close_dialog(ctx, &translations, &dialog, &mut events);
         }
         if let Some(about) = presenters::dialogs::present_about(&self.editor, &self.view) {
-            dialogs::show_about(ctx, &about, &mut events);
+            dialogs::show_about(ctx, &translations, &about, &mut events);
         }
         if let Some(errors) = presenters::dialogs::present_load_errors(&self.editor, &self.view) {
-            dialogs::show_load_errors(ctx, &errors, &mut events);
+            dialogs::show_load_errors(ctx, &translations, &errors, &mut events);
         }
         events
     }

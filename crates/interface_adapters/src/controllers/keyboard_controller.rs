@@ -46,7 +46,7 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
 
     let keymap = &editor.state().keymap;
     if keymap.is_waiting_for_chord() {
-        let message = format!("{} was pressed. Waiting for second key…", keymap.pending_chord_display());
+        let message = editor.tr_args("{keys} was pressed. Waiting for second key…", &[("keys", &keymap.pending_chord_display())]);
         editor.notify(message);
     } else if was_waiting {
         editor.clear_status();

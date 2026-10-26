@@ -225,6 +225,6 @@ impl Editor {
     fn report_plugin_error(&mut self, name: &str, error: &str) {
         self.log(&format!("{name}: {error}\n"));
         let summary = error.trim_end().lines().last().unwrap_or(error).to_string();
-        self.notify(format!("{name} failed: {summary} (View > Show Console)"));
+        self.notify(self.tr_args("{name} failed: {error} (View > Show Console)", &[("name", &name), ("error", &summary)]));
     }
 }

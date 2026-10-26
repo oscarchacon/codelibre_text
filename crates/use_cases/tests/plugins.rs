@@ -64,7 +64,7 @@ fn load_problems_are_package_load_errors_and_go_to_the_console() {
     *world.plugins.load_error.borrow_mut() = Some("no Python 3 interpreter found".into());
     let editor = world.editor();
     assert_eq!(editor.state().load_errors, ["Python plugins: no Python 3 interpreter found"]);
-    assert!(status(&editor).contains("1 package resources failed to load"));
+    assert!(status(&editor).contains("1 package resource failed to load"));
 
     let world = World::new().with_file(&format!("{PACKAGES}/P/p.py"), "");
     world.plugins.then([PluginMessage::Loaded { commands: vec![], errors: vec!["p.py: SyntaxError".into()] }]);
@@ -76,7 +76,7 @@ fn load_problems_are_package_load_errors_and_go_to_the_console() {
     world.plugins.then([PluginMessage::Loaded { commands: vec![("ok".into(), Text)], errors: vec![] }]);
     editor.reload_plugins();
     assert!(editor.state().load_errors.is_empty());
-    assert_eq!(status(&editor), "Plugins reloaded: 1 commands");
+    assert_eq!(status(&editor), "Plugins reloaded: 1 command");
 }
 
 #[test]

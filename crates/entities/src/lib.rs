@@ -10,6 +10,7 @@ pub mod command;
 pub mod document;
 pub mod find;
 pub mod keymap;
+pub mod localization;
 pub mod menu;
 pub mod selection;
 pub mod settings;

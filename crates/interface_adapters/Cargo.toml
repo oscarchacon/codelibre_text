@@ -14,3 +14,5 @@ serde_json.workspace = true
 [dev-dependencies]
 test_support.workspace = true
 tempfile.workspace = true
+# Extracting the translatable text from the sources (tests/builtin_resources.rs)
+regex.workspace = true

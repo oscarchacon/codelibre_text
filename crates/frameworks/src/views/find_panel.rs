@@ -2,12 +2,13 @@
 
 use egui::{Id, Key, RichText, Ui};
 use entities::find::FindOptions;
+use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::FindPanelViewModel;
 
 use super::theme::Chrome;
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &FindPanelViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, panel: &FindPanelViewModel, events: &mut Vec<UiEvent>) {
     let mut options = FindOptions {
         query: panel.query.clone(),
         regex: panel.regex,
@@ -19,16 +20,16 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &FindPanelViewModel, events: &m
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        toggle(ui, chrome, &mut options.regex, ".*", "Regular expression");
-        toggle(ui, chrome, &mut options.case_sensitive, "Aa", "Case sensitive");
-        toggle(ui, chrome, &mut options.whole_word, "“ ”", "Whole word");
-        toggle(ui, chrome, &mut options.wrap, "⟲", "Wrap");
+        toggle(ui, chrome, &mut options.regex, ".*", text.tr("Regular expression"));
+        toggle(ui, chrome, &mut options.case_sensitive, "Aa", text.tr("Case sensitive"));
+        toggle(ui, chrome, &mut options.whole_word, "“ ”", text.tr("Whole word"));
+        toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
         ui.add_space(6.0);
 
         let query = ui.add(
             egui::TextEdit::singleline(&mut options.query)
                 .id(Id::new("find_input"))
-                .hint_text("Find")
+                .hint_text(text.tr("Find"))
                 .desired_width((ui.available_width() - 260.0).max(160.0))
                 .font(egui::TextStyle::Monospace),
         );
@@ -45,13 +46,13 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &FindPanelViewModel, events: &m
         ui.label(RichText::new(&panel.status).size(11.5).color(color));
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("×").on_hover_text("Close (Esc)").clicked() {
+            if ui.small_button("×").on_hover_text(text.tr("Close (Esc)")).clicked() {
                 events.push(UiEvent::CloseFindPanel);
             }
-            if ui.button("Find Prev").clicked() {
+            if ui.button(text.tr("Find Prev")).clicked() {
                 events.push(UiEvent::FindPrevious);
             }
-            if ui.button("Find").clicked() {
+            if ui.button(text.tr("Find")).clicked() {
                 events.push(UiEvent::FindNext);
             }
         });
@@ -63,7 +64,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &FindPanelViewModel, events: &m
             let field = ui.add(
                 egui::TextEdit::singleline(&mut replacement)
                     .id(Id::new("replace_input"))
-                    .hint_text("Replace")
+                    .hint_text(text.tr("Replace"))
                     .desired_width((ui.available_width() - 260.0).max(160.0))
                     .font(egui::TextStyle::Monospace),
             );
@@ -73,10 +74,10 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &FindPanelViewModel, events: &m
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(26.0);
-                if ui.button("Replace All").clicked() {
+                if ui.button(text.tr("Replace All")).clicked() {
                     events.push(UiEvent::ReplaceAll);
                 }
-                if ui.button("Replace").clicked() {
+                if ui.button(text.tr("Replace")).clicked() {
                     events.push(UiEvent::ReplaceNext);
                 }
             });

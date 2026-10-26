@@ -198,6 +198,35 @@ fn the_menu_shows_shortcuts_and_check_marks() {
     assert_eq!(file[3].checked, Some(false));
 }
 
+#[test]
+fn the_menu_and_the_status_bar_are_shown_in_the_interface_language() {
+    let world = World::new()
+        .with_language(
+            "es",
+            "Español",
+            &[("File", "Archivo"), ("Save", "Guardar"), ("Line {line}, Column {column}", "Línea {line}, columna {column}")],
+        )
+        .with_preferences(json!({ "language": "es" }))
+        .with_menu(MenuItem {
+            caption: "File".into(),
+            id: Some("file".into()),
+            command: None,
+            checkbox: false,
+            children: vec![MenuItem {
+                caption: "Save".into(),
+                id: None,
+                command: Some(Command::new("save")),
+                checkbox: false,
+                children: vec![],
+            }],
+        });
+    let editor = editor_with_text(&world, "ab", Selection::caret(1));
+    let menu = menu::present(&editor);
+    assert_eq!(menu[0].caption, "Archivo");
+    assert_eq!(menu[0].children[0].caption, "Guardar");
+    assert_eq!(status_bar::present(&editor).position, "Línea 1, columna 2");
+}
+
 // ----- quick panel ---------------------------------------------------------------------------------
 
 #[test]

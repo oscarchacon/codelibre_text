@@ -11,7 +11,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
   syntect engine, OS/library gateways) + thin `main.rs` (CLI + window).
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
-- `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
+- `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
+  gettext `.po` per interface language, parsed by `gateways/po_file.rs`) (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
 - `assets/python/` — the Python plugin host and our own `sublime` / `sublime_plugin` modules (`include_str!` in
   `frameworks/src/gateways/python_plugin_host.rs`). Design, protocol and the **pending phases B and C**: `docs/plugins.md`.
 - `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
@@ -31,6 +32,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Only positional `files` and `--fullscreen` are used from `crates/frameworks/src/cli.rs`.
 
 ## Adding things
+- Text users see: never a bare literal. Use `tr` / `tr_args` / `tr_n` (on `Editor`, or `Translations` in views) with a
+  string literal, then `UPDATE_TRANSLATIONS=1 cargo test -p interface_adapters --test builtin_resources` and translate
+  the new entries in every `assets/Default/Localization/*.po` (that test fails otherwise). See `docs/translating.md`.
 - Sublime command: arm in `interface_adapters/src/controllers/command_controller.rs` → use case → expose in `assets/Default/*`.
 - Text transformation: `entities/src/text_commands.rs` + `TextCommand` variant in `use_cases/src/editing.rs`.
 - External system: trait in `use_cases/src/gateways.rs`, impl in `frameworks/src/gateways/`, wire in `compose()`

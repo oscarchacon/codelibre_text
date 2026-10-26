@@ -8,6 +8,9 @@ use crate::text::char_to_byte;
 
 pub type DocumentId = u64;
 
+/// Name of a new document with no text yet (the interface shows it translated).
+pub const UNTITLED: &str = "untitled";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
     Unix,
@@ -202,7 +205,7 @@ impl Document {
         }
         let first_line = self.text.lines().next().unwrap_or("").trim();
         if first_line.is_empty() {
-            "untitled".into()
+            UNTITLED.into()
         } else {
             first_line.chars().take(40).collect()
         }

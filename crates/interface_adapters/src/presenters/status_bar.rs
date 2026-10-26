@@ -29,10 +29,10 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
 
     let selection = doc.selection();
     let (line, column) = line_col(&doc.text, selection.head);
-    let mut position = format!("Line {}, Column {}", line + 1, column + 1);
+    let mut position = editor.tr_args("Line {line}, Column {column}", &[("line", &(line + 1)), ("column", &(column + 1))]);
     if !selection.is_empty() {
-        let n = selection.len();
-        position.push_str(&format!("; {n} character{} selected", if n == 1 { "" } else { "s" }));
+        position.push_str("; ");
+        position.push_str(&editor.tr_n("{count} character selected", "{count} characters selected", selection.len(), &[]));
     }
 
     let settings = editor.view_settings();
@@ -41,9 +41,9 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
         position,
         message,
         indentation: if settings.bool("translate_tabs_to_spaces", false) {
-            format!("Spaces: {tab_size}")
+            editor.tr_args("Spaces: {size}", &[("size", &tab_size)])
         } else {
-            format!("Tab Size: {tab_size}")
+            editor.tr_args("Tab Size: {size}", &[("size", &tab_size)])
         },
         line_ending: doc.line_ending.label().to_string(),
         encoding: doc.encoding.label().to_string(),

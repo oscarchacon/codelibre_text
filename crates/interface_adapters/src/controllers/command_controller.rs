@@ -8,7 +8,7 @@ use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::editing::{Expansion, TextCommand};
-use use_cases::search::SearchKind;
+use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
 use crate::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit};
@@ -50,7 +50,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 "command_palette" => SearchKind::Commands,
                 "goto" => SearchKind::Goto,
                 other => {
-                    editor.notify(format!("Overlay not supported: {other}"));
+                    editor.notify(editor.tr_args("Overlay not supported: {name}", &[("name", &other)]));
                     return;
                 }
             };
@@ -70,6 +70,18 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             panel.color_scheme_before = Some(current);
             view.quick_panel = Some(panel);
         }
+        "select_language" => {
+            let current = editor.language_setting();
+            let mut panel = QuickPanel::new(SearchKind::Languages, String::new());
+            panel.results = editor.search(SearchKind::Languages, "");
+            panel.results_query = Some(String::new());
+            panel.selected = panel
+                .results
+                .iter()
+                .position(|c| matches!(&c.target, CandidateTarget::Language(code) if *code == current))
+                .unwrap_or(0);
+            view.quick_panel = Some(panel);
+        }
         "show_panel" => {
             let panel = command.str_arg("panel").trim_start_matches("output.");
             let toggle = command.bool_arg("toggle", false);
@@ -87,7 +99,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 }
                 "console" if toggle => editor.toggle_console(),
                 "console" => editor.show_console(),
-                other => editor.notify(format!("Panel not supported: {other}")),
+                other => editor.notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
             }
         }
         "hide_panel" => {
@@ -149,7 +161,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             "brackets" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets)),
             "indentation" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation)),
             "smart" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Smart)),
-            other => editor.notify(format!("expand_selection to {other} is not supported")),
+            other => editor.notify(editor.tr_args("expand_selection to {target} is not supported", &[("target", &other)])),
         },
         "indent" => editor.run_text_command(TextCommand::Indent),
         "unindent" => editor.run_text_command(TextCommand::Unindent),
@@ -204,7 +216,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         // ----- Python plugins: they can run other commands, which come back here ---------------
         other => {
             if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
-                editor.notify(format!("Command not available: {other}"));
+                editor.notify(editor.tr_args("Command not available: {name}", &[("name", &other)]));
             }
         }
     }
@@ -244,7 +256,7 @@ fn run_macro(editor: &mut Editor, file: &str) {
         "Delete to Hard EOL" => TextCommand::DeleteToLineEdge { to_end: true },
         "Delete to Hard BOL" => TextCommand::DeleteToLineEdge { to_end: false },
         _ => {
-            editor.notify(format!("Macro not supported: {file}"));
+            editor.notify(editor.tr_args("Macro not supported: {file}", &[("file", &file)]));
             return;
         }
     };

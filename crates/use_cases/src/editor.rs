@@ -1,11 +1,13 @@
 //! The application state and the entry point of the use cases.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Instant;
 
 use entities::document::{Document, DocumentId, LineEnding};
 use entities::find::FindOptions;
 use entities::keymap::{KeyCombo, KeyContext, KeyResult, Keymap};
+use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
 
@@ -65,6 +67,8 @@ pub struct EditorState {
     pub palette: Vec<PaletteCommand>,
     /// Problems found while loading packages.
     pub load_errors: Vec<String>,
+    /// The interface language (see [`crate::localization`]).
+    pub translations: Rc<Translations>,
     pub find: FindOptions,
     pub replacement: String,
     pub find_error: Option<String>,
@@ -100,6 +104,7 @@ impl Editor {
                 main_menu: Vec::new(),
                 palette: Vec::new(),
                 load_errors: Vec::new(),
+                translations: Rc::default(),
                 find: FindOptions::default(),
                 replacement: String::new(),
                 find_error: None,
@@ -136,9 +141,11 @@ impl Editor {
             self.new_file();
         }
         if !self.state.load_errors.is_empty() {
-            self.notify(format!(
-                "{} package resources failed to load (Help > Package Load Errors)",
-                self.state.load_errors.len()
+            self.notify(self.tr_n(
+                "{count} package resource failed to load (Help > Package Load Errors)",
+                "{count} package resources failed to load (Help > Package Load Errors)",
+                self.state.load_errors.len(),
+                &[],
             ));
         }
     }

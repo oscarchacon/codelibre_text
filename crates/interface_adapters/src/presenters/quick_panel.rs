@@ -14,10 +14,13 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewMo
     }
     Some(QuickPanelViewModel {
         placeholder: match panel.kind {
-            SearchKind::Commands => "Command Palette",
-            SearchKind::Goto => "Goto Anything — file name, :line, @symbol",
-            SearchKind::ColorSchemes => "Select Color Scheme",
-        },
+            SearchKind::Commands => editor.tr("Command Palette"),
+            SearchKind::Goto => editor.tr("Goto Anything — file name, :line, @symbol"),
+            SearchKind::ColorSchemes => editor.tr("Select Color Scheme"),
+            SearchKind::Languages => editor.tr("Select Language"),
+        }
+        .to_string(),
+        no_matches: editor.tr("No matches").to_string(),
         query: panel.query.clone(),
         selected: panel.selected,
         take_focus: std::mem::take(&mut panel.focus_requested),

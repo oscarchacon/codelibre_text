@@ -47,7 +47,7 @@ fn load_errors_are_kept_and_announced() {
     world.resources.errors.borrow_mut().push("bad.sublime-keymap: expected `]`".into());
     let editor = world.editor();
     assert_eq!(editor.state().load_errors, vec!["bad.sublime-keymap: expected `]`"]);
-    assert!(status(&editor).contains("1 package resources failed to load"));
+    assert!(status(&editor).contains("1 package resource failed to load"));
 }
 
 #[test]

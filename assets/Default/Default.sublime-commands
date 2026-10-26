@@ -61,6 +61,7 @@
 
 	{ "caption": "Set Syntax…", "command": "show_overlay", "args": { "overlay": "command_palette", "text": "Set Syntax: " } },
 	{ "caption": "UI: Select Color Scheme", "command": "select_color_scheme" },
+	{ "caption": "UI: Select Language", "command": "select_language" },
 	{ "caption": "Preferences: Settings", "command": "edit_settings", "args": { "base_file": "${packages}/Default/Preferences.sublime-settings", "default": "{\n\t$0\n}\n" } },
 	{ "caption": "Preferences: Key Bindings", "command": "edit_settings", "args": { "base_file": "${packages}/Default/Default (${platform}).sublime-keymap", "default": "[\n\t$0\n]\n" } },
 	{ "caption": "Preferences: Browse Packages", "command": "open_dir", "args": { "dir": "${packages}" } },

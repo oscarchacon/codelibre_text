@@ -53,6 +53,7 @@ The editor's business rules, true for any editor regardless of how it is shown:
 | `keymap.rs` | Key combos in Sublime notation, chords, context conditions. |
 | `settings.rs` | Layered settings (defaults → packages → User → syntax → runtime). |
 | `menu.rs`, `command.rs`, `symbol.rs` | Menus, palette entries, command invocations, Goto Symbol entries. |
+| `localization.rs` | Interface translations: catalogs keyed by the English text, gettext plural formulas, choosing the language. |
 
 No I/O, no UI. Tested in `crates/entities/tests/`.
 
@@ -69,8 +70,9 @@ each module adds the use cases of one area as methods:
 | `preferences.rs` | settings, font size, color scheme, edit settings files |
 | `packages.rs` | load and reload Sublime resources |
 | `project.rs` | folders, folder listing, file index |
-| `search.rs` | Command Palette, Goto Anything (`file`, `:line`, `@symbol`), color scheme picker |
+| `search.rs` | Command Palette, Goto Anything (`file`, `:line`, `@symbol`), color scheme and language pickers |
 | `session.rs` | hot exit: save/restore the session, exit confirmation |
+| `localization.rs` | the `language` setting, the language picker, translated messages (`tr`, `tr_args`, `tr_n`) |
 
 **Gateways** (`gateways.rs`) are the traits through which use cases reach the outside world:
 `FileSystemGateway`, `DialogGateway`, `ClipboardGateway`, `ResourceGateway`, `SyntaxGateway`,
@@ -88,7 +90,7 @@ Converts data between the use cases and the outside:
 | `presenters/` | Application state → view models, one presenter per part of the window. |
 | `view_models.rs` | Plain data the views draw (`TabViewModel`, `EditorViewModel`…). |
 | `view_state.rs` | Presentation-only state: open panels, expanded folders, queued commands. |
-| `gateways/` | Gateway implementations about **file formats**: Sublime's JSON dialect, `.sublime-settings/-keymap/-menu/-commands`, `.sublime-color-scheme`, the session file. |
+| `gateways/` | Gateway implementations about **file formats**: Sublime's JSON dialect, `.sublime-settings/-keymap/-menu/-commands`, `.sublime-color-scheme`, gettext `.po` translations (`po_file.rs`), the session file. |
 
 ### 4. Frameworks & Drivers — `crates/frameworks`
 Everything tied to a library or the OS:
@@ -145,6 +147,10 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
   by the command controller in an outer circle. The controller therefore passes itself in as a
   `CommandRunner` closure; the use case only calls it, so no dependency points outwards.
   Plugins themselves run in a separate Python process behind `PluginHostGateway` (`docs/plugins.md`).
+- **Views look up their fixed labels in `Translations`.** Button and header texts ("Find", "OPEN
+  FILES") would otherwise all become view model fields; views receive the read-only `Translations`
+  entity instead (`text.tr("Find")`). Anything computed (status, captions, messages) is still
+  translated by the use cases and presenters. See `docs/translating.md`.
 
 ## Where to put a change
 
@@ -157,6 +163,7 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
 | Support another Sublime file format | `interface_adapters/src/gateways/` |
 | Give plugins another `sublime` API function | `assets/python/sublime.py` + an arm in `use_cases/src/plugin_api.rs` (see `docs/plugins.md`) |
 | Change how something looks | a presenter (what is shown) or a view (how it is drawn) |
+| Show new text to users | `tr` / `tr_args` / `tr_n` with a literal, then regenerate `messages.pot` and translate it (`docs/translating.md`) |
 
 ## Tests
 

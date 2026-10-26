@@ -59,7 +59,7 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
                     let mut query = panel.query.clone();
                     let input = egui::TextEdit::singleline(&mut query)
                         .id(input_id)
-                        .hint_text(panel.placeholder)
+                        .hint_text(panel.placeholder.as_str())
                         .desired_width(f32::INFINITY)
                         .font(egui::FontId::proportional(15.0))
                         .margin(egui::Margin::symmetric(8, 6))
@@ -148,7 +148,7 @@ fn result_list(
                 }
             }
             if panel.items.is_empty() {
-                ui.label(RichText::new("No matches").color(chrome.fg_dim));
+                ui.label(RichText::new(&panel.no_matches).color(chrome.fg_dim));
             }
         });
 }
