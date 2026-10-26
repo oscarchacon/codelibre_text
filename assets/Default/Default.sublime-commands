@@ -66,5 +66,6 @@
 	{ "caption": "Preferences: Browse Packages", "command": "open_dir", "args": { "dir": "${packages}" } },
 	{ "caption": "Preferences: Reload Packages", "command": "reload_packages" },
 	{ "caption": "Help: Show Package Load Errors", "command": "show_load_errors" },
+	{ "caption": "Help: Report an Issue", "command": "report_issue" },
 	{ "caption": "Help: About CodeLibre Text", "command": "show_about_window" },
 ]

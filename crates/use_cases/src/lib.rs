@@ -15,6 +15,7 @@
 //! | [`find_replace`] | find next/previous, find under caret, replace |
 //! | [`preferences`] | settings, font size, color scheme, edit settings files |
 //! | [`packages`] | load / reload Sublime resources |
+//! | [`help`] | open a link, report an issue |
 //! | [`plugins`] | load and run Python plugins, the console |
 //! | [`plugin_api`] | the `sublime_api` functions plugins call |
 //! | [`project`] | folders, folder listing, file index |
@@ -26,6 +27,7 @@ pub mod editing;
 pub mod editor;
 pub mod find_replace;
 pub mod gateways;
+pub mod help;
 pub mod packages;
 pub mod plugin_api;
 pub mod plugins;

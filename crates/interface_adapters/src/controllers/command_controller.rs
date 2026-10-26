@@ -198,6 +198,8 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "reload_packages" => editor.reload_packages(),
         "show_load_errors" => view.show_load_errors = true,
         "show_about_window" => view.show_about = true,
+        "open_url" => editor.open_url(command.str_arg("url")),
+        "report_issue" => editor.report_issue(),
 
         // ----- Python plugins: they can run other commands, which come back here ---------------
         other => {

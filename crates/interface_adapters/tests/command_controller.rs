@@ -91,6 +91,18 @@ fn open_file_and_open_dir_expand_package_paths() {
 }
 
 #[test]
+fn open_url_and_report_issue_open_the_browser() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(&mut editor, &mut view, &cmd_with("open_url", json!({ "url": "https://example.com" })));
+    run(&mut editor, &mut view, &cmd("report_issue"));
+    let urls = world.opened_urls.borrow();
+    assert_eq!(urls[0], "https://example.com");
+    assert!(urls[1].contains("template=bug_report.yml&version="));
+}
+
+#[test]
 fn close_window_and_exit_ask_the_window_to_close() {
     for name in ["close_window", "exit"] {
         let world = World::new();

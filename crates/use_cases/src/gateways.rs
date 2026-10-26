@@ -80,9 +80,10 @@ pub trait ClipboardGateway {
     fn write_text(&self, text: &str) -> Result<(), String>;
 }
 
-/// Opens folders in the operating system's file manager.
+/// Opens folders in the operating system's file manager and links in the default browser.
 pub trait ShellGateway {
     fn open_in_file_manager(&self, path: &Path);
+    fn open_url(&self, url: &str);
 }
 
 /// Key bindings, menus and command palette entries read from packages.

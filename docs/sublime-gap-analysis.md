@@ -17,7 +17,7 @@ Compared against the installed Sublime Text 4 (`C:\Program Files\Sublime Text`):
   and macros, plus every `*Command` class in its `.py` files; and the keys of `Preferences.sublime-settings`.
 - Project side: names matched in `command_controller.rs` / `WIDGET_COMMANDS`, and setting keys read in `crates/*/src`.
 
-Totals: **87 / 287** commands handled, **17 / 200** settings read.
+Totals: **88 / 287** commands handled, **17 / 200** settings read.
 
 "Native" = the name appears in `sublime_text.exe` (built into the core). "Python" = defined in `Default.sublime-package`
 (port them as Rust use cases: Sublime's `Default` package is not loaded as a plugin; Python plugin support is in
@@ -49,7 +49,7 @@ cannot be told apart by the string scan and are listed under native.
 | Recent / projects | `open_recent_file`, `open_recent_folder`, `clear_recent_files`, `*project_or_workspace*`, `new_window`, `save_workspace_as`, `close_workspace` | native |
 | Build | `build`, `cancel_build`, `exec`, `set_build_system`, `toggle_save_all_on_build` | native / py |
 | UI toggles | `toggle_minimap`, `toggle_menu`, `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |
-| Misc | `switch_file` (Alt+O), `open_url`, `open_in_browser`, `open_context_url`, `open_terminal`, `copy_as_html`, `html_print`, `view_resource`, `edit_syntax_settings`, `convert_syntax`, `chain`, `context_menu` | native / py |
+| Misc | `switch_file` (Alt+O), ~~`open_url`~~ (done), `open_in_browser`, `open_context_url`, `open_terminal`, `copy_as_html`, `html_print`, `view_resource`, `edit_syntax_settings`, `convert_syntax`, `chain`, `context_menu` | native / py |
 | Out of scope | `sublime_merge_*`, license/update commands, `install_package_control`, `new_plugin`, syntax-test/profiling commands | — |
 
 ## Settings not yet read (most user-visible first)

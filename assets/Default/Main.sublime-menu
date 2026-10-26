@@ -151,6 +151,8 @@
 		"caption": "Help", "id": "help",
 		"children": [
 			{ "command": "show_load_errors", "caption": "Package Load Errors" },
+			{ "command": "report_issue", "caption": "Report an Issue…" },
+			{ "caption": "-" },
 			{ "command": "show_about_window", "caption": "About CodeLibre Text" }
 		]
 	}

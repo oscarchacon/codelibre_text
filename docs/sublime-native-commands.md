@@ -20,7 +20,7 @@ Classes whose registered name differs from the class: `distraction_free` → `to
 `duplicate_selections` → `duplicate_line`, `remove_all_folders` → `close_folder_list`, `global_*` → the command
 without the prefix (used when no window is open).
 
-## Not implemented in CodeLibre Text (121)
+## Not implemented in CodeLibre Text (120)
 
 | Command | Class (if different) | Arguments / settings it reads |
 |---|---|---|
@@ -90,7 +90,6 @@ without the prefix (used when no window is open).
 | `open_recent_project_or_workspace` |  |  |
 | `open_recent_workspace` |  |  |
 | `open_terminal` |  | `terminal_command` |
-| `open_url` |  |  |
 | `overwrite` |  |  |
 | `paste_selection_clipboard` |  | `event` |
 | `prev_bookmark` |  |  |
@@ -146,7 +145,7 @@ without the prefix (used when no window is open).
 | `unselect_to_right` |  |  |
 | `wrap_lines` |  | `rulers` `wrap_width` |
 
-## Implemented — check the arguments and settings (61)
+## Implemented — check the arguments and settings (62)
 
 Supported since 2026-10-26: `expand_selection {to: smart | line_prev | line_without_eol | line_strict | brackets | indentation}`,
 `copy` / `cut` / `paste` with `copy_with_empty_selection`, `trim_trailing_white_space {only_modified, trim_on_caret}` (and on save
@@ -188,6 +187,7 @@ Still ignored:
 | `open_dir` | `global_open_dir_command` |  |
 | `open_dir` |  |  |
 | `open_file` |  | `add_to_selection` `clear_to_right` `encoded_position` `force_clone` `force_group` `replace_mru` `semi_transient` |
+| `open_url` |  | `url` |
 | `paste` |  |  |
 | `paste_and_indent` |  |  |
 | `prev_view` |  | `extend` `update_stack` |

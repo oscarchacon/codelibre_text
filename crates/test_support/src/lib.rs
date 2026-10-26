@@ -172,11 +172,18 @@ impl ClipboardGateway for FakeClipboard {
     }
 }
 
-struct FakeShell(Rc<RefCell<Vec<PathBuf>>>);
+struct FakeShell {
+    folders: Rc<RefCell<Vec<PathBuf>>>,
+    urls: Rc<RefCell<Vec<String>>>,
+}
 
 impl ShellGateway for FakeShell {
     fn open_in_file_manager(&self, path: &Path) {
-        self.0.borrow_mut().push(path.to_path_buf());
+        self.folders.borrow_mut().push(path.to_path_buf());
+    }
+
+    fn open_url(&self, url: &str) {
+        self.urls.borrow_mut().push(url.to_string());
     }
 }
 
@@ -458,6 +465,8 @@ pub struct World {
     pub file_index: Rc<FileIndex>,
     /// Folders opened in the file manager.
     pub opened_folders: Rc<RefCell<Vec<PathBuf>>>,
+    /// Links opened in the browser.
+    pub opened_urls: Rc<RefCell<Vec<String>>>,
     pub plugins: Rc<PluginScript>,
 }
 
@@ -505,6 +514,7 @@ impl World {
             session: Rc::default(),
             file_index: Rc::default(),
             opened_folders: Rc::default(),
+            opened_urls: Rc::default(),
             plugins: Rc::default(),
         }
     }
@@ -582,7 +592,10 @@ impl World {
                 files: self.file_index.files.clone(),
                 scanning: false,
             }),
-            shell: Box::new(FakeShell(self.opened_folders.clone())),
+            shell: Box::new(FakeShell {
+                folders: self.opened_folders.clone(),
+                urls: self.opened_urls.clone(),
+            }),
             plugins: Box::new(FakePluginHost(self.plugins.clone())),
         }
     }

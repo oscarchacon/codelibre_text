@@ -1,0 +1,54 @@
+name: Bug report
+description: Something does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! CodeLibre Text collects no telemetry, so this report is
+        how we learn about problems. Please search the existing issues first.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Filled in by Help > Report an Issue; also shown in Help > About CodeLibre Text.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Filled in by Help > Report an Issue; add the version (e.g. Windows 11, Ubuntu 24.04).
+      placeholder: "windows x86_64"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a file with ...
+        2. Press ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample file, setting or package
+      description: The smallest content that shows the problem (it will be formatted as code).
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors
+      description: Messages from Help > Package Load Errors and from the console (Ctrl+`).
+      render: text
