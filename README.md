@@ -115,6 +115,27 @@ cargo run --release -- path/to/folder path/to/file.rs
 cargo test --workspace
 ```
 
+### Graphics requirements
+
+The window is drawn with [wgpu](https://wgpu.rs/), which uses Vulkan or DirectX 12 on Windows,
+Vulkan on Linux and Metal on macOS, with OpenGL as its last option. If wgpu cannot start (old GPUs
+or drivers, virtual machines, remote desktops), the editor automatically opens again with its
+OpenGL renderer (glow, OpenGL 2.1 or newer), so it runs on modest hardware too.
+
+The `WGPU_BACKEND` environment variable chooses the renderer:
+
+| Value | Renderer |
+|-------|----------|
+| *(unset)* | wgpu, with the automatic OpenGL fallback |
+| `glow` | OpenGL renderer directly (skips wgpu) |
+| `vulkan`, `dx12`, `metal`, `gl` | wgpu restricted to that API (comma-separated lists work too) |
+
+```bash
+WGPU_BACKEND=glow codelibre_text
+```
+
+On Windows (PowerShell): `$env:WGPU_BACKEND = "glow"; .\codelibre_text.exe`.
+
 ## Installing
 
 The icon lives in `assets/icons/`. The window and taskbar use it on every platform; each system
