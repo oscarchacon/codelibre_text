@@ -9,8 +9,9 @@ use interface_adapters::controllers::command_controller::{close_quick_panel, run
 use interface_adapters::gateways::{builtin_resources, sublime_json};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
 use serde_json::{json, Value};
-use test_support::{active_text, open, status, World};
+use test_support::{active_text, open, plugin_call, status, World};
 use use_cases::editing::TextCommand;
+use use_cases::gateways::{PluginCommandKind, PluginMessage};
 use use_cases::search::SearchKind;
 use use_cases::Editor;
 
@@ -468,7 +469,28 @@ fn unknown_commands_are_reported() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     run(&mut editor, &mut view, &cmd("git_blame"));
-    assert_eq!(status(&editor), "Command not available: git_blame (Python plugin commands are not supported yet)");
+    assert_eq!(status(&editor), "Command not available: git_blame");
+}
+
+#[test]
+fn other_commands_go_to_the_plugins_which_can_run_built_in_ones() {
+    let world = World::new().with_plugin_commands(&[("shout", PluginCommandKind::Text)]);
+    let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
+    world
+        .plugins
+        .then([plugin_call("run_command", json!(["window", 1, "upper_case", null])), PluginMessage::Done { error: None }]);
+    run(&mut editor, &mut view, &cmd("shout"));
+    assert_eq!(world.plugins.runs.borrow()[0].1, "shout");
+    assert_eq!(active_text(&editor), "ABC", "the plugin ran upper_case through this controller");
+}
+
+#[test]
+fn show_panel_console_opens_the_console() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    editor.log("hello from a plugin\n");
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({"panel": "console", "toggle": true})));
+    assert_eq!(active_text(&editor), "hello from a plugin\n");
 }
 
 #[test]

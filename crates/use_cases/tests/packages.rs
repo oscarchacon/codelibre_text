@@ -58,7 +58,7 @@ fn reload_packages_reads_everything_again_and_reports_counts() {
     editor.reload_packages();
     assert_eq!(editor.state().keymap.bindings.len(), 2);
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
-    assert_eq!(status(&editor), "Packages reloaded: 6 syntaxes, 3 color schemes, 2 key bindings");
+    assert_eq!(status(&editor), "Packages reloaded: 6 syntaxes, 3 color schemes, 2 key bindings, 0 plugin commands");
 }
 
 #[test]

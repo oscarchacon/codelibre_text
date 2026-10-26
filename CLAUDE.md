@@ -12,6 +12,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
   syntect engine, OS/library gateways) + thin `main.rs` (CLI + window).
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
 - `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
+- `assets/python/` — the Python plugin host and our own `sublime` / `sublime_plugin` modules (`include_str!` in
+  `frameworks/src/gateways/python_plugin_host.rs`). Design, protocol and the **pending phases B and C**: `docs/plugins.md`.
 - `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
   `packaging/linux` (`.desktop` + `install.sh`) and `packaging/macos` (`Info.plist` + `make_app.sh`). `.gitattributes` keeps them LF.
 
@@ -24,6 +26,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).
+  `frameworks/tests/python_plugin_host.rs` runs a real Python 3 (skipped with a message when none is found).
 - `Cargo.lock` is gitignored. Dependencies build at `opt-level = 2` in dev (syntect is slow unoptimized).
 - Only positional `files` and `--fullscreen` are used from `crates/frameworks/src/cli.rs`.
 
@@ -32,6 +35,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Text transformation: `entities/src/text_commands.rs` + `TextCommand` variant in `use_cases/src/editing.rs`.
 - External system: trait in `use_cases/src/gateways.rs`, impl in `frameworks/src/gateways/`, wire in `compose()`
   (`frameworks/src/lib.rs`), and add a fake to `crates/test_support`.
+- Plugin API function: method in `assets/python/sublime.py` → arm in `use_cases/src/plugin_api.rs` → test in
+  `use_cases/tests/plugin_api.rs` (see `docs/plugins.md`). Command names without a controller arm go to the plugins.
 - Views draw view models and push `UiEvent`s; they must not mutate state (exception: the text area, see below).
 
 ## Gotchas
@@ -42,17 +47,28 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
 - `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1").
-- Multiple selections (Ctrl+D): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
+- Multiple selections (Ctrl+D, Alt+F3 `find_all_under`, Ctrl+Alt+Up/Down `select_lines`, Ctrl+Shift+L
+  `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
 - Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`.
 - `persist_setting` re-serializes the user's `Preferences.sublime-settings` (comments are lost), as Sublime does.
+- Plugin commands run synchronously on the UI thread (20 s timeout kills the host). Python code must never write to the
+  host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
+- Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
 - Packages: `%APPDATA%\codelibre_text\data\Packages` (`User` inside); Sublime's `%APPDATA%\Sublime Text\Packages`
   is also read unless `import_sublime_packages` is false (its `Default` package is skipped).
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
+- Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python`.
+
+## Pending work (read before starting new features)
+- `docs/plugins.md` — Python plugins: phase A done; phases B (events, panels, async) and C (Package Control,
+  `.sublime-package`, scopes) are checklists with the files to touch.
+- `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 
 ## Not implemented
-Multiple cursors other than Ctrl+D (no Ctrl+click, column selection, Up/Down or copy of all selections), Python plugins, `.sublime-package` zips,
-split groups, minimap, folding, auto-complete, find in files. Highlighting is skipped above 4 MB.
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, plugin phases B and C
+(`docs/plugins.md`), `.sublime-package` zips, split groups, minimap, folding, auto-complete, find in files.
+Highlighting is skipped above 4 MB.

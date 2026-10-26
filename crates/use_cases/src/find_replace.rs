@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use entities::document::DocumentId;
 use entities::find::{self, FindOptions};
+use entities::selection::Selection;
 use entities::text::{selected_text, word_at};
 
 use crate::editor::Editor;
@@ -96,19 +97,35 @@ impl Editor {
             }
             return;
         }
-        let word = word_at(&doc.text, selection.start());
-        let options = FindOptions {
-            query: selected_text(&doc.text, selection).to_string(),
-            case_sensitive: true,
-            whole_word: word.start() == selection.start() && word.end() == selection.end(),
-            ..FindOptions::default()
-        };
-        let Ok(Some(pattern)) = options.pattern() else {
+        let Ok(Some(pattern)) = occurrence_options(&doc.text, selection).pattern() else {
             return;
         };
         if let Some(next) = find::next_unselected(&pattern, &doc.text, selection, &doc.selections()) {
             doc.add_selection(next);
         }
+    }
+
+    /// `find_all_under` (Alt+F3): selects every occurrence of the selection, or of the word under
+    /// the caret, with the same matching rules as `find_under_expand`.
+    pub fn select_all_occurrences(&mut self) {
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let mut selection = doc.selection();
+        if selection.is_empty() {
+            selection = word_at(&doc.text, selection.head);
+        }
+        let Ok(Some(pattern)) = occurrence_options(&doc.text, selection).pattern() else {
+            return;
+        };
+        let matches = find::find_all_selections(&pattern, &doc.text);
+        // The primary selection stays where it was, so the view does not jump.
+        let primary = matches
+            .iter()
+            .copied()
+            .find(|m| m.start() == selection.start() && m.end() == selection.end())
+            .unwrap_or(selection);
+        doc.set_selections(primary, matches);
     }
 
     pub fn replace_next(&mut self) {
@@ -168,5 +185,17 @@ impl Editor {
             matches: matches.clone(),
         });
         matches
+    }
+}
+
+/// How `find_under_expand` and `find_all_under` look for the selected text: case sensitive, and
+/// only whole words when the selection is a whole word.
+fn occurrence_options(text: &str, selection: Selection) -> FindOptions {
+    let word = word_at(text, selection.start());
+    FindOptions {
+        query: selected_text(text, selection).to_string(),
+        case_sensitive: true,
+        whole_word: word.start() == selection.start() && word.end() == selection.end(),
+        ..FindOptions::default()
     }
 }

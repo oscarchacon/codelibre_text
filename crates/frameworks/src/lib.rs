@@ -26,7 +26,8 @@ use use_cases::{Editor, Gateways};
 
 use gateways::{
     app_directories, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
-    std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
+    python_plugin_host::PythonPluginHost, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    system_clipboard::SystemClipboard,
 };
 use syntax_engine::{SharedSyntaxEngine, SyntaxEngine};
 
@@ -35,6 +36,7 @@ pub fn compose(paths: Vec<PathBuf>) -> (Editor, ViewState, SharedSyntaxEngine) {
     let package_paths = app_directories::package_paths();
     let session_file = app_directories::session_file(&package_paths);
     let engine: SharedSyntaxEngine = Rc::new(RefCell::new(SyntaxEngine::new(package_paths.clone())));
+    let python_lib = app_directories::python_lib_dir(&package_paths);
 
     let gateways = Gateways {
         file_system: Box::new(StdFileSystem),
@@ -45,6 +47,7 @@ pub fn compose(paths: Vec<PathBuf>) -> (Editor, ViewState, SharedSyntaxEngine) {
         sessions: Box::new(SessionFileGateway::new(session_file)),
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
+        plugins: Box::new(PythonPluginHost::new(python_lib)),
     };
     let mut editor = Editor::new(gateways);
     editor.start(paths);

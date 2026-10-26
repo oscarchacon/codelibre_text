@@ -301,3 +301,42 @@ fn labels_for_the_status_bar() {
     assert_eq!(Encoding::Utf8WithBom.label(), "UTF-8 with BOM");
     assert_eq!(Encoding::Latin1.label(), "Western (ISO 8859-1)");
 }
+
+#[test]
+fn set_selections_replaces_every_selection() {
+    let mut doc = from_bytes(b"abcdef");
+    doc.add_selection(Selection::caret(1));
+    let revision = doc.selection_revision();
+    doc.set_selections(Selection::caret(4), [Selection::caret(5), Selection::caret(2), Selection::caret(4), Selection::caret(9)]);
+    assert_eq!(doc.selection(), Selection::caret(4));
+    assert_eq!(doc.extra_selections(), &[Selection::caret(2), Selection::caret(5), Selection::caret(6)], "sorted, clamped, without the primary");
+    assert!(doc.selection_revision() > revision, "the view follows the new primary selection");
+}
+
+#[test]
+fn replace_range_moves_the_selections_like_sublime() {
+    let mut doc = from_bytes(b"abcdef");
+    doc.set_selections(Selection::caret(4), [Selection::caret(1), Selection::new(2, 5)]);
+    assert!(doc.replace_range(4, 4, "XY"));
+    assert_eq!(doc.text, "abcdXYef");
+    assert_eq!(doc.selection(), Selection::caret(6), "a caret where text is inserted ends after it");
+    assert_eq!(doc.extra_selections(), &[Selection::caret(1), Selection::new(2, 7)]);
+
+    doc.replace_range(1, 3, "");
+    assert_eq!(doc.text, "adXYef");
+    assert_eq!(doc.extra_selections(), &[Selection::caret(1), Selection::new(1, 5)], "positions inside go to the end");
+
+    let mut doc = from_bytes(b"hello");
+    doc.set_selection(Selection::new(0, 5));
+    doc.replace_range(0, 5, "héllo!");
+    assert_eq!(doc.selection(), Selection::new(0, 6), "replacing the selection keeps the new text selected");
+    assert!(doc.replace_range(10, 2, "x"), "out of range positions are clamped");
+    assert_eq!(doc.text, "héllo!x");
+}
+
+#[test]
+fn replace_range_leaves_read_only_documents_alone() {
+    let mut doc = Document::scratch(1, "Defaults", "{}", "JSON", true);
+    assert!(!doc.replace_range(0, 0, "x"));
+    assert_eq!(doc.text, "{}");
+}

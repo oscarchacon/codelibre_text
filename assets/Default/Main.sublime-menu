@@ -66,6 +66,11 @@
 	{
 		"caption": "Selection", "id": "selection",
 		"children": [
+			{ "command": "split_selection_into_lines", "caption": "Split into Lines" },
+			{ "command": "select_lines", "args": { "forward": false }, "caption": "Add Previous Line" },
+			{ "command": "select_lines", "args": { "forward": true }, "caption": "Add Next Line" },
+			{ "command": "single_selection", "caption": "Single Selection" },
+			{ "caption": "-" },
 			{ "command": "select_all", "caption": "Select All" },
 			{ "command": "expand_selection", "args": { "to": "line" }, "caption": "Expand Selection to Line" },
 			{ "command": "find_under_expand", "caption": "Expand Selection to Word" }
@@ -81,6 +86,7 @@
 			{ "command": "replace_all", "caption": "Replace All" },
 			{ "caption": "-" },
 			{ "command": "find_under", "caption": "Quick Find" },
+			{ "command": "find_all_under", "caption": "Quick Find All" },
 			{ "command": "slurp_find_string", "caption": "Use Selection for Find" }
 		]
 	},
@@ -89,6 +95,7 @@
 		"children": [
 			{ "command": "toggle_side_bar", "caption": "Side Bar" },
 			{ "command": "toggle_status_bar", "caption": "Status Bar" },
+			{ "command": "show_panel", "args": { "panel": "console", "toggle": true }, "caption": "Show Console" },
 			{ "command": "toggle_full_screen", "caption": "Enter Full Screen" },
 			{ "caption": "-" },
 			{

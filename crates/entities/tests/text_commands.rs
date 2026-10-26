@@ -408,3 +408,35 @@ fn ensure_trailing_newline_adds_one_only_when_missing() {
         assert_eq!(text, expected);
     }
 }
+
+#[test]
+fn split_into_lines_gives_one_selection_per_line() {
+    assert_eq!(split_into_lines("ab\ncd\nef", sel(1, 7)), vec![sel(1, 2), sel(3, 5), sel(6, 7)]);
+    assert_eq!(split_into_lines("ab\n\ncd", sel(0, 6)), vec![sel(0, 2), caret(3), sel(4, 6)], "empty lines get a caret");
+    assert_eq!(split_into_lines("ab\ncd\n", sel(0, 6)), vec![sel(0, 2), sel(3, 5)], "ending at column 0 skips that line");
+    assert_eq!(split_into_lines("ab\ncd", caret(4)), vec![caret(4)]);
+    assert_eq!(split_into_lines("áb\nçd", sel(0, 5)), vec![sel(0, 2), sel(3, 5)], "char indices, not bytes");
+}
+
+#[test]
+fn carets_on_next_line_add_one_line_in_each_direction() {
+    assert_eq!(carets_on_next_line("abc\nabc\nabc", &[caret(1)], true), vec![caret(5)]);
+    assert_eq!(carets_on_next_line("abc\nabc\nabc", &[caret(9)], false), vec![caret(5)]);
+    assert!(carets_on_next_line("abc\nabc", &[caret(5)], true).is_empty(), "no line below");
+    assert!(carets_on_next_line("abc\nabc", &[caret(1)], false).is_empty(), "no line above");
+}
+
+#[test]
+fn carets_on_next_line_keep_the_column_across_short_lines() {
+    let text = "abcdef\nab\nabcdef";
+    let first = carets_on_next_line(text, &[caret(4)], true);
+    assert_eq!(first, vec![caret(9)], "clamped to the end of the short line");
+    let second = carets_on_next_line(text, &[caret(4), caret(9)], true);
+    assert_eq!(second, vec![caret(14)], "back at column 4");
+}
+
+#[test]
+fn carets_on_next_line_skip_lines_that_already_have_a_selection() {
+    assert_eq!(carets_on_next_line("a\nb\nc\nd", &[caret(0), caret(4)], true), vec![caret(2), caret(6)]);
+    assert_eq!(carets_on_next_line("a\nb\nc", &[caret(0), caret(2)], true), vec![caret(4)]);
+}

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::selection::Selection;
+use crate::text::char_to_byte;
 
 pub type DocumentId = u64;
 
@@ -73,7 +74,8 @@ pub struct Document {
     pub modified_at: Option<SystemTime>,
     /// The primary selection: the one the text widget shows and edits.
     selection: Selection,
-    /// More selections added by `find_under_expand` (Ctrl+D). Any other selection change drops them.
+    /// More selections added by `find_under_expand` (Ctrl+D), `select_lines`, `find_all_under`…
+    /// Any other selection change drops them.
     extra_selections: Vec<Selection>,
     /// Increases whenever the selection is changed by a command (not by the user typing),
     /// so the view knows it has to move its caret.
@@ -246,6 +248,20 @@ impl Document {
         self.extra_selections = extra;
     }
 
+    /// Replaces every selection on behalf of a command; `primary` is the one the view follows.
+    pub fn set_selections(&mut self, primary: Selection, others: impl IntoIterator<Item = Selection>) {
+        self.set_selection(primary);
+        let len = self.char_count();
+        let mut extra: Vec<Selection> = others
+            .into_iter()
+            .map(|s| s.clamped(len))
+            .filter(|s| *s != self.selection)
+            .collect();
+        extra.sort_by_key(|s| (s.start(), s.end()));
+        extra.dedup();
+        self.extra_selections = extra;
+    }
+
     /// Drops the extra selections, keeping the primary one (Sublime's `single_selection`).
     pub fn single_selection(&mut self) {
         self.extra_selections.clear();
@@ -275,6 +291,36 @@ impl Document {
             }
             None => false,
         }
+    }
+
+    /// Replaces the chars `start..end` with `insert` (a plugin's `view.insert/erase/replace`) and
+    /// moves every selection along, as Sublime does: positions after the change shift, positions
+    /// inside it go to its end, and a caret where text is inserted ends up after the new text.
+    /// Returns false for read-only documents.
+    pub fn replace_range(&mut self, start: usize, end: usize, insert: &str) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let len = self.char_count();
+        let start = start.min(len);
+        let end = end.clamp(start, len);
+        let (start_byte, end_byte) = (char_to_byte(&self.text, start), char_to_byte(&self.text, end));
+        self.text.replace_range(start_byte..end_byte, insert);
+        let inserted = insert.chars().count();
+        let map = |p: usize| {
+            if p < start || (p == start && start < end) {
+                p
+            } else if p >= end {
+                p - (end - start) + inserted
+            } else {
+                start + inserted
+            }
+        };
+        let moved = |s: &Selection| Selection::new(map(s.anchor), map(s.head));
+        let primary = moved(&self.selection);
+        let extra: Vec<Selection> = self.extra_selections.iter().map(moved).collect();
+        self.set_selections(primary, extra);
+        true
     }
 
     /// Runs a text command on every selection at once. The command gets the selections sorted

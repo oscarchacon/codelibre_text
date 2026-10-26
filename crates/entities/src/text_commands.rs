@@ -587,6 +587,71 @@ pub fn move_carets(text: &str, selections: &[Selection], motion: CaretMotion) ->
         .collect()
 }
 
+/// `split_selection_into_lines`: one selection per line the selection touches. A selection that
+/// ends at column 0 does not include that last line; an empty selection stays as it is.
+pub fn split_into_lines(text: &str, selection: Selection) -> Vec<Selection> {
+    if selection.is_empty() {
+        return vec![selection];
+    }
+    let start = char_to_byte(text, selection.start());
+    let mut end = char_to_byte(text, selection.end());
+    if text[..end].ends_with('\n') {
+        end -= 1;
+    }
+    let mut lines = Vec::new();
+    let (mut pos, mut char_pos) = (start, selection.start());
+    loop {
+        let le = line_end(text, pos).min(end);
+        let chars = text[pos..le].chars().count();
+        lines.push(Selection::new(char_pos, char_pos + chars));
+        if le >= end {
+            return lines;
+        }
+        pos = le + 1;
+        char_pos += chars + 1;
+    }
+}
+
+/// `select_lines`: a new caret on the line below (`forward`) or above every selection whose next
+/// line has no selection yet. The column is the one the run of carets started from, so a short
+/// line in between does not lose it. Returns only the new carets.
+pub fn carets_on_next_line(text: &str, selections: &[Selection], forward: bool) -> Vec<Selection> {
+    // (first char, length in chars) of every line
+    let mut lines = Vec::new();
+    let mut first = 0;
+    for line in text.split('\n') {
+        let chars = line.chars().count();
+        lines.push((first, chars));
+        first += chars + 1;
+    }
+    let line_of = |position: usize| lines.partition_point(|&(first, _)| first <= position) - 1;
+    let mut columns = std::collections::BTreeMap::new();
+    for s in selections {
+        let line = line_of(s.head);
+        columns.entry(line).or_insert(s.head - lines[line].0);
+    }
+    // The column each caret's run started from, walking the lines in the direction of the move.
+    let mut goal = std::collections::HashMap::new();
+    let ordered: Vec<(usize, usize)> = if forward {
+        columns.into_iter().collect()
+    } else {
+        columns.into_iter().rev().collect()
+    };
+    for &(line, column) in &ordered {
+        let previous = if forward { line.checked_sub(1) } else { Some(line + 1) };
+        let column = previous.and_then(|p| goal.get(&p).copied()).unwrap_or(column);
+        goal.insert(line, column);
+    }
+    ordered
+        .iter()
+        .filter_map(|&(line, _)| {
+            let next = if forward { line + 1 } else { line.checked_sub(1)? };
+            let &(first, chars) = lines.get(next)?;
+            (!goal.contains_key(&next)).then(|| Selection::caret(first + goal[&line].min(chars)))
+        })
+        .collect()
+}
+
 pub fn ensure_trailing_newline(text: &mut String) {
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');

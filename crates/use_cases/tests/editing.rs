@@ -140,3 +140,41 @@ fn clipboard_errors_are_reported() {
     assert_eq!(editor.clipboard_text(), None);
     assert_eq!(status(&editor), "Clipboard unavailable: locked");
 }
+
+#[test]
+fn select_lines_adds_a_caret_below_and_makes_it_the_primary_one() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "abc\nabc\nabc", 1);
+    editor.add_carets_on_next_line(true);
+    editor.add_carets_on_next_line(true);
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.selection(), Selection::caret(9));
+    assert_eq!(doc.selections(), vec![Selection::caret(1), Selection::caret(5), Selection::caret(9)]);
+    editor.insert_at_selections("x");
+    assert_eq!(active_text(&editor), "axbc\naxbc\naxbc");
+}
+
+#[test]
+fn select_lines_upwards_on_the_first_line_does_nothing() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "abc\nabc", 1);
+    editor.add_carets_on_next_line(false);
+    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(1));
+}
+
+#[test]
+fn split_selection_into_lines_keeps_the_caret_line_as_primary() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "ab\ncd\nef", 0);
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::new(0, 8));
+    editor.split_selection_into_lines();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.selection(), Selection::new(6, 8));
+    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(3, 5), Selection::new(6, 8)]);
+
+    editor.sync_selection_from_view(id, Selection::new(8, 0));
+    editor.split_selection_into_lines();
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 2), "a backwards selection keeps the first line");
+}

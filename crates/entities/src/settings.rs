@@ -47,6 +47,17 @@ impl Settings {
             .unwrap_or_default()
     }
 
+    /// Every key and its value.
+    pub fn values(&self) -> &Map<String, Value> {
+        &self.values
+    }
+
+    /// The same settings with `values` on top (e.g. one view's own settings).
+    pub fn with(mut self, values: &Map<String, Value>) -> Self {
+        self.values.extend(values.clone());
+        self
+    }
+
     fn merge(&mut self, layer: &Value) {
         if let Value::Object(map) = layer {
             self.values.extend(map.clone());
@@ -89,6 +100,10 @@ impl SettingsLayers {
 
     pub fn set_override(&mut self, key: &str, value: Value) {
         self.overrides.insert(key.to_string(), value);
+    }
+
+    pub fn remove_override(&mut self, key: &str) {
+        self.overrides.remove(key);
     }
 
     pub fn toggle_override(&mut self, key: &str) {

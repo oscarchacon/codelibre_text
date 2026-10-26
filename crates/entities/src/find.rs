@@ -84,6 +84,20 @@ pub fn find_from(pattern: &Regex, text: &str, selection: Selection, forward: boo
     found.map(to_selection)
 }
 
+/// Every match as a selection (`find_all_under`).
+pub fn find_all_selections(pattern: &Regex, text: &str) -> Vec<Selection> {
+    let (mut byte, mut char) = (0, 0);
+    let mut to_char = |target: usize| {
+        char += text[byte..target].chars().count();
+        byte = target;
+        char
+    };
+    find_all(pattern, text)
+        .into_iter()
+        .map(|r| Selection::new(to_char(r.start), to_char(r.end)))
+        .collect()
+}
+
 /// `find_under_expand`: the first match after `after` (wrapping around) that is not already one
 /// of the `selected` ranges.
 pub fn next_unselected(pattern: &Regex, text: &str, after: Selection, selected: &[Selection]) -> Option<Selection> {

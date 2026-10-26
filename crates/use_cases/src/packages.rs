@@ -26,12 +26,25 @@ impl Editor {
     /// `reload_packages`, with a summary in the status bar.
     pub fn reload_packages(&mut self) {
         self.load_packages();
+        self.load_plugins();
         self.notify(format!(
-            "Packages reloaded: {} syntaxes, {} color schemes, {} key bindings",
+            "Packages reloaded: {} syntaxes, {} color schemes, {} key bindings, {} plugin commands",
             self.gateways.syntaxes.syntax_names().len(),
             self.gateways.syntaxes.color_scheme_names().len(),
-            self.state.keymap.bindings.len()
+            self.state.keymap.bindings.len(),
+            self.state.plugins.commands.len()
         ));
+    }
+
+    /// Reloads only the Python plugins (after a plugin file was saved).
+    pub fn reload_plugins(&mut self) {
+        self.load_plugins();
+        let failed = self.state.plugins.errors.len();
+        if failed > 0 {
+            self.notify(format!("{failed} plugin errors (View > Show Console)"));
+        } else {
+            self.notify(format!("Plugins reloaded: {} commands", self.state.plugins.commands.len()));
+        }
     }
 
     /// Reloads only the settings layers (after a settings file changed).

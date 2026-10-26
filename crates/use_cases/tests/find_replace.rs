@@ -220,3 +220,29 @@ fn find_matches_is_empty_without_a_query() {
     let mut editor = editor_with(&world, "abc", Selection::caret(0));
     assert!(editor.find_matches().is_empty());
 }
+
+#[test]
+fn find_all_under_selects_every_whole_word_occurrence_of_the_word_at_the_caret() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "ab abc ab Ab", Selection::caret(8));
+    editor.select_all_occurrences();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.selection(), Selection::new(7, 9), "the primary selection stays where the caret was");
+    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(7, 9)], "case sensitive, whole words");
+}
+
+#[test]
+fn find_all_under_with_a_partial_selection_matches_inside_words() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "ab abc", Selection::new(0, 1));
+    editor.select_all_occurrences();
+    assert_eq!(editor.active_document().unwrap().selections(), vec![Selection::new(0, 1), Selection::new(3, 4)]);
+}
+
+#[test]
+fn find_all_under_without_a_word_does_nothing() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "a  b", Selection::caret(2));
+    editor.select_all_occurrences();
+    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+}

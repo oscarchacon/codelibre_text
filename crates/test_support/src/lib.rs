@@ -16,7 +16,7 @@
 //! ```
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -29,7 +29,8 @@ use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
     ClipboardGateway, DialogGateway, DirectoryEntry, FileIndexGateway, FileSystemGateway, PackagePaths,
-    ResourceGateway, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
+    PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ResourceGateway, SessionGateway, ShellGateway,
+    SyntaxGateway, UiResources,
 };
 use use_cases::session::Session;
 use use_cases::{Editor, Gateways};
@@ -161,6 +162,11 @@ impl ClipboardGateway for FakeClipboard {
     fn read_text(&self) -> Result<String, String> {
         self.0.borrow().clone()
     }
+
+    fn write_text(&self, text: &str) -> Result<(), String> {
+        *self.0.borrow_mut() = Ok(text.to_string());
+        Ok(())
+    }
 }
 
 struct FakeShell(Rc<RefCell<Vec<PathBuf>>>);
@@ -182,6 +188,10 @@ pub struct Resources {
     pub syntax_settings: RefCell<Vec<(String, Value)>>,
     /// The user's `Preferences.sublime-settings` (loaded last, written by `persist_setting`).
     pub user_settings: RefCell<Map<String, Value>>,
+    /// Other settings files as merged from the packages (`sublime.load_settings`).
+    pub settings_files: RefCell<BTreeMap<String, Map<String, Value>>>,
+    /// The `User` package's copies of other settings files (`sublime.save_settings`).
+    pub user_settings_files: RefCell<BTreeMap<String, Map<String, Value>>>,
     pub bindings: RefCell<Vec<Binding>>,
     pub menu: RefCell<Vec<MenuItem>>,
     pub palette: RefCell<Vec<PaletteCommand>>,
@@ -237,6 +247,21 @@ impl ResourceGateway for FakeResources {
 
     fn default_resource(&self, file_name: &str) -> Option<String> {
         (file_name == "Preferences.sublime-settings").then(|| "{ \"tab_size\": 4 }".to_string())
+    }
+
+    fn load_settings_file(&self, file_name: &str, _include_sublime: bool, _errors: &mut Vec<String>) -> Map<String, Value> {
+        let mut values = self.0.settings_files.borrow().get(file_name).cloned().unwrap_or_default();
+        values.extend(self.read_user_settings_file(file_name));
+        values
+    }
+
+    fn read_user_settings_file(&self, file_name: &str) -> Map<String, Value> {
+        self.0.user_settings_files.borrow().get(file_name).cloned().unwrap_or_default()
+    }
+
+    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String> {
+        self.0.user_settings_files.borrow_mut().insert(file_name.to_string(), values.clone());
+        Ok(())
     }
 }
 
@@ -299,6 +324,71 @@ impl SyntaxGateway for FakeSyntaxes {
 
     fn forget(&self, document: DocumentId) {
         self.0.forgotten.borrow_mut().push(document);
+    }
+}
+
+// ----- plugin host ---------------------------------------------------------------------------------
+
+/// One `run` request: (kind, command name, arguments, view).
+pub type PluginRun = (PluginCommandKind, String, Value, Option<DocumentId>);
+
+/// A scripted plugin host: a test queues the messages the "plugins" send (calls to the editor,
+/// then `Loaded` / `Done`) and afterwards checks what the editor asked and answered.
+#[derive(Default)]
+pub struct PluginScript {
+    /// What `receive` returns, in order.
+    pub messages: RefCell<VecDeque<PluginMessage>>,
+    pub loads: RefCell<Vec<PluginLoad>>,
+    pub runs: RefCell<Vec<PluginRun>>,
+    /// The editor's answers to the `Call` messages, in order.
+    pub replies: RefCell<Vec<Result<Value, String>>>,
+    pub stops: Cell<usize>,
+    /// When set, `load` fails with this message (e.g. no Python installed).
+    pub load_error: RefCell<Option<String>>,
+}
+
+impl PluginScript {
+    /// Queues messages for the next request.
+    pub fn then(&self, messages: impl IntoIterator<Item = PluginMessage>) {
+        self.messages.borrow_mut().extend(messages);
+    }
+}
+
+/// `Call { function, args }`.
+pub fn plugin_call(function: &str, args: Value) -> PluginMessage {
+    PluginMessage::Call {
+        function: function.to_string(),
+        args: args.as_array().cloned().unwrap_or_default(),
+    }
+}
+
+struct FakePluginHost(Rc<PluginScript>);
+
+impl PluginHostGateway for FakePluginHost {
+    fn load(&mut self, request: &PluginLoad) -> Result<(), String> {
+        self.0.loads.borrow_mut().push(request.clone());
+        match self.0.load_error.borrow().clone() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String> {
+        self.0.runs.borrow_mut().push((kind, name.to_string(), args.clone(), view));
+        Ok(())
+    }
+
+    fn reply(&mut self, result: Result<Value, String>) -> Result<(), String> {
+        self.0.replies.borrow_mut().push(result);
+        Ok(())
+    }
+
+    fn receive(&mut self) -> Result<PluginMessage, String> {
+        self.0.messages.borrow_mut().pop_front().ok_or_else(|| "the plugin host stopped".to_string())
+    }
+
+    fn stop(&mut self) {
+        self.0.stops.set(self.0.stops.get() + 1);
     }
 }
 
@@ -365,6 +455,7 @@ pub struct World {
     pub file_index: Rc<FileIndex>,
     /// Folders opened in the file manager.
     pub opened_folders: Rc<RefCell<Vec<PathBuf>>>,
+    pub plugins: Rc<PluginScript>,
 }
 
 impl Default for World {
@@ -398,6 +489,8 @@ impl World {
                 })]),
                 syntax_settings: RefCell::default(),
                 user_settings: RefCell::default(),
+                settings_files: RefCell::default(),
+                user_settings_files: RefCell::default(),
                 bindings: RefCell::default(),
                 menu: RefCell::default(),
                 palette: RefCell::default(),
@@ -409,7 +502,19 @@ impl World {
             session: Rc::default(),
             file_index: Rc::default(),
             opened_folders: Rc::default(),
+            plugins: Rc::default(),
         }
+    }
+
+    /// A package with a plugin file, so the editor starts the (fake) plugin host, which answers
+    /// the load with these commands.
+    pub fn with_plugin_commands(self, commands: &[(&str, PluginCommandKind)]) -> Self {
+        self.disk.put(format!("{PACKAGES}/MyPlugin/plugin.py"), "");
+        self.plugins.then([PluginMessage::Loaded {
+            commands: commands.iter().map(|(name, kind)| (name.to_string(), *kind)).collect(),
+            errors: Vec::new(),
+        }]);
+        self
     }
 
     pub fn with_file(self, path: &str, contents: impl Into<Vec<u8>>) -> Self {
@@ -475,6 +580,7 @@ impl World {
                 scanning: false,
             }),
             shell: Box::new(FakeShell(self.opened_folders.clone())),
+            plugins: Box::new(FakePluginHost(self.plugins.clone())),
         }
     }
 

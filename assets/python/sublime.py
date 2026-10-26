@@ -1,0 +1,749 @@
+"""CodeLibre Text's implementation of Sublime Text's ``sublime`` module.
+
+Written from the public API reference (https://www.sublimetext.com/docs/api_reference.html).
+Phase A of plugin support: regions, selections, views, the window, settings and commands.
+What is not implemented yet is listed in ``docs/plugins.md``; calling it raises AttributeError.
+"""
+
+import collections
+import os
+import re
+import sys
+
+import sublime_api
+
+# ----- constants -------------------------------------------------------------------------------
+
+LITERAL = 1
+IGNORECASE = 2
+
+CLASS_WORD_START = 1
+CLASS_WORD_END = 2
+CLASS_PUNCTUATION_START = 4
+CLASS_PUNCTUATION_END = 8
+CLASS_SUB_WORD_START = 16
+CLASS_SUB_WORD_END = 32
+CLASS_LINE_START = 64
+CLASS_LINE_END = 128
+CLASS_EMPTY_LINE = 256
+
+DRAW_EMPTY = 1
+HIDE_ON_MINIMAP = 2
+DRAW_EMPTY_AS_OVERWRITE = 4
+PERSISTENT = 16
+DRAW_OUTLINED = 32
+DRAW_NO_FILL = 32
+HIDDEN = 128
+DRAW_NO_OUTLINE = 256
+DRAW_SOLID_UNDERLINE = 512
+DRAW_STIPPLED_UNDERLINE = 1024
+DRAW_SQUIGGLY_UNDERLINE = 2048
+NO_UNDO = 8192
+
+ENCODED_POSITION = 1
+TRANSIENT = 4
+FORCE_GROUP = 8
+SEMI_TRANSIENT = 16
+ADD_TO_SELECTION = 32
+REPLACE_MRU = 64
+CLEAR_TO_RIGHT = 128
+
+MONOSPACE_FONT = 1
+KEEP_OPEN_ON_FOCUS_LOST = 2
+WANT_EVENT = 4
+
+DIALOG_CANCEL = 0
+DIALOG_YES = 1
+DIALOG_NO = 2
+
+HOVER_TEXT = 1
+HOVER_GUTTER = 2
+HOVER_MARGIN = 3
+
+COOPERATE_WITH_AUTO_COMPLETE = 2
+HIDE_ON_MOUSE_MOVE = 4
+HIDE_ON_MOUSE_MOVE_AWAY = 8
+
+INHIBIT_WORD_COMPLETIONS = 8
+INHIBIT_EXPLICIT_COMPLETIONS = 16
+
+OP_EQUAL = 0
+OP_NOT_EQUAL = 1
+OP_REGEX_MATCH = 2
+OP_NOT_REGEX_MATCH = 3
+OP_REGEX_CONTAINS = 4
+OP_NOT_REGEX_CONTAINS = 5
+
+# ----- application -----------------------------------------------------------------------------
+
+# Filled by the plugin host from the editor's ``load`` request.
+_paths = {"packages": "", "installed_packages": "", "cache": "", "executable": ""}
+# Callbacks of set_timeout(); the host runs them after the current command (phase A has no timers).
+_pending_timeouts = []
+# Views whose selection a plugin cleared and has not refilled yet (the editor always keeps one).
+_cleared_selections = set()
+
+
+def version():
+    return "4200"
+
+
+def channel():
+    return "stable"
+
+
+def platform():
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "osx"
+    return "linux"
+
+
+def arch():
+    return "x64"
+
+
+def executable_path():
+    return _paths["executable"]
+
+
+def packages_path():
+    return _paths["packages"]
+
+
+def installed_packages_path():
+    return _paths["installed_packages"]
+
+
+def cache_path():
+    return _paths["cache"]
+
+
+def status_message(msg):
+    sublime_api.status_message(str(msg))
+
+
+def error_message(msg):
+    sublime_api.error_message(str(msg))
+
+
+def message_dialog(msg):
+    sublime_api.message_dialog(str(msg))
+
+
+def ok_cancel_dialog(msg, ok_title="", title=""):
+    print("ok_cancel_dialog is not supported yet:", msg)
+    return False
+
+
+def yes_no_cancel_dialog(msg, yes_title="", no_title="", title=""):
+    print("yes_no_cancel_dialog is not supported yet:", msg)
+    return DIALOG_CANCEL
+
+
+def get_clipboard(size_limit=16777216):
+    return sublime_api.get_clipboard()[:size_limit]
+
+
+def set_clipboard(text):
+    sublime_api.set_clipboard(str(text))
+
+
+def set_timeout(callback, delay=0):
+    _pending_timeouts.append(callback)
+
+
+def set_timeout_async(callback, delay=0):
+    _pending_timeouts.append(callback)
+
+
+def run_pending_timeouts():
+    """Runs the callbacks queued by set_timeout() (and the ones they queue)."""
+    for _ in range(100):
+        if not _pending_timeouts:
+            return
+        callbacks = list(_pending_timeouts)
+        del _pending_timeouts[:]
+        for callback in callbacks:
+            callback()
+
+
+def active_window():
+    return Window(1)
+
+
+def windows():
+    return [Window(1)]
+
+
+def run_command(cmd, args=None):
+    sublime_api.run_command("application", 0, cmd, args)
+
+
+def load_settings(base_name):
+    return Settings(["file", base_name])
+
+
+def save_settings(base_name):
+    sublime_api.save_settings(base_name)
+
+
+def log_commands(flag=None):
+    pass
+
+
+def log_input(flag=None):
+    pass
+
+
+def log_result_regex(flag=None):
+    pass
+
+
+# ----- regions and selections --------------------------------------------------------------------
+
+class Region:
+    """A range of the buffer: ``a`` is where it starts (the anchor), ``b`` where the caret is."""
+
+    __slots__ = ("a", "b", "xpos")
+
+    def __init__(self, a, b=None, xpos=-1):
+        if b is None:
+            b = a
+        self.a = a
+        self.b = b
+        self.xpos = xpos
+
+    def __str__(self):
+        return "(%d, %d)" % (self.a, self.b)
+
+    def __repr__(self):
+        return "Region(%d, %d)" % (self.a, self.b)
+
+    def __len__(self):
+        return self.size()
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, Region) and self.a == rhs.a and self.b == rhs.b
+
+    def __hash__(self):
+        return hash((self.a, self.b))
+
+    def __lt__(self, rhs):
+        return (self.begin(), self.end()) < (rhs.begin(), rhs.end())
+
+    def __iter__(self):
+        return iter((self.a, self.b))
+
+    def __contains__(self, value):
+        return self.contains(value)
+
+    def to_tuple(self):
+        return (self.a, self.b)
+
+    def empty(self):
+        return self.a == self.b
+
+    def begin(self):
+        return min(self.a, self.b)
+
+    def end(self):
+        return max(self.a, self.b)
+
+    def size(self):
+        return abs(self.a - self.b)
+
+    def contains(self, x):
+        if isinstance(x, Region):
+            return self.begin() <= x.begin() and x.end() <= self.end()
+        return self.begin() <= x <= self.end()
+
+    def cover(self, rhs):
+        if self.a > self.b:
+            return Region(max(self.a, rhs.end()), min(self.b, rhs.begin()))
+        return Region(min(self.a, rhs.begin()), max(self.b, rhs.end()))
+
+    def intersection(self, rhs):
+        if self.end() <= rhs.begin() or rhs.end() <= self.begin():
+            return Region(0)
+        return Region(max(self.begin(), rhs.begin()), min(self.end(), rhs.end()))
+
+    def intersects(self, rhs):
+        if self.empty() or rhs.empty():
+            return self.begin() == rhs.begin()
+        return self.begin() < rhs.end() and rhs.begin() < self.end()
+
+
+def _region(value):
+    return Region(value) if isinstance(value, int) else value
+
+
+def _merge(regions):
+    """Sorted regions with overlapping ones (and repeated carets) merged, as Sublime keeps them."""
+    merged = []
+    for region in sorted(regions):
+        last = merged[-1] if merged else None
+        if last is None:
+            merged.append(region)
+            continue
+        touches_caret = region.begin() == last.end() and (region.empty() or last.empty())
+        if region.begin() < last.end() or region == last or touches_caret:
+            merged[-1] = last.cover(region)
+        else:
+            merged.append(region)
+    return merged
+
+
+class Selection:
+    """``view.sel()``: the view's selections, sorted by position."""
+
+    def __init__(self, view_id):
+        self.view_id = view_id
+
+    def _get(self):
+        if self.view_id in _cleared_selections:
+            return []
+        return [Region(a, b) for a, b in sublime_api.view_selection_get(self.view_id)]
+
+    def _set(self, regions):
+        if not regions:
+            _cleared_selections.add(self.view_id)
+            return
+        _cleared_selections.discard(self.view_id)
+        sublime_api.view_selection_set(self.view_id, [[r.a, r.b] for r in _merge(regions)])
+
+    def __len__(self):
+        return len(self._get())
+
+    def __getitem__(self, index):
+        return self._get()[index]
+
+    def __iter__(self):
+        return iter(self._get())
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, Selection) and list(self) == list(rhs)
+
+    def __str__(self):
+        return "[%s]" % ", ".join(str(r) for r in self._get())
+
+    def __repr__(self):
+        return "Selection(%s)" % ", ".join(repr(r) for r in self._get())
+
+    def is_valid(self):
+        return View(self.view_id).is_valid()
+
+    def clear(self):
+        self._set([])
+
+    def add(self, x):
+        self._set(self._get() + [_region(x)])
+
+    def add_all(self, regions):
+        self._set(self._get() + [_region(x) for x in regions])
+
+    def subtract(self, region):
+        kept = []
+        for r in self._get():
+            if not r.intersects(region):
+                kept.append(r)
+                continue
+            if r.begin() < region.begin():
+                kept.append(Region(r.begin(), region.begin()))
+            if region.end() < r.end():
+                kept.append(Region(region.end(), r.end()))
+        self._set(kept)
+
+    def contains(self, region):
+        return any(r.contains(region) for r in self._get())
+
+
+# ----- settings ----------------------------------------------------------------------------------
+
+class Settings:
+    """A view's settings, a settings file (``load_settings``) or the window's settings."""
+
+    def __init__(self, target):
+        self.target = target
+        self._on_change = {}
+
+    def __getitem__(self, key):
+        found, value = sublime_api.settings_get(self.target, key)
+        if not found:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key, value):
+        self.set(key, value)
+
+    def __delitem__(self, key):
+        self.erase(key)
+
+    def __contains__(self, key):
+        return self.has(key)
+
+    def get(self, key, default=None):
+        found, value = sublime_api.settings_get(self.target, key)
+        return value if found and value is not None else default
+
+    def has(self, key):
+        return sublime_api.settings_get(self.target, key)[0]
+
+    def set(self, key, value):
+        sublime_api.settings_set(self.target, key, value)
+
+    def erase(self, key):
+        sublime_api.settings_erase(self.target, key)
+
+    def setdefault(self, key, value):
+        if not self.has(key):
+            self.set(key, value)
+        return self.get(key)
+
+    def update(self, other=(), **kwargs):
+        pairs = other.items() if hasattr(other, "items") else other
+        for key, value in list(pairs) + list(kwargs.items()):
+            self.set(key, value)
+
+    def to_dict(self):
+        return sublime_api.settings_all(self.target)
+
+    def add_on_change(self, tag, callback):
+        # Kept, but not called yet: change notifications are phase B.
+        self._on_change[tag] = callback
+
+    def clear_on_change(self, tag):
+        self._on_change.pop(tag, None)
+
+
+# ----- views and windows -------------------------------------------------------------------------
+
+Syntax = collections.namedtuple("Syntax", ["path", "name", "hidden", "scope"])
+
+
+class View:
+    """A tab showing a document. ``view_id`` is the editor's document id."""
+
+    def __init__(self, view_id):
+        self.view_id = view_id
+        self.selection = Selection(view_id)
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, View) and self.view_id == rhs.view_id
+
+    def __hash__(self):
+        return self.view_id
+
+    def __bool__(self):
+        return self.view_id != 0
+
+    def __repr__(self):
+        return "View(%d)" % self.view_id
+
+    def __len__(self):
+        return self.size()
+
+    def id(self):
+        return self.view_id
+
+    def buffer_id(self):
+        return self.view_id
+
+    def buffer(self):
+        return self
+
+    def is_valid(self):
+        return sublime_api.view_is_valid(self.view_id)
+
+    def is_primary(self):
+        return True
+
+    def window(self):
+        return Window(1) if self.is_valid() else None
+
+    def clones(self):
+        return []
+
+    def file_name(self):
+        return sublime_api.view_file_name(self.view_id)
+
+    def name(self):
+        return sublime_api.view_name(self.view_id)
+
+    def set_name(self, name):
+        sublime_api.view_set_name(self.view_id, name)
+
+    def is_loading(self):
+        return False
+
+    def is_dirty(self):
+        return sublime_api.view_is_dirty(self.view_id)
+
+    def is_read_only(self):
+        return sublime_api.view_is_read_only(self.view_id)
+
+    def set_read_only(self, read_only):
+        sublime_api.view_set_read_only(self.view_id, bool(read_only))
+
+    def is_scratch(self):
+        return False
+
+    def set_scratch(self, scratch):
+        pass
+
+    def encoding(self):
+        return sublime_api.view_encoding(self.view_id)
+
+    def line_endings(self):
+        return sublime_api.view_line_endings(self.view_id)
+
+    def set_line_endings(self, line_endings):
+        sublime_api.view_set_line_endings(self.view_id, line_endings)
+
+    def syntax(self):
+        name = sublime_api.view_syntax(self.view_id)
+        return Syntax("", name, False, "")
+
+    def assign_syntax(self, syntax):
+        if isinstance(syntax, Syntax):
+            syntax = syntax.path or syntax.name
+        sublime_api.view_assign_syntax(self.view_id, syntax)
+
+    def set_syntax_file(self, syntax_file):
+        self.assign_syntax(syntax_file)
+
+    def settings(self):
+        return Settings(["view", self.view_id])
+
+    def size(self):
+        return sublime_api.view_size(self.view_id)
+
+    def substr(self, x):
+        if isinstance(x, Region):
+            return sublime_api.view_cached_substr(self.view_id, x.begin(), x.end())
+        return sublime_api.view_cached_substr(self.view_id, x, x + 1)
+
+    def insert(self, edit, pt, text):
+        return sublime_api.view_insert(self.view_id, pt, text)
+
+    def erase(self, edit, region):
+        sublime_api.view_erase(self.view_id, region.begin(), region.end())
+
+    def replace(self, edit, region, text):
+        sublime_api.view_replace(self.view_id, region.begin(), region.end(), text)
+
+    def sel(self):
+        return self.selection
+
+    def line(self, x):
+        r = _region(x)
+        return Region(*sublime_api.view_line(self.view_id, r.begin(), r.end()))
+
+    def full_line(self, x):
+        r = _region(x)
+        return Region(*sublime_api.view_full_line(self.view_id, r.begin(), r.end()))
+
+    def lines(self, region):
+        return [Region(a, b) for a, b in sublime_api.view_lines(self.view_id, region.begin(), region.end())]
+
+    def split_by_newlines(self, region):
+        pieces = []
+        start = region.begin()
+        for line in self.substr(region).split("\n"):
+            pieces.append(Region(start, start + len(line)))
+            start += len(line) + 1
+        return pieces
+
+    def word(self, x):
+        r = _region(x)
+        return Region(*sublime_api.view_word(self.view_id, r.begin(), r.end()))
+
+    def rowcol(self, tp):
+        row, col = sublime_api.view_rowcol(self.view_id, tp)
+        return (row, col)
+
+    def text_point(self, row, col):
+        return sublime_api.view_text_point(self.view_id, row, col)
+
+    def find(self, pattern, start_pt, flags=0):
+        return Region(*sublime_api.view_find(self.view_id, pattern, start_pt, flags))
+
+    def find_all(self, pattern, flags=0, fmt=None, extractions=None):
+        regions = [Region(a, b) for a, b in sublime_api.view_find_all(self.view_id, pattern, flags)]
+        if fmt is not None and extractions is not None:
+            expression = re.compile(re.escape(pattern) if flags & LITERAL else pattern,
+                                    re.IGNORECASE if flags & IGNORECASE else 0)
+            for region in regions:
+                match = expression.match(self.substr(region))
+                extractions.append(match.expand(fmt) if match else "")
+        return regions
+
+    def run_command(self, cmd, args=None):
+        sublime_api.run_command("view", self.view_id, cmd, args)
+
+    def show(self, x, show_surrounds=True, keep_to_left=False, animate=True):
+        pass
+
+    def show_at_center(self, x, animate=True):
+        pass
+
+    def visible_region(self):
+        return Region(0, self.size())
+
+    # Scopes need the syntax engine (phase C): nothing matches yet.
+    def scope_name(self, pt):
+        return ""
+
+    def match_selector(self, pt, selector):
+        return False
+
+    def score_selector(self, pt, selector):
+        return 0
+
+    # Regions are kept so get_regions() works, but they are not drawn yet (phase B).
+    def add_regions(self, key, regions, scope="", icon="", flags=0, *args, **kwargs):
+        _regions[(self.view_id, key)] = list(regions)
+
+    def get_regions(self, key):
+        return list(_regions.get((self.view_id, key), []))
+
+    def erase_regions(self, key):
+        _regions.pop((self.view_id, key), None)
+
+    def set_status(self, key, value):
+        _statuses[(self.view_id, key)] = value
+
+    def get_status(self, key):
+        return _statuses.get((self.view_id, key), "")
+
+    def erase_status(self, key):
+        _statuses.pop((self.view_id, key), None)
+
+
+_regions = {}
+_statuses = {}
+
+
+class Window:
+    """The editor window (there is only one)."""
+
+    def __init__(self, window_id):
+        self.window_id = window_id
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, Window) and self.window_id == rhs.window_id
+
+    def __hash__(self):
+        return self.window_id
+
+    def __bool__(self):
+        return self.window_id != 0
+
+    def __repr__(self):
+        return "Window(%d)" % self.window_id
+
+    def id(self):
+        return self.window_id
+
+    def is_valid(self):
+        return True
+
+    def settings(self):
+        return Settings(["window", self.window_id])
+
+    def active_view(self):
+        view_id = sublime_api.window_active_view()
+        return View(view_id) if view_id else None
+
+    def views(self):
+        return [View(view_id) for view_id in sublime_api.window_views()]
+
+    def num_groups(self):
+        return 1
+
+    def active_group(self):
+        return 0
+
+    def active_view_in_group(self, group):
+        return self.active_view()
+
+    def views_in_group(self, group):
+        return self.views()
+
+    def get_view_index(self, view):
+        ids = sublime_api.window_views()
+        return (0, ids.index(view.id())) if view.id() in ids else (-1, -1)
+
+    def focus_view(self, view):
+        sublime_api.window_focus_view(view.id())
+
+    def new_file(self, flags=0, syntax=""):
+        view = View(sublime_api.window_new_file())
+        if syntax:
+            view.assign_syntax(syntax)
+        return view
+
+    def open_file(self, fname, flags=0, group=-1):
+        if flags & ENCODED_POSITION:
+            match = re.match(r"^(.*?)(?::(\d+))?(?::(\d+))?$", fname)
+            fname, row, col = match.group(1), match.group(2), match.group(3)
+        else:
+            row = col = None
+        view_id = sublime_api.window_open_file(fname)
+        if not view_id:
+            return None
+        view = View(view_id)
+        if row:
+            point = view.text_point(int(row) - 1, int(col or 1) - 1)
+            view.sel().clear()
+            view.sel().add(Region(point))
+        return view
+
+    def find_open_file(self, fname):
+        view_id = sublime_api.window_find_open_file(fname)
+        return View(view_id) if view_id else None
+
+    def run_command(self, cmd, args=None):
+        sublime_api.run_command("window", self.window_id, cmd, args)
+
+    def status_message(self, msg):
+        status_message(msg)
+
+    def folders(self):
+        return sublime_api.window_folders()
+
+    def project_file_name(self):
+        return None
+
+    def project_data(self):
+        return {"folders": [{"path": folder} for folder in self.folders()]}
+
+    def extract_variables(self):
+        variables = {"packages": packages_path(), "platform": platform().capitalize()
+                     if platform() != "osx" else "OSX"}
+        folders = self.folders()
+        if folders:
+            variables["folder"] = folders[0]
+        view = self.active_view()
+        file_name = view.file_name() if view else None
+        if file_name:
+            base, extension = os.path.splitext(os.path.basename(file_name))
+            variables.update({
+                "file": file_name,
+                "file_path": os.path.dirname(file_name),
+                "file_name": os.path.basename(file_name),
+                "file_base_name": base,
+                "file_extension": extension.lstrip("."),
+            })
+        return variables
+
+
+class Edit:
+    """The token a TextCommand receives; edits are only allowed while it runs."""
+
+    def __init__(self, token):
+        self.edit_token = token
+
+    def __repr__(self):
+        return "Edit(%d)" % self.edit_token

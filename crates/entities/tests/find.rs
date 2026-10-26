@@ -146,3 +146,9 @@ fn replace_all_with_no_matches_changes_nothing() {
     assert_eq!(replace_all(&pattern(&opts), &mut text, "x", &opts), 0);
     assert_eq!(text, "abc");
 }
+
+#[test]
+fn find_all_selections_uses_char_indices() {
+    let opts = options("é");
+    assert_eq!(find_all_selections(&pattern(&opts), "é aé"), vec![Selection::new(0, 1), Selection::new(3, 4)]);
+}

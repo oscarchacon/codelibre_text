@@ -2,7 +2,7 @@
 //! so packages written for Sublime can call these commands with Sublime's arguments.
 //!
 //! To add a command: add an arm below that calls a use case, then expose it in
-//! `assets/Default/` (keymap, menu, command palette).
+//! `assets/Default/` (keymap, menu, command palette). Names without an arm go to the Python plugins.
 
 use entities::command::Command;
 use entities::document::LineEnding;
@@ -79,6 +79,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     view.find_panel.focus_requested = true;
                     editor.use_selection_as_query_if_single_line();
                 }
+                "console" => editor.show_console(),
                 other => editor.notify(format!("Panel not supported: {other}")),
             }
         }
@@ -95,6 +96,9 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "slurp_find_string" => editor.use_selection_as_query(false),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
+        "find_all_under" => editor.select_all_occurrences(),
+        "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
+        "split_selection_into_lines" => editor.split_selection_into_lines(),
         "single_selection" => editor.single_selection(),
         "replace_next" => editor.replace_next(),
         "replace_all" => editor.replace_all(),
@@ -177,7 +181,12 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "show_load_errors" => view.show_load_errors = true,
         "show_about_window" => view.show_about = true,
 
-        other => editor.notify(format!("Command not available: {other} (Python plugin commands are not supported yet)")),
+        // ----- Python plugins: they can run other commands, which come back here ---------------
+        other => {
+            if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
+                editor.notify(format!("Command not available: {other}"));
+            }
+        }
     }
 
     // Whatever the command did, typing continues in the text unless a panel took the focus.

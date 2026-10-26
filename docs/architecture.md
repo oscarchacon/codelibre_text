@@ -140,6 +140,11 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
   command arguments are JSON values in Sublime, and find is defined by regular expressions.
 - **File-format gateways read files with `std::fs`.** The standard library is not a framework;
   those gateways exist to understand Sublime's formats.
+- **Plugins run built-in commands through a callback.** A Python plugin's `run_command` reaches the
+  use cases (`use_cases::plugins`) while a command is running, but built-in commands are dispatched
+  by the command controller in an outer circle. The controller therefore passes itself in as a
+  `CommandRunner` closure; the use case only calls it, so no dependency points outwards.
+  Plugins themselves run in a separate Python process behind `PluginHostGateway` (`docs/plugins.md`).
 
 ## Where to put a change
 
@@ -150,6 +155,7 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
 | Add application behavior | a method in the matching `use_cases/src/*.rs` module |
 | Talk to a new external system | a trait in `use_cases/src/gateways.rs`, its implementation in `frameworks/src/gateways/`, wired in `compose()` in `frameworks/src/lib.rs` |
 | Support another Sublime file format | `interface_adapters/src/gateways/` |
+| Give plugins another `sublime` API function | `assets/python/sublime.py` + an arm in `use_cases/src/plugin_api.rs` (see `docs/plugins.md`) |
 | Change how something looks | a presenter (what is shown) or a view (how it is drawn) |
 
 ## Tests

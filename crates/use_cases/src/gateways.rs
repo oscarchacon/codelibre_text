@@ -77,6 +77,7 @@ pub trait DialogGateway {
 
 pub trait ClipboardGateway {
     fn read_text(&self) -> Result<String, String>;
+    fn write_text(&self, text: &str) -> Result<(), String>;
 }
 
 /// Opens folders in the operating system's file manager.
@@ -100,6 +101,12 @@ pub trait ResourceGateway {
     /// The user's `Preferences.sublime-settings` as a JSON object.
     fn read_user_settings(&self) -> Map<String, Value>;
     fn write_user_settings(&self, values: &Map<String, Value>) -> Result<(), String>;
+    /// Any other settings file (e.g. a plugin's `Foo.sublime-settings`), merged from every
+    /// package in load order (`User` last). Problems are appended to `errors`.
+    fn load_settings_file(&self, file_name: &str, include_sublime_packages: bool, errors: &mut Vec<String>) -> Map<String, Value>;
+    /// The `User` package's copy of a settings file (what `save_settings` changes).
+    fn read_user_settings_file(&self, file_name: &str) -> Map<String, Value>;
+    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String>;
     /// Contents of a built-in default resource (e.g. `Preferences.sublime-settings`).
     fn default_resource(&self, file_name: &str) -> Option<String>;
 }
@@ -124,6 +131,59 @@ pub trait SyntaxGateway {
 pub trait SessionGateway {
     fn load(&self) -> Option<Session>;
     fn save(&self, session: &Session) -> Result<(), String>;
+}
+
+/// A package with Python plugins: its name and its folders (ours and Sublime's can both have one).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginPackage {
+    pub name: String,
+    pub dirs: Vec<PathBuf>,
+}
+
+/// What the plugin host needs to load the plugins.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginLoad {
+    pub packages: Vec<PluginPackage>,
+    /// `sublime.packages_path()`.
+    pub packages_path: PathBuf,
+    /// The `python_interpreter` setting; `None` finds one.
+    pub interpreter: Option<String>,
+}
+
+/// Sublime's three kinds of commands (`TextCommand`, `WindowCommand`, `ApplicationCommand`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginCommandKind {
+    Text,
+    Window,
+    Application,
+}
+
+/// A message from the plugin host.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PluginMessage {
+    /// Plugin code calls the editor: a `sublime_api` function and its arguments.
+    /// Answer it with [`PluginHostGateway::reply`].
+    Call { function: String, args: Vec<Value> },
+    /// Text that plugins printed.
+    Log(String),
+    /// The plugins are loaded: their commands, and a traceback for each plugin that failed.
+    Loaded { commands: Vec<(String, PluginCommandKind)>, errors: Vec<String> },
+    /// A command finished; `error` is its traceback if it failed.
+    Done { error: Option<String> },
+}
+
+/// Runs Sublime Text plugins (Python) in a separate process. Every request is answered through
+/// [`receive`](Self::receive): first any number of `Call`s and `Log`s, then `Loaded` or `Done`.
+pub trait PluginHostGateway {
+    /// (Re)starts the host and asks it to load the plugins.
+    fn load(&mut self, request: &PluginLoad) -> Result<(), String>;
+    /// Asks the host to run a plugin command on a view (text commands) or the window.
+    fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String>;
+    /// The answer to the last `Call`.
+    fn reply(&mut self, result: Result<Value, String>) -> Result<(), String>;
+    /// Waits for the next message; an error means the host died or stopped answering.
+    fn receive(&mut self) -> Result<PluginMessage, String>;
+    fn stop(&mut self);
 }
 
 /// Background list of the files in the open folders (for Goto Anything).

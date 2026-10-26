@@ -12,7 +12,13 @@
 	{ "caption": "Project: Close Folder", "command": "close_folder_list" },
 	{ "caption": "Project: Refresh Folders", "command": "refresh_folder_list" },
 
+	{ "caption": "Selection: Split into Lines", "command": "split_selection_into_lines" },
+	{ "caption": "Selection: Add Previous Line", "command": "select_lines", "args": { "forward": false } },
+	{ "caption": "Selection: Add Next Line", "command": "select_lines", "args": { "forward": true } },
+	{ "caption": "Selection: Select All Occurrences", "command": "find_all_under" },
+
 	{ "caption": "View: Toggle Side Bar", "command": "toggle_side_bar" },
+	{ "caption": "View: Show Console", "command": "show_panel", "args": { "panel": "console", "toggle": true } },
 	{ "caption": "View: Toggle Status Bar", "command": "toggle_status_bar" },
 	{ "caption": "View: Toggle Full Screen", "command": "toggle_full_screen" },
 	{ "caption": "View: Toggle Word Wrap", "command": "toggle_setting", "args": { "setting": "word_wrap" } },

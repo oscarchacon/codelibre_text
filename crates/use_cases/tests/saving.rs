@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde_json::json;
 use test_support::{open, status, World};
 use use_cases::editing::TextCommand;
+use use_cases::gateways::{PluginCommandKind, PluginMessage};
 
 #[test]
 fn save_writes_the_file_with_its_original_line_endings() {
@@ -146,6 +147,20 @@ fn saving_a_keymap_in_packages_reloads_the_packages() {
     let loads = world.resources.ui_loads.borrow().len();
     editor.save_active(false);
     assert_eq!(world.resources.ui_loads.borrow().len(), loads + 1);
+}
+
+#[test]
+fn saving_a_plugin_reloads_only_the_plugins() {
+    let world = World::new();
+    let mut editor = world.editor();
+    editor.open_file(std::path::Path::new("/packages/User/hello.py"));
+    editor.run_text_command(TextCommand::Insert("import sublime\n".into()));
+    let ui_loads = world.resources.ui_loads.borrow().len();
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("hello".into(), PluginCommandKind::Text)], errors: vec![] }]);
+    editor.save_active(false);
+    assert_eq!(world.plugins.loads.borrow().len(), 1);
+    assert_eq!(world.resources.ui_loads.borrow().len(), ui_loads);
+    assert!(editor.is_plugin_command("hello"));
 }
 
 #[test]

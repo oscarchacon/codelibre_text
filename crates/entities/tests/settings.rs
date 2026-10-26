@@ -66,3 +66,22 @@ fn non_object_layers_are_ignored() {
     layers.add_preferences(&json!([1, 2]));
     assert!(layers.global().get("0").is_none());
 }
+
+#[test]
+fn values_with_a_view_s_own_settings_on_top() {
+    let mut layers = SettingsLayers::default();
+    layers.add_preferences(&json!({"tab_size": 4, "word_wrap": false}));
+    let own = json!({"tab_size": 2}).as_object().unwrap().clone();
+    let settings = layers.global().with(&own);
+    assert_eq!(settings.usize("tab_size", 0), 2);
+    assert_eq!(settings.values().len(), 2);
+}
+
+#[test]
+fn removing_an_override_brings_back_the_preference() {
+    let mut layers = SettingsLayers::default();
+    layers.add_preferences(&json!({"tab_size": 4}));
+    layers.set_override("tab_size", json!(8));
+    layers.remove_override("tab_size");
+    assert_eq!(layers.global().usize("tab_size", 0), 4);
+}

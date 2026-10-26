@@ -94,6 +94,34 @@ impl Editor {
         }
     }
 
+    /// `select_lines` (Ctrl+Alt+Up/Down): adds a caret on the line above or below the selections.
+    /// The newest caret becomes the primary one, so the view scrolls to it.
+    pub fn add_carets_on_next_line(&mut self, forward: bool) {
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let selections = doc.selections();
+        let added = tc::carets_on_next_line(&doc.text, &selections, forward);
+        if let Some(&primary) = added.last() {
+            doc.set_selections(primary, selections.into_iter().chain(added));
+        }
+    }
+
+    /// `split_selection_into_lines` (Ctrl+Shift+L): one selection per selected line.
+    pub fn split_selection_into_lines(&mut self) {
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let primary = doc.selection();
+        let mut pieces = tc::split_into_lines(&doc.text, primary);
+        // The primary one stays on the line where the caret was.
+        let new_primary = if primary.head < primary.anchor { pieces[0] } else { pieces[pieces.len() - 1] };
+        for &extra in doc.extra_selections() {
+            pieces.extend(tc::split_into_lines(&doc.text, extra));
+        }
+        doc.set_selections(new_primary, pieces);
+    }
+
     /// `single_selection` (Escape): keeps only the primary selection.
     pub fn single_selection(&mut self) {
         if let Some(doc) = self.active_document_mut() {

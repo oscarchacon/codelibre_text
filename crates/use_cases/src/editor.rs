@@ -11,9 +11,10 @@ use entities::settings::{Settings, SettingsLayers};
 
 use crate::find_replace::FindCache;
 use crate::gateways::{
-    ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, ResourceGateway, SessionGateway,
-    ShellGateway, SyntaxGateway,
+    ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ResourceGateway,
+    SessionGateway, ShellGateway, SyntaxGateway,
 };
+use crate::plugins::PluginState;
 
 /// The implementations of every gateway, provided by the outer circles at startup.
 pub struct Gateways {
@@ -25,6 +26,7 @@ pub struct Gateways {
     pub sessions: Box<dyn SessionGateway>,
     pub file_index: Box<dyn FileIndexGateway>,
     pub shell: Box<dyn ShellGateway>,
+    pub plugins: Box<dyn PluginHostGateway>,
 }
 
 /// A message for the status bar.
@@ -68,6 +70,9 @@ pub struct EditorState {
     pub find_error: Option<String>,
     pub status: Option<StatusMessage>,
     pub pending_close: Option<PendingClose>,
+    /// What plugins printed, and their errors (View > Show Console).
+    pub console: String,
+    pub(crate) plugins: PluginState,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -98,6 +103,8 @@ impl Editor {
                 find_error: None,
                 status: None,
                 pending_close: None,
+                console: String::new(),
+                plugins: PluginState::default(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,
@@ -111,6 +118,7 @@ impl Editor {
     /// Startup: loads packages, restores the previous session and opens the given paths.
     pub fn start(&mut self, paths: Vec<PathBuf>) {
         self.load_packages();
+        self.load_plugins();
         if self.global_settings().bool("hot_exit", true) {
             self.restore_session();
         }
@@ -172,8 +180,20 @@ impl Editor {
     /// Settings for the active document (including its syntax-specific settings).
     pub fn view_settings(&self) -> Settings {
         match self.active_document() {
-            Some(doc) => self.state.settings.for_syntax(&doc.syntax),
+            Some(doc) => self.settings_of(doc.id),
             None => self.global_settings(),
+        }
+    }
+
+    /// Settings of one document: its syntax-specific settings plus what plugins set on its view.
+    pub(crate) fn settings_of(&self, id: DocumentId) -> Settings {
+        let Some(doc) = self.index_of(id).map(|i| &self.state.documents[i]) else {
+            return self.global_settings();
+        };
+        let settings = self.state.settings.for_syntax(&doc.syntax);
+        match self.state.plugins.view_settings.get(&id) {
+            Some(own) => settings.with(own),
+            None => settings,
         }
     }
 

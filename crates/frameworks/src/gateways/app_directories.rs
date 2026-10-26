@@ -23,6 +23,15 @@ pub fn session_file(paths: &PackagePaths) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("Session.sublime_session"))
 }
 
+/// Where the plugin host's Python modules are written (`…\data\Lib\python`, as in Sublime).
+pub fn python_lib_dir(paths: &PackagePaths) -> PathBuf {
+    paths
+        .packages
+        .parent()
+        .map(|data| data.join("Lib").join("python"))
+        .unwrap_or_else(|| PathBuf::from("Lib").join("python"))
+}
+
 /// Sublime Text's `Packages` folder, if it is installed.
 fn sublime_text_packages() -> Option<PathBuf> {
     let base = directories::BaseDirs::new()?;

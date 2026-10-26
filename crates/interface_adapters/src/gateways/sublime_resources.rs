@@ -12,6 +12,8 @@ use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResour
 use super::package_files::{find_resources, is_in_default_package};
 use super::{builtin_resources, sublime_json};
 
+const PREFERENCES: &str = "Preferences.sublime-settings";
+
 pub struct SublimeResourceGateway {
     paths: PackagePaths,
 }
@@ -109,15 +111,43 @@ impl ResourceGateway for SublimeResourceGateway {
     }
 
     fn read_user_settings(&self) -> Map<String, Value> {
-        std::fs::read_to_string(self.paths.user_settings_file())
+        self.read_user_settings_file(PREFERENCES)
+    }
+
+    fn write_user_settings(&self, values: &Map<String, Value>) -> Result<(), String> {
+        self.write_user_settings_file(PREFERENCES, values)
+    }
+
+    fn load_settings_file(&self, file_name: &str, include_sublime: bool, errors: &mut Vec<String>) -> Map<String, Value> {
+        let stem = file_name.trim_end_matches(".sublime-settings");
+        let platform_file = format!("{stem} ({}).sublime-settings", platform_name());
+        let mut values = Map::new();
+        for path in find_resources(&self.paths, include_sublime, |n| n == file_name || n == platform_file) {
+            if is_in_default_package(&path) {
+                continue;
+            }
+            let parsed = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| sublime_json::parse(&text).map_err(|e| e.to_string()));
+            match parsed {
+                Ok(Value::Object(map)) => values.extend(map),
+                Ok(_) => {}
+                Err(e) => errors.push(format!("{}: {e}", path.display())),
+            }
+        }
+        values
+    }
+
+    fn read_user_settings_file(&self, file_name: &str) -> Map<String, Value> {
+        std::fs::read_to_string(self.paths.user_dir().join(file_name))
             .ok()
             .and_then(|text| sublime_json::parse(&text).ok())
             .and_then(|value| value.as_object().cloned())
             .unwrap_or_default()
     }
 
-    fn write_user_settings(&self, values: &Map<String, Value>) -> Result<(), String> {
-        let path = self.paths.user_settings_file();
+    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String> {
+        let path = self.paths.user_dir().join(file_name);
         let text = serde_json::to_string_pretty(values).map_err(|e| e.to_string())?;
         std::fs::write(&path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))
     }

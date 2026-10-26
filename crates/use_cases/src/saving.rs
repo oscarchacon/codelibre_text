@@ -76,7 +76,7 @@ impl Editor {
         self.state.active = active;
     }
 
-    /// Saving package resources reloads them.
+    /// Saving package resources reloads them; saving a plugin reloads the plugins, as in Sublime.
     fn after_save(&mut self, path: &std::path::Path) {
         if !path.starts_with(&self.gateways.resources.paths().packages) {
             return;
@@ -86,6 +86,8 @@ impl Editor {
             self.reload_settings();
         } else if PACKAGE_RESOURCE_EXTENSIONS.iter().any(|ext| name.ends_with(ext)) {
             self.load_packages();
+        } else if name.ends_with(".py") {
+            self.reload_plugins();
         }
     }
 }
