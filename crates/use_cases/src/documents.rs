@@ -13,6 +13,7 @@ impl Editor {
         let id = self.next_document_id();
         let doc = Document::new_untitled(id, self.default_line_ending());
         self.state.documents.push(doc);
+        self.plugin_event("on_new", id);
         self.activate(self.state.documents.len() - 1);
     }
 
@@ -31,7 +32,8 @@ impl Editor {
         }
 
         let id = self.next_document_id();
-        let mut doc = if self.gateways.file_system.exists(&path) {
+        let exists = self.gateways.file_system.exists(&path);
+        let mut doc = if exists {
             let bytes = match self.gateways.file_system.read(&path) {
                 Ok(bytes) => bytes,
                 Err(e) => {
@@ -54,6 +56,7 @@ impl Editor {
         };
         doc.syntax = self.gateways.syntaxes.detect(&path, doc.first_line());
         self.insert_document(doc);
+        self.plugin_event(if exists { "on_load" } else { "on_new" }, id);
         true
     }
 
@@ -104,6 +107,7 @@ impl Editor {
             self.state.active = index;
             self.state.recently_used.retain(|d| *d != id);
             self.state.recently_used.insert(0, id);
+            self.plugin_activation_events();
         }
     }
 
@@ -189,12 +193,19 @@ impl Editor {
     }
 
     fn remove_document(&mut self, index: usize) {
+        let id = self.state.documents[index].id;
+        self.plugin_event("on_pre_close", id);
+        // A listener may have closed or moved documents meanwhile.
+        let Some(index) = self.index_of(id) else {
+            return;
+        };
         let doc = self.state.documents.remove(index);
         self.gateways.syntaxes.forget(doc.id);
         if let Some(path) = doc.path {
             self.state.closed_files.push(path);
         }
         self.state.recently_used.retain(|d| *d != doc.id);
+        self.plugin_event("on_close", doc.id);
         if self.state.documents.is_empty() {
             self.state.active = 0;
         } else if let Some(recent) = self.state.recently_used.first().and_then(|id| self.index_of(*id)) {
@@ -278,6 +289,13 @@ impl Editor {
     pub fn sync_selection_from_view(&mut self, id: DocumentId, selection: Selection) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].sync_selection_from_view(selection);
+        }
+    }
+
+    /// The view reports that the text widget changed the text.
+    pub fn note_text_edited(&mut self, id: DocumentId) {
+        if let Some(index) = self.index_of(id) {
+            self.state.documents[index].note_text_changed();
         }
     }
 

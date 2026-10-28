@@ -133,10 +133,14 @@ fn closed_views_and_unknown_functions() {
     assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
     assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_show_quick_panel", json!([])),
-        Err("sublime_api.window_show_quick_panel is not implemented yet".into())
+        call(&world, &mut editor, "window_create_output_panel", json!([1, "exec"])),
+        Err("sublime_api.window_create_output_panel is not implemented yet".into())
     );
     assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
+    assert_eq!(
+        call(&world, &mut editor, "window_show_quick_panel", json!([1, [["a"]], 0, 0, "", "x"])),
+        Err("argument 6 must be a callback id".into())
+    );
 }
 
 #[test]

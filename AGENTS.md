@@ -59,7 +59,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
 - Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`.
 - `persist_setting` re-serializes the user's `Preferences.sublime-settings` (comments are lost), as Sublime does.
-- Plugin commands run synchronously on the UI thread (20 s timeout kills the host). Python code must never write to the
+- Plugin commands and events run synchronously on the UI thread (20 s timeout kills the host); timers and plugin
+  threads call the editor between frames (`Editor::poll_plugins`, every frame in `app.rs`). Python code must never write to the
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
@@ -70,13 +71,14 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python`.
 
 ## Pending work (read before starting new features)
-- `docs/plugins.md` — Python plugins: phase A done; phases B (events, panels, async) and C (Package Control,
+- `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels) — the rest of B
+  (output panels, dialogs, query_context, …) and C (Package Control,
   `.sublime-package`, scopes) are checklists with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, plugin phases B and C
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin phase B and C
 (`docs/plugins.md`), `.sublime-package` zips, split groups, minimap, folding, auto-complete, find in files.
 Highlighting is skipped above 4 MB.

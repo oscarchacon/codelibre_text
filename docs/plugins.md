@@ -1,6 +1,7 @@
 # Python plugins (Sublime Text API)
 
-Status: **phase A done** (2026-10-26). Phases B and C below are the pending work, in order.
+Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-10-28: request ids, calls
+outside commands, real timers, view events; then quick and input panels). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -20,12 +21,17 @@ command_controller ──run "foo"──▶ use_cases::plugins ──PluginHostG
 | Piece | File | Circle |
 |---|---|---|
 | Gateway trait, messages (`PluginMessage`, `PluginLoad`, `PluginCommandKind`) | `crates/use_cases/src/gateways.rs` | Use Cases |
-| Loading, running, console, conversation loop (`converse`) | `crates/use_cases/src/plugins.rs` | Use Cases |
+| Loading, running, console, conversation loop (`converse`), events, `poll_plugins` | `crates/use_cases/src/plugins.rs` | Use Cases |
+| Where events fire: `on_new`/`on_load`/`on_activated`/`on_*close` (`documents.rs`), `on_*_save` (`saving.rs`) | `crates/use_cases/src/` | Use Cases |
+| `poll_plugins` every frame, after the UI events (`command_controller::poll_plugins`) | `crates/frameworks/src/app.rs` | Frameworks |
 | The `sublime_api` functions the editor answers | `crates/use_cases/src/plugin_api.rs` | Use Cases |
+| Quick / input panels plugins open, and the answers to their callbacks | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
+| Showing them (`show_plugin_panels`), answers from the views (`SearchKind::PluginItems`, `UiEvent::InputPanel*`) | `crates/interface_adapters/src/controllers/{command,ui}_controller.rs` | Interface Adapters |
+| The input panel view | `crates/frameworks/src/views/input_panel.rs` | Frameworks |
 | Edits from plugins move every selection (`Document::replace_range`) | `crates/entities/src/document.rs` | Entities |
 | Plugin commands are the fallback of the command controller; `show_panel console` | `crates/interface_adapters/src/controllers/command_controller.rs` | Interface Adapters |
 | Arbitrary `.sublime-settings` files (`load_settings_file`, `*_user_settings_file`) | `crates/interface_adapters/src/gateways/sublime_resources.rs` | Interface Adapters |
-| Process, interpreter discovery, reader threads, 20 s timeout | `crates/frameworks/src/gateways/python_plugin_host.rs` | Frameworks |
+| Process, interpreter discovery, reader threads (wake the window), call ids, 20 s timeout | `crates/frameworks/src/gateways/python_plugin_host.rs` | Frameworks |
 | Host, transport, our own `sublime` / `sublime_plugin` modules | `assets/python/*.py` (embedded with `include_str!`, written to `%APPDATA%\codelibre_text\data\Lib\python` at start) | — |
 | Fake host for tests (`PluginScript`, `plugin_call`, `World::with_plugin_commands`) | `crates/test_support/src/lib.rs` | tests |
 
@@ -38,10 +44,12 @@ behaviour is fine. Their `sublime_api` function names are a good guide for namin
 
 ```
 editor → host  {"op":"load","packages":[{"name":"MyPkg","dirs":["…"]}],"paths":{"packages":…,"installed_packages":…,"cache":…,"executable":…}}
-host → editor  {"op":"loaded","commands":[["hello","text"],…],"errors":["traceback",…]}
+host → editor  {"op":"loaded","commands":[["hello","text"],…],"events":["on_modified","on_load_async",…],"errors":["traceback",…]}
 editor → host  {"op":"run","kind":"text|window|application","name":"hello","args":{…},"view":7,"window":1}
-host → editor  {"op":"call","fn":"view_insert","args":[7,0,"hi"]}        (zero or more)
-editor → host  {"op":"result","value":2}   or   {"op":"result","error":"the view is closed"}
+editor → host  {"op":"event","name":"on_pre_save","view":7}
+editor → host  {"op":"callback","id":3,"name":"select","args":[2]}        (a panel's answer)
+host → editor  {"op":"call","id":12,"fn":"view_insert","args":[7,0,"hi"]}   (zero or more; also between requests)
+editor → host  {"op":"result","id":12,"value":2}   or   {"op":"result","id":12,"error":"the view is closed"}
 host → editor  {"op":"log","text":"printed text"}                         (any time)
 host → editor  {"op":"done","error":null}   or   {"op":"done","error":"Traceback …"}
 editor → host  {"op":"exit"}
@@ -51,6 +59,24 @@ While the host waits for a `result` it may receive a nested `run` (a plugin's `r
 plugin command); it runs it and answers `done` before going on. The editor does the same in `converse`.
 A plugin's `run_command` of a built-in command goes back through the command controller (the use case
 receives it as a `CommandRunner` callback, because built-in commands live in an outer circle).
+
+Threads (`codelibre_rpc.py`): a reader thread takes every line from stdin; a `result` goes to the thread
+whose `call` has that `id`, any other message is a request for the main thread. So the API works from any
+thread. The editor answers calls in nesting order: the gateway keeps a stack of open call ids, and
+`reply` answers the innermost. Between requests the host's main loop runs due `set_timeout` callbacks and
+waits for the next request with the next timer's delay; `set_timeout_async` callbacks and the `*_async`
+listeners run on one "sublime async" thread. Calls made then are answered by `Editor::poll_plugins`,
+which `app.rs` calls every frame; the gateway's reader threads wake the window (`with_waker`,
+`ctx.request_repaint()`) when the host writes something.
+
+Events: the host reports in `loaded` which events some listener defines, and the editor sends only those
+(an `_async` listener makes the editor send the sync name; the host queues the async call). Listener
+tracebacks go to the console; the event still answers `done` with no error. Built-in commands that a
+listener runs are queued and run by the next `poll_plugins` (events fire inside use cases, which have no
+command controller); plugin commands run at once, so a formatter's own `TextCommand` in `on_pre_save`
+edits the text before it is written. `on_modified` / `on_selection_modified` are found by
+`poll_plugins` comparing each document's `change_count` (bumped by `Document` edits and by
+`UiEvent::TextEdited` from the text widget) and the active one's selections with the previous frame.
 
 ### Conventions
 
@@ -81,29 +107,39 @@ receives it as a `CommandRunner` callback, because built-in commands live in an 
   `Window` (active_view, views, new_file, open_file incl. `ENCODED_POSITION`, find_open_file, focus_view, folders,
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
-- Stand-ins (so plugins do not crash, but nothing visible happens yet): `set_timeout*` run right after the current
-  command; `add_regions`/`set_status` are stored but not drawn; `scope_name` is `""`, `match_selector` is false;
-  `show`/`show_at_center` do nothing; `ok_cancel_dialog` returns false.
+- Stand-ins (so plugins do not crash, but nothing visible happens yet): `add_regions`/`set_status` are stored but
+  not drawn; `scope_name` is `""`, `match_selector` is false; `show`/`show_at_center` do nothing;
+  `ok_cancel_dialog` returns false; `view.is_scratch()` is false and `set_scratch` does nothing.
+  (`set_timeout*` were stand-ins too; phase B made them real timers.)
 
-## Phase B — events, panels, async (next)
+## Phase B — events, panels, async (in progress)
 
 Goal: plugins that react to the editor and show UI (linters, formatters on save, quick-panel pickers).
 
-- [ ] **Request ids in the protocol** (`"id"` on `call`/`result`), so calls can also come from background threads.
-- [ ] **Calls outside a command**: a non-blocking `PluginHostGateway::try_receive`; `app.rs` polls it every frame and
-      serves calls (`converse` without waiting for `done`). Host side: `codelibre_rpc.call` from other threads must
-      queue under a lock instead of raising (see `_main_thread` check in `codelibre_rpc.py`).
-- [ ] **Real timers**: `set_timeout(cb, delay)` / `set_timeout_async` with delays — the host keeps a timer heap and runs
-      callbacks from its main loop (it needs a `select`-style wait on stdin with a timeout; on Windows use a reader thread + queue).
-- [ ] **Event listeners** (`EventListener`, `ViewEventListener`, `TextChangeListener`): host sends `{"op":"event","name":"on_modified","view":id}`.
-      Fire from the use cases: `on_new`, `on_load` (open_file), `on_activated`/`on_deactivated` (activate),
-      `on_pre_save`/`on_post_save` (saving.rs), `on_close` (close_documents), `on_modified`/`on_selection_modified`
-      (from `app.rs` after the text widget changed the document; debounce), `*_async` variants after the sync ones.
+- [x] **Request ids in the protocol** (`"id"` on `call`/`result`): the API works from any Python thread.
+- [x] **Calls outside a command**: `PluginHostGateway::try_receive`; `Editor::poll_plugins` every frame (woken by the host).
+- [x] **Real timers**: `set_timeout(cb, delay)` on the main loop, `set_timeout_async` on the async thread (`sublime._Timers`).
+- [x] **Event listeners** `EventListener` and `ViewEventListener` (`is_applicable`, one object per view, dropped at
+      `on_close`): `on_new`, `on_load`, `on_activated`/`on_deactivated`, `on_pre_save`/`on_post_save`,
+      `on_pre_close`/`on_close`, `on_modified`/`on_selection_modified`, and their `*_async` variants. `view.change_count()`.
+- [ ] Other events: `on_clone`, `on_load` for views restored by the session (now only `open_file`), `on_reload`,
+      `on_revert`, `on_init`, `on_exit`, `on_new_window`, `on_post_text_command`/`on_post_window_command`, `on_hover`,
+      `ViewEventListener.applies_to_primary_view_only`, `TextChangeListener` (`on_text_changed` with `TextChange`s).
+- [ ] Built-in commands run from inside a use-case event (e.g. `view.run_command("reindent")` in `on_pre_save`) wait
+      for the next frame; running them at once needs the command controller inside `Editor` (a callback set by
+      `compose()`, or `save`/`close` moved to the controller).
 - [ ] **`on_query_context`**: key binding contexts unknown to `KeyContext` ask the plugins (keyboard_controller → use case → host).
 - [ ] **`on_text_command` / `on_window_command`**: let plugins rewrite or cancel commands before the controller runs them.
-- [ ] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight)` → the
-      `QuickPanel` view state with plugin items; the answer goes back as `{"op":"callback","id":…,"args":[index]}`.
-- [ ] **Input panel**: `window.show_input_panel(caption, initial, on_done, on_change, on_cancel)` (a one-line panel like Find).
+- [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
+      items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `,
+      annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
+      Python keeps the callbacks by id (`sublime._callbacks`); the editor answers `select` (index in the plugin's
+      list, -1 when dismissed or replaced by another quick panel) and `highlight` (also for the first selection).
+- [x] **Input panel**: `window.show_input_panel(caption, initial, on_done, on_change, on_cancel)`, a one-line panel at
+      the bottom in place of the find panel; Esc (`hide_panel`) or opening Find cancels it. Answers `done`, `change`,
+      `cancel`. It returns `View(0)`, not a real view: its `sel()` / text cannot be used yet.
+- [ ] `KEEP_OPEN_ON_FOCUS_LOST` (the quick panel always closes on a click outside), `kind` letters, `QuickPanelItem`
+      annotations right-aligned with their own color, `sublime.ListInputItem`.
 - [ ] **Output panels**: `window.create_output_panel(name)` returns a view (a hidden document) shown at the bottom by
       `show_panel {"panel": "output.<name>"}`; `find_output_panel`, `destroy_output_panel`. Build systems need it.
 - [ ] **Command input handlers** (`input()` → `TextInputHandler`/`ListInputHandler`) in the command palette.

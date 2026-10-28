@@ -129,7 +129,8 @@ fn result_list(
                 row.horizontal(|ui| {
                     ui.vertical(|ui| {
                         let color = if is_selected { chrome.accent } else { chrome.fg };
-                        ui.label(RichText::new(&item.caption).size(14.0).color(color));
+                        let caption = RichText::new(&item.caption).size(14.0).color(color);
+                        ui.label(if panel.monospace { caption.monospace() } else { caption });
                         if !item.detail.is_empty() {
                             ui.label(RichText::new(&item.detail).size(11.5).color(chrome.fg_dim));
                         }

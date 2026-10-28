@@ -61,7 +61,7 @@ fn run(renderer: Renderer, cli: &Cli, paths: Vec<PathBuf>, started: &Rc<Cell<boo
         options,
         Box::new(move |cc| {
             started.set(true);
-            let (editor, view, engine) = compose(paths);
+            let (editor, view, engine) = compose(paths, cc.egui_ctx.clone());
             Ok(Box::new(App::new(cc, editor, view, engine)))
         }),
     )

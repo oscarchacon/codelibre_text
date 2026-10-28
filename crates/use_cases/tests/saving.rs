@@ -181,7 +181,7 @@ fn saving_a_plugin_reloads_only_the_plugins() {
     editor.open_file(std::path::Path::new("/packages/User/hello.py"));
     editor.run_text_command(TextCommand::Insert("import sublime\n".into()));
     let ui_loads = world.resources.ui_loads.borrow().len();
-    world.plugins.then([PluginMessage::Loaded { commands: vec![("hello".into(), PluginCommandKind::Text)], errors: vec![] }]);
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("hello".into(), PluginCommandKind::Text)], events: vec![], errors: vec![] }]);
     editor.save_active(false);
     assert_eq!(world.plugins.loads.borrow().len(), 1);
     assert_eq!(world.resources.ui_loads.borrow().len(), ui_loads);

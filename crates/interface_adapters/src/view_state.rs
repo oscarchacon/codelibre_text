@@ -35,6 +35,13 @@ impl QuickPanel {
     }
 }
 
+/// The one-line panel at the bottom that a plugin opened (`window.show_input_panel`).
+pub struct InputPanelState {
+    pub caption: String,
+    pub text: String,
+    pub focus_requested: bool,
+}
+
 #[derive(Default)]
 pub struct FindPanelState {
     pub visible: bool,
@@ -68,6 +75,7 @@ pub struct ViewState {
     pub fullscreen: bool,
     pub quick_panel: Option<QuickPanel>,
     pub find_panel: FindPanelState,
+    pub input_panel: Option<InputPanelState>,
     pub show_about: bool,
     pub show_load_errors: bool,
     pub expanded_folders: HashSet<PathBuf>,
@@ -91,6 +99,7 @@ impl Default for ViewState {
             fullscreen: false,
             quick_panel: None,
             find_panel: FindPanelState::default(),
+            input_panel: None,
             show_about: false,
             show_load_errors: false,
             expanded_folders: HashSet::new(),

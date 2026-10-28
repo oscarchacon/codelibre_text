@@ -8,10 +8,77 @@ use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::editing::{Expansion, TextCommand};
+use use_cases::plugin_panels::PluginPanelRequest;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
-use crate::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit};
+use crate::view_state::{InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit};
+
+/// Every frame: answers what plugins ask outside a command (timers, threads) and tells their
+/// listeners about edits; the commands they run come back here.
+pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
+    editor.poll_plugins(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
+/// Shows the quick / input panels plugins asked for. A plugin's quick panel replaces whatever
+/// quick panel is open; its input panel replaces the find panel.
+fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
+    while let Some(request) = editor.take_plugin_panel_request() {
+        match request {
+            PluginPanelRequest::QuickPanel => {
+                let Some(selected) = editor.plugin_quick_panel().map(|p| p.selected) else {
+                    continue;
+                };
+                if view.quick_panel.as_ref().is_some_and(|p| p.kind != SearchKind::PluginItems) {
+                    cancel_quick_panel(editor, view);
+                }
+                let mut panel = QuickPanel::new(SearchKind::PluginItems, String::new());
+                panel.selected = selected;
+                view.quick_panel = Some(panel);
+                // Like Sublime, the plugin hears about the item selected at first.
+                highlight_plugin_item(editor, view, selected);
+            }
+            PluginPanelRequest::InputPanel => {
+                let Some(panel) = editor.plugin_input_panel() else {
+                    continue;
+                };
+                view.input_panel = Some(InputPanelState {
+                    caption: panel.caption.clone(),
+                    text: panel.initial_text.clone(),
+                    focus_requested: true,
+                });
+                view.find_panel.visible = false;
+            }
+        }
+    }
+}
+
+/// The answers to a plugin's panels go back to it; the commands its callbacks run come back here.
+pub fn answer_plugin_quick_panel(editor: &mut Editor, view: &mut ViewState, item: Option<usize>) {
+    editor.answer_plugin_quick_panel(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    view.focus_editor = true;
+    show_plugin_panels(editor, view);
+}
+
+pub fn highlight_plugin_item(editor: &mut Editor, view: &mut ViewState, item: usize) {
+    editor.highlight_plugin_quick_panel_item(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+}
+
+pub fn change_plugin_input(editor: &mut Editor, view: &mut ViewState, text: &str) {
+    editor.change_plugin_input_panel(text, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+}
+
+/// Enter (`done`) or Esc in a plugin's input panel.
+pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool) {
+    let Some(panel) = view.input_panel.take() else {
+        return;
+    };
+    let text = done.then_some(panel.text.as_str());
+    editor.finish_plugin_input_panel(text, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    view.focus_editor = true;
+    show_plugin_panels(editor, view);
+}
 
 pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     match command.name.as_str() {
@@ -54,10 +121,12 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     return;
                 }
             };
+            cancel_quick_panel(editor, view);
             view.quick_panel = Some(QuickPanel::new(kind, command.str_arg("text").to_string()));
         }
         "hide_overlay" => close_quick_panel(editor, view),
         "select_color_scheme" => {
+            cancel_quick_panel(editor, view);
             let current = editor.color_scheme_name();
             let mut panel = QuickPanel::new(SearchKind::ColorSchemes, String::new());
             panel.results = editor.search(SearchKind::ColorSchemes, "");
@@ -71,6 +140,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             view.quick_panel = Some(panel);
         }
         "select_language" => {
+            cancel_quick_panel(editor, view);
             let current = editor.language_setting();
             let mut panel = QuickPanel::new(SearchKind::Languages, String::new());
             panel.results = editor.search(SearchKind::Languages, "");
@@ -92,6 +162,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     view.find_panel.visible = false;
                 }
                 "find" | "incremental_find" | "find_in_files" | "replace" => {
+                    finish_plugin_input(editor, view, false);
                     view.find_panel.visible = true;
                     view.find_panel.replace_mode = panel == "replace";
                     view.find_panel.focus_requested = true;
@@ -104,6 +175,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "hide_panel" => {
             view.find_panel.visible = false;
+            finish_plugin_input(editor, view, false);
             view.focus_editor = true;
         }
 
@@ -221,20 +293,30 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
     }
 
+    show_plugin_panels(editor, view);
     // Whatever the command did, typing continues in the text unless a panel took the focus.
-    if view.quick_panel.is_none() && !view.find_panel.focus_requested {
+    if view.quick_panel.is_none() && !view.find_panel.focus_requested && view.input_panel.is_none() {
         view.focus_editor = true;
     }
 }
 
-/// Closes the quick panel; a cancelled color scheme preview is reverted.
+/// Closes the quick panel and gives the focus back to the text.
 pub fn close_quick_panel(editor: &mut Editor, view: &mut ViewState) {
+    cancel_quick_panel(editor, view);
+    view.focus_editor = true;
+}
+
+/// Takes the quick panel away: a cancelled color scheme preview is reverted, a plugin's list hears -1.
+fn cancel_quick_panel(editor: &mut Editor, view: &mut ViewState) {
     if let Some(panel) = view.quick_panel.take() {
         if let Some(scheme) = panel.color_scheme_before {
             editor.preview_color_scheme(&scheme);
         }
+        if panel.kind == SearchKind::PluginItems {
+            editor.answer_plugin_quick_panel(None, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+            show_plugin_panels(editor, view);
+        }
     }
-    view.focus_editor = true;
 }
 
 fn find_next(editor: &mut Editor, view: &mut ViewState, forward: bool) {

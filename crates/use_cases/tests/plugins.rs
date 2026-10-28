@@ -2,7 +2,7 @@
 
 use entities::command::Command;
 use serde_json::{json, Value};
-use test_support::{active_text, plugin_call, status, World, PACKAGES};
+use test_support::{active_text, open, plugin_call, status, World, PACKAGES};
 use use_cases::gateways::PluginCommandKind::{Text, Window};
 use use_cases::gateways::PluginMessage;
 use use_cases::Editor;
@@ -32,7 +32,7 @@ fn packages_with_python_files_are_loaded_user_last() {
         .with_file(&format!("{PACKAGES}/Zeta/z.py"), "")
         .with_file(&format!("{PACKAGES}/Alpha/a.py"), "")
         .with_file(&format!("{PACKAGES}/Docs/readme.md"), "");
-    world.plugins.then([PluginMessage::Loaded { commands: vec![("hello".into(), Text)], errors: vec![] }]);
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("hello".into(), Text)], events: vec![], errors: vec![] }]);
     let editor = world.editor();
     let loads = world.plugins.loads.borrow();
     let names: Vec<&str> = loads[0].packages.iter().map(|p| p.name.as_str()).collect();
@@ -67,13 +67,13 @@ fn load_problems_are_package_load_errors_and_go_to_the_console() {
     assert!(status(&editor).contains("1 package resource failed to load"));
 
     let world = World::new().with_file(&format!("{PACKAGES}/P/p.py"), "");
-    world.plugins.then([PluginMessage::Loaded { commands: vec![], errors: vec!["p.py: SyntaxError".into()] }]);
+    world.plugins.then([PluginMessage::Loaded { commands: vec![], events: vec![], errors: vec!["p.py: SyntaxError".into()] }]);
     let mut editor = world.editor();
     assert_eq!(editor.state().load_errors, ["p.py: SyntaxError"]);
     assert!(editor.state().console.contains("p.py: SyntaxError"));
 
     // Reloading replaces the previous plugin errors.
-    world.plugins.then([PluginMessage::Loaded { commands: vec![("ok".into(), Text)], errors: vec![] }]);
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("ok".into(), Text)], events: vec![], errors: vec![] }]);
     editor.reload_plugins();
     assert!(editor.state().load_errors.is_empty());
     assert_eq!(status(&editor), "Plugins reloaded: 1 command");
@@ -176,4 +176,105 @@ fn the_console_opens_as_a_read_only_tab_and_is_refreshed() {
     editor.show_console();
     assert_eq!(active_text(&editor), "first\nsecond\n");
     assert_eq!(editor.state().documents.iter().filter(|d| d.name() == "Console").count(), 1);
+}
+
+// ----- events and calls outside commands -------------------------------------------------------
+
+#[test]
+fn events_go_only_to_the_host_when_a_listener_wants_them() {
+    let world = World::new().with_plugin_commands(&[("hello", Text)]);
+    let mut editor = world.editor();
+    editor.new_file();
+    assert!(world.plugins.events.borrow().is_empty());
+
+    let world = World::new().with_plugins(&[], &["on_new", "on_activated_async"]).with_file("/a.txt", "a");
+    // The untitled view the editor starts with is new, and active.
+    world.plugins.then([done(), done()]);
+    let mut editor = world.editor();
+    let first = editor.active_document().unwrap().id;
+    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_new".to_string(), first), ("on_activated".to_string(), first)]);
+
+    world.plugins.then([done(), done(), done()]);
+    editor.new_file();
+    let id = editor.active_document().unwrap().id;
+    assert_eq!(world.plugins.events.borrow()[2..], [("on_new".to_string(), id), ("on_activated".to_string(), id)]);
+    // Opening a file: on_activated (wanted through its async variant); on_load is not wanted.
+    open(&mut editor, "/a.txt");
+    assert_eq!(world.plugins.event_names(), ["on_new", "on_activated", "on_new", "on_activated", "on_activated"]);
+}
+
+#[test]
+fn a_pre_save_listener_changes_the_text_that_is_written() {
+    let world = World::new().with_plugins(&[], &["on_pre_save", "on_post_save"]).with_file("/a.txt", "abc");
+    let mut editor = world.editor();
+    open(&mut editor, "/a.txt");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([plugin_call("view_insert", json!([id, 0, "// "])), done(), done()]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.disk.bytes("/a.txt").unwrap(), b"// abc");
+    assert_eq!(world.plugins.event_names(), ["on_pre_save", "on_post_save"]);
+}
+
+#[test]
+fn closing_a_view_tells_the_listeners_before_and_after() {
+    let world = World::new().with_plugins(&[], &["on_pre_close", "on_close"]);
+    let mut editor = world.editor();
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([done(), done()]);
+    editor.close_documents(vec![id]);
+    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_pre_close".to_string(), id), ("on_close".to_string(), id)]);
+}
+
+#[test]
+fn calls_made_between_commands_are_answered_when_polling() {
+    let world = World::new().with_plugin_commands(&[]);
+    let mut editor = world.editor();
+    let id = editor.active_document().unwrap().id;
+    world.plugins.meanwhile([
+        PluginMessage::Log("from a timer\n".into()),
+        plugin_call("view_insert", json!([id, 0, "tick"])),
+        plugin_call("run_command", json!(["window", 1, "save_all", null])),
+    ]);
+    let mut builtins = Vec::new();
+    editor.poll_plugins(&mut |_, command| builtins.push(command.clone()));
+    assert_eq!(active_text(&editor), "tick");
+    assert_eq!(builtins, [Command::new("save_all")]);
+    assert!(editor.state().console.contains("from a timer"));
+    assert_eq!(world.plugins.replies.borrow().len(), 2);
+}
+
+#[test]
+fn edits_and_caret_moves_become_on_modified_and_on_selection_modified() {
+    let world = World::new().with_plugins(&[], &["on_modified", "on_selection_modified_async"]);
+    let mut editor = world.editor();
+    let id = editor.active_document().unwrap().id;
+    let poll = |editor: &mut Editor| editor.poll_plugins(&mut |_, _| {});
+    poll(&mut editor);
+    assert!(world.plugins.events.borrow().is_empty(), "nothing changed yet");
+
+    world.plugins.then([done(), done()]);
+    editor.insert_at_selections("abc");
+    poll(&mut editor);
+    assert_eq!(world.plugins.event_names(), ["on_modified", "on_selection_modified"]);
+
+    // The text widget edits the text in place and says so.
+    world.plugins.then([done()]);
+    editor.text_for_editing(id).unwrap().push('d');
+    editor.note_text_edited(id);
+    poll(&mut editor);
+    assert_eq!(world.plugins.event_names().len(), 3);
+    poll(&mut editor);
+    assert_eq!(world.plugins.event_names().len(), 3, "each change is told once");
+}
+
+#[test]
+fn built_in_commands_run_by_listeners_wait_for_the_next_poll() {
+    let world = World::new().with_plugins(&[], &["on_new"]);
+    world.plugins.then([done()]);
+    let mut editor = world.editor();
+    world.plugins.then([plugin_call("run_command", json!(["window", 1, "upper_case", null])), done()]);
+    editor.new_file();
+    let mut builtins = Vec::new();
+    editor.poll_plugins(&mut |_, command| builtins.push(command.clone()));
+    assert_eq!(builtins, [Command::new("upper_case")]);
 }

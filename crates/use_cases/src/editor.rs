@@ -16,6 +16,7 @@ use crate::gateways::{
     ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ResourceGateway,
     SessionGateway, ShellGateway, SyntaxGateway,
 };
+use crate::plugin_panels::PluginPanels;
 use crate::plugins::PluginState;
 
 /// The implementations of every gateway, provided by the outer circles at startup.
@@ -79,6 +80,8 @@ pub struct EditorState {
     /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
     pub(crate) line_clipboard: Option<String>,
     pub(crate) plugins: PluginState,
+    /// The quick / input panels plugins opened.
+    pub(crate) plugin_panels: PluginPanels,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -113,6 +116,7 @@ impl Editor {
                 console: String::new(),
                 line_clipboard: None,
                 plugins: PluginState::default(),
+                plugin_panels: PluginPanels::default(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,

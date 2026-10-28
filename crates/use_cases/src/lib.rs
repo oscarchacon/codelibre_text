@@ -19,6 +19,7 @@
 //! | [`help`] | open a link, report an issue |
 //! | [`plugins`] | load and run Python plugins, the console |
 //! | [`plugin_api`] | the `sublime_api` functions plugins call |
+//! | [`plugin_panels`] | the quick and input panels plugins open |
 //! | [`project`] | folders, folder listing, file index |
 //! | [`search`] | command palette, Goto Anything, pickers |
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
@@ -32,6 +33,7 @@ pub mod help;
 pub mod localization;
 pub mod packages;
 pub mod plugin_api;
+pub mod plugin_panels;
 pub mod plugins;
 pub mod preferences;
 pub mod project;

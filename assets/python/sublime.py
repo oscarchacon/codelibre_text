@@ -1,15 +1,21 @@
 """CodeLibre Text's implementation of Sublime Text's ``sublime`` module.
 
 Written from the public API reference (https://www.sublimetext.com/docs/api_reference.html).
-Phase A of plugin support: regions, selections, views, the window, settings and commands.
+Regions, selections, views, the window, settings, commands and timers.
 What is not implemented yet is listed in ``docs/plugins.md``; calling it raises AttributeError.
 """
 
 import collections
+import heapq
+import itertools
 import os
 import re
 import sys
+import threading
+import time
+import traceback
 
+import codelibre_rpc
 import sublime_api
 
 # ----- constants -------------------------------------------------------------------------------
@@ -52,6 +58,26 @@ MONOSPACE_FONT = 1
 KEEP_OPEN_ON_FOCUS_LOST = 2
 WANT_EVENT = 4
 
+KIND_ID_AMBIGUOUS = 0
+KIND_ID_KEYWORD = 1
+KIND_ID_TYPE = 2
+KIND_ID_FUNCTION = 3
+KIND_ID_NAMESPACE = 4
+KIND_ID_NAVIGATION = 5
+KIND_ID_MARKUP = 6
+KIND_ID_VARIABLE = 7
+KIND_ID_SNIPPET = 8
+KIND_ID_COLOR_REDISH = 9
+KIND_AMBIGUOUS = (KIND_ID_AMBIGUOUS, "", "")
+KIND_KEYWORD = (KIND_ID_KEYWORD, "k", "Keyword")
+KIND_TYPE = (KIND_ID_TYPE, "t", "Type")
+KIND_FUNCTION = (KIND_ID_FUNCTION, "f", "Function")
+KIND_NAMESPACE = (KIND_ID_NAMESPACE, "a", "Namespace")
+KIND_NAVIGATION = (KIND_ID_NAVIGATION, "n", "Navigation")
+KIND_MARKUP = (KIND_ID_MARKUP, "m", "Markup")
+KIND_VARIABLE = (KIND_ID_VARIABLE, "v", "Variable")
+KIND_SNIPPET = (KIND_ID_SNIPPET, "s", "Snippet")
+
 DIALOG_CANCEL = 0
 DIALOG_YES = 1
 DIALOG_NO = 2
@@ -78,8 +104,6 @@ OP_NOT_REGEX_CONTAINS = 5
 
 # Filled by the plugin host from the editor's ``load`` request.
 _paths = {"packages": "", "installed_packages": "", "cache": "", "executable": ""}
-# Callbacks of set_timeout(); the host runs them after the current command (phase A has no timers).
-_pending_timeouts = []
 # Views whose selection a plugin cleared and has not refilled yet (the editor always keeps one).
 _cleared_selections = set()
 
@@ -150,23 +174,124 @@ def set_clipboard(text):
     sublime_api.set_clipboard(str(text))
 
 
+class _Timers:
+    """Callbacks waiting for their time. The main thread's ones (``set_timeout``) are run by the
+    host's main loop (``run_due``); the async ones run on their own thread, like Sublime's."""
+
+    def __init__(self, own_thread):
+        self._condition = threading.Condition()
+        self._heap = []
+        self._count = itertools.count()
+        self._own_thread = own_thread
+        self._thread = None
+
+    def add(self, callback, delay):
+        with self._condition:
+            due = time.monotonic() + max(delay or 0, 0) / 1000.0
+            heapq.heappush(self._heap, (due, next(self._count), callback))
+            if self._own_thread and self._thread is None:
+                self._thread = threading.Thread(target=self._run_forever, name="sublime async", daemon=True)
+                self._thread.start()
+            self._condition.notify_all()
+
+    def clear(self):
+        with self._condition:
+            del self._heap[:]
+
+    def next_delay(self):
+        """Seconds until the next callback is due, or None when there is none."""
+        with self._condition:
+            return max(0.0, self._heap[0][0] - time.monotonic()) if self._heap else None
+
+    def run_due(self):
+        """Runs the callbacks that are due (not the ones they add, which wait for the next turn)."""
+        with self._condition:
+            now, limit = time.monotonic(), next(self._count)
+        while True:
+            with self._condition:
+                if not self._heap or self._heap[0][0] > now or self._heap[0][1] > limit:
+                    return
+                callback = heapq.heappop(self._heap)[2]
+            _run_callback(callback)
+
+    def _run_forever(self):
+        while True:
+            with self._condition:
+                while True:
+                    wait = self._heap[0][0] - time.monotonic() if self._heap else None
+                    if wait is not None and wait <= 0:
+                        callback = heapq.heappop(self._heap)[2]
+                        break
+                    self._condition.wait(wait)
+            _run_callback(callback)
+
+
+def _run_callback(callback):
+    try:
+        callback()
+    except Exception:
+        traceback.print_exc()
+
+
+_main_timers = _Timers(own_thread=False)
+_async_timers = _Timers(own_thread=True)
+
+
 def set_timeout(callback, delay=0):
-    _pending_timeouts.append(callback)
+    _main_timers.add(callback, delay)
+    if threading.current_thread() is not threading.main_thread():
+        # The main thread may be waiting for a request: wake it so it sees the new timer.
+        codelibre_rpc.post({"op": "wake"})
 
 
 def set_timeout_async(callback, delay=0):
-    _pending_timeouts.append(callback)
+    _async_timers.add(callback, delay)
 
 
-def run_pending_timeouts():
-    """Runs the callbacks queued by set_timeout() (and the ones they queue)."""
-    for _ in range(100):
-        if not _pending_timeouts:
-            return
-        callbacks = list(_pending_timeouts)
-        del _pending_timeouts[:]
-        for callback in callbacks:
-            callback()
+# Callbacks of open panels, by id: {"select": f, "highlight": f, ..., "final": names that close it}.
+_callbacks = {}
+_callback_ids = itertools.count(1)
+
+
+def _register_callbacks(final, **functions):
+    callback_id = next(_callback_ids)
+    _callbacks[callback_id] = dict(functions, final=final)
+    return callback_id
+
+
+def run_callback(callback_id, name, args):
+    """The editor answers a panel: ``select`` / ``highlight`` (quick panel), ``done`` / ``change``
+    / ``cancel`` (input panel). A final answer forgets the panel."""
+    entry = _callbacks.get(callback_id)
+    if entry is None:
+        return
+    if name in entry["final"]:
+        del _callbacks[callback_id]
+    function = entry.get(name)
+    if function is not None:
+        function(*args)
+
+
+class QuickPanelItem:
+    def __init__(self, trigger, details="", annotation="", kind=KIND_AMBIGUOUS):
+        self.trigger = trigger
+        self.details = details
+        self.annotation = annotation
+        self.kind = kind
+
+    def __repr__(self):
+        return "QuickPanelItem(%r, %r, %r, %r)" % (self.trigger, self.details, self.annotation, self.kind)
+
+
+def _quick_panel_item(item):
+    """A quick panel row as ``[caption, detail, hint]``: from a string, a list of strings (the
+    caption, then detail lines) or a QuickPanelItem."""
+    if isinstance(item, QuickPanelItem):
+        details = item.details if isinstance(item.details, (list, tuple)) else [item.details]
+        return [str(item.trigger), " · ".join(str(d) for d in details if d), str(item.annotation or "")]
+    if isinstance(item, (list, tuple)):
+        return [str(item[0]) if item else "", " · ".join(str(d) for d in item[1:] if d), ""]
+    return [str(item), "", ""]
 
 
 def active_window():
@@ -480,6 +605,9 @@ class View:
     def is_dirty(self):
         return sublime_api.view_is_dirty(self.view_id)
 
+    def change_count(self):
+        return sublime_api.view_change_count(self.view_id)
+
     def is_read_only(self):
         return sublime_api.view_is_read_only(self.view_id)
 
@@ -706,6 +834,27 @@ class Window:
 
     def run_command(self, cmd, args=None):
         sublime_api.run_command("window", self.window_id, cmd, args)
+
+    def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None):
+        """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled."""
+        def select(index):
+            if on_select is None:
+                return
+            if flags & WANT_EVENT:
+                on_select(index, {"modifier_keys": {}})
+            else:
+                on_select(index)
+        callback = _register_callbacks(("select",), select=select, highlight=on_highlight)
+        rows = [_quick_panel_item(item) for item in items]
+        sublime_api.window_show_quick_panel(
+            self.window_id, rows, flags, selected_index, placeholder or "", callback, on_highlight is not None
+        )
+
+    def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel):
+        """A one-line text field at the bottom. Returns a stand-in view: the field is not a view here."""
+        callback = _register_callbacks(("done", "cancel"), done=on_done, change=on_change, cancel=on_cancel)
+        sublime_api.window_show_input_panel(self.window_id, str(caption), str(initial_text), callback, on_change is not None)
+        return View(0)
 
     def status_message(self, msg):
         status_message(msg)

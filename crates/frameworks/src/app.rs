@@ -15,7 +15,7 @@ use crate::input;
 use crate::syntax_engine::SharedSyntaxEngine;
 use crate::views::editor_view::{self, EditorText, SelectionSync};
 use crate::views::theme::Chrome;
-use crate::views::{dialogs, find_panel, menu_bar, quick_panel, side_bar, status_bar, tabs};
+use crate::views::{dialogs, find_panel, input_panel, menu_bar, quick_panel, side_bar, status_bar, tabs};
 
 pub struct App {
     editor: Editor,
@@ -158,6 +158,17 @@ impl App {
                 .show(ctx, |ui| status_bar::show(ui, chrome, &translations, &status, &mut events));
         }
 
+        if let Some(input) = presenters::quick_panel::present_input_panel(&mut self.view) {
+            egui::TopBottomPanel::bottom("input_panel")
+                .frame(
+                    egui::Frame::new()
+                        .fill(chrome.panel_bg)
+                        .inner_margin(egui::Margin::symmetric(8, 0))
+                        .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
+                )
+                .show(ctx, |ui| input_panel::show(ui, chrome, &input, &mut events));
+        }
+
         if let Some(find) = presenters::find_panel::present(&mut self.editor, &mut self.view) {
             egui::TopBottomPanel::bottom("find_panel")
                 .frame(
@@ -260,6 +271,8 @@ impl eframe::App for App {
         for event in self.draw(ctx, &chrome) {
             ui_controller::handle(&mut self.editor, &mut self.view, event);
         }
+        // After the text widget's edits, so listeners hear about them this frame.
+        command_controller::poll_plugins(&mut self.editor, &mut self.view);
 
         let title = presenters::window::present_title(&self.editor);
         if title != self.window_title {

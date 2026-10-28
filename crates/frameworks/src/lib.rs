@@ -18,6 +18,7 @@ pub mod views;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use interface_adapters::gateways::session_file::SessionFileGateway;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
@@ -31,12 +32,14 @@ use gateways::{
 };
 use syntax_engine::{SharedSyntaxEngine, SyntaxEngine};
 
-/// Wires every gateway implementation into the use cases and starts the editor.
-pub fn compose(paths: Vec<PathBuf>) -> (Editor, ViewState, SharedSyntaxEngine) {
+/// Wires every gateway implementation into the use cases and starts the editor. `ctx` is woken
+/// up when a plugin calls the editor between frames.
+pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, SharedSyntaxEngine) {
     let package_paths = app_directories::package_paths();
     let session_file = app_directories::session_file(&package_paths);
     let engine: SharedSyntaxEngine = Rc::new(RefCell::new(SyntaxEngine::new(package_paths.clone())));
     let python_lib = app_directories::python_lib_dir(&package_paths);
+    let plugin_host = PythonPluginHost::new(python_lib).with_waker(Arc::new(move || ctx.request_repaint()));
 
     let gateways = Gateways {
         file_system: Box::new(StdFileSystem),
@@ -47,7 +50,7 @@ pub fn compose(paths: Vec<PathBuf>) -> (Editor, ViewState, SharedSyntaxEngine) {
         sessions: Box::new(SessionFileGateway::new(session_file)),
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
-        plugins: Box::new(PythonPluginHost::new(python_lib)),
+        plugins: Box::new(plugin_host),
     };
     let mut editor = Editor::new(gateways);
     editor.start(paths);

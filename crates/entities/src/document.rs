@@ -83,6 +83,8 @@ pub struct Document {
     /// Increases whenever the selection is changed by a command (not by the user typing),
     /// so the view knows it has to move its caret.
     selection_revision: u64,
+    /// Increases with every change to the text (Sublime's `view.change_count()`).
+    change_count: u64,
 }
 
 impl Document {
@@ -102,6 +104,7 @@ impl Document {
             selection: Selection::caret(0),
             extra_selections: Vec::new(),
             selection_revision: 1,
+            change_count: 0,
         }
     }
 
@@ -172,6 +175,7 @@ impl Document {
     pub fn reload_from(&mut self, fresh: Document) {
         let caret = self.selection.head.min(fresh.text.chars().count());
         self.text = fresh.text;
+        self.note_text_changed();
         self.saved_text = fresh.saved_text;
         self.encoding = fresh.encoding;
         self.line_ending = fresh.line_ending;
@@ -183,6 +187,7 @@ impl Document {
     /// Puts back unsaved text (hot exit); the document stays dirty.
     pub fn restore_unsaved_text(&mut self, text: String) {
         self.text = text;
+        self.note_text_changed();
     }
 
     /// The text as it was last read from or written to disk.
@@ -225,6 +230,15 @@ impl Document {
 
     pub fn selection_revision(&self) -> u64 {
         self.selection_revision
+    }
+
+    pub fn change_count(&self) -> u64 {
+        self.change_count
+    }
+
+    /// Records that the text changed outside this type's methods (the text widget edits it in place).
+    pub fn note_text_changed(&mut self) {
+        self.change_count += 1;
     }
 
     /// The selections besides the primary one, in the order they were added.
@@ -294,6 +308,7 @@ impl Document {
         let selection = self.selection.clamped(self.char_count());
         match command(&mut self.text, selection) {
             Some(new_selection) => {
+                self.note_text_changed();
                 self.set_selection(new_selection);
                 true
             }
@@ -314,6 +329,7 @@ impl Document {
         let end = end.clamp(start, len);
         let (start_byte, end_byte) = (char_to_byte(&self.text, start), char_to_byte(&self.text, end));
         self.text.replace_range(start_byte..end_byte, insert);
+        self.note_text_changed();
         let inserted = insert.chars().count();
         let map = |p: usize| {
             if p < start || (p == start && start < end) {
@@ -345,6 +361,7 @@ impl Document {
         if new.len() != selections.len() {
             return false;
         }
+        self.note_text_changed();
         let new_primary = new.remove(primary_index);
         self.set_selection(new_primary);
         // Carets that met (e.g. deleting the text between them) become one.

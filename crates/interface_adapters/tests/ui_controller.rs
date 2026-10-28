@@ -298,3 +298,99 @@ fn closing_the_about_and_errors_windows() {
     handle(&mut editor, &mut view, UiEvent::LoadErrorsClosed);
     assert!(!view.show_about && !view.show_load_errors);
 }
+
+// ----- panels opened by plugins --------------------------------------------------------------------
+
+fn done() -> use_cases::gateways::PluginMessage {
+    use_cases::gateways::PluginMessage::Done { error: None }
+}
+
+/// Runs the plugin command `pick`, which opens a quick panel with callback id 7.
+fn plugin_quick_panel(world: &World, items: serde_json::Value, wants_highlight: bool) -> (Editor, ViewState) {
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let show = test_support::plugin_call("window_show_quick_panel", json!([1, items, 0, 1, "Pick one", 7, wants_highlight]));
+    world.plugins.then([show, done()]);
+    if wants_highlight {
+        world.plugins.then([done()]);
+    }
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("pick"));
+    (editor, view)
+}
+
+fn callbacks(world: &World) -> Vec<(u64, String, serde_json::Value)> {
+    world.plugins.callbacks.borrow().clone()
+}
+
+#[test]
+fn a_plugin_quick_panel_lists_its_items_and_answers_the_original_index() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("pick", Window)]);
+    let items = json!([["alpha", "first", ""], ["beta", "", "b"], ["gamma", "", ""]]);
+    let (mut editor, mut view) = plugin_quick_panel(&world, items, true);
+    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(SearchKind::PluginItems));
+    assert_eq!(callbacks(&world), [(7, "highlight".to_string(), json!([1]))], "the first selection is announced");
+
+    let model = interface_adapters::presenters::quick_panel::present(&editor, &mut view).unwrap();
+    assert_eq!((model.placeholder.as_str(), model.selected), ("Pick one", 1));
+    assert_eq!(model.items.iter().map(|i| i.caption.as_str()).collect::<Vec<_>>(), ["alpha", "beta", "gamma"]);
+    assert_eq!(model.items[0].detail, "first");
+
+    // Filtering keeps the plugin's indices.
+    handle(&mut editor, &mut view, UiEvent::QuickPanelQueryChanged("gam".into()));
+    interface_adapters::presenters::quick_panel::present(&editor, &mut view).unwrap();
+    world.plugins.then([done()]);
+    handle(&mut editor, &mut view, UiEvent::QuickPanelAccepted(0));
+    assert_eq!(callbacks(&world)[1], (7, "select".to_string(), json!([2])));
+    assert!(view.quick_panel.is_none() && editor.plugin_quick_panel().is_none());
+}
+
+#[test]
+fn dismissing_or_replacing_a_plugin_quick_panel_answers_minus_one() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("pick", Window)]);
+    let (mut editor, mut view) = plugin_quick_panel(&world, json!([["a", "", ""]]), false);
+    world.plugins.then([done()]);
+    handle(&mut editor, &mut view, UiEvent::QuickPanelDismissed);
+    assert_eq!(callbacks(&world), [(7, "select".to_string(), json!([-1]))]);
+
+    let world = World::new().with_plugin_commands(&[("pick", Window)]);
+    let (mut editor, mut view) = plugin_quick_panel(&world, json!([["a", "", ""]]), false);
+    world.plugins.then([done()]);
+    handle(&mut editor, &mut view, UiEvent::RunCommand(Command::with_args("show_overlay", json!({"overlay": "command_palette"}))));
+    let palette = queued(&mut view).remove(0);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &palette);
+    assert_eq!(callbacks(&world), [(7, "select".to_string(), json!([-1]))]);
+    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(SearchKind::Commands));
+}
+
+#[test]
+fn a_plugin_input_panel_reports_changes_and_the_final_text() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("ask", Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.find_panel.visible = true;
+    let show = test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "bob", 3, true]));
+    world.plugins.then([show, done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
+    let panel = view.input_panel.as_ref().unwrap();
+    assert_eq!((panel.caption.as_str(), panel.text.as_str()), ("Name:", "bob"));
+    assert!(!view.find_panel.visible, "it takes the find panel's place");
+
+    world.plugins.then([done(), done()]);
+    handle(&mut editor, &mut view, UiEvent::InputPanelChanged("bobby".into()));
+    handle(&mut editor, &mut view, UiEvent::InputPanelDone);
+    assert_eq!(
+        callbacks(&world),
+        [(3, "change".to_string(), json!(["bobby"])), (3, "done".to_string(), json!(["bobby"]))]
+    );
+    assert!(view.input_panel.is_none());
+
+    // Esc (hide_panel) cancels it.
+    let show = test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "", 4, false]));
+    world.plugins.then([show, done(), done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("hide_panel"));
+    assert_eq!(callbacks(&world)[2], (4, "cancel".to_string(), json!([])));
+}

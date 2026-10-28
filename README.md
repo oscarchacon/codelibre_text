@@ -170,7 +170,8 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 
 - [ ] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
 - [ ] Find panel toggles and Find in Files
-- [ ] Python plugins phase B: events (`EventListener`), output panels, `set_timeout_async`
+- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`
+- [ ] Python plugins phase B rest: output panels, dialogs, `on_query_context`, status and regions drawn
 - [ ] Python plugins phase C: `.sublime-package` (zip) loading and Package Control
 - [ ] Split layouts (groups)
 - [ ] Minimap, code folding, auto-complete, bookmarks

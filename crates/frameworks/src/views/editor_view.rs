@@ -156,6 +156,9 @@ pub fn show(
                         Selection::new(r.secondary.index, r.primary.index)
                     })
                     .unwrap_or(model.selection);
+                if output.response.changed() {
+                    events.push(UiEvent::TextEdited(model.document));
+                }
                 if selection != model.selection || output.response.changed() {
                     events.push(UiEvent::SelectionChanged(model.document, selection));
                 }

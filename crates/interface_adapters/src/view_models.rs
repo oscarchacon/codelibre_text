@@ -74,6 +74,14 @@ pub struct QuickPanelViewModel {
     pub items: Vec<QuickPanelItemViewModel>,
     /// Focus the query field (with the caret after any preset text, e.g. `:`).
     pub take_focus: bool,
+    /// Items in the monospace font (a plugin's `sublime.MONOSPACE_FONT`).
+    pub monospace: bool,
+}
+
+pub struct InputPanelViewModel {
+    pub caption: String,
+    pub text: String,
+    pub take_focus: bool,
 }
 
 pub struct FindPanelViewModel {

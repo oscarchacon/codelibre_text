@@ -340,3 +340,19 @@ fn replace_range_leaves_read_only_documents_alone() {
     assert!(!doc.replace_range(0, 0, "x"));
     assert_eq!(doc.text, "{}");
 }
+
+#[test]
+fn the_change_count_grows_with_text_changes_only() {
+    let mut doc = from_bytes(b"abc");
+    assert_eq!(doc.change_count(), 0);
+    doc.set_selection(Selection::caret(1));
+    assert_eq!(doc.change_count(), 0, "moving the caret is not a change");
+    doc.replace_range(0, 1, "x");
+    doc.edit_all(|text, sels| {
+        text.push('!');
+        sels.to_vec()
+    });
+    assert_eq!(doc.change_count(), 2);
+    doc.note_text_changed();
+    assert_eq!(doc.change_count(), 3);
+}

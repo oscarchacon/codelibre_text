@@ -6,7 +6,8 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use entities::document::DocumentId;
@@ -27,9 +28,15 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// After the host exits, how long to wait for the rest of what it wrote to stderr.
 const EXIT_GRACE: Duration = Duration::from_millis(300);
 
+const NOT_RUNNING: &str = "the plugin host is not running (Preferences > Reload Packages)";
+
 /// Windows: start the interpreter without opening a console window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Called from the reader threads when the host wrote something, so the window wakes up and
+/// answers calls made outside a command (timers, plugin threads).
+pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
 enum Line {
     Message(Value),
@@ -41,17 +48,26 @@ struct HostProcess {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<Line>,
+    /// The ids of the calls being answered, innermost last (a call can be answered while the
+    /// editor serves another one, e.g. a plugin command run by a plugin).
+    open_calls: Vec<Value>,
 }
 
 pub struct PythonPluginHost {
     lib_dir: PathBuf,
     process: Option<HostProcess>,
+    waker: Option<Waker>,
 }
 
 impl PythonPluginHost {
     /// `lib_dir`: where the support modules are written (Sublime's `Lib/python` equivalent).
     pub fn new(lib_dir: PathBuf) -> Self {
-        Self { lib_dir, process: None }
+        Self { lib_dir, process: None, waker: None }
+    }
+
+    pub fn with_waker(mut self, waker: Waker) -> Self {
+        self.waker = Some(waker);
+        self
     }
 
     fn start(&mut self, interpreter: Option<&str>) -> Result<(), String> {
@@ -76,20 +92,44 @@ impl PythonPluginHost {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
         let stdin = child.stdin.take().expect("piped stdin");
-        spawn_reader(stdout, sender.clone(), true);
-        spawn_reader(stderr, sender, false);
-        self.process = Some(HostProcess { child, stdin, lines });
+        spawn_reader(stdout, sender.clone(), true, self.waker.clone());
+        spawn_reader(stderr, sender, false, self.waker.clone());
+        self.process = Some(HostProcess { child, stdin, lines, open_calls: Vec::new() });
         Ok(())
     }
 
     fn send(&mut self, message: Value) -> Result<(), String> {
-        let process = self.process.as_mut().ok_or("the plugin host is not running (Preferences > Reload Packages)")?;
+        let process = self.process.as_mut().ok_or(NOT_RUNNING)?;
         let written = writeln!(process.stdin, "{message}").and_then(|()| process.stdin.flush());
         if let Err(e) = written {
             self.stop();
             return Err(format!("the plugin host stopped: {e}"));
         }
         Ok(())
+    }
+
+    fn message(&mut self, line: Line) -> Result<PluginMessage, String> {
+        let process = self.process.as_mut().ok_or(NOT_RUNNING)?;
+        match line {
+            Line::Message(value) => {
+                let message = parse_message(&value)?;
+                if let PluginMessage::Call { .. } = message {
+                    process.open_calls.push(value.get("id").cloned().unwrap_or(Value::Null));
+                }
+                Ok(message)
+            }
+            Line::Stderr(text) => Ok(PluginMessage::Log(text + "\n")),
+            Line::Closed => {
+                // Whatever the host printed before exiting explains why.
+                let mut output = String::new();
+                while let Ok(Line::Stderr(text)) = process.lines.recv_timeout(EXIT_GRACE) {
+                    output.push_str(&text);
+                    output.push('\n');
+                }
+                self.stop();
+                Err(format!("the plugin host stopped\n{output}"))
+            }
+        }
     }
 }
 
@@ -128,32 +168,42 @@ impl PluginHostGateway for PythonPluginHost {
         self.send(json!({ "op": "run", "kind": kind, "name": name, "args": args, "view": view, "window": 1 }))
     }
 
+    fn event(&mut self, name: &str, view: DocumentId) -> Result<(), String> {
+        self.send(json!({ "op": "event", "name": name, "view": view }))
+    }
+
+    fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String> {
+        self.send(json!({ "op": "callback", "id": id, "name": name, "args": args }))
+    }
+
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String> {
+        let id = self.process.as_mut().and_then(|p| p.open_calls.pop()).unwrap_or(Value::Null);
         self.send(match result {
-            Ok(value) => json!({ "op": "result", "value": value }),
-            Err(error) => json!({ "op": "result", "error": error }),
+            Ok(value) => json!({ "op": "result", "id": id, "value": value }),
+            Err(error) => json!({ "op": "result", "id": id, "error": error }),
         })
     }
 
     fn receive(&mut self) -> Result<PluginMessage, String> {
-        let process = self.process.as_mut().ok_or("the plugin host is not running (Preferences > Reload Packages)")?;
+        let process = self.process.as_mut().ok_or(NOT_RUNNING)?;
         match process.lines.recv_timeout(TIMEOUT) {
-            Ok(Line::Message(value)) => parse_message(&value),
-            Ok(Line::Stderr(text)) => Ok(PluginMessage::Log(text + "\n")),
-            Ok(Line::Closed) | Err(RecvTimeoutError::Disconnected) => {
-                // Whatever the host printed before exiting explains why.
-                let mut output = String::new();
-                while let Ok(Line::Stderr(text)) = process.lines.recv_timeout(EXIT_GRACE) {
-                    output.push_str(&text);
-                    output.push('\n');
-                }
-                self.stop();
-                Err(format!("the plugin host stopped\n{output}"))
-            }
+            Ok(line) => self.message(line),
+            Err(RecvTimeoutError::Disconnected) => self.message(Line::Closed),
             Err(RecvTimeoutError::Timeout) => {
                 self.stop();
                 Err(format!("a plugin did not answer in {} seconds; the plugin host was stopped", TIMEOUT.as_secs()))
             }
+        }
+    }
+
+    fn try_receive(&mut self) -> Result<Option<PluginMessage>, String> {
+        let Some(process) = self.process.as_mut() else {
+            return Ok(None);
+        };
+        match process.lines.try_recv() {
+            Ok(line) => self.message(line).map(Some),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => self.message(Line::Closed).map(Some),
         }
     }
 
@@ -167,8 +217,9 @@ impl PluginHostGateway for PythonPluginHost {
 }
 
 /// Reads lines in the background: JSON messages from stdout, plain text from stderr.
-fn spawn_reader(stream: impl Read + Send + 'static, sender: Sender<Line>, is_stdout: bool) {
+fn spawn_reader(stream: impl Read + Send + 'static, sender: Sender<Line>, is_stdout: bool, waker: Option<Waker>) {
     std::thread::spawn(move || {
+        let wake = || waker.iter().for_each(|wake| wake());
         for line in BufReader::new(stream).lines() {
             let Ok(line) = line else { break };
             let message = match serde_json::from_str::<Value>(&line) {
@@ -178,9 +229,11 @@ fn spawn_reader(stream: impl Read + Send + 'static, sender: Sender<Line>, is_std
             if sender.send(message).is_err() {
                 return;
             }
+            wake();
         }
         if is_stdout {
             let _ = sender.send(Line::Closed);
+            wake();
         }
     });
 }
@@ -209,14 +262,16 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
                     Some((c.get(0)?.as_str()?.to_string(), kind))
                 })
                 .collect();
-            let errors = value
-                .get("errors")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.as_str().map(String::from))
-                .collect();
-            Ok(PluginMessage::Loaded { commands, errors })
+            let strings = |key: &str| {
+                value
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e.as_str().map(String::from))
+                    .collect()
+            };
+            Ok(PluginMessage::Loaded { commands, events: strings("events"), errors: strings("errors") })
         }
         _ => Err(format!("unexpected message from the plugin host: {value}")),
     }

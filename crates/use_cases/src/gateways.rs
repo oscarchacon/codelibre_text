@@ -175,23 +175,33 @@ pub enum PluginMessage {
     Call { function: String, args: Vec<Value> },
     /// Text that plugins printed.
     Log(String),
-    /// The plugins are loaded: their commands, and a traceback for each plugin that failed.
-    Loaded { commands: Vec<(String, PluginCommandKind)>, errors: Vec<String> },
-    /// A command finished; `error` is its traceback if it failed.
+    /// The plugins are loaded: their commands, the events they listen to (e.g. `on_modified`,
+    /// `on_load_async`), and a traceback for each plugin that failed.
+    Loaded { commands: Vec<(String, PluginCommandKind)>, events: Vec<String>, errors: Vec<String> },
+    /// A command or event finished; `error` is its traceback if it failed.
     Done { error: Option<String> },
 }
 
 /// Runs Sublime Text plugins (Python) in a separate process. Every request is answered through
 /// [`receive`](Self::receive): first any number of `Call`s and `Log`s, then `Loaded` or `Done`.
+/// Between requests, timers and other threads of the plugins may call too
+/// ([`try_receive`](Self::try_receive)).
 pub trait PluginHostGateway {
     /// (Re)starts the host and asks it to load the plugins.
     fn load(&mut self, request: &PluginLoad) -> Result<(), String>;
     /// Asks the host to run a plugin command on a view (text commands) or the window.
     fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String>;
-    /// The answer to the last `Call`.
+    /// Tells the listeners about a view event (`on_load`, `on_modified`…).
+    fn event(&mut self, name: &str, view: DocumentId) -> Result<(), String>;
+    /// Answers a panel a plugin opened: callback `id`, which answer (`select`, `highlight`, `done`,
+    /// `change`, `cancel`) and its arguments.
+    fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String>;
+    /// The answer to the last `Call` that has not been answered yet.
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String>;
     /// Waits for the next message; an error means the host died or stopped answering.
     fn receive(&mut self) -> Result<PluginMessage, String>;
+    /// The next message if there is one already (calls made outside a request); never waits.
+    fn try_receive(&mut self) -> Result<Option<PluginMessage>, String>;
     fn stop(&mut self);
 }
 

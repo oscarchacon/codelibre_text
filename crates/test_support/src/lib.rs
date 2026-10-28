@@ -366,8 +366,14 @@ pub type PluginRun = (PluginCommandKind, String, Value, Option<DocumentId>);
 pub struct PluginScript {
     /// What `receive` returns, in order.
     pub messages: RefCell<VecDeque<PluginMessage>>,
+    /// What `try_receive` returns (messages sent outside a request, e.g. by a timer).
+    pub idle_messages: RefCell<VecDeque<PluginMessage>>,
     pub loads: RefCell<Vec<PluginLoad>>,
     pub runs: RefCell<Vec<PluginRun>>,
+    /// The `event` requests: (name, view).
+    pub events: RefCell<Vec<(String, DocumentId)>>,
+    /// The `callback` requests (a panel's answers): (callback id, name, arguments).
+    pub callbacks: RefCell<Vec<(u64, String, Value)>>,
     /// The editor's answers to the `Call` messages, in order.
     pub replies: RefCell<Vec<Result<Value, String>>>,
     pub stops: Cell<usize>,
@@ -379,6 +385,16 @@ impl PluginScript {
     /// Queues messages for the next request.
     pub fn then(&self, messages: impl IntoIterator<Item = PluginMessage>) {
         self.messages.borrow_mut().extend(messages);
+    }
+
+    /// Queues messages the plugins send while the editor is idle.
+    pub fn meanwhile(&self, messages: impl IntoIterator<Item = PluginMessage>) {
+        self.idle_messages.borrow_mut().extend(messages);
+    }
+
+    /// The names of the events sent so far.
+    pub fn event_names(&self) -> Vec<String> {
+        self.events.borrow().iter().map(|(name, _)| name.clone()).collect()
     }
 }
 
@@ -406,6 +422,16 @@ impl PluginHostGateway for FakePluginHost {
         Ok(())
     }
 
+    fn event(&mut self, name: &str, view: DocumentId) -> Result<(), String> {
+        self.0.events.borrow_mut().push((name.to_string(), view));
+        Ok(())
+    }
+
+    fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String> {
+        self.0.callbacks.borrow_mut().push((id, name.to_string(), args.clone()));
+        Ok(())
+    }
+
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String> {
         self.0.replies.borrow_mut().push(result);
         Ok(())
@@ -413,6 +439,10 @@ impl PluginHostGateway for FakePluginHost {
 
     fn receive(&mut self) -> Result<PluginMessage, String> {
         self.0.messages.borrow_mut().pop_front().ok_or_else(|| "the plugin host stopped".to_string())
+    }
+
+    fn try_receive(&mut self) -> Result<Option<PluginMessage>, String> {
+        Ok(self.0.idle_messages.borrow_mut().pop_front())
     }
 
     fn stop(&mut self) {
@@ -542,9 +572,15 @@ impl World {
     /// A package with a plugin file, so the editor starts the (fake) plugin host, which answers
     /// the load with these commands.
     pub fn with_plugin_commands(self, commands: &[(&str, PluginCommandKind)]) -> Self {
+        self.with_plugins(commands, &[])
+    }
+
+    /// Like [`with_plugin_commands`](Self::with_plugin_commands), with listeners of these events.
+    pub fn with_plugins(self, commands: &[(&str, PluginCommandKind)], events: &[&str]) -> Self {
         self.disk.put(format!("{PACKAGES}/MyPlugin/plugin.py"), "");
         self.plugins.then([PluginMessage::Loaded {
             commands: commands.iter().map(|(name, kind)| (name.to_string(), *kind)).collect(),
+            events: events.iter().map(|e| e.to_string()).collect(),
             errors: Vec::new(),
         }]);
         self

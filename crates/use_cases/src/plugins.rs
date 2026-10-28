@@ -2,10 +2,12 @@
 //! `ApplicationCommand`), and the console where their output goes.
 //!
 //! Plugins run in a separate process behind [`PluginHostGateway`](crate::gateways::PluginHostGateway).
-//! While a plugin command runs, the plugin calls back into the editor (`sublime_api` functions,
-//! served by [`crate::plugin_api`]) until the host says the command is done. See `docs/plugins.md`.
+//! While a plugin command or event runs, the plugin calls back into the editor (`sublime_api`
+//! functions, served by [`crate::plugin_api`]) until the host says it is done. Timers and plugin
+//! threads call at other times too: [`Editor::poll_plugins`] answers them every frame. See
+//! `docs/plugins.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use entities::command::Command;
 use entities::document::DocumentId;
@@ -19,6 +21,8 @@ use crate::gateways::{PluginCommandKind, PluginLoad, PluginMessage, PluginPackag
 const CONSOLE_LIMIT: usize = 200_000;
 /// Plugin commands that run each other deeper than this are stopped.
 const MAX_DEPTH: usize = 16;
+/// At most this many messages are answered per frame, so a busy plugin thread cannot freeze the window.
+const MAX_IDLE_MESSAGES: usize = 1000;
 const CONSOLE_NAME: &str = "Console";
 
 /// Runs another command (built-in or plugin) when a plugin calls `run_command`. The command
@@ -42,6 +46,16 @@ pub struct PluginState {
     pub(crate) window_settings: Map<String, Value>,
     /// The errors of the last load (also in the package load errors).
     pub(crate) errors: Vec<String>,
+    /// The events some listener wants (`on_modified`, `on_load_async`…); others are not sent.
+    events: HashSet<String>,
+    /// Built-in commands that event listeners ran; the next [`Editor::poll_plugins`] runs them.
+    queued_commands: Vec<Command>,
+    /// The view the listeners last heard `on_activated` for.
+    active_view: Option<DocumentId>,
+    /// Each document's change count and the active one's selections when `on_modified` /
+    /// `on_selection_modified` were last checked.
+    change_counts: HashMap<DocumentId, u64>,
+    selections: Option<(DocumentId, Vec<Selection>)>,
     depth: usize,
 }
 
@@ -50,6 +64,7 @@ impl Editor {
     /// registers their commands. Problems go to the package load errors and the console.
     pub fn load_plugins(&mut self) {
         self.state.plugins.commands.clear();
+        self.state.plugins.events.clear();
         self.state.plugins.settings_files.clear();
         let old_errors = std::mem::take(&mut self.state.plugins.errors);
         self.state.load_errors.retain(|e| !old_errors.contains(e));
@@ -75,8 +90,9 @@ impl Editor {
         match self.converse(&mut |editor: &mut Editor, command: &Command| {
             editor.log(&format!("{}: built-in commands cannot run while plugins load\n", command.name));
         }) {
-            Ok(PluginMessage::Loaded { commands, errors }) => {
+            Ok(PluginMessage::Loaded { commands, events, errors }) => {
                 self.state.plugins.commands = commands.into_iter().collect();
+                self.state.plugins.events = events.into_iter().collect();
                 errors.into_iter().for_each(|e| self.plugin_load_error(e));
             }
             Ok(_) => {}
@@ -112,6 +128,128 @@ impl Editor {
 
     pub fn is_plugin_command(&self, name: &str) -> bool {
         self.state.plugins.commands.contains_key(name)
+    }
+
+    /// Called every frame: answers the calls plugins made outside a command (timers, threads),
+    /// runs the built-in commands event listeners asked for, and tells the listeners what the
+    /// user changed since the last frame (`on_modified`, `on_selection_modified`).
+    pub fn poll_plugins(&mut self, run_command: &mut CommandRunner) {
+        for _ in 0..MAX_IDLE_MESSAGES {
+            match self.gateways.plugins.try_receive() {
+                Ok(Some(PluginMessage::Call { function, args })) => {
+                    let result = self.plugin_call(&function, &args, run_command);
+                    if let Err(e) = self.gateways.plugins.reply(result) {
+                        self.plugin_host_failed(&e);
+                        break;
+                    }
+                }
+                Ok(Some(PluginMessage::Log(text))) => self.log(&text),
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(e) => {
+                    self.plugin_host_failed(&e);
+                    break;
+                }
+            }
+        }
+        for command in std::mem::take(&mut self.state.plugins.queued_commands) {
+            run_command(self, &command);
+        }
+        self.notice_changes();
+    }
+
+    /// Tells the listeners about a view event, when one listens to it or to its `_async` variant.
+    /// Built-in commands they run wait for the next [`poll_plugins`](Self::poll_plugins).
+    pub(crate) fn plugin_event(&mut self, name: &str, view: DocumentId) {
+        let events = &self.state.plugins.events;
+        if !events.contains(name) && !events.contains(&format!("{name}_async")) {
+            return;
+        }
+        if self.state.plugins.depth >= MAX_DEPTH {
+            self.log(&format!("{name}: plugin events run each other too deeply\n"));
+            return;
+        }
+        self.state.plugins.depth += 1;
+        let result = self.gateways.plugins.event(name, view).and_then(|()| {
+            self.converse(&mut |editor: &mut Editor, command: &Command| {
+                editor.state.plugins.queued_commands.push(command.clone());
+            })
+        });
+        self.state.plugins.depth -= 1;
+        match result {
+            Ok(PluginMessage::Done { error: Some(traceback) }) => self.log(&format!("{name}: {traceback}\n")),
+            Ok(_) => {}
+            Err(e) => self.plugin_host_failed(&e),
+        }
+    }
+
+    /// Runs a panel's callback in the plugin (see `plugin_panels`).
+    pub(crate) fn plugin_callback(&mut self, callback: u64, name: &str, args: Value, run_command: &mut CommandRunner) {
+        if self.state.plugins.depth >= MAX_DEPTH {
+            self.log(&format!("{name}: plugin callbacks run each other too deeply\n"));
+            return;
+        }
+        self.state.plugins.depth += 1;
+        let result = self
+            .gateways
+            .plugins
+            .callback(callback, name, &args)
+            .and_then(|()| self.converse(run_command));
+        self.state.plugins.depth -= 1;
+        match result {
+            Ok(PluginMessage::Done { error: Some(traceback) }) => self.report_plugin_error(name, &traceback),
+            Ok(_) => {}
+            Err(e) => self.report_plugin_error(name, &e),
+        }
+    }
+
+    /// `on_deactivated` / `on_activated` when the active document is not the one the listeners
+    /// last heard about.
+    pub(crate) fn plugin_activation_events(&mut self) {
+        let Some(id) = self.active_document().map(|d| d.id) else {
+            return;
+        };
+        let previous = self.state.plugins.active_view.replace(id);
+        if previous == Some(id) {
+            return;
+        }
+        if let Some(old) = previous.filter(|old| self.index_of(*old).is_some()) {
+            self.plugin_event("on_deactivated", old);
+        }
+        self.plugin_event("on_activated", id);
+    }
+
+    /// `on_modified` for every document whose text changed since the last check, and
+    /// `on_selection_modified` when the active document's selections moved.
+    fn notice_changes(&mut self) {
+        let events = &self.state.plugins.events;
+        let wants = |name: &str| events.contains(name) || events.contains(&format!("{name}_async"));
+        let (modified, selection_modified) = (wants("on_modified"), wants("on_selection_modified"));
+        if !modified && !selection_modified {
+            return;
+        }
+        let plugins = &mut self.state.plugins;
+        let documents = &self.state.documents;
+        let mut changed = Vec::new();
+        for doc in documents {
+            let before = plugins.change_counts.insert(doc.id, doc.change_count());
+            if before.is_some_and(|count| count != doc.change_count()) {
+                changed.push(doc.id);
+            }
+        }
+        plugins.change_counts.retain(|id, _| documents.iter().any(|d| d.id == *id));
+        let active = documents.get(self.state.active).map(|d| (d.id, d.selections()));
+        let moved = match (&plugins.selections, &active) {
+            (Some((before_id, before)), Some((id, now))) => before_id == id && before != now,
+            _ => false,
+        };
+        plugins.selections = active.clone();
+        if modified {
+            changed.into_iter().for_each(|id| self.plugin_event("on_modified", id));
+        }
+        if let (true, Some((id, _))) = (moved && selection_modified, active) {
+            self.plugin_event("on_selection_modified", id);
+        }
     }
 
     /// Adds text to the console.
@@ -214,6 +352,12 @@ impl Editor {
             (rank, p.name.to_lowercase())
         });
         packages
+    }
+
+    /// The host died or stopped answering: say so, and stop sending it events.
+    fn plugin_host_failed(&mut self, error: &str) {
+        self.log(&format!("Python plugins: {error}\n"));
+        self.state.plugins.events.clear();
     }
 
     fn plugin_load_error(&mut self, error: String) {

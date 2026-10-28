@@ -10,7 +10,7 @@ use entities::selection::Selection;
 use entities::text_commands::CaretMotion;
 use use_cases::editing::TextCommand;
 use use_cases::editor::CloseChoice;
-use use_cases::search::SearchKind;
+use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
 use super::command_controller;
@@ -34,6 +34,10 @@ pub enum UiEvent {
     QuickPanelAccepted(usize),
     QuickPanelDismissed,
 
+    /// A plugin's input panel: the text changed, Enter was pressed.
+    InputPanelChanged(String),
+    InputPanelDone,
+
     FindOptionsChanged(FindOptions),
     ReplacementChanged(String),
     FindNext,
@@ -46,6 +50,8 @@ pub enum UiEvent {
     IndentationClicked,
     LineEndingClicked,
 
+    /// The text widget changed the document's text (typing, its own undo, paste…).
+    TextEdited(DocumentId),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
     /// Keys the editor handles with Sublime's indentation rules instead of the widget's.
@@ -101,26 +107,43 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::QuickPanelHighlighted(index) => {
+            let mut plugin_item = None;
             if let Some(panel) = &mut view.quick_panel {
                 panel.selected = index;
-                if let Some(candidate) = panel.results.get(index) {
-                    if panel.kind == SearchKind::ColorSchemes {
-                        editor.preview_candidate(&candidate.target);
-                    }
+                match panel.results.get(index).map(|c| &c.target) {
+                    Some(CandidateTarget::PluginItem(item)) => plugin_item = Some(*item),
+                    Some(target) if panel.kind == SearchKind::ColorSchemes => editor.preview_candidate(target),
+                    _ => {}
                 }
+            }
+            if let Some(item) = plugin_item {
+                command_controller::highlight_plugin_item(editor, view, item);
             }
         }
         UiEvent::QuickPanelAccepted(index) => {
             if let Some(panel) = view.quick_panel.take() {
-                if let Some(candidate) = panel.results.into_iter().nth(index) {
-                    if let Some(command) = editor.accept_candidate(candidate.target) {
-                        view.queue_command(command);
+                match panel.results.into_iter().nth(index).map(|c| c.target) {
+                    Some(CandidateTarget::PluginItem(item)) => command_controller::answer_plugin_quick_panel(editor, view, Some(item)),
+                    Some(target) => {
+                        if let Some(command) = editor.accept_candidate(target) {
+                            view.queue_command(command);
+                        }
                     }
+                    None if panel.kind == SearchKind::PluginItems => command_controller::answer_plugin_quick_panel(editor, view, None),
+                    None => {}
                 }
             }
             view.focus_editor = true;
         }
         UiEvent::QuickPanelDismissed => command_controller::close_quick_panel(editor, view),
+
+        UiEvent::InputPanelChanged(text) => {
+            if let Some(panel) = &mut view.input_panel {
+                panel.text = text.clone();
+                command_controller::change_plugin_input(editor, view, &text);
+            }
+        }
+        UiEvent::InputPanelDone => command_controller::finish_plugin_input(editor, view, true),
 
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
@@ -146,6 +169,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             view.queue_command(Command::with_args("set_line_ending", serde_json::json!({ "type": next })));
         }
 
+        UiEvent::TextEdited(document) => editor.note_text_edited(document),
         UiEvent::SelectionChanged(document, selection) => editor.sync_selection_from_view(document, selection),
         UiEvent::TabPressed => editor.run_text_command(TextCommand::InsertTab),
         UiEvent::ShiftTabPressed => editor.run_text_command(TextCommand::Unindent),

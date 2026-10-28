@@ -22,6 +22,8 @@ pub enum SearchKind {
     ColorSchemes,
     /// The interface language picker.
     Languages,
+    /// The items of a plugin's `window.show_quick_panel`.
+    PluginItems,
 }
 
 /// What choosing a result does.
@@ -34,6 +36,8 @@ pub enum CandidateTarget {
     ColorScheme(String),
     /// A language code, or `auto`.
     Language(String),
+    /// The index of an item in a plugin's quick panel (the controller answers the plugin).
+    PluginItem(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +112,17 @@ impl Editor {
                         c.hint = if code == AUTOMATIC { String::new() } else { code };
                         // An empty query keeps the order: automatic, English, then the others.
                         scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
+                    }
+                }
+            }
+            SearchKind::PluginItems => {
+                let items = self.plugin_quick_panel().map(|p| p.items.as_slice()).unwrap_or_default();
+                for (index, item) in items.iter().enumerate() {
+                    if let Some(s) = score(&item.caption, query).max(score(&item.detail, query)) {
+                        let mut c = Candidate::new(&item.caption, CandidateTarget::PluginItem(index));
+                        c.detail = item.detail.clone();
+                        c.hint = item.hint.clone();
+                        scored.push((s, c));
                     }
                 }
             }
@@ -199,6 +214,8 @@ impl Editor {
             CandidateTarget::Line(line) => self.go_to_line(line),
             CandidateTarget::ColorScheme(name) => self.apply_color_scheme(&name),
             CandidateTarget::Language(code) => self.select_language(&code),
+            // Answered by the controller, which can run the commands the plugin's callback runs.
+            CandidateTarget::PluginItem(_) => {}
         }
         None
     }

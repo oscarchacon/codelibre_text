@@ -35,7 +35,12 @@ impl Editor {
             },
         };
 
-        let index = self.state.active;
+        // Listeners may change the text before it is written (formatters on save).
+        let id = doc.id;
+        self.plugin_event("on_pre_save", id);
+        let Some(index) = self.index_of(id) else {
+            return false;
+        };
         let doc = &mut self.state.documents[index];
         // `trim_trailing_white_space_on_save`: "none" / false, "all" / true, or "not_on_caret".
         let trim_on_caret = match settings.get("trim_trailing_white_space_on_save") {
@@ -52,7 +57,11 @@ impl Editor {
             doc.edit(|text, sel| Some(text_commands::trim_trailing_whitespace_with(text, sel, &options)));
         }
         if settings.bool("ensure_newline_at_eof_on_save", false) {
+            let length = doc.text.len();
             text_commands::ensure_trailing_newline(&mut doc.text);
+            if doc.text.len() != length {
+                doc.note_text_changed();
+            }
         }
         let was_untitled = doc.path.is_none();
         let bytes = doc.to_bytes();
@@ -67,6 +76,7 @@ impl Editor {
             doc.syntax = self.gateways.syntaxes.detect(&path, doc.first_line());
         }
 
+        self.plugin_event("on_post_save", id);
         self.after_save(&path);
         self.notify(self.tr_args("Saved {path}", &[("path", &path.display())]));
         true

@@ -4,11 +4,16 @@ The editor starts it as ``python -I -u plugin_host.py`` and talks to it over std
 JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
 
     editor -> host   {"op": "load", "packages": [{"name": ..., "dirs": [...]}], "paths": {...}}
-    host -> editor   {"op": "loaded", "commands": [[name, kind], ...], "errors": [...]}
+    host -> editor   {"op": "loaded", "commands": [[name, kind], ...], "events": [...], "errors": [...]}
     editor -> host   {"op": "run", "kind": ..., "name": ..., "args": {...}, "view": id, "window": id}
-    host -> editor   {"op": "call", "fn": "view_insert", "args": [...]}     (any number of times)
-    editor -> host   {"op": "result", "value": ...}  or  {"op": "result", "error": "..."}
+    editor -> host   {"op": "event", "name": "on_modified", "view": id}
+    editor -> host   {"op": "callback", "id": n, "name": "select", "args": [index]}   (a panel's answer)
+    host -> editor   {"op": "call", "id": n, "fn": "view_insert", "args": [...]}     (any number of times)
+    editor -> host   {"op": "result", "id": n, "value": ...}  or  {"op": "result", "id": n, "error": "..."}
     host -> editor   {"op": "done", "error": null or "traceback"}
+
+Between requests the main loop runs the ``set_timeout`` callbacks; they (and other threads) may
+call the editor at any time, and the editor answers those calls while it is idle too.
 """
 
 import importlib.machinery
@@ -56,6 +61,8 @@ def unload_plugins():
     del _plugin_modules[:]
     del _package_names[:]
     sublime_plugin.reset()
+    sublime._main_timers.clear()
+    sublime._async_timers.clear()
 
 
 def load_package(name, dirs, errors):
@@ -97,12 +104,9 @@ def load(message):
                 loaded()
             except Exception:
                 errors.append("%s plugin_loaded():\n%s" % (module.__name__, traceback.format_exc()))
-    try:
-        finish_command()
-    except Exception:
-        errors.append("set_timeout callback:\n%s" % traceback.format_exc())
+    finish_command()
     commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
-    return {"op": "loaded", "commands": commands, "errors": errors}
+    return {"op": "loaded", "commands": commands, "events": sublime_plugin.events(), "errors": errors}
 
 
 def run(message):
@@ -122,18 +126,29 @@ def run(message):
                 command.run(**args)
     except Exception:
         error = traceback.format_exc()
+    finish_command()
+    return {"op": "done", "error": error}
+
+
+def event(message):
+    """A view event: the listeners' tracebacks go to the console, so the event itself succeeds."""
+    sublime_plugin.dispatch(message["name"], message.get("view") or 0)
+    finish_command()
+    return {"op": "done", "error": None}
+
+
+def callback(message):
+    error = None
     try:
-        finish_command()
+        sublime.run_callback(message.get("id"), message.get("name"), message.get("args") or [])
     except Exception:
-        error = error or traceback.format_exc()
+        error = traceback.format_exc()
+    finish_command()
     return {"op": "done", "error": error}
 
 
 def finish_command():
-    try:
-        sublime.run_pending_timeouts()
-    finally:
-        sublime._cleared_selections.clear()
+    sublime._cleared_selections.clear()
 
 
 def handle(message):
@@ -142,6 +157,12 @@ def handle(message):
         codelibre_rpc.send(load(message))
     elif op == "run":
         codelibre_rpc.send(run(message))
+    elif op == "event":
+        codelibre_rpc.send(event(message))
+    elif op == "callback":
+        codelibre_rpc.send(callback(message))
+    elif op == "wake":
+        pass
     elif op == "exit":
         sys.exit(0)
     else:
@@ -151,7 +172,11 @@ def handle(message):
 def main():
     codelibre_rpc.handler = handle
     while True:
-        handle(codelibre_rpc.receive())
+        sublime._main_timers.run_due()
+        sublime._cleared_selections.clear()
+        message = codelibre_rpc.next_request(sublime._main_timers.next_delay())
+        if message is not None:
+            handle(message)
 
 
 if __name__ == "__main__":

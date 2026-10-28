@@ -114,6 +114,8 @@ impl Editor {
                 self.activate_document(a.u64(0)?);
                 Ok(Value::Null)
             }
+            "window_show_quick_panel" => self.plugin_show_quick_panel(args, run_command),
+            "window_show_input_panel" => self.plugin_show_input_panel(args, run_command),
             "window_folders" => Ok(json!(self
                 .state
                 .folders
@@ -139,6 +141,7 @@ impl Editor {
                 Value::Null
             }
             "view_is_dirty" => json!(doc.is_dirty()),
+            "view_change_count" => json!(doc.change_count()),
             "view_is_read_only" => json!(doc.read_only),
             "view_set_read_only" => {
                 doc.read_only = a.bool(1);
