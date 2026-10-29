@@ -130,7 +130,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `on_close`): `on_new`, `on_load`, `on_activated`/`on_deactivated`, `on_pre_save`/`on_post_save`,
       `on_pre_close`/`on_close`, `on_modified`/`on_selection_modified`, and their `*_async` variants. `view.change_count()`.
 - [ ] Other events: `on_clone`, `on_load` for views restored by the session (now only `open_file`), `on_reload`,
-      `on_revert`, `on_init`, `on_exit`, `on_new_window`, `on_post_text_command`/`on_post_window_command`, `on_hover`,
+      `on_revert`, `on_init`, `on_exit`, `on_new_window`, `on_hover`,
       `ViewEventListener.applies_to_primary_view_only`, `TextChangeListener` (`on_text_changed` with `TextChange`s).
 - [ ] Built-in commands run from inside a use-case event (e.g. `view.run_command("reindent")` in `on_pre_save`) wait
       for the next frame; running them at once needs the command controller inside `Editor` (a callback set by
