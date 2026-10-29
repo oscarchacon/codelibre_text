@@ -6,7 +6,7 @@ use entities::selection::Selection;
 use serde_json::{json, Value};
 use test_support::{active_text, plugin_call, status, World};
 use use_cases::gateways::PluginCommandKind::Text;
-use use_cases::gateways::PluginMessage;
+use use_cases::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginMessage};
 use use_cases::Editor;
 
 fn editor_with(world: &World, text: &str) -> Editor {
@@ -133,8 +133,8 @@ fn closed_views_and_unknown_functions() {
     assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
     assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_create_output_panel", json!([1, "exec"])),
-        Err("sublime_api.window_create_output_panel is not implemented yet".into())
+        call(&world, &mut editor, "window_set_layout", json!([1, {}])),
+        Err("sublime_api.window_set_layout is not implemented yet".into())
     );
     assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
     assert_eq!(
@@ -169,10 +169,135 @@ fn messages_and_the_clipboard() {
     call(&world, &mut editor, "status_message", json!(["hi"])).unwrap();
     assert_eq!(status(&editor), "hi");
     call(&world, &mut editor, "error_message", json!(["bad"])).unwrap();
-    assert_eq!(status(&editor), "bad");
     assert!(editor.state().console.ends_with("bad\n"));
+    assert_eq!(
+        world.dialogs.messages.borrow().last(),
+        Some(&MessageDialog {
+            level: MessageLevel::Error,
+            title: "CodeLibre Text".into(),
+            text: "bad".into(),
+            buttons: MessageButtons::Ok,
+        })
+    );
     call(&world, &mut editor, "set_clipboard", json!(["copied"])).unwrap();
     assert_eq!(call(&world, &mut editor, "get_clipboard", json!([])), Ok(json!("copied")));
+}
+
+#[test]
+fn questions_answer_with_the_button_pressed() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    world.dialogs.message_answers.borrow_mut().extend([MessageAnswer::Ok, MessageAnswer::Cancel, MessageAnswer::No]);
+    assert_eq!(call(&world, &mut editor, "ok_cancel_dialog", json!(["Install?", "Install", ""])), Ok(json!(true)));
+    assert_eq!(
+        world.dialogs.messages.borrow().last().unwrap().buttons,
+        MessageButtons::OkCancel { ok: "Install".into(), cancel: "Cancel".into() }
+    );
+    assert_eq!(call(&world, &mut editor, "ok_cancel_dialog", json!(["Install?", "", ""])), Ok(json!(false)));
+    assert_eq!(
+        world.dialogs.messages.borrow().last().unwrap().buttons,
+        MessageButtons::OkCancel { ok: "OK".into(), cancel: "Cancel".into() },
+        "default labels"
+    );
+    assert_eq!(call(&world, &mut editor, "yes_no_cancel_dialog", json!(["Keep?", "", "Drop", "Tool"])), Ok(json!(2)));
+    let last = world.dialogs.messages.borrow().last().unwrap().clone();
+    assert_eq!(last.title, "Tool");
+    assert_eq!(last.buttons, MessageButtons::YesNoCancel { yes: "Yes".into(), no: "Drop".into(), cancel: "Cancel".into() });
+    assert_eq!(call(&world, &mut editor, "yes_no_cancel_dialog", json!(["Keep?", "", "", ""])), Ok(json!(0)), "closed");
+}
+
+#[test]
+fn file_dialogs_answer_with_paths() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    assert_eq!(call(&world, &mut editor, "open_dialog", json!([null])), Ok(Value::Null), "cancelled");
+    *world.dialogs.files_to_open.borrow_mut() = vec!["/p/a.txt".into(), "/p/b.txt".into()];
+    assert_eq!(call(&world, &mut editor, "open_dialog", json!(["/p"])), Ok(json!(["/p/a.txt", "/p/b.txt"])));
+    assert_eq!(world.dialogs.last_open_dir.borrow().as_deref(), Some(std::path::Path::new("/p")));
+
+    *world.dialogs.save_path.borrow_mut() = Some("/p/out.json".into());
+    assert_eq!(call(&world, &mut editor, "save_dialog", json!([null, "out", "json"])), Ok(json!("/p/out.json")));
+    assert_eq!(world.dialogs.save_requests.borrow().last().map(String::as_str), Some("out.json"));
+
+    *world.dialogs.folder_to_open.borrow_mut() = Some("/p".into());
+    assert_eq!(call(&world, &mut editor, "select_folder_dialog", json!([null])), Ok(json!(["/p"])));
+}
+
+#[test]
+fn resources_are_found_and_loaded() {
+    let world = plugin_world()
+        .with_resource("Packages/Tool/Tool.sublime-settings", "{\r\n}")
+        .with_resource("Packages/Tool/icon.png", vec![0x89, 0x50, 0x00, 0xff]);
+    let mut editor = world.editor();
+    assert_eq!(
+        call(&world, &mut editor, "find_resources", json!(["*.sublime-settings"])),
+        Ok(json!(["Packages/Tool/Tool.sublime-settings"]))
+    );
+    assert_eq!(call(&world, &mut editor, "load_resource", json!(["Packages/Tool/Tool.sublime-settings"])), Ok(json!("{\n}")));
+    assert_eq!(call(&world, &mut editor, "load_binary_resource", json!(["Packages/Tool/icon.png"])), Ok(json!("895000ff")));
+    assert!(call(&world, &mut editor, "load_resource", json!(["Packages/Tool/icon.png"])).is_err(), "not text");
+    assert_eq!(
+        call(&world, &mut editor, "load_resource", json!(["Packages/Tool/nope"])),
+        Err("resource not found: Packages/Tool/nope".into())
+    );
+}
+
+#[test]
+fn statuses_by_key_until_erased_or_closed() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let v = view_id(&editor);
+    call(&world, &mut editor, "view_set_status", json!([v, "z_git", "main"])).unwrap();
+    call(&world, &mut editor, "view_set_status", json!([v, "a_lint", "2 errors"])).unwrap();
+    assert_eq!(editor.plugin_statuses(v), ["2 errors", "main"], "sorted by key");
+    assert_eq!(call(&world, &mut editor, "view_get_status", json!([v, "z_git"])), Ok(json!("main")));
+    call(&world, &mut editor, "view_erase_status", json!([v, "a_lint"])).unwrap();
+    assert_eq!(editor.plugin_statuses(v), ["main"]);
+    assert_eq!(call(&world, &mut editor, "view_get_status", json!([v, "a_lint"])), Ok(json!("")));
+    assert!(call(&world, &mut editor, "view_set_status", json!([999, "k", "v"])).is_err());
+
+    editor.close_active_document();
+    assert!(editor.plugin_statuses(v).is_empty(), "forgotten with the view");
+}
+
+#[test]
+fn regions_are_kept_by_the_editor_and_move_with_the_text() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "let x = 1;");
+    let v = view_id(&editor);
+    call(&world, &mut editor, "view_add_regions", json!([v, "lint", [[4, 5]], "region.redish", "dot", 2048])).unwrap();
+    let set = &editor.active_document().unwrap().region_sets()[0];
+    assert_eq!((set.scope.as_str(), set.icon.as_str(), set.flags), ("region.redish", "dot", 2048));
+    call(&world, &mut editor, "view_insert", json!([v, 0, "  "])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_get_regions", json!([v, "lint"])), Ok(json!([[6, 7]])));
+    call(&world, &mut editor, "view_erase_regions", json!([v, "lint"])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_get_regions", json!([v, "lint"])), Ok(json!([])));
+}
+
+#[test]
+fn show_asks_the_view_to_scroll() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "a\nb\nc");
+    let v = view_id(&editor);
+    call(&world, &mut editor, "view_show", json!([v, 4, true])).unwrap();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 4, center: true }));
+}
+
+#[test]
+fn scratch_views_close_without_asking() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "unsaved");
+    let v = view_id(&editor);
+    assert_eq!(call(&world, &mut editor, "view_is_scratch", json!([v])), Ok(json!(false)));
+    assert_eq!(call(&world, &mut editor, "view_close", json!([v])), Ok(json!(false)), "dirty: the user is asked");
+    assert!(editor.state().pending_close.is_some());
+    editor.resolve_pending_close(use_cases::editor::CloseChoice::Cancel);
+
+    call(&world, &mut editor, "view_set_scratch", json!([v, true])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_is_dirty", json!([v])), Ok(json!(false)));
+    assert_eq!(call(&world, &mut editor, "view_close", json!([v])), Ok(json!(true)));
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([v])), Ok(json!(false)));
 }
 
 #[test]

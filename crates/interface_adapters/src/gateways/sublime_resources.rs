@@ -9,8 +9,9 @@ use entities::menu::{merge_menu, MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
 use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResources};
+use use_cases::project::matches_pattern;
 
-use super::package_files::{find_resources, is_in_default_package};
+use super::package_files::{find_resources, is_in_default_package, resource_name, resource_path};
 use super::{builtin_resources, po_file, sublime_json};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
@@ -223,6 +224,22 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
         catalog
+    }
+
+    fn find_resources(&self, pattern: &str, include_sublime: bool) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for path in find_resources(&self.paths, include_sublime, |n| matches_pattern(pattern, n)) {
+            match resource_name(&self.paths, include_sublime, &path) {
+                Some(name) if !names.contains(&name) => names.push(name),
+                _ => {}
+            }
+        }
+        names
+    }
+
+    fn load_resource(&self, name: &str, include_sublime: bool) -> Result<Vec<u8>, String> {
+        let path = resource_path(&self.paths, include_sublime, name).ok_or_else(|| format!("resource not found: {name}"))?;
+        std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     fn system_language(&self) -> Option<String> {

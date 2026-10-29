@@ -29,10 +29,11 @@ use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
-    ClipboardGateway, DialogGateway, DirectoryEntry, FileIndexGateway, FileSystemGateway, PackagePaths,
+    ClipboardGateway, DialogGateway, DirectoryEntry, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
     PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ResourceGateway, SessionGateway, ShellGateway,
     SyntaxGateway, UiResources,
 };
+use use_cases::project::matches_pattern;
 use use_cases::session::Session;
 use use_cases::{Editor, Gateways};
 
@@ -139,6 +140,10 @@ pub struct DialogScript {
     pub last_open_dir: RefCell<Option<PathBuf>>,
     /// Start folder of the last "Open Folder" dialog.
     pub last_folder_dir: RefCell<Option<PathBuf>>,
+    /// Message dialogs shown, in order.
+    pub messages: RefCell<Vec<MessageDialog>>,
+    /// Answers to the next message dialogs (`Cancel` once they run out).
+    pub message_answers: RefCell<VecDeque<MessageAnswer>>,
 }
 
 struct FakeDialogs(Rc<DialogScript>);
@@ -157,6 +162,11 @@ impl DialogGateway for FakeDialogs {
     fn pick_save_path(&self, _start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf> {
         self.0.save_requests.borrow_mut().push(file_name.to_string());
         self.0.save_path.borrow().clone()
+    }
+
+    fn show_message(&self, dialog: &MessageDialog) -> MessageAnswer {
+        self.0.messages.borrow_mut().push(dialog.clone());
+        self.0.message_answers.borrow_mut().pop_front().unwrap_or(MessageAnswer::Cancel)
     }
 }
 
@@ -215,6 +225,8 @@ pub struct Resources {
     pub settings_loads: Cell<usize>,
     /// `include_sublime_packages` of every `load_ui_resources` call.
     pub ui_loads: RefCell<Vec<bool>>,
+    /// Package files by resource name (`Packages/<package>/<path>`).
+    pub package_files: RefCell<BTreeMap<String, Vec<u8>>>,
 }
 
 struct FakeResources(Rc<Resources>);
@@ -290,6 +302,16 @@ impl ResourceGateway for FakeResources {
 
     fn system_language(&self) -> Option<String> {
         self.0.system_language.borrow().clone()
+    }
+
+    fn find_resources(&self, pattern: &str, _include_sublime: bool) -> Vec<String> {
+        let files = self.0.package_files.borrow();
+        let file_name = |name: &str| name.rsplit('/').next().unwrap_or_default().to_string();
+        files.keys().filter(|name| matches_pattern(pattern, &file_name(name))).cloned().collect()
+    }
+
+    fn load_resource(&self, name: &str, _include_sublime: bool) -> Result<Vec<u8>, String> {
+        self.0.package_files.borrow().get(name).cloned().ok_or_else(|| format!("resource not found: {name}"))
     }
 }
 
@@ -374,6 +396,8 @@ pub struct PluginScript {
     pub events: RefCell<Vec<(String, DocumentId)>>,
     /// The `callback` requests (a panel's answers): (callback id, name, arguments).
     pub callbacks: RefCell<Vec<(u64, String, Value)>>,
+    /// The `query` requests (`on_query_context`, `on_text_command`…): (event, view, arguments).
+    pub queries: RefCell<Vec<(String, Option<DocumentId>, Value)>>,
     /// The editor's answers to the `Call` messages, in order.
     pub replies: RefCell<Vec<Result<Value, String>>>,
     pub stops: Cell<usize>,
@@ -429,6 +453,11 @@ impl PluginHostGateway for FakePluginHost {
 
     fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String> {
         self.0.callbacks.borrow_mut().push((id, name.to_string(), args.clone()));
+        Ok(())
+    }
+
+    fn query(&mut self, name: &str, view: Option<DocumentId>, args: &Value) -> Result<(), String> {
+        self.0.queries.borrow_mut().push((name.to_string(), view, args.clone()));
         Ok(())
     }
 
@@ -559,6 +588,7 @@ impl World {
                 errors: RefCell::default(),
                 settings_loads: Cell::new(0),
                 ui_loads: RefCell::default(),
+                package_files: RefCell::default(),
             }),
             syntaxes: Rc::default(),
             session: Rc::default(),
@@ -593,6 +623,12 @@ impl World {
 
     pub fn with_dir(self, path: &str) -> Self {
         self.disk.mkdir(path);
+        self
+    }
+
+    /// A package file plugins can find and load (`Packages/<package>/<path>`).
+    pub fn with_resource(self, name: &str, contents: impl Into<Vec<u8>>) -> Self {
+        self.resources.package_files.borrow_mut().insert(name.to_string(), contents.into());
         self
     }
 

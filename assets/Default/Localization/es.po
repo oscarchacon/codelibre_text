@@ -876,3 +876,15 @@ msgstr "Cambiar finales de línea"
 #: crates/frameworks/src/views/status_bar.rs
 msgid "Toggle translate tabs to spaces"
 msgstr "Alternar tabulaciones como espacios"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "OK"
+msgstr "Aceptar"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "Yes"
+msgstr "Sí"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "No"
+msgstr "No"

@@ -69,11 +69,46 @@ pub trait FileSystemGateway {
     fn list_dir(&self, path: &Path) -> Vec<DirectoryEntry>;
 }
 
-/// Native file pickers.
+/// How serious a message dialog is (its icon).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// The buttons of a message dialog, with their labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageButtons {
+    Ok,
+    OkCancel { ok: String, cancel: String },
+    YesNoCancel { yes: String, no: String, cancel: String },
+}
+
+/// The button the user pressed: `Ok` is also "Yes"; closing the dialog is `Cancel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageAnswer {
+    Ok,
+    No,
+    Cancel,
+}
+
+/// A modal message dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageDialog {
+    pub level: MessageLevel,
+    pub title: String,
+    pub text: String,
+    pub buttons: MessageButtons,
+}
+
+/// Native file pickers and message dialogs.
 pub trait DialogGateway {
     fn pick_files(&self, start_dir: Option<&Path>) -> Vec<PathBuf>;
     fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf>;
     fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf>;
+    /// Shows a message and waits for the user's answer.
+    fn show_message(&self, dialog: &MessageDialog) -> MessageAnswer;
 }
 
 pub trait ClipboardGateway {
@@ -118,6 +153,11 @@ pub trait ResourceGateway {
     fn load_translations(&self, language: &str, include_sublime_packages: bool, errors: &mut Vec<String>) -> Catalog;
     /// The operating system's language (e.g. `es-CL`), used when the `language` setting is `auto`.
     fn system_language(&self) -> Option<String>;
+    /// Every package file whose name matches `pattern` (`*` and `?` wildcards), as resource names
+    /// (`Packages/<package>/<path>`), in load order.
+    fn find_resources(&self, pattern: &str, include_sublime_packages: bool) -> Vec<String>;
+    /// The bytes of a resource named `Packages/<package>/<path>`.
+    fn load_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Vec<u8>, String>;
 }
 
 /// Syntax definitions and color schemes.
@@ -180,10 +220,12 @@ pub enum PluginMessage {
     Loaded { commands: Vec<(String, PluginCommandKind)>, events: Vec<String>, errors: Vec<String> },
     /// A command or event finished; `error` is its traceback if it failed.
     Done { error: Option<String> },
+    /// The listeners' answer to a [`query`](PluginHostGateway::query) (`Null` when none answered).
+    Answer(Value),
 }
 
 /// Runs Sublime Text plugins (Python) in a separate process. Every request is answered through
-/// [`receive`](Self::receive): first any number of `Call`s and `Log`s, then `Loaded` or `Done`.
+/// [`receive`](Self::receive): first any number of `Call`s and `Log`s, then `Loaded`, `Done` or `Answer`.
 /// Between requests, timers and other threads of the plugins may call too
 /// ([`try_receive`](Self::try_receive)).
 pub trait PluginHostGateway {
@@ -196,6 +238,10 @@ pub trait PluginHostGateway {
     /// Answers a panel a plugin opened: callback `id`, which answer (`select`, `highlight`, `done`,
     /// `change`, `cancel`) and its arguments.
     fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String>;
+    /// Asks the listeners something they answer (`on_query_context`, `on_text_command`,
+    /// `on_window_command`; also `on_post_*_command`, which answer nothing): the event, its view
+    /// (none for window events) and the event's other arguments. Finished by an `Answer`.
+    fn query(&mut self, name: &str, view: Option<DocumentId>, args: &Value) -> Result<(), String>;
     /// The answer to the last `Call` that has not been answered yet.
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String>;
     /// Waits for the next message; an error means the host died or stopped answering.

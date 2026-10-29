@@ -346,3 +346,34 @@ fn the_system_language_comes_from_the_caller() {
     let gateway = packages.gateway().with_system_language(Some("es-CL".into()));
     assert_eq!(gateway.system_language().as_deref(), Some("es-CL"));
 }
+
+// ----- resources for plugins -----------------------------------------------------------------------
+
+#[test]
+fn plugins_find_resources_by_file_name_pattern() {
+    let packages = Packages::new();
+    packages
+        .file("Tool", "Tool.sublime-settings", "{}")
+        .file("Tool", "schemes/Dark.sublime-color-scheme", "{}")
+        .file("User", "Light.sublime-color-scheme", "{}")
+        .sublime_file("Tool", "schemes/Dark.sublime-color-scheme", "{}");
+    let gateway = packages.gateway();
+    assert_eq!(
+        gateway.find_resources("*.sublime-color-scheme", true),
+        vec!["Packages/Tool/schemes/Dark.sublime-color-scheme", "Packages/User/Light.sublime-color-scheme"],
+        "a file in both copies of a package is listed once"
+    );
+    assert_eq!(gateway.find_resources("Tool.sublime-?ettings", false), vec!["Packages/Tool/Tool.sublime-settings"]);
+}
+
+#[test]
+fn plugins_load_resources_by_name() {
+    let packages = Packages::new();
+    packages.file("Tool", "data/info.txt", "hello");
+    let gateway = packages.gateway();
+    assert_eq!(gateway.load_resource("Packages/Tool/data/info.txt", false), Ok(b"hello".to_vec()));
+    assert_eq!(
+        gateway.load_resource("Packages/Tool/missing.txt", false),
+        Err("resource not found: Packages/Tool/missing.txt".into())
+    );
+}

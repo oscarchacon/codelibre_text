@@ -6,16 +6,19 @@
 //! ones to add are listed in `docs/plugins.md`.
 
 use entities::command::Command;
-use entities::document::{DocumentId, LineEnding};
+use entities::document::{DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
 use crate::editor::Editor;
+use crate::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
 use crate::plugins::CommandRunner;
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
+/// The title of plugins' message dialogs (Sublime's say "Sublime Text").
+const APP_NAME: &str = "CodeLibre Text";
 /// `sublime.LITERAL` and `sublime.IGNORECASE`.
 const LITERAL: u64 = 1;
 const IGNORECASE: u64 = 2;
@@ -81,8 +84,65 @@ impl Editor {
             "error_message" | "message_dialog" => {
                 let message = a.str(0)?.to_string();
                 self.log(&format!("{message}\n"));
-                self.notify(message);
+                let level = if function == "error_message" { MessageLevel::Error } else { MessageLevel::Info };
+                self.plugin_dialog(level, "", &message, MessageButtons::Ok);
                 Ok(Value::Null)
+            }
+            "ok_cancel_dialog" => {
+                let ok = Self::button_label(a.str(1).unwrap_or_default(), self.tr("OK"));
+                let buttons = MessageButtons::OkCancel { ok, cancel: self.tr("Cancel").to_string() };
+                let answer = self.plugin_dialog(MessageLevel::Info, a.str(2).unwrap_or_default(), a.str(0)?, buttons);
+                Ok(json!(answer == MessageAnswer::Ok))
+            }
+            "yes_no_cancel_dialog" => {
+                let buttons = MessageButtons::YesNoCancel {
+                    yes: Self::button_label(a.str(1).unwrap_or_default(), self.tr("Yes")),
+                    no: Self::button_label(a.str(2).unwrap_or_default(), self.tr("No")),
+                    cancel: self.tr("Cancel").to_string(),
+                };
+                let answer = self.plugin_dialog(MessageLevel::Info, a.str(3).unwrap_or_default(), a.str(0)?, buttons);
+                // `sublime.DIALOG_CANCEL`, `DIALOG_YES`, `DIALOG_NO`.
+                Ok(json!(match answer {
+                    MessageAnswer::Cancel => 0,
+                    MessageAnswer::Ok => 1,
+                    MessageAnswer::No => 2,
+                }))
+            }
+            "open_dialog" => {
+                let files = self.gateways.dialogs.pick_files(self.dialog_directory(a.value(0)).as_deref());
+                let files: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
+                Ok(if files.is_empty() { Value::Null } else { json!(files) })
+            }
+            "save_dialog" => {
+                let name = a.str(1).unwrap_or_default();
+                let extension = a.str(2).unwrap_or_default();
+                let file_name = match (name, extension) {
+                    (name, "") => name.to_string(),
+                    (name, extension) => format!("{name}.{extension}"),
+                };
+                let path = self.gateways.dialogs.pick_save_path(self.dialog_directory(a.value(0)).as_deref(), &file_name);
+                Ok(path.map_or(Value::Null, |p| json!(p.display().to_string())))
+            }
+            "select_folder_dialog" => {
+                let folder = self.gateways.dialogs.pick_folder(self.dialog_directory(a.value(0)).as_deref());
+                Ok(folder.map_or(Value::Null, |p| json!([p.display().to_string()])))
+            }
+            "find_resources" => {
+                let include_sublime = self.global_settings().bool("import_sublime_packages", true);
+                Ok(json!(self.gateways.resources.find_resources(a.str(0)?, include_sublime)))
+            }
+            "load_resource" | "load_binary_resource" => {
+                let include_sublime = self.global_settings().bool("import_sublime_packages", true);
+                let name = a.str(0)?;
+                let bytes = self.gateways.resources.load_resource(name, include_sublime)?;
+                if function == "load_resource" {
+                    // Sublime gives resources `\n` line endings.
+                    let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not UTF-8 text"))?;
+                    Ok(json!(text.replace("\r\n", "\n")))
+                } else {
+                    // JSON has no bytes: hexadecimal, read with `bytes.fromhex`.
+                    Ok(json!(bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()))
+                }
             }
             "get_clipboard" => self.gateways.clipboard.read_text().map(Value::from),
             "set_clipboard" => self.gateways.clipboard.write_text(a.str(0)?).map(|()| Value::Null),
@@ -122,15 +182,48 @@ impl Editor {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect::<Vec<_>>())),
-            "view_is_valid" => Ok(json!(self.index_of(a.u64(0)?).is_some())),
+            "view_is_valid" => Ok(json!(self.any_document(a.u64(0)?).is_some())),
+            "view_set_status" | "view_erase_status" => {
+                let id = a.u64(0)?;
+                self.any_document(id).ok_or("the view is closed")?;
+                let statuses = self.state.plugins.view_statuses.entry(id).or_default();
+                if function == "view_set_status" {
+                    statuses.insert(a.str(1)?.to_string(), a.str(2)?.to_string());
+                } else {
+                    statuses.remove(a.str(1)?);
+                }
+                Ok(Value::Null)
+            }
+            "view_get_status" => {
+                let statuses = self.state.plugins.view_statuses.get(&a.u64(0)?);
+                Ok(json!(statuses.and_then(|s| s.get(a.str(1).unwrap_or_default())).cloned().unwrap_or_default()))
+            }
+            "window_create_output_panel" => Ok(json!(self.create_output_panel(a.str(1)?))),
+            "window_find_output_panel" => Ok(self.find_output_panel(a.str(1)?).map_or(Value::Null, |id| json!(id))),
+            "window_destroy_output_panel" => {
+                self.destroy_output_panel(a.str(1)?);
+                Ok(Value::Null)
+            }
+            "window_active_panel" => Ok(self.shown_output_panel().map_or(Value::Null, |p| json!(format!("output.{}", p.name)))),
+            "window_panels" => Ok(json!(self.output_panel_names())),
+            "view_close" => {
+                // A dirty view asks to save first, so it may still be open.
+                let id = a.u64(0)?;
+                self.close_documents(vec![id]);
+                Ok(json!(self.index_of(id).is_none()))
+            }
             _ if function.starts_with("view_") => self.plugin_view_call(function, &a),
             _ => Err(format!("sublime_api.{function} is not implemented yet")),
         }
     }
 
     fn plugin_view_call(&mut self, function: &str, a: &Args) -> Result<Value, String> {
-        let index = self.index_of(a.u64(0)?).ok_or("the view is closed")?;
-        let doc = &mut self.state.documents[index];
+        // Resolved before borrowing the document: it needs the syntax gateway.
+        let syntax = match function {
+            "view_assign_syntax" => Some(self.gateways.syntaxes.resolve(a.str(1)?)),
+            _ => None,
+        };
+        let doc = self.any_document_mut(a.u64(0)?).ok_or("the view is closed")?;
         let len = doc.char_count();
         let point = |i: usize| a.usize(i).map(|p| p.min(len));
         Ok(match function {
@@ -141,6 +234,11 @@ impl Editor {
                 Value::Null
             }
             "view_is_dirty" => json!(doc.is_dirty()),
+            "view_is_scratch" => json!(doc.scratch),
+            "view_set_scratch" => {
+                doc.scratch = a.bool(1);
+                Value::Null
+            }
             "view_change_count" => json!(doc.change_count()),
             "view_is_read_only" => json!(doc.read_only),
             "view_set_read_only" => {
@@ -155,11 +253,36 @@ impl Editor {
             }
             "view_syntax" => json!(doc.syntax),
             "view_assign_syntax" => {
-                let syntax = self.gateways.syntaxes.resolve(a.str(1)?);
-                self.state.documents[index].syntax = syntax;
+                doc.syntax = syntax.unwrap_or_default();
                 Value::Null
             }
             "view_size" => json!(len),
+            "view_add_regions" => {
+                let regions = a
+                    .value(2)
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|r| Some((r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
+                    .collect();
+                doc.add_regions(RegionSet {
+                    key: a.str(1)?.to_string(),
+                    regions,
+                    scope: a.str(3).unwrap_or_default().to_string(),
+                    icon: a.str(4).unwrap_or_default().to_string(),
+                    flags: a.u64(5).unwrap_or(0),
+                });
+                Value::Null
+            }
+            "view_get_regions" => json!(doc.regions(a.str(1)?).iter().map(|&(start, end)| [start, end]).collect::<Vec<_>>()),
+            "view_erase_regions" => {
+                doc.erase_regions(a.str(1)?);
+                Value::Null
+            }
+            "view_show" => {
+                doc.request_show(point(1)?, a.bool(2));
+                Value::Null
+            }
             "view_cached_substr" => json!(selected_text(&doc.text, Selection::new(point(1)?, point(2)?))),
             "view_insert" => {
                 let text = a.str(2)?;
@@ -242,6 +365,23 @@ impl Editor {
         })
     }
 
+    /// A modal message for a plugin, titled with the application's name unless the plugin gives one.
+    fn plugin_dialog(&self, level: MessageLevel, title: &str, text: &str, buttons: MessageButtons) -> MessageAnswer {
+        let title = if title.is_empty() { APP_NAME } else { title };
+        let dialog = MessageDialog { level, title: title.to_string(), text: text.to_string(), buttons };
+        self.gateways.dialogs.show_message(&dialog)
+    }
+
+    /// A button's label: the plugin's, or the (translated) default.
+    fn button_label(label: &str, default: &str) -> String {
+        if label.is_empty() { default } else { label }.to_string()
+    }
+
+    /// The folder a plugin's file dialog starts in, or the usual one.
+    fn dialog_directory(&self, directory: &Value) -> Option<std::path::PathBuf> {
+        self.dialog_start(directory.as_str())
+    }
+
     /// `view.run_command`, `window.run_command` or `sublime.run_command`. A view's command runs
     /// with that view active; the previously active view comes back afterwards.
     fn plugin_run_command(
@@ -251,6 +391,18 @@ impl Editor {
         command: &Command,
         run_command: &mut CommandRunner,
     ) -> Result<Value, String> {
+        if command.name == "append" {
+            let id = if kind == "view" { target } else { self.active_document().ok_or("no view is open")?.id };
+            self.append_text(id, command.str_arg("characters"), command.bool_arg("force", false))?;
+            return Ok(Value::Null);
+        }
+        if kind == "view" && self.is_output_panel(target) {
+            if self.run_plugin_command_in(command, Some(target), run_command) {
+                return Ok(Value::Null);
+            }
+            // The command controller only knows tabs.
+            return Err(format!("{} cannot run in an output panel yet (only append and plugin commands)", command.name));
+        }
         let previous = self.state.active;
         if kind == "view" {
             self.state.active = self.index_of(target).ok_or("the view is closed")?;

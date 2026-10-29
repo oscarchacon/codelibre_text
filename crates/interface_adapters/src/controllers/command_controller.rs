@@ -8,6 +8,8 @@ use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::editing::{Expansion, TextCommand};
+use use_cases::gateways::PluginCommandKind;
+use use_cases::plugin_hooks::CommandTarget;
 use use_cases::plugin_panels::PluginPanelRequest;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
@@ -49,8 +51,24 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                     focus_requested: true,
                 });
                 view.find_panel.visible = false;
+                editor.hide_output_panel();
             }
         }
+    }
+}
+
+/// `show_panel {"panel": "output.<name>"}`: the panel takes the place of the find and input panels.
+fn show_output_panel(editor: &mut Editor, view: &mut ViewState, name: &str, toggle: bool) {
+    if toggle && editor.shown_output_panel().is_some_and(|p| p.name == name) {
+        editor.hide_output_panel();
+        return;
+    }
+    if editor.show_output_panel(name) {
+        view.find_panel.visible = false;
+        finish_plugin_input(editor, view, false);
+    } else {
+        let panel = format!("output.{name}");
+        editor.notify(editor.tr_args("Panel not supported: {name}", &[("name", &panel)]));
     }
 }
 
@@ -80,7 +98,44 @@ pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool
     show_plugin_panels(editor, view);
 }
 
+/// Built-in commands that are window commands in Sublime (the others run on the active view), so
+/// plugins hear about them in `on_window_command` instead of `on_text_command`.
+const WINDOW_COMMANDS: &[&str] = &[
+    "new_file", "prompt_open_file", "prompt_open_folder", "prompt_add_folder", "open_file", "open_dir", "save_all",
+    "close", "close_file", "close_all", "close_window", "exit", "reopen_last_file", "close_folder_list",
+    "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
+    "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
+    "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
+    "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "show_load_errors",
+    "show_about_window", "open_url", "report_issue",
+];
+
+/// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
+/// first, and hear `on_post_text_command` / `on_post_window_command` after it.
 pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
+    let command = match hook_target(editor, &command.name) {
+        Some(target) => editor.plugin_rewrite_command(command, target),
+        None => command.clone(),
+    };
+    run_command(editor, view, &command);
+    if let Some(target) = hook_target(editor, &command.name) {
+        editor.plugin_command_ran(&command, target);
+    }
+}
+
+/// Which hooks hear about a command: plugin commands by their kind (application commands have
+/// none), built-in ones by [`WINDOW_COMMANDS`].
+fn hook_target(editor: &Editor, name: &str) -> Option<CommandTarget> {
+    match editor.plugin_command_kind(name) {
+        Some(PluginCommandKind::Text) => Some(CommandTarget::View),
+        Some(PluginCommandKind::Window) => Some(CommandTarget::Window),
+        Some(PluginCommandKind::Application) => None,
+        None if WINDOW_COMMANDS.contains(&name) => Some(CommandTarget::Window),
+        None => Some(CommandTarget::View),
+    }
+}
+
+fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     match command.name.as_str() {
         // ----- files ---------------------------------------------------------------------------
         "new_file" => editor.new_file(),
@@ -153,8 +208,12 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             view.quick_panel = Some(panel);
         }
         "show_panel" => {
-            let panel = command.str_arg("panel").trim_start_matches("output.");
             let toggle = command.bool_arg("toggle", false);
+            if let Some(name) = command.str_arg("panel").strip_prefix("output.") {
+                show_output_panel(editor, view, name, toggle);
+                return;
+            }
+            let panel = command.str_arg("panel");
             match panel {
                 "find" | "incremental_find" | "find_in_files" | "replace"
                     if toggle && view.find_panel.visible && view.find_panel.replace_mode == (panel == "replace") =>
@@ -163,6 +222,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 }
                 "find" | "incremental_find" | "find_in_files" | "replace" => {
                     finish_plugin_input(editor, view, false);
+                    editor.hide_output_panel();
                     view.find_panel.visible = true;
                     view.find_panel.replace_mode = panel == "replace";
                     view.find_panel.focus_requested = true;
@@ -176,6 +236,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "hide_panel" => {
             view.find_panel.visible = false;
             finish_plugin_input(editor, view, false);
+            editor.hide_output_panel();
             view.focus_editor = true;
         }
 

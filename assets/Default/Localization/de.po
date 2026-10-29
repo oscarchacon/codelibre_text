@@ -876,3 +876,15 @@ msgstr "Zeilenenden umschalten"
 #: crates/frameworks/src/views/status_bar.rs
 msgid "Toggle translate tabs to spaces"
 msgstr "Tabulatoren als Leerzeichen umschalten"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "OK"
+msgstr "OK"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "Yes"
+msgstr "Ja"
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "No"
+msgstr "Nein"

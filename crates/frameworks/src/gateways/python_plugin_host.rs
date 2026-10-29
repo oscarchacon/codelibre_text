@@ -176,6 +176,10 @@ impl PluginHostGateway for PythonPluginHost {
         self.send(json!({ "op": "callback", "id": id, "name": name, "args": args }))
     }
 
+    fn query(&mut self, name: &str, view: Option<DocumentId>, args: &Value) -> Result<(), String> {
+        self.send(json!({ "op": "query", "name": name, "view": view, "window": 1, "args": args }))
+    }
+
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String> {
         let id = self.process.as_mut().and_then(|p| p.open_calls.pop()).unwrap_or(Value::Null);
         self.send(match result {
@@ -247,6 +251,7 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
         }),
         Some("log") => Ok(PluginMessage::Log(text("text").unwrap_or_default())),
         Some("done") => Ok(PluginMessage::Done { error: text("error") }),
+        Some("answer") => Ok(PluginMessage::Answer(value.get("value").cloned().unwrap_or(Value::Null))),
         Some("loaded") => {
             let commands = value
                 .get("commands")

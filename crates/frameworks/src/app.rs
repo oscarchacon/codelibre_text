@@ -15,7 +15,7 @@ use crate::input;
 use crate::syntax_engine::SharedSyntaxEngine;
 use crate::views::editor_view::{self, EditorText, SelectionSync};
 use crate::views::theme::Chrome;
-use crate::views::{dialogs, find_panel, input_panel, menu_bar, quick_panel, side_bar, status_bar, tabs};
+use crate::views::{dialogs, find_panel, input_panel, menu_bar, output_panel, quick_panel, side_bar, status_bar, tabs};
 
 pub struct App {
     editor: Editor,
@@ -167,6 +167,20 @@ impl App {
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
                 .show(ctx, |ui| input_panel::show(ui, chrome, &input, &mut events));
+        }
+
+        if let Some(output) = presenters::output_panel::present(&self.editor) {
+            egui::TopBottomPanel::bottom("output_panel")
+                .resizable(true)
+                .default_height(180.0)
+                .height_range(60.0..=ctx.screen_rect().height() * 0.7)
+                .frame(
+                    egui::Frame::new()
+                        .fill(chrome.editor_bg)
+                        .inner_margin(egui::Margin::symmetric(8, 4))
+                        .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
+                )
+                .show(ctx, |ui| output_panel::show(ui, chrome, &output, &mut events));
         }
 
         if let Some(find) = presenters::find_panel::present(&mut self.editor, &mut self.view) {

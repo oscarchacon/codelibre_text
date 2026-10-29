@@ -27,7 +27,9 @@ pub enum KeyHandling {
 pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[KeyCombo]) -> KeyHandling {
     let context = ViewKeyContext {
         overlay_visible: view.quick_panel.is_some(),
-        panel_visible: view.find_panel.visible || view.input_panel.is_some(),
+        panel_visible: view.find_panel.visible || view.input_panel.is_some() || editor.shown_output_panel().is_some(),
+        // Output panels are not focused: the caret stays in the text.
+        panel_has_focus: view.find_panel.visible || view.input_panel.is_some(),
         selection_empty: editor.active_document().is_none_or(|d| d.selection().is_empty()),
         num_selections: editor.active_document().map_or(1, |d| d.extra_selections().len() + 1),
         settings: editor.view_settings(),
@@ -81,6 +83,7 @@ fn takes_over_from_widget(editor: &mut Editor, view: &ViewState, command: &str) 
 struct ViewKeyContext {
     overlay_visible: bool,
     panel_visible: bool,
+    panel_has_focus: bool,
     selection_empty: bool,
     num_selections: usize,
     settings: Settings,
@@ -90,7 +93,8 @@ impl KeyContext for ViewKeyContext {
     fn query(&self, key: &str, operator: &str, operand: &Value) -> Option<bool> {
         let value = match key {
             "overlay_visible" | "overlay_has_focus" => Value::Bool(self.overlay_visible),
-            "panel_visible" | "panel_has_focus" => Value::Bool(self.panel_visible),
+            "panel_visible" => Value::Bool(self.panel_visible),
+            "panel_has_focus" => Value::Bool(self.panel_has_focus),
             "selection_empty" => Value::Bool(self.selection_empty),
             "num_selections" => Value::from(self.num_selections),
             "auto_complete_visible" | "has_next_field" | "has_prev_field" | "is_recording" | "popup_visible" => {

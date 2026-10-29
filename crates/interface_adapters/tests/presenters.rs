@@ -7,7 +7,9 @@ use entities::find::FindOptions;
 use entities::keymap::{Binding, KeyCombo};
 use entities::menu::MenuItem;
 use entities::selection::Selection;
-use interface_adapters::presenters::{dialogs, editor as editor_presenter, find_panel, menu, quick_panel, side_bar, status_bar, tabs, window};
+use interface_adapters::presenters::{
+    dialogs, editor as editor_presenter, find_panel, menu, output_panel, quick_panel, side_bar, status_bar, tabs, window,
+};
 use interface_adapters::view_models::{DialogViewModel, TreeRowKind};
 use interface_adapters::view_state::{QuickPanel, ViewState};
 use serde_json::json;
@@ -417,4 +419,53 @@ fn about_and_load_errors_windows() {
     assert_eq!(about.packages, PathBuf::from("/packages").display().to_string());
     assert!(about.sublime_packages.is_none());
     assert_eq!(dialogs::present_load_errors(&editor, &view).unwrap(), vec!["broken file"]);
+}
+
+#[test]
+fn the_output_panel_shows_the_end_of_its_text() {
+    let world = World::new().with_plugin_commands(&[("build", use_cases::gateways::PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    assert!(output_panel::present(&editor).is_none(), "nothing shown");
+    let text: String = (0..output_panel::MAX_LINES + 5).map(|i| format!("line {i}\n")).collect();
+    // The panel gets the next document id.
+    let panel_id = editor.active_document().unwrap().id + 1;
+    world.plugins.then([
+        test_support::plugin_call("window_create_output_panel", json!([1, "exec"])),
+        test_support::plugin_call("run_command", json!(["view", panel_id, "append", {"characters": text}])),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&Command::new("build"), &mut |_, _| {});
+    editor.show_output_panel("exec");
+    let panel = output_panel::present(&editor).unwrap();
+    assert_eq!(panel.name, "exec");
+    assert_eq!(panel.text.lines().count(), output_panel::MAX_LINES);
+    assert!(panel.text.starts_with("line 5\n") && panel.text.ends_with(&format!("line {}\n", output_panel::MAX_LINES + 4)));
+}
+#[test]
+fn plugin_regions_and_statuses_are_presented() {
+    let world = World::new().with_plugin_commands(&[("lint", use_cases::gateways::PluginCommandKind::Text)]);
+    let mut editor = editor_with_text(&world, "one two three", Selection::caret(0));
+    let v = editor.active_document().unwrap().id;
+    let call = |function: &str, args: serde_json::Value| test_support::plugin_call(function, args);
+    world.plugins.then([
+        call("view_add_regions", json!([v, "plain", [[8, 13], [0, 3]], "region.bluish", "", 0])),
+        call("view_add_regions", json!([v, "squiggly", [[4, 7], [5, 5]], "invalid", "dot", 32 | 256 | 2048 | 1])),
+        call("view_add_regions", json!([v, "hidden", [[0, 1]], "", "", 128])),
+        call("view_set_status", json!([v, "lint", "1 warning"])),
+        call("view_show", json!([v, 8, false])),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&Command::new("lint"), &mut |_, _| {});
+
+    let model = editor_presenter::present(&mut editor, &mut ViewState::default()).unwrap();
+    assert_eq!(model.regions.len(), 2, "hidden regions are not drawn");
+    let plain = &model.regions[0];
+    assert_eq!(plain.ranges, vec![0..3, 8..13], "sorted");
+    assert!(plain.fill && plain.outline && plain.underline.is_none() && !plain.draw_empty);
+    let squiggly = &model.regions[1];
+    assert_eq!((squiggly.scope.as_str(), squiggly.icon.as_str()), ("invalid", "dot"));
+    assert!(!squiggly.fill && !squiggly.outline && squiggly.draw_empty);
+    assert_eq!(squiggly.underline, Some(interface_adapters::view_models::Underline::Squiggly));
+    assert_eq!(model.show, Some((8, false, 1)));
+    assert_eq!(status_bar::present(&editor).plugin_statuses, vec!["1 warning".to_string()]);
 }

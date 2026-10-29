@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use interface_adapters::gateways::package_files::{find_resources, is_in_default_package};
+use interface_adapters::gateways::package_files::{find_resources, is_in_default_package, resource_name, resource_path};
 use use_cases::gateways::PackagePaths;
 
 fn write(path: &Path) {
@@ -85,6 +85,28 @@ fn sublime_text_packages_are_only_read_when_included() {
 fn missing_package_folders_find_nothing() {
     let paths = PackagePaths { packages: PathBuf::from("/does/not/exist"), sublime_packages: None };
     assert!(find_resources(&paths, true, |_| true).is_empty());
+}
+
+#[test]
+fn resource_names_and_their_files() {
+    let dir = tempfile::tempdir().unwrap();
+    write(&dir.path().join("Sublime/Packages/Tool/Tool.sublime-settings"));
+    write(&dir.path().join("Sublime/Packages/Tool/only_sublime.txt"));
+    write(&dir.path().join("Packages/Tool/Tool.sublime-settings"));
+    let paths = PackagePaths {
+        packages: dir.path().join("Packages"),
+        sublime_packages: Some(dir.path().join("Sublime/Packages")),
+    };
+    let ours = dir.path().join("Packages/Tool/Tool.sublime-settings");
+    assert_eq!(resource_name(&paths, true, &ours).as_deref(), Some("Packages/Tool/Tool.sublime-settings"));
+    assert_eq!(resource_path(&paths, true, "Packages/Tool/Tool.sublime-settings"), Some(ours), "ours win");
+    assert_eq!(
+        resource_path(&paths, true, "Packages/Tool/only_sublime.txt"),
+        Some(dir.path().join("Sublime/Packages/Tool/only_sublime.txt"))
+    );
+    assert_eq!(resource_path(&paths, false, "Packages/Tool/only_sublime.txt"), None);
+    assert_eq!(resource_path(&paths, true, "Packages/Tool/../../secret.txt"), None, "cannot climb out");
+    assert_eq!(resource_path(&paths, true, "Tool/Tool.sublime-settings"), None);
 }
 
 #[test]

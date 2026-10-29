@@ -1,7 +1,8 @@
 # Python plugins (Sublime Text API)
 
 Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-10-28: request ids, calls
-outside commands, real timers, view events; then quick and input panels). The rest of B and phase C below are the pending work, in order.
+outside commands, real timers, view events; then quick and input panels; 2026-10-29 dialogs, resources,
+scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -23,14 +24,20 @@ command_controller ──run "foo"──▶ use_cases::plugins ──PluginHostG
 | Gateway trait, messages (`PluginMessage`, `PluginLoad`, `PluginCommandKind`) | `crates/use_cases/src/gateways.rs` | Use Cases |
 | Loading, running, console, conversation loop (`converse`), events, `poll_plugins` | `crates/use_cases/src/plugins.rs` | Use Cases |
 | Where events fire: `on_new`/`on_load`/`on_activated`/`on_*close` (`documents.rs`), `on_*_save` (`saving.rs`) | `crates/use_cases/src/` | Use Cases |
+| Listener methods that answer: `on_query_context` (`press_key`), `on_text_command` / `on_window_command` and `on_post_*_command` | `crates/use_cases/src/plugin_hooks.rs` | Use Cases |
+| Which built-ins are window commands for the hooks (`WINDOW_COMMANDS`), hooks around every command (`run`) | `crates/interface_adapters/src/controllers/command_controller.rs` | Interface Adapters |
 | `poll_plugins` every frame, after the UI events (`command_controller::poll_plugins`) | `crates/frameworks/src/app.rs` | Frameworks |
 | The `sublime_api` functions the editor answers | `crates/use_cases/src/plugin_api.rs` | Use Cases |
 | Quick / input panels plugins open, and the answers to their callbacks | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
 | Showing them (`show_plugin_panels`), answers from the views (`SearchKind::PluginItems`, `UiEvent::InputPanel*`) | `crates/interface_adapters/src/controllers/{command,ui}_controller.rs` | Interface Adapters |
 | The input panel view | `crates/frameworks/src/views/input_panel.rs` | Frameworks |
-| Edits from plugins move every selection (`Document::replace_range`) | `crates/entities/src/document.rs` | Entities |
+| Output panels (documents that are not tabs, `any_document`), the `append` command | `crates/use_cases/src/output_panels.rs` | Use Cases |
+| `show_panel output.<name>` (`show_output_panel`), its presenter and view | `command_controller.rs`, `presenters/output_panel.rs`, `frameworks/src/views/output_panel.rs` | Adapters / Frameworks |
+| Edits from plugins move every selection and region set (`Document::replace_range`, `RegionSet`, `request_show`) | `crates/entities/src/document.rs` | Entities |
+| Regions drawn (fill, outline, underlines, gutter icons), the scope's color (`SyntaxEngine::scope_color`), `view.show` scrolling | `crates/frameworks/src/views/editor_view.rs`, `presenters/editor.rs` (flags → `RegionViewModel`) | Frameworks / Adapters |
 | Plugin commands are the fallback of the command controller; `show_panel console` | `crates/interface_adapters/src/controllers/command_controller.rs` | Interface Adapters |
-| Arbitrary `.sublime-settings` files (`load_settings_file`, `*_user_settings_file`) | `crates/interface_adapters/src/gateways/sublime_resources.rs` | Interface Adapters |
+| Arbitrary `.sublime-settings` files (`load_settings_file`, `*_user_settings_file`), `find_resources` / `load_resource` | `crates/interface_adapters/src/gateways/sublime_resources.rs` (names ↔ files: `package_files.rs`) | Interface Adapters |
+| Message dialogs plugins show (`DialogGateway::show_message`, `rfd::MessageDialog`) | `crates/frameworks/src/gateways/native_dialogs.rs` | Frameworks |
 | Process, interpreter discovery, reader threads (wake the window), call ids, 20 s timeout | `crates/frameworks/src/gateways/python_plugin_host.rs` | Frameworks |
 | Host, transport, our own `sublime` / `sublime_plugin` modules | `assets/python/*.py` (embedded with `include_str!`, written to `%APPDATA%\codelibre_text\data\Lib\python` at start) | — |
 | Fake host for tests (`PluginScript`, `plugin_call`, `World::with_plugin_commands`) | `crates/test_support/src/lib.rs` | tests |
@@ -48,10 +55,12 @@ host → editor  {"op":"loaded","commands":[["hello","text"],…],"events":["on_
 editor → host  {"op":"run","kind":"text|window|application","name":"hello","args":{…},"view":7,"window":1}
 editor → host  {"op":"event","name":"on_pre_save","view":7}
 editor → host  {"op":"callback","id":3,"name":"select","args":[2]}        (a panel's answer)
+editor → host  {"op":"query","name":"on_query_context","view":7,"window":1,"args":["key","equal",true,false]}
 host → editor  {"op":"call","id":12,"fn":"view_insert","args":[7,0,"hi"]}   (zero or more; also between requests)
 editor → host  {"op":"result","id":12,"value":2}   or   {"op":"result","id":12,"error":"the view is closed"}
 host → editor  {"op":"log","text":"printed text"}                         (any time)
 host → editor  {"op":"done","error":null}   or   {"op":"done","error":"Traceback …"}
+host → editor  {"op":"answer","value":true}   (ends a query: true / false, ["command", {args}], or null)
 editor → host  {"op":"exit"}
 ```
 
@@ -107,10 +116,8 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   `Window` (active_view, views, new_file, open_file incl. `ENCODED_POSITION`, find_open_file, focus_view, folders,
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
-- Stand-ins (so plugins do not crash, but nothing visible happens yet): `add_regions`/`set_status` are stored but
-  not drawn; `scope_name` is `""`, `match_selector` is false; `show`/`show_at_center` do nothing;
-  `ok_cancel_dialog` returns false; `view.is_scratch()` is false and `set_scratch` does nothing.
-  (`set_timeout*` were stand-ins too; phase B made them real timers.)
+- Stand-ins (so plugins do not crash, but nothing visible happens yet): `scope_name` is `""`, `match_selector` is false.
+  (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
 ## Phase B — events, panels, async (in progress)
 
@@ -128,8 +135,17 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [ ] Built-in commands run from inside a use-case event (e.g. `view.run_command("reindent")` in `on_pre_save`) wait
       for the next frame; running them at once needs the command controller inside `Editor` (a callback set by
       `compose()`, or `save`/`close` moved to the controller).
-- [ ] **`on_query_context`**: key binding contexts unknown to `KeyContext` ask the plugins (keyboard_controller → use case → host).
-- [ ] **`on_text_command` / `on_window_command`**: let plugins rewrite or cancel commands before the controller runs them.
+- [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
+      listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
+      becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
+      `match_all` is always false.
+- [x] **`on_text_command` / `on_window_command`**: `command_controller::run` asks before every command; a `(name, args)`
+      answer runs instead (once: the new command is not asked about again). `on_post_text_command` /
+      `on_post_window_command` after it, with the command that ran. Plugin commands go by their kind (application
+      commands have no hook); built-ins by `WINDOW_COMMANDS`, the rest are text commands (only with an open view).
+      Built-in commands a listener runs while answering wait for the next frame, as in events.
+- [ ] Hooks, still missing: commands run by the text widget itself (typing, undo, the clipboard keys) are not
+      seen; `on_query_context` with `match_all`; `_async` variants of the post events.
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -140,15 +156,46 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `cancel`. It returns `View(0)`, not a real view: its `sel()` / text cannot be used yet.
 - [ ] `KEEP_OPEN_ON_FOCUS_LOST` (the quick panel always closes on a click outside), `kind` letters, `QuickPanelItem`
       annotations right-aligned with their own color, `sublime.ListInputItem`.
-- [ ] **Output panels**: `window.create_output_panel(name)` returns a view (a hidden document) shown at the bottom by
-      `show_panel {"panel": "output.<name>"}`; `find_output_panel`, `destroy_output_panel`. Build systems need it.
+- [x] **Output panels**: `window.create_output_panel(name)` (also `get_output_panel`) returns a view: a document kept
+      apart from the tabs (`EditorState::output_panels`; view functions find it through `any_document`), never dirty,
+      emptied when created again. `show_panel {"panel": "output.<name>", "toggle"}` shows it at the bottom in place of
+      the find / input panels; `hide_panel` (Esc: `panel_visible` is true, `panel_has_focus` is not) hides it.
+      `find_output_panel`, `destroy_output_panel`, `window.active_panel()` (only output panels), `window.panels()`.
+      Sublime's `append` command (`characters`, `force` for read-only panels) runs in the use case, for panels and tabs;
+      plugin `TextCommand`s run with the panel as their view; other built-in commands refuse to run in a panel.
+      The view draws the last 2000 lines, following the end.
+- [ ] Output panels, still missing: clicking a `result_file_regex` line to open the file (`next_result`), the panel's
+      own syntax highlighting / `word_wrap`, selections drawn, `unlisted`, built-in commands other than `append` in a
+      panel (the command controller only knows tabs), the console as a panel (it is a tab). Build systems
+      (`.sublime-build`, `exec`) are not implemented: Sublime's `exec` lives in its `Default` package, which we skip.
 - [ ] **Command input handlers** (`input()` → `TextInputHandler`/`ListInputHandler`) in the command palette.
 - [ ] **Command metadata** for menus and the palette: `is_visible`, `is_checked`, `description` (ask the host when a menu opens).
-- [ ] **`Settings.add_on_change`** notifications (fire after `set_setting`/`persist_setting`/reload_settings).
-- [ ] **Dialogs**: `ok_cancel_dialog`, `yes_no_cancel_dialog` (`rfd::MessageDialog` in a new DialogGateway method), `open_dialog`, `save_dialog`, `select_folder_dialog`.
-- [ ] **Status and regions drawn**: `view.set_status` keys in the status bar; `add_regions` outlines/underlines/gutter icons in `editor_view.rs`.
-- [ ] **Resources**: `sublime.find_resources(pattern)`, `load_resource`, `load_binary_resource` (ResourceGateway) — many plugins need them.
-- [ ] `view.change_count()`, `view.is_scratch/set_scratch`, `view.close()`, `window.close_file`, `view.show/show_at_center` (scroll request to the view).
+- [x] **`Settings.add_on_change`** / `clear_on_change`: kept by settings object in `sublime._on_change`, called after
+      a plugin's own `set` / `erase` (through any `Settings` of the same file).
+- [ ] `add_on_change` for the editor's own changes (`set_setting`, `persist_setting`, the user saving
+      `Preferences.sublime-settings`, `reload_settings`): a `{"op":"settings_changed","target":…}` request.
+- [x] **Dialogs**: `message_dialog` / `error_message` (also logged to the console), `ok_cancel_dialog`,
+      `yes_no_cancel_dialog` (`DialogGateway::show_message`, custom labels, the plugin's title or "CodeLibre Text"),
+      `open_dialog`, `save_dialog` (`name.extension`), `select_folder_dialog`. File dialogs answer through a
+      `set_timeout` after the call, as in Sublime. `file_types` filters and `allow_folders` are ignored, and
+      `select_folder_dialog` picks one folder even with `multi_select`.
+- [x] **Statuses**: `view.set_status/get_status/erase_status`, kept by the editor per view
+      (`PluginState::view_statuses`, dropped with the view) and shown after the caret position, in key order.
+- [x] **Regions drawn**: `view.add_regions(key, regions, scope, icon, flags)` / `get_regions` / `erase_regions` keep a
+      `RegionSet` in the `Document`, moved by its edits (`replace_range`). Drawn under the text in the scope's color
+      (the color scheme's rule, or a built-in color for `region.<color>ish`): filled and outlined unless
+      `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar, `HIDDEN` not
+      drawn; `dot` / `circle` / `bookmark` icons in the gutter (any other icon is a dot).
+- [ ] Regions, still missing: edits made by the text widget or with several selections do not move them (only
+      kept within the text: plugins usually redraw on `on_modified`), annotations, `on_navigate`, `PERSISTENT`,
+      `DRAW_EMPTY_AS_OVERWRITE`, icon files, the minimap.
+- [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
+      once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
+      a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are phase C.
+- [x] `view.change_count()`, `view.is_scratch/set_scratch` (`Document::scratch`: never dirty), `view.close(on_close)`
+      (a dirty view asks first and answers false).
+- [x] `view.show/show_at_center` (point, region or selection): `Document::request_show`, followed by the view
+      like `selection_revision`. `visible_region` / `viewport_*` still answer the whole text.
 
 ## Phase C — Package Control and full compatibility
 

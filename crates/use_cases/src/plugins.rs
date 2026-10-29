@@ -7,7 +7,7 @@
 //! threads call at other times too: [`Editor::poll_plugins`] answers them every frame. See
 //! `docs/plugins.md`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use entities::command::Command;
 use entities::document::DocumentId;
@@ -42,6 +42,8 @@ pub struct PluginState {
     pub(crate) commands: HashMap<String, PluginCommandKind>,
     /// Settings plugins set on a view (`view.settings().set(...)`).
     pub(crate) view_settings: HashMap<DocumentId, Map<String, Value>>,
+    /// Status bar texts plugins set on a view (`view.set_status(key, text)`), sorted by key.
+    pub(crate) view_statuses: HashMap<DocumentId, BTreeMap<String, String>>,
     pub(crate) settings_files: HashMap<String, SettingsFile>,
     pub(crate) window_settings: Map<String, Value>,
     /// The errors of the last load (also in the package load errors).
@@ -57,6 +59,13 @@ pub struct PluginState {
     change_counts: HashMap<DocumentId, u64>,
     selections: Option<(DocumentId, Vec<Selection>)>,
     depth: usize,
+}
+
+impl PluginState {
+    /// Some listener defines this method (the host listed it in `loaded`).
+    pub(crate) fn wants(&self, event: &str) -> bool {
+        self.events.contains(event)
+    }
 }
 
 impl Editor {
@@ -103,6 +112,13 @@ impl Editor {
     /// Runs a plugin command on the active view (text commands) or the window.
     /// Returns false when no plugin defines it.
     pub fn run_plugin_command(&mut self, command: &Command, run_command: &mut CommandRunner) -> bool {
+        let view = self.active_document().map(|d| d.id);
+        self.run_plugin_command_in(command, view, run_command)
+    }
+
+    /// Like [`run_plugin_command`](Self::run_plugin_command), with a text command's view given
+    /// (e.g. an output panel, which is never the active document).
+    pub(crate) fn run_plugin_command_in(&mut self, command: &Command, view: Option<DocumentId>, run_command: &mut CommandRunner) -> bool {
         let Some(&kind) = self.state.plugins.commands.get(&command.name) else {
             return false;
         };
@@ -110,7 +126,6 @@ impl Editor {
             self.report_plugin_error(&command.name, "plugin commands run each other too deeply");
             return true;
         }
-        let view = self.active_document().map(|d| d.id);
         self.state.plugins.depth += 1;
         let result = self
             .gateways
@@ -124,6 +139,16 @@ impl Editor {
             Err(e) => self.report_plugin_error(&command.name, &e),
         }
         true
+    }
+
+    /// What plugins show in the status bar for a view, in key order (Sublime sorts them by key).
+    pub fn plugin_statuses(&self, id: DocumentId) -> Vec<&str> {
+        let statuses = self.state.plugins.view_statuses.get(&id);
+        statuses.into_iter().flat_map(|s| s.values()).map(String::as_str).filter(|s| !s.is_empty()).collect()
+    }
+
+    pub fn plugin_command_kind(&self, name: &str) -> Option<PluginCommandKind> {
+        self.state.plugins.commands.get(name).copied()
     }
 
     pub fn is_plugin_command(&self, name: &str) -> bool {
@@ -161,21 +186,15 @@ impl Editor {
     /// Tells the listeners about a view event, when one listens to it or to its `_async` variant.
     /// Built-in commands they run wait for the next [`poll_plugins`](Self::poll_plugins).
     pub(crate) fn plugin_event(&mut self, name: &str, view: DocumentId) {
-        let events = &self.state.plugins.events;
-        if !events.contains(name) && !events.contains(&format!("{name}_async")) {
+        let plugins = &self.state.plugins;
+        if !plugins.wants(name) && !plugins.wants(&format!("{name}_async")) {
             return;
         }
-        if self.state.plugins.depth >= MAX_DEPTH {
-            self.log(&format!("{name}: plugin events run each other too deeply\n"));
+        if !self.enter_plugin(name) {
             return;
         }
-        self.state.plugins.depth += 1;
-        let result = self.gateways.plugins.event(name, view).and_then(|()| {
-            self.converse(&mut |editor: &mut Editor, command: &Command| {
-                editor.state.plugins.queued_commands.push(command.clone());
-            })
-        });
-        self.state.plugins.depth -= 1;
+        let result = self.gateways.plugins.event(name, view).and_then(|()| self.converse_queuing_commands());
+        self.leave_plugin();
         match result {
             Ok(PluginMessage::Done { error: Some(traceback) }) => self.log(&format!("{name}: {traceback}\n")),
             Ok(_) => {}
@@ -222,8 +241,8 @@ impl Editor {
     /// `on_modified` for every document whose text changed since the last check, and
     /// `on_selection_modified` when the active document's selections moved.
     fn notice_changes(&mut self) {
-        let events = &self.state.plugins.events;
-        let wants = |name: &str| events.contains(name) || events.contains(&format!("{name}_async"));
+        let plugins = &self.state.plugins;
+        let wants = |name: &str| plugins.wants(name) || plugins.wants(&format!("{name}_async"));
         let (modified, selection_modified) = (wants("on_modified"), wants("on_selection_modified"));
         if !modified && !selection_modified {
             return;
@@ -298,7 +317,29 @@ impl Editor {
         }
     }
 
-    /// Answers the host's calls until it finishes the current request (`Loaded` or `Done`).
+    /// Counts one more plugin request in progress; false (and a console line) when they nest too deeply.
+    pub(crate) fn enter_plugin(&mut self, name: &str) -> bool {
+        if self.state.plugins.depth >= MAX_DEPTH {
+            self.log(&format!("{name}: plugin events run each other too deeply\n"));
+            return false;
+        }
+        self.state.plugins.depth += 1;
+        true
+    }
+
+    pub(crate) fn leave_plugin(&mut self) {
+        self.state.plugins.depth -= 1;
+    }
+
+    /// Like `converse`, for events: built-in commands the listeners run are queued for the next
+    /// [`poll_plugins`](Self::poll_plugins) (events fire inside use cases, which cannot run them).
+    pub(crate) fn converse_queuing_commands(&mut self) -> Result<PluginMessage, String> {
+        self.converse(&mut |editor: &mut Editor, command: &Command| {
+            editor.state.plugins.queued_commands.push(command.clone());
+        })
+    }
+
+    /// Answers the host's calls until it finishes the current request (`Loaded`, `Done` or `Answer`).
     fn converse(&mut self, run_command: &mut CommandRunner) -> Result<PluginMessage, String> {
         loop {
             match self.gateways.plugins.receive()? {
@@ -355,7 +396,7 @@ impl Editor {
     }
 
     /// The host died or stopped answering: say so, and stop sending it events.
-    fn plugin_host_failed(&mut self, error: &str) {
+    pub(crate) fn plugin_host_failed(&mut self, error: &str) {
         self.log(&format!("Python plugins: {error}\n"));
         self.state.plugins.events.clear();
     }

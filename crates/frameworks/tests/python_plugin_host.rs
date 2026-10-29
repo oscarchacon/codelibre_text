@@ -299,6 +299,84 @@ class ShoutCommand(sublime_plugin.TextCommand):
 }
 
 #[test]
+fn a_build_like_command_writes_to_an_output_panel_from_a_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import threading
+import sublime
+import sublime_plugin
+
+class FakeBuildCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        panel = self.window.create_output_panel("exec")
+        panel.set_read_only(True)
+        panel.settings().set("result_file_regex", "^(.+):(\\d+)")
+        self.window.run_command("show_panel", {"panel": "output.exec"})
+        def work():
+            for line in ("compiling\n", "a.rs:3: error\n"):
+                panel.run_command("append", {"characters": line, "force": True, "scroll_to_end": True})
+            sublime.status_message("built %s %s" % (self.window.active_panel(), panel.size()))
+        threading.Thread(target=work).start()
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("fake_build"));
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+
+    // The thread's calls are answered between frames.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !editor_status(&editor).starts_with("built") && Instant::now() < deadline {
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(editor_status(&editor), "built output.exec 24", "console:\n{}", editor.state().console);
+    assert_eq!(editor.shown_output_panel().unwrap().document.text, "compiling\na.rs:3: error\n");
+    assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
+}
+
+#[test]
+fn regions_statuses_and_show_reach_the_editor() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class MarkCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        self.view.insert(edit, 0, "alpha beta\ngamma")
+        self.view.add_regions("words", [sublime.Region(6, 10), 0], "region.redish", "dot",
+                              sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE | sublime.DRAW_SQUIGGLY_UNDERLINE,
+                              annotations=["unused"])
+        self.view.set_status("count", "2 marks")
+        self.view.sel().clear()
+        self.view.sel().add(sublime.Region(11, 12))
+        self.view.show_at_center(self.view.sel())
+        sublime.status_message("%s %s" % (self.view.get_regions("words"), self.view.get_status("count")))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("mark"));
+    assert_eq!(
+        editor_status(&editor),
+        "[Region(6, 10), Region(0, 0)] 2 marks",
+        "console:\n{}",
+        editor.state().console
+    );
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.region_sets()[0].flags, 32 | 256 | 2048);
+    assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 11, center: true }));
+    assert_eq!(editor.plugin_statuses(doc.id), ["2 marks"]);
+}
+
+fn editor_status(editor: &Editor) -> String {
+    editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default()
+}
+
+#[test]
 fn timers_and_the_async_thread_call_the_editor_after_the_command() {
     let dir = tempfile::tempdir().unwrap();
     let plugin = r#"
@@ -463,6 +541,111 @@ class AskCommand(sublime_plugin.WindowCommand):
     host.callback(2, "done", &json!(["alice"])).unwrap();
     assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
     assert!(log.ends_with("done alice\n"), "{log}");
+}
+
+#[test]
+fn dialogs_resources_and_settings_callbacks() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        print("ok", sublime.ok_cancel_dialog("Go?"))
+        print("bin", sublime.load_binary_resource("Packages/T/x.bin"))
+        try:
+            sublime.load_resource("Packages/T/nope")
+        except FileNotFoundError as error:
+            print("missing", error)
+        settings = sublime.load_settings("T.sublime-settings")
+        settings.add_on_change("t", lambda: print("changed"))
+        sublime.load_settings("T.sublime-settings").set("a", 1)
+        settings.clear_on_change("t")
+        settings.set("a", 2)
+        print(sublime.decode_value('{"a": [1, 2,], // note\n "b": "x//y,]" /* z */,}'))
+        sublime.open_dialog(lambda path: sublime.status_message("picked %s" % path))
+"#;
+    let Some((mut host, _)) = host_with(dir.path(), &[("probe.py", plugin)]) else {
+        return;
+    };
+    let mut log = String::new();
+    host.run(PluginCommandKind::Window, "probe", &Value::Null, None).unwrap();
+    assert_eq!(expect_call(&mut host, &mut log, "ok_cancel_dialog"), vec![json!("Go?"), json!(""), json!("")]);
+    host.reply(Ok(json!(true))).unwrap();
+    expect_call(&mut host, &mut log, "load_binary_resource");
+    host.reply(Ok(json!("00ff"))).unwrap();
+    expect_call(&mut host, &mut log, "load_resource");
+    host.reply(Err("resource not found: Packages/T/nope".into())).unwrap();
+    for _ in 0..2 {
+        expect_call(&mut host, &mut log, "settings_set");
+        host.reply(Ok(Value::Null)).unwrap();
+    }
+    assert_eq!(expect_call(&mut host, &mut log, "open_dialog"), vec![Value::Null]);
+    host.reply(Ok(json!(["/a.txt", "/b.txt"]))).unwrap();
+    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None }, "{log}");
+    assert_eq!(
+        log,
+        "ok True\nbin b'\\x00\\xff'\nmissing resource not found: Packages/T/nope\nchanged\n{'a': [1, 2], 'b': 'x//y,]'}\n",
+        "the callback heard only the change made before clear_on_change"
+    );
+    match next_idle(&mut host, &mut log) {
+        PluginMessage::Call { function, args } if function == "status_message" => {
+            assert_eq!(args, vec![json!("picked /a.txt")], "one file without multi_select, after the command")
+        }
+        other => panic!("expected status_message, got {other:?}"),
+    }
+}
+
+#[test]
+fn listeners_answer_queries() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Contexts(sublime_plugin.EventListener):
+    def on_query_context(self, view, key, operator, operand, match_all):
+        if key != "my.ctx":
+            return None
+        return (operator == sublime.OP_EQUAL) == (operand == view.id())
+
+    def on_text_command(self, view, name, args):
+        if name == "title_case":
+            return ("upper_case", {"from": name})
+
+    def on_post_window_command(self, window, name, args):
+        print("ran", name, args, window.id())
+
+class Broken(sublime_plugin.ViewEventListener):
+    def on_text_command(self, name, args):
+        raise ValueError("ignored")
+"#;
+    let Some((mut host, loaded)) = host_with(dir.path(), &[("hooks.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { events, .. } = loaded else {
+        panic!("expected loaded, got {loaded:?}");
+    };
+    for event in ["on_query_context", "on_text_command", "on_post_window_command"] {
+        assert!(events.contains(&event.to_string()), "{events:?}");
+    }
+    let mut log = String::new();
+    let mut ask = |host: &mut PythonPluginHost, name: &str, view: Option<u64>, args: Value| {
+        host.query(name, view, &args).unwrap();
+        next(host, &mut log)
+    };
+    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["my.ctx", "equal", 7, false])), PluginMessage::Answer(json!(true)));
+    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["my.ctx", "not_equal", 7, false])), PluginMessage::Answer(json!(false)));
+    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["other", "equal", 7, false])), PluginMessage::Answer(Value::Null));
+    assert_eq!(
+        ask(&mut host, "on_text_command", Some(7), json!(["title_case", null])),
+        PluginMessage::Answer(json!(["upper_case", {"from": "title_case"}]))
+    );
+    assert_eq!(ask(&mut host, "on_text_command", Some(7), json!(["lower_case", null])), PluginMessage::Answer(Value::Null));
+    assert_eq!(ask(&mut host, "on_post_window_command", None, json!(["new_file", null])), PluginMessage::Answer(Value::Null));
+    assert!(log.contains("ran new_file None 1"), "{log}");
+    assert!(log.contains("ValueError: ignored"), "a failing listener's traceback goes to the console: {log}");
 }
 
 #[test]

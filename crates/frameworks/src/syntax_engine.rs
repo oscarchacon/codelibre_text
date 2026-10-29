@@ -38,6 +38,24 @@ pub struct SyntaxEngine {
     caches: HashMap<DocumentId, HighlightCache>,
     /// Scheme of the last paint, so symbol lookups reuse the same caches.
     current_scheme: String,
+    /// `scope_color` answers by (scheme, scope).
+    scope_colors: HashMap<(String, String), Option<Color32>>,
+}
+
+/// Sublime's `region.<color>ish` scopes, for color schemes without rules for them.
+fn region_color(scope: &str) -> Option<Color32> {
+    let name = scope.strip_prefix("region.")?;
+    Some(match name.split('.').next()? {
+        "redish" => Color32::from_rgb(235, 96, 106),
+        "orangish" => Color32::from_rgb(242, 151, 78),
+        "yellowish" => Color32::from_rgb(230, 200, 90),
+        "greenish" => Color32::from_rgb(130, 200, 120),
+        "cyanish" => Color32::from_rgb(95, 200, 200),
+        "bluish" => Color32::from_rgb(100, 150, 230),
+        "purplish" => Color32::from_rgb(180, 130, 220),
+        "pinkish" => Color32::from_rgb(230, 130, 190),
+        _ => return None,
+    })
 }
 
 impl SyntaxEngine {
@@ -50,6 +68,7 @@ impl SyntaxEngine {
             schemes: BTreeMap::new(),
             caches: HashMap::new(),
             current_scheme: DEFAULT_SCHEME.to_string(),
+            scope_colors: HashMap::new(),
         };
         engine.load_builtin_schemes(&mut Vec::new());
         engine
@@ -102,6 +121,7 @@ impl SyntaxEngine {
             }
         }
         self.caches.clear();
+        self.scope_colors.clear();
     }
 
     /// The color scheme with that name (or the default one).
@@ -146,6 +166,22 @@ impl SyntaxEngine {
 
     pub fn forget(&mut self, document: DocumentId) {
         self.caches.remove(&document);
+    }
+
+    /// The color a color scheme gives a scope (a plugin region's `region.redish`, `invalid`…):
+    /// its rule's foreground, or for the `region.<color>ish` scopes without a rule, that color.
+    pub fn scope_color(&mut self, scheme: &str, scope: &str) -> Option<Color32> {
+        let key = (scheme.to_string(), scope.to_string());
+        if let Some(color) = self.scope_colors.get(&key) {
+            return *color;
+        }
+        let first = scope.split_whitespace().next().unwrap_or_default();
+        let from_scheme = ScopeStack::from_str(first).ok().and_then(|stack| {
+            Highlighter::new(find_scheme(&self.schemes, scheme)).style_mod_for_stack(stack.as_slice()).foreground
+        });
+        let color = from_scheme.map(to_color32).or_else(|| region_color(first));
+        self.scope_colors.insert(key, color);
+        color
     }
 
     pub fn symbols(&mut self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol> {

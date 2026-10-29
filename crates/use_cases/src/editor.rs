@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use entities::document::{Document, DocumentId, LineEnding};
 use entities::find::FindOptions;
-use entities::keymap::{KeyCombo, KeyContext, KeyResult, Keymap};
+use entities::keymap::Keymap;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
@@ -16,6 +16,7 @@ use crate::gateways::{
     ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ResourceGateway,
     SessionGateway, ShellGateway, SyntaxGateway,
 };
+use crate::output_panels::OutputPanels;
 use crate::plugin_panels::PluginPanels;
 use crate::plugins::PluginState;
 
@@ -82,6 +83,8 @@ pub struct EditorState {
     pub(crate) plugins: PluginState,
     /// The quick / input panels plugins opened.
     pub(crate) plugin_panels: PluginPanels,
+    /// The output panels plugins created (not tabs).
+    pub(crate) output_panels: OutputPanels,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -117,6 +120,7 @@ impl Editor {
                 line_clipboard: None,
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
+                output_panels: OutputPanels::default(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,
@@ -199,9 +203,10 @@ impl Editor {
         }
     }
 
-    /// Settings of one document: its syntax-specific settings plus what plugins set on its view.
+    /// Settings of one document (or output panel): its syntax-specific settings plus what plugins
+    /// set on its view.
     pub(crate) fn settings_of(&self, id: DocumentId) -> Settings {
-        let Some(doc) = self.index_of(id).map(|i| &self.state.documents[i]) else {
+        let Some(doc) = self.any_document(id) else {
             return self.global_settings();
         };
         let settings = self.state.settings.for_syntax(&doc.syntax);
@@ -213,11 +218,6 @@ impl Editor {
 
     pub fn global_settings(&self) -> Settings {
         self.state.settings.global()
-    }
-
-    /// Resolves a key press through the keymap.
-    pub fn press_key(&mut self, alternatives: &[KeyCombo], context: &dyn KeyContext) -> KeyResult {
-        self.state.keymap.press(alternatives, context)
     }
 
     /// The text of a document, for the editor widget to edit in place.

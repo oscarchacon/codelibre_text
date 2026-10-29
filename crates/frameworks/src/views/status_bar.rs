@@ -1,4 +1,4 @@
-//! Status bar: caret position and messages on the left; indentation, line endings, encoding and
+//! Status bar: caret position, plugins' statuses and messages on the left; indentation, line endings, encoding and
 //! syntax on the right (clickable, as in Sublime).
 
 use egui::{RichText, Sense, Ui};
@@ -13,6 +13,10 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, status: &StatusBa
     ui.horizontal_centered(|ui| {
         ui.add_space(8.0);
         ui.label(small(&status.position));
+        for plugin_status in &status.plugin_statuses {
+            ui.add_space(12.0);
+            ui.label(small(plugin_status));
+        }
         if let Some(message) = &status.message {
             ui.add_space(16.0);
             ui.label(RichText::new(message).size(12.0).color(chrome.fg));

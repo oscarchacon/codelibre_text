@@ -205,6 +205,8 @@ impl Editor {
             self.state.closed_files.push(path);
         }
         self.state.recently_used.retain(|d| *d != doc.id);
+        self.state.plugins.view_settings.remove(&doc.id);
+        self.state.plugins.view_statuses.remove(&doc.id);
         self.plugin_event("on_close", doc.id);
         if self.state.documents.is_empty() {
             self.state.active = 0;

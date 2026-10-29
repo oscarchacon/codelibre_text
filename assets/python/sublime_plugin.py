@@ -147,6 +147,17 @@ VIEW_EVENTS = (
     "on_new", "on_load", "on_activated", "on_deactivated", "on_pre_save", "on_post_save",
     "on_pre_close", "on_close", "on_modified", "on_selection_modified",
 )
+# Methods the editor asks (``query``): the first listener's answer wins; the ``on_post_*`` ones
+# answer nothing, every listener hears them.
+QUERY_EVENTS = (
+    "on_query_context", "on_text_command", "on_window_command", "on_post_text_command", "on_post_window_command",
+)
+# Key binding context operators, as the keymap writes them -> ``sublime.OP_*``.
+_OPERATORS = {
+    "equal": sublime.OP_EQUAL, "not_equal": sublime.OP_NOT_EQUAL, "regex_match": sublime.OP_REGEX_MATCH,
+    "not_regex_match": sublime.OP_NOT_REGEX_MATCH, "regex_contains": sublime.OP_REGEX_CONTAINS,
+    "not_regex_contains": sublime.OP_NOT_REGEX_CONTAINS,
+}
 
 # name -> (kind, class)
 commands = {}
@@ -188,7 +199,7 @@ def register_module(module):
 def events():
     """The event names some listener has a method for (the editor sends only those)."""
     listeners = _event_listeners + _view_listener_classes
-    names = [n for e in VIEW_EVENTS for n in (e, e + "_async")]
+    names = [n for e in VIEW_EVENTS for n in (e, e + "_async")] + list(QUERY_EVENTS)
     return [n for n in names if any(callable(getattr(listener, n, None)) for listener in listeners)]
 
 
@@ -199,12 +210,35 @@ def _listeners_of(view, create):
 
 
 def _call(listener, name, args):
+    """Calls a listener's method if it has one; its result, or None (also when it failed)."""
     method = getattr(listener, name, None)
     if callable(method):
         try:
-            method(*args)
+            return method(*args)
         except Exception:
             traceback.print_exc()
+    return None
+
+
+def query(name, view_id, window_id, args):
+    """A method the editor asks (see ``QUERY_EVENTS``): ``on_query_context`` answers true or false
+    for a key binding context it knows, ``on_text_command`` / ``on_window_command`` a
+    ``(name, args)`` that replaces the command. None when no listener answers."""
+    args = list(args)
+    if name in ("on_window_command", "on_post_window_command"):
+        window = sublime.Window(window_id)
+        calls = [(listener, [window] + args) for listener in _event_listeners]
+    else:
+        view = sublime.View(view_id)
+        if name == "on_query_context":
+            args[1] = _OPERATORS.get(args[1], args[1])
+        calls = [(listener, [view] + args) for listener in _event_listeners]
+        calls += [(listener, args) for listener in _listeners_of(view, create=bool(_view_listener_classes))]
+    for listener, call_args in calls:
+        result = _call(listener, name, call_args)
+        if result is not None and not name.startswith("on_post_"):
+            return bool(result) if name == "on_query_context" else result
+    return None
 
 
 def dispatch(name, view_id):

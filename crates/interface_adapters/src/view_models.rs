@@ -42,6 +42,8 @@ pub struct SideBarViewModel {
 pub struct StatusBarViewModel {
     /// e.g. `Line 3, Column 7; 5 characters selected`.
     pub position: String,
+    /// What plugins show for the active view (`view.set_status`), in key order.
+    pub plugin_statuses: Vec<String>,
     pub message: Option<String>,
     pub indentation: String,
     pub line_ending: String,
@@ -84,6 +86,16 @@ pub struct InputPanelViewModel {
     pub take_focus: bool,
 }
 
+/// The output panel shown at the bottom (a build's or a plugin's output).
+pub struct OutputPanelViewModel {
+    pub name: String,
+    /// The end of the panel's text (at most [`presenters::output_panel::MAX_LINES`] lines).
+    ///
+    /// [`presenters::output_panel::MAX_LINES`]: crate::presenters::output_panel::MAX_LINES
+    pub text: String,
+    pub font_size: f32,
+}
+
 pub struct FindPanelViewModel {
     pub query: String,
     pub replacement: String,
@@ -119,7 +131,35 @@ pub struct EditorViewModel {
     pub auto_indent: bool,
     /// Byte ranges to highlight (find panel matches).
     pub find_matches: Vec<Range<usize>>,
+    /// Regions plugins marked (`view.add_regions`), except hidden ones.
+    pub regions: Vec<RegionViewModel>,
+    /// A plugin's `view.show`: the char to scroll to, whether centered, and a counter that
+    /// changes with each request.
+    pub show: Option<(usize, bool, u64)>,
     pub take_focus: bool,
+}
+
+/// How a plugin's region set is drawn (from Sublime's `DRAW_*` flags).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionViewModel {
+    /// Char ranges, sorted by start.
+    pub ranges: Vec<Range<usize>>,
+    /// The color comes from this scope in the color scheme (the view resolves it).
+    pub scope: String,
+    /// Gutter icon on each region's first line: `dot`, `circle`, `bookmark`… (any other name is drawn as a dot).
+    pub icon: String,
+    pub fill: bool,
+    pub outline: bool,
+    pub underline: Option<Underline>,
+    /// Empty regions are drawn (as a bar where the caret would be).
+    pub draw_empty: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Underline {
+    Solid,
+    Stippled,
+    Squiggly,
 }
 
 pub enum DialogViewModel {

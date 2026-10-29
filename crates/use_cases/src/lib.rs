@@ -20,6 +20,8 @@
 //! | [`plugins`] | load and run Python plugins, the console |
 //! | [`plugin_api`] | the `sublime_api` functions plugins call |
 //! | [`plugin_panels`] | the quick and input panels plugins open |
+//! | [`plugin_hooks`] | key presses (`on_query_context`) and commands (`on_text_command`, …) plugins take part in |
+//! | [`output_panels`] | output panels (build and plugin output at the bottom), the `append` command |
 //! | [`project`] | folders, folder listing, file index |
 //! | [`search`] | command palette, Goto Anything, pickers |
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
@@ -31,8 +33,10 @@ pub mod find_replace;
 pub mod gateways;
 pub mod help;
 pub mod localization;
+pub mod output_panels;
 pub mod packages;
 pub mod plugin_api;
+pub mod plugin_hooks;
 pub mod plugin_panels;
 pub mod plugins;
 pub mod preferences;

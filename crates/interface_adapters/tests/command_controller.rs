@@ -227,13 +227,39 @@ fn show_panel_find_and_replace() {
 }
 
 #[test]
-fn output_panels_are_not_supported() {
+fn missing_output_panels_are_reported() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
     run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "output.exec" })));
     assert!(!view.find_panel.visible);
-    assert_eq!(status(&editor), "Panel not supported: exec");
+    assert_eq!(status(&editor), "Panel not supported: output.exec");
+}
+
+#[test]
+fn output_panels_take_the_place_of_the_find_panel() {
+    let world = World::new().with_plugin_commands(&[("build", PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([
+        plugin_call("window_create_output_panel", json!([1, "exec"])),
+        plugin_call("run_command", json!(["window", 1, "show_panel", {"panel": "output.exec"}])),
+        PluginMessage::Done { error: None },
+    ]);
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(&mut editor, &mut view, &cmd("build"));
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"));
+    assert!(!view.find_panel.visible, "one panel at a time");
+
+    let show = cmd_with("show_panel", json!({ "panel": "output.exec", "toggle": true }));
+    run(&mut editor, &mut view, &show);
+    assert!(editor.shown_output_panel().is_none(), "toggled off");
+    run(&mut editor, &mut view, &show);
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    assert!(editor.shown_output_panel().is_none() && view.find_panel.visible);
+    run(&mut editor, &mut view, &show);
+    run(&mut editor, &mut view, &cmd("hide_panel"));
+    assert!(editor.shown_output_panel().is_none());
 }
 
 #[test]
@@ -607,6 +633,23 @@ fn other_commands_go_to_the_plugins_which_can_run_built_in_ones() {
     run(&mut editor, &mut view, &cmd("shout"));
     assert_eq!(world.plugins.runs.borrow()[0].1, "shout");
     assert_eq!(active_text(&editor), "ABC", "the plugin ran upper_case through this controller");
+}
+
+#[test]
+fn listeners_rewrite_commands_before_they_run_and_hear_about_them_after() {
+    let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command", "on_window_command"]);
+    let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
+    world.plugins.then([PluginMessage::Answer(json!(["upper_case", null])), PluginMessage::Answer(Value::Null)]);
+    run(&mut editor, &mut view, &cmd("title_case"));
+    assert_eq!(active_text(&editor), "ABC", "the listener's command ran instead");
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries.iter().map(|q| q.0.as_str()).collect::<Vec<_>>(), ["on_text_command", "on_post_text_command"]);
+    assert_eq!(queries[1].2, json!(["upper_case", null]), "the post event names the command that ran");
+    drop(queries);
+
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    run(&mut editor, &mut view, &cmd("toggle_side_bar"));
+    assert_eq!(world.plugins.queries.borrow().last().unwrap().0, "on_window_command", "a window command");
 }
 
 #[test]

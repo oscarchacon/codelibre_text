@@ -19,6 +19,7 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
     let Some(doc) = editor.active_document() else {
         return StatusBarViewModel {
             position: String::new(),
+            plugin_statuses: Vec::new(),
             message,
             indentation: String::new(),
             line_ending: String::new(),
@@ -39,6 +40,7 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
     let tab_size = settings.usize("tab_size", 4);
     StatusBarViewModel {
         position,
+        plugin_statuses: editor.plugin_statuses(doc.id).into_iter().map(str::to_string).collect(),
         message,
         indentation: if settings.bool("translate_tabs_to_spaces", false) {
             editor.tr_args("Spaces: {size}", &[("size", &tab_size)])

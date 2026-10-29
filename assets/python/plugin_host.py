@@ -8,6 +8,8 @@ JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
     editor -> host   {"op": "run", "kind": ..., "name": ..., "args": {...}, "view": id, "window": id}
     editor -> host   {"op": "event", "name": "on_modified", "view": id}
     editor -> host   {"op": "callback", "id": n, "name": "select", "args": [index]}   (a panel's answer)
+    editor -> host   {"op": "query", "name": "on_query_context", "view": id, "window": 1, "args": [...]}
+    host -> editor   {"op": "answer", "value": true / ["command", {args}] / null}       (ends a query)
     host -> editor   {"op": "call", "id": n, "fn": "view_insert", "args": [...]}     (any number of times)
     editor -> host   {"op": "result", "id": n, "value": ...}  or  {"op": "result", "id": n, "error": "..."}
     host -> editor   {"op": "done", "error": null or "traceback"}
@@ -18,6 +20,7 @@ call the editor at any time, and the editor answers those calls while it is idle
 
 import importlib.machinery
 import importlib.util
+import json
 import os
 import sys
 import traceback
@@ -147,6 +150,20 @@ def callback(message):
     return {"op": "done", "error": error}
 
 
+def query(message):
+    """A question for the listeners (``on_query_context``, ``on_text_command``…); their
+    tracebacks go to the console and count as no answer."""
+    value = sublime_plugin.query(message["name"], message.get("view") or 0, message.get("window") or 1,
+                                 message.get("args") or [])
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        print("%s answered %r, which is not JSON" % (message["name"], value))
+        value = None
+    finish_command()
+    return {"op": "answer", "value": value}
+
+
 def finish_command():
     sublime._cleared_selections.clear()
 
@@ -161,6 +178,8 @@ def handle(message):
         codelibre_rpc.send(event(message))
     elif op == "callback":
         codelibre_rpc.send(callback(message))
+    elif op == "query":
+        codelibre_rpc.send(query(message))
     elif op == "wake":
         pass
     elif op == "exit":

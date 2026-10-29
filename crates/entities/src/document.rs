@@ -64,6 +64,8 @@ pub struct Document {
     pub path: Option<PathBuf>,
     /// Name for buffers that are not files (e.g. the read-only default settings).
     pub scratch_name: Option<String>,
+    /// Never dirty, so closing it does not ask to save (a plugin's `view.set_scratch(True)`).
+    pub scratch: bool,
     pub read_only: bool,
     /// The text, always with `\n` line endings in memory.
     pub text: String,
@@ -85,6 +87,33 @@ pub struct Document {
     selection_revision: u64,
     /// Increases with every change to the text (Sublime's `view.change_count()`).
     change_count: u64,
+    /// Regions plugins mark (`view.add_regions`), in the order they were added.
+    region_sets: Vec<RegionSet>,
+    /// Where a plugin asked the view to scroll (`view.show`), and how many times it asked.
+    show_request: Option<ShowRequest>,
+    show_revision: u64,
+}
+
+/// A named set of regions a plugin marks (a linter's errors, a search's matches…). The regions
+/// move with the text when it is edited through the document's methods.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionSet {
+    pub key: String,
+    /// `(a, b)` char positions, like a selection's anchor and head.
+    pub regions: Vec<(usize, usize)>,
+    /// Gives the color through the color scheme (e.g. `region.redish`, `invalid`).
+    pub scope: String,
+    /// Gutter icon: `dot`, `circle`, `bookmark` or a resource path; empty for none.
+    pub icon: String,
+    /// Sublime's drawing flags (`sublime.DRAW_NO_FILL`, `DRAW_SQUIGGLY_UNDERLINE`, `HIDDEN`…).
+    pub flags: u64,
+}
+
+/// A plugin's `view.show(point)` / `view.show_at_center(point)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShowRequest {
+    pub point: usize,
+    pub center: bool,
 }
 
 impl Document {
@@ -93,6 +122,7 @@ impl Document {
             id,
             path: None,
             scratch_name: None,
+            scratch: false,
             read_only: false,
             text: String::new(),
             saved_text: String::new(),
@@ -105,6 +135,9 @@ impl Document {
             extra_selections: Vec::new(),
             selection_revision: 1,
             change_count: 0,
+            region_sets: Vec::new(),
+            show_request: None,
+            show_revision: 0,
         }
     }
 
@@ -197,6 +230,7 @@ impl Document {
 
     pub fn is_dirty(&self) -> bool {
         !self.read_only
+            && !self.scratch
             && (self.text != self.saved_text || (self.path.is_some() && self.line_ending != self.saved_line_ending))
     }
 
@@ -344,7 +378,50 @@ impl Document {
         let primary = moved(&self.selection);
         let extra: Vec<Selection> = self.extra_selections.iter().map(moved).collect();
         self.set_selections(primary, extra);
+        for set in &mut self.region_sets {
+            for region in &mut set.regions {
+                *region = (map(region.0), map(region.1));
+            }
+        }
         true
+    }
+
+    /// Adds a region set, replacing the one with the same key.
+    pub fn add_regions(&mut self, set: RegionSet) {
+        match self.region_sets.iter_mut().find(|s| s.key == set.key) {
+            Some(existing) => *existing = set,
+            None => self.region_sets.push(set),
+        }
+    }
+
+    /// The regions of a set, kept within the text (edits the widget made in place do not move them).
+    pub fn regions(&self, key: &str) -> Vec<(usize, usize)> {
+        let len = self.char_count();
+        let set = self.region_sets.iter().find(|s| s.key == key);
+        set.map(|s| s.regions.iter().map(|&(a, b)| (a.min(len), b.min(len))).collect()).unwrap_or_default()
+    }
+
+    pub fn erase_regions(&mut self, key: &str) {
+        self.region_sets.retain(|s| s.key != key);
+    }
+
+    pub fn region_sets(&self) -> &[RegionSet] {
+        &self.region_sets
+    }
+
+    /// Asks the view to scroll so that `point` is visible (centered when `center`).
+    pub fn request_show(&mut self, point: usize, center: bool) {
+        self.show_request = Some(ShowRequest { point: point.min(self.char_count()), center });
+        self.show_revision += 1;
+    }
+
+    pub fn show_request(&self) -> Option<ShowRequest> {
+        self.show_request
+    }
+
+    /// Increases with every `request_show`, so the view knows when to scroll.
+    pub fn show_revision(&self) -> u64 {
+        self.show_revision
     }
 
     /// Runs a text command on every selection at once. The command gets the selections sorted

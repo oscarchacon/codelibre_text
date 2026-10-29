@@ -1,8 +1,18 @@
+use entities::document::RegionSet;
 use serde_json::Value;
 use use_cases::Editor;
 
-use crate::view_models::EditorViewModel;
+use crate::view_models::{EditorViewModel, RegionViewModel, Underline};
 use crate::view_state::ViewState;
+
+// Sublime's `add_regions` flags (`sublime.DRAW_EMPTY`, …).
+const DRAW_EMPTY: u64 = 1;
+const DRAW_NO_FILL: u64 = 32;
+const HIDDEN: u64 = 128;
+const DRAW_NO_OUTLINE: u64 = 256;
+const DRAW_SOLID_UNDERLINE: u64 = 512;
+const DRAW_STIPPLED_UNDERLINE: u64 = 1024;
+const DRAW_SQUIGGLY_UNDERLINE: u64 = 2048;
 
 /// The active document as the text area should show it.
 pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewModel> {
@@ -17,6 +27,7 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
         && !view.find_panel.focus_requested
         && editor.state().pending_close.is_none();
 
+    let len = doc.char_count();
     Some(EditorViewModel {
         document: doc.id,
         read_only: doc.read_only,
@@ -34,6 +45,41 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
         rulers: settings.numbers("rulers"),
         auto_indent: settings.bool("auto_indent", true),
         find_matches,
+        regions: doc.region_sets().iter().filter_map(|set| present_regions(set, len)).collect(),
+        show: doc.show_request().map(|r| (r.point.min(len), r.center, doc.show_revision())),
         take_focus,
+    })
+}
+
+/// A region set as drawn: Sublime fills and outlines regions unless the flags say otherwise
+/// (plugins combine the underline flags with `DRAW_NO_FILL | DRAW_NO_OUTLINE`).
+fn present_regions(set: &RegionSet, len: usize) -> Option<RegionViewModel> {
+    if set.flags & HIDDEN != 0 {
+        return None;
+    }
+    let has = |flag: u64| set.flags & flag != 0;
+    let underline = if has(DRAW_SQUIGGLY_UNDERLINE) {
+        Some(Underline::Squiggly)
+    } else if has(DRAW_STIPPLED_UNDERLINE) {
+        Some(Underline::Stippled)
+    } else if has(DRAW_SOLID_UNDERLINE) {
+        Some(Underline::Solid)
+    } else {
+        None
+    };
+    let mut ranges: Vec<_> = set
+        .regions
+        .iter()
+        .map(|&(a, b)| a.min(b).min(len)..a.max(b).min(len))
+        .collect();
+    ranges.sort_by_key(|r| (r.start, r.end));
+    Some(RegionViewModel {
+        ranges,
+        scope: set.scope.clone(),
+        icon: set.icon.clone(),
+        fill: !has(DRAW_NO_FILL),
+        outline: !has(DRAW_NO_OUTLINE),
+        underline,
+        draw_empty: has(DRAW_EMPTY),
     })
 }

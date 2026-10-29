@@ -356,3 +356,43 @@ fn the_change_count_grows_with_text_changes_only() {
     doc.note_text_changed();
     assert_eq!(doc.change_count(), 3);
 }
+
+fn region_set(key: &str, regions: &[(usize, usize)]) -> RegionSet {
+    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0 }
+}
+
+#[test]
+fn plugin_regions_move_with_the_text() {
+    let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
+    doc.add_regions(region_set("lint", &[(4, 7), (8, 13)]));
+    doc.replace_range(0, 0, ">> ");
+    assert_eq!(doc.regions("lint"), vec![(7, 10), (11, 16)], "after an insertion before them");
+    doc.replace_range(7, 10, "2");
+    assert_eq!(doc.regions("lint"), vec![(7, 8), (9, 14)], "a replaced region covers the new text");
+    doc.text.truncate(5);
+    doc.note_text_changed();
+    assert_eq!(doc.regions("lint"), vec![(5, 5), (5, 5)], "edits made in place: kept within the text");
+}
+
+#[test]
+fn region_sets_are_replaced_and_erased_by_key() {
+    let mut doc = Document::scratch(1, "s", "abcdef", "Plain Text", false);
+    doc.add_regions(region_set("a", &[(0, 1)]));
+    doc.add_regions(region_set("b", &[(2, 3)]));
+    doc.add_regions(region_set("a", &[(4, 5)]));
+    assert_eq!(doc.region_sets().iter().map(|s| s.key.as_str()).collect::<Vec<_>>(), ["a", "b"], "first-added order");
+    assert_eq!(doc.regions("a"), vec![(4, 5)]);
+    doc.erase_regions("a");
+    assert!(doc.regions("a").is_empty());
+    assert_eq!(doc.region_sets().len(), 1);
+}
+
+#[test]
+fn show_requests_are_counted_and_clamped() {
+    let mut doc = Document::scratch(1, "s", "abc", "Plain Text", false);
+    assert_eq!(doc.show_request(), None);
+    doc.request_show(99, true);
+    assert_eq!(doc.show_request(), Some(ShowRequest { point: 3, center: true }));
+    doc.request_show(1, false);
+    assert_eq!(doc.show_revision(), 2);
+}

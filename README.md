@@ -83,7 +83,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | `Main.sublime-menu` | Yes, merged by `id` |
 | `.sublime-commands` | Yes |
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, `open_url`, …) |
-| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Events, panels and async callbacks are not yet supported — see [docs/plugins.md](docs/plugins.md) |
+| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, statuses and regions work; build systems and Package Control do not yet — see [docs/plugins.md](docs/plugins.md) |
 | `.sublime-package` archives | Not yet: only unpacked package folders are read |
 
 ### Keyboard shortcuts (Sublime Text defaults)
@@ -170,8 +170,8 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 
 - [ ] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
 - [ ] Find panel toggles and Find in Files
-- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`
-- [ ] Python plugins phase B rest: output panels, dialogs, `on_query_context`, status and regions drawn
+- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`, dialogs, `find_resources` / `load_resource`, scratch views, output panels, `set_status`, `add_regions`
+- [ ] Python plugins phase B rest: input handlers, command metadata (`is_visible`, `is_checked`), build systems
 - [ ] Python plugins phase C: `.sublime-package` (zip) loading and Package Control
 - [ ] Split layouts (groups)
 - [ ] Minimap, code folding, auto-complete, bookmarks

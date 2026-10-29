@@ -8,6 +8,7 @@ What is not implemented yet is listed in ``docs/plugins.md``; calling it raises 
 import collections
 import heapq
 import itertools
+import json
 import os
 import re
 import sys
@@ -157,13 +158,93 @@ def message_dialog(msg):
 
 
 def ok_cancel_dialog(msg, ok_title="", title=""):
-    print("ok_cancel_dialog is not supported yet:", msg)
-    return False
+    return sublime_api.ok_cancel_dialog(str(msg), str(ok_title or ""), str(title or ""))
 
 
 def yes_no_cancel_dialog(msg, yes_title="", no_title="", title=""):
-    print("yes_no_cancel_dialog is not supported yet:", msg)
-    return DIALOG_CANCEL
+    return sublime_api.yes_no_cancel_dialog(str(msg), str(yes_title or ""), str(no_title or ""), str(title or ""))
+
+
+def _answer_later(callback, value):
+    # Sublime answers file dialogs after the call returns.
+    set_timeout(lambda: callback(value))
+
+
+def open_dialog(callback, file_types=[], directory=None, multi_select=False, allow_folders=False):
+    # ``file_types`` filters and ``allow_folders`` are not supported: any file can be picked.
+    files = sublime_api.open_dialog(directory)
+    if files is not None and not multi_select:
+        files = files[0]
+    _answer_later(callback, files)
+
+
+def save_dialog(callback, file_types=[], directory=None, name=None, extension=None):
+    _answer_later(callback, sublime_api.save_dialog(directory, name or "", extension or ""))
+
+
+def select_folder_dialog(callback, directory=None, multi_select=False):
+    folders = sublime_api.select_folder_dialog(directory)
+    if folders is not None and not multi_select:
+        folders = folders[0]
+    _answer_later(callback, folders)
+
+
+def find_resources(pattern):
+    return sublime_api.find_resources(pattern)
+
+
+def load_resource(name):
+    try:
+        return sublime_api.load_resource(name)
+    except RuntimeError as error:
+        raise FileNotFoundError(str(error)) from None
+
+
+def load_binary_resource(name):
+    try:
+        return bytes.fromhex(sublime_api.load_binary_resource(name))
+    except RuntimeError as error:
+        raise FileNotFoundError(str(error)) from None
+
+
+def _strip_json_comments(text):
+    """Sublime's JSON without its ``//`` and ``/* */`` comments and trailing commas."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            end = i + 1
+            while end < n and text[end] != '"':
+                end += 2 if text[end] == "\\" else 1
+            out.append(text[i:end + 1])
+            i = end + 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        else:
+            if c in "]}":
+                # Drop a trailing comma (strings are whole items of ``out``, so never touched).
+                j = len(out) - 1
+                while j >= 0 and out[j].isspace():
+                    j -= 1
+                if j >= 0 and out[j] == ",":
+                    del out[j]
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def decode_value(data):
+    """Parses Sublime's JSON (comments and trailing commas allowed), as in resource files."""
+    return json.loads(_strip_json_comments(data))
+
+
+def encode_value(value, pretty=False):
+    return json.dumps(value, indent=4 if pretty else None)
 
 
 def get_clipboard(size_limit=16777216):
@@ -486,12 +567,24 @@ class Selection:
 
 # ----- settings ----------------------------------------------------------------------------------
 
+# ``add_on_change`` callbacks by settings object (the same file seen through any Settings) and tag.
+_on_change = {}
+
+
+def _settings_changed(target):
+    """Calls the ``add_on_change`` callbacks of a settings object a plugin changed."""
+    for callback in list(_on_change.get(tuple(target), {}).values()):
+        try:
+            callback()
+        except Exception:
+            traceback.print_exc()
+
+
 class Settings:
     """A view's settings, a settings file (``load_settings``) or the window's settings."""
 
     def __init__(self, target):
         self.target = target
-        self._on_change = {}
 
     def __getitem__(self, key):
         found, value = sublime_api.settings_get(self.target, key)
@@ -517,9 +610,11 @@ class Settings:
 
     def set(self, key, value):
         sublime_api.settings_set(self.target, key, value)
+        _settings_changed(self.target)
 
     def erase(self, key):
         sublime_api.settings_erase(self.target, key)
+        _settings_changed(self.target)
 
     def setdefault(self, key, value):
         if not self.has(key):
@@ -535,11 +630,11 @@ class Settings:
         return sublime_api.settings_all(self.target)
 
     def add_on_change(self, tag, callback):
-        # Kept, but not called yet: change notifications are phase B.
-        self._on_change[tag] = callback
+        # Called after a plugin's own changes; the editor's changes do not notify yet.
+        _on_change.setdefault(tuple(self.target), {})[tag] = callback
 
     def clear_on_change(self, tag):
-        self._on_change.pop(tag, None)
+        _on_change.get(tuple(self.target), {}).pop(tag, None)
 
 
 # ----- views and windows -------------------------------------------------------------------------
@@ -615,10 +710,16 @@ class View:
         sublime_api.view_set_read_only(self.view_id, bool(read_only))
 
     def is_scratch(self):
-        return False
+        return sublime_api.view_is_scratch(self.view_id)
 
     def set_scratch(self, scratch):
-        pass
+        sublime_api.view_set_scratch(self.view_id, bool(scratch))
+
+    def close(self, on_close=None):
+        closed = sublime_api.view_close(self.view_id)
+        if on_close is not None:
+            set_timeout(lambda: on_close(closed))
+        return closed
 
     def encoding(self):
         return sublime_api.view_encoding(self.view_id)
@@ -711,10 +812,14 @@ class View:
         sublime_api.run_command("view", self.view_id, cmd, args)
 
     def show(self, x, show_surrounds=True, keep_to_left=False, animate=True):
-        pass
+        point = _point_of(x)
+        if point is not None:
+            sublime_api.view_show(self.view_id, point, False)
 
     def show_at_center(self, x, animate=True):
-        pass
+        point = _point_of(x)
+        if point is not None:
+            sublime_api.view_show(self.view_id, point, True)
 
     def visible_region(self):
         return Region(0, self.size())
@@ -729,28 +834,43 @@ class View:
     def score_selector(self, pt, selector):
         return 0
 
-    # Regions are kept so get_regions() works, but they are not drawn yet (phase B).
-    def add_regions(self, key, regions, scope="", icon="", flags=0, *args, **kwargs):
-        _regions[(self.view_id, key)] = list(regions)
+    def add_regions(self, key, regions, scope="", icon="", flags=0, annotations=None, annotation_color="",
+                    on_navigate=None, on_close=None, **kwargs):
+        """Marks regions (drawn with the scope's color, see ``DRAW_*``); they move with the text.
+        Annotations are not shown yet."""
+        rows = [[r.a, r.b] for r in (_region(r) for r in regions)]
+        sublime_api.view_add_regions(self.view_id, str(key), rows, scope or "", icon or "", int(flags))
 
     def get_regions(self, key):
-        return list(_regions.get((self.view_id, key), []))
+        return [Region(a, b) for a, b in sublime_api.view_get_regions(self.view_id, str(key))]
 
     def erase_regions(self, key):
-        _regions.pop((self.view_id, key), None)
+        sublime_api.view_erase_regions(self.view_id, str(key))
 
     def set_status(self, key, value):
-        _statuses[(self.view_id, key)] = value
+        sublime_api.view_set_status(self.view_id, str(key), str(value))
 
     def get_status(self, key):
-        return _statuses.get((self.view_id, key), "")
+        return sublime_api.view_get_status(self.view_id, str(key))
 
     def erase_status(self, key):
-        _statuses.pop((self.view_id, key), None)
+        sublime_api.view_erase_status(self.view_id, str(key))
 
 
-_regions = {}
-_statuses = {}
+def _point_of(x):
+    """The point ``view.show`` scrolls to: a point, a region's start or a selection's first region."""
+    if isinstance(x, int):
+        return x
+    if isinstance(x, Region):
+        return x.begin()
+    if isinstance(x, Selection):
+        regions = list(x)
+        return regions[0].begin() if regions else None
+    if isinstance(x, (list, tuple)) and x:
+        return _point_of(x[0])
+    return None
+
+
 
 
 class Window:
@@ -834,6 +954,27 @@ class Window:
 
     def run_command(self, cmd, args=None):
         sublime_api.run_command("window", self.window_id, cmd, args)
+
+    def create_output_panel(self, name, unlisted=False):
+        """The view of the output panel ``name``, created (or emptied) now. Show it with
+        ``run_command("show_panel", {"panel": "output." + name})``."""
+        return View(sublime_api.window_create_output_panel(self.window_id, name))
+
+    def get_output_panel(self, name):
+        return self.create_output_panel(name)
+
+    def find_output_panel(self, name):
+        view_id = sublime_api.window_find_output_panel(self.window_id, name)
+        return View(view_id) if view_id else None
+
+    def destroy_output_panel(self, name):
+        sublime_api.window_destroy_output_panel(self.window_id, name)
+
+    def active_panel(self):
+        return sublime_api.window_active_panel(self.window_id)
+
+    def panels(self):
+        return sublime_api.window_panels(self.window_id)
 
     def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None):
         """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled."""

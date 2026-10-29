@@ -666,6 +666,23 @@ msgid_plural "Plugins reloaded: {count} commands"
 msgstr[0] ""
 msgstr[1] ""
 
+#: crates/use_cases/src/plugin_api.rs
+msgid "OK"
+msgstr ""
+
+#: crates/use_cases/src/plugin_api.rs
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Cancel"
+msgstr ""
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "Yes"
+msgstr ""
+
+#: crates/use_cases/src/plugin_api.rs
+msgid "No"
+msgstr ""
+
 #: crates/use_cases/src/plugins.rs
 msgid "{name} failed: {error} (View > Show Console)"
 msgstr ""
@@ -703,11 +720,11 @@ msgid "Could not save the session: {error}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
-msgid "Overlay not supported: {name}"
+msgid "Panel not supported: {name}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
-msgid "Panel not supported: {name}"
+msgid "Overlay not supported: {name}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
@@ -789,10 +806,6 @@ msgstr ""
 
 #: crates/frameworks/src/views/dialogs.rs
 msgid "Don't Save"
-msgstr ""
-
-#: crates/frameworks/src/views/dialogs.rs
-msgid "Cancel"
 msgstr ""
 
 #: crates/frameworks/src/views/dialogs.rs

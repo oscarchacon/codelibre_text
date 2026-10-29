@@ -1,5 +1,5 @@
-//! The text area: gutter with line numbers, current line highlight, rulers, find matches and the
-//! text itself (an egui `TextEdit` colored by the syntect engine).
+//! The text area: gutter with line numbers, current line highlight, rulers, find matches, plugins'
+//! regions and icons, and the text itself (an egui `TextEdit` colored by the syntect engine).
 //!
 //! **The one place a view writes to the model.** egui's `TextEdit` needs `&mut String` and owns
 //! typing, caret movement, IME and undo. Copying the whole buffer every frame would be too slow, so
@@ -8,6 +8,7 @@
 //! when the document's `selection_revision` changes, the view moves the widget's caret.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
@@ -17,7 +18,7 @@ use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::EditorViewModel;
+use interface_adapters::view_models::{EditorViewModel, RegionViewModel, Underline};
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
 
@@ -33,6 +34,8 @@ pub enum EditorText<'a> {
 #[derive(Default)]
 pub struct SelectionSync {
     applied_revision: HashMap<DocumentId, u64>,
+    /// The same for plugins' `view.show` requests.
+    applied_show: HashMap<DocumentId, u64>,
 }
 
 pub fn widget_id(document: DocumentId) -> Id {
@@ -51,6 +54,11 @@ pub fn show(
     let ctx = ui.ctx().clone();
     let mut engine = engine.borrow_mut();
     let colors = Colors::from_scheme(&engine.scheme(&model.color_scheme).settings);
+    let region_colors: Vec<Color32> = model
+        .regions
+        .iter()
+        .map(|r| engine.scope_color(&model.color_scheme, &r.scope).unwrap_or(colors.foreground))
+        .collect();
 
     // Like Sublime, the text has the keyboard focus unless a panel, overlay or dialog took it.
     if model.take_focus || ctx.memory(|m| m.focused().is_none()) {
@@ -63,6 +71,11 @@ pub fn show(
         set_widget_selection(&ctx, id, model.selection);
         sync.applied_revision.insert(model.document, model.selection_revision);
         reveal = true;
+    }
+    // And `view.show` from plugins.
+    let show = model.show.filter(|&(_, _, revision)| sync.applied_show.get(&model.document) != Some(&revision));
+    if let Some((_, _, revision)) = show {
+        sync.applied_show.insert(model.document, revision);
     }
 
     // Tab, Shift+Tab and Enter follow Sublime's indentation settings, so the use cases handle them.
@@ -186,6 +199,10 @@ pub fn show(
                     ));
                 }
                 shapes.extend(find_match_shapes(model, text, galley, origin, viewport, char_width, colors.find_highlight));
+                let visible = visible_chars(galley, origin, viewport);
+                for (regions, &color) in model.regions.iter().zip(&region_colors) {
+                    shapes.extend(region_shapes(regions, color, galley, origin, visible.clone()));
+                }
                 for extra in &model.extra_selections {
                     for rect in range_rects(galley, extra.start(), extra.end()) {
                         shapes.push(Shape::rect_filled(rect.translate(origin.to_vec2()), 0.0, colors.selection));
@@ -199,9 +216,15 @@ pub fn show(
                 }
 
                 paint_gutter(ui, model, text, galley, origin, viewport, gutter_width, char_width, row_height, &font, &colors, selection);
+                paint_region_icons(ui, model, &region_colors, galley, origin, viewport, gutter_width, char_width, row_height);
 
                 if reveal {
                     ui.scroll_to_rect(caret.expand2(egui::vec2(char_width * 4.0, row_height * 4.0)), None);
+                }
+                if let Some((point, center, _)) = show {
+                    let at = galley.pos_from_ccursor(CCursor::new(point)).translate(origin.to_vec2());
+                    let align = center.then_some(egui::Align::Center);
+                    ui.scroll_to_rect(at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)), align);
                 }
             });
         });
@@ -277,9 +300,8 @@ fn find_match_shapes(
     if model.find_matches.is_empty() {
         return Vec::new();
     }
-    let first_visible = galley.cursor_from_pos(egui::vec2(0.0, viewport.top() - origin.y)).ccursor.index;
-    let last_visible = galley.cursor_from_pos(egui::vec2(f32::MAX, viewport.bottom() - origin.y)).ccursor.index;
-    let (first_byte, last_byte) = (char_to_byte(text, first_visible), char_to_byte(text, last_visible));
+    let visible = visible_chars(galley, origin, viewport);
+    let (first_byte, last_byte) = (char_to_byte(text, visible.start), char_to_byte(text, visible.end));
 
     let start = model.find_matches.partition_point(|m| m.end < first_byte);
     let mut shapes = Vec::new();
@@ -299,6 +321,116 @@ fn find_match_shapes(
         shapes.push(Shape::rect_filled(rect.translate(origin.to_vec2()).expand(1.0), 2.0, color));
     }
     shapes
+}
+
+/// The chars on screen: from the first visible row's start to the last one's end.
+fn visible_chars(galley: &egui::Galley, origin: egui::Pos2, viewport: Rect) -> Range<usize> {
+    let first = galley.cursor_from_pos(egui::vec2(0.0, viewport.top() - origin.y)).ccursor.index;
+    let last = galley.cursor_from_pos(egui::vec2(f32::MAX, viewport.bottom() - origin.y)).ccursor.index;
+    first..last
+}
+
+/// A plugin's regions that are on screen: a fill, an outline, an underline, or a bar for empty ones.
+fn region_shapes(
+    regions: &RegionViewModel,
+    color: Color32,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    visible: Range<usize>,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let stroke = Stroke::new(1.0_f32, color);
+    for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
+        if range.is_empty() {
+            if regions.draw_empty {
+                let at = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2());
+                shapes.push(Shape::line_segment([at.left_top(), at.left_bottom()], stroke));
+            }
+            continue;
+        }
+        for rect in range_rects(galley, range.start, range.end) {
+            let rect = rect.translate(origin.to_vec2());
+            if regions.fill {
+                shapes.push(Shape::rect_filled(rect, 2.0, color.gamma_multiply(0.25)));
+            }
+            if regions.outline {
+                shapes.push(Shape::rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside));
+            }
+            if let Some(underline) = regions.underline {
+                shapes.extend(underline_shapes(underline, rect, stroke));
+            }
+        }
+    }
+    shapes
+}
+
+fn underline_shapes(underline: Underline, rect: Rect, stroke: Stroke) -> Vec<Shape> {
+    let y = rect.bottom() - 1.0;
+    match underline {
+        Underline::Solid => vec![Shape::line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], stroke)],
+        Underline::Stippled => {
+            let mut dashes = Vec::new();
+            let mut x = rect.left();
+            while x < rect.right() {
+                dashes.push(Shape::line_segment([egui::pos2(x, y), egui::pos2((x + 2.0).min(rect.right()), y)], stroke));
+                x += 4.0;
+            }
+            dashes
+        }
+        Underline::Squiggly => {
+            let mut points = Vec::new();
+            let mut x = rect.left();
+            let mut up = true;
+            while x <= rect.right() {
+                points.push(egui::pos2(x, if up { y - 2.0 } else { y }));
+                x += 2.0;
+                up = !up;
+            }
+            vec![Shape::line(points, stroke)]
+        }
+    }
+}
+
+/// Gutter icons of plugins' regions (`dot`, `circle`, `bookmark`; other icons are drawn as dots),
+/// on the line where each region starts.
+#[allow(clippy::too_many_arguments)]
+fn paint_region_icons(
+    ui: &egui::Ui,
+    model: &EditorViewModel,
+    region_colors: &[Color32],
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    gutter_width: f32,
+    char_width: f32,
+    row_height: f32,
+) {
+    let gutter = Rect::from_min_max(viewport.left_top(), egui::pos2(viewport.left() + gutter_width, viewport.bottom()));
+    let painter = ui.painter().with_clip_rect(gutter);
+    let visible = visible_chars(galley, origin, viewport);
+    let x = gutter.left() + char_width * 0.8;
+    let radius = (row_height * 0.22).max(2.0);
+    for (regions, &color) in model.regions.iter().zip(region_colors) {
+        if regions.icon.is_empty() {
+            continue;
+        }
+            for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
+            let y = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2()).center().y;
+            let center = egui::pos2(x, y);
+            match regions.icon.as_str() {
+                "circle" => {
+                    painter.circle_stroke(center, radius, Stroke::new(1.5_f32, color));
+                }
+                "bookmark" => {
+                    let rect = Rect::from_center_size(center, egui::vec2(radius * 1.4, radius * 2.2));
+                    painter.rect_filled(rect, 1.0, color);
+                }
+                _ => {
+                    painter.circle_filled(center, radius, color);
+                }
+            }
+        }
+    }
 }
 
 /// Line numbers, painted over the text so horizontally scrolled text slides under them.

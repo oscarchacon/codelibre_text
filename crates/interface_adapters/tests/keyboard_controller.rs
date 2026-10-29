@@ -5,7 +5,8 @@ use entities::keymap::{Binding, KeyCombo};
 use interface_adapters::controllers::keyboard_controller::{clipboard_shortcut, key_pressed, KeyHandling};
 use interface_adapters::view_state::{QuickPanel, ViewState};
 use serde_json::{json, Value};
-use test_support::{status, World};
+use test_support::{plugin_call, status, World};
+use use_cases::gateways::{PluginCommandKind, PluginMessage};
 use use_cases::search::SearchKind;
 use use_cases::Editor;
 
@@ -120,6 +121,43 @@ fn panel_visible_context() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     view.find_panel.visible = true;
+    assert!(press(&mut editor, &mut view, "escape"));
+    assert_eq!(queued(&mut view), vec!["hide_panel"]);
+}
+
+#[test]
+fn plugins_answer_contexts_the_editor_does_not_know() {
+    let world = World::new()
+        .with_binding(bind(
+            &["tab"],
+            Command::new("expand_abbreviation"),
+            vec![json!({ "key": "emmet_abbreviation", "operator": "equal", "operand": true })],
+        ))
+        .with_plugins(&[], &["on_query_context"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([PluginMessage::Answer(json!(true))]);
+    assert!(press(&mut editor, &mut view, "tab"));
+    assert_eq!(queued(&mut view), vec!["expand_abbreviation"]);
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    assert!(!press(&mut editor, &mut view, "tab"), "no answer: Tab goes to the text");
+}
+
+#[test]
+fn an_output_panel_is_visible_but_has_no_focus() {
+    let world = escape_world()
+        .with_binding(bind(
+            &["enter"],
+            Command::new("find_next"),
+            vec![json!({ "key": "panel_has_focus", "operator": "equal", "operand": true })],
+        ))
+        .with_plugin_commands(&[("build", PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([plugin_call("window_create_output_panel", json!([1, "exec"])), PluginMessage::Done { error: None }]);
+    editor.run_plugin_command(&Command::new("build"), &mut |_, _| {});
+    editor.show_output_panel("exec");
+    assert!(!press(&mut editor, &mut view, "enter"), "Enter still types in the text");
     assert!(press(&mut editor, &mut view, "escape"));
     assert_eq!(queued(&mut view), vec!["hide_panel"]);
 }
