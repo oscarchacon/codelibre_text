@@ -3,7 +3,7 @@
 //! the editor view's: selections they set arrive by revision, the caret goes back as an event.
 
 use egui::text::{CCursor, CCursorRange};
-use egui::{Id, Key, RichText, Ui};
+use egui::{Event, Id, Key, RichText, Ui};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::InputPanelViewModel;
 
@@ -29,6 +29,8 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &
         }
         if field.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             done = true;
+            // The text area takes the focus back in this frame: it must not get these keys too.
+            ui.input_mut(|i| i.events.retain(|e| !matches!(e, Event::Key { .. } | Event::Text(_))));
         }
         let seen = id.with("selection_revision");
         let revision = (panel.id, panel.selection_revision);

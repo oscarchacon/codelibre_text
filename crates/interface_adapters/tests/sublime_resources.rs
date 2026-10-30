@@ -377,3 +377,13 @@ fn plugins_load_resources_by_name() {
         Err("resource not found: Packages/Tool/missing.txt".into())
     );
 }
+
+#[test]
+fn the_built_in_defaults_are_resources_of_the_default_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() };
+    let gateway = SublimeResourceGateway::new(paths);
+    let defaults = gateway.load_json_resource("Packages/Default/Preferences.sublime-settings", false).unwrap();
+    assert_eq!(defaults["ignored_packages"], serde_json::json!(["Vintage"]));
+    assert!(gateway.load_resource("Packages/Default/Nope.sublime-settings", false).is_err());
+}

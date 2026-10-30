@@ -232,6 +232,11 @@ pub struct PluginLoad {
     pub packages: Vec<PluginPackage>,
     /// `sublime.packages_path()`.
     pub packages_path: PathBuf,
+    /// Where packages are unpacked and the folder of their archives: plugins there see the paths
+    /// they would have inside the archive.
+    pub archives: Vec<(PathBuf, PathBuf)>,
+    /// The folder of the packages Sublime Text ships, if it is installed.
+    pub shipped_packages: Option<PathBuf>,
     /// The `python_interpreter` setting; `None` finds one.
     pub interpreter: Option<String>,
 }

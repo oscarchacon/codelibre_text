@@ -257,7 +257,10 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`.sublime-package` files**: unpacked by `gateways/package_archives.rs` at every `load_packages` (only those that
       changed: a stamp file holds size and date) to `data/Cache/Packages/{shipped,sublime,own}`, which then are folders of
       packages like any other (`PackagePaths::roots`, load order: those, Sublime's loose packages, ours). So resources,
-      `load_resource` and the plugin host (no `zipimport`) work on plain files; `__file__` points to the cache. A file of
+      `load_resource` and the plugin host (no `zipimport`) work on plain files. Plugins still see the paths inside the
+      archive, `<Installed Packages>/<package>.sublime-package/<file>` (`ArchiveFinder` / `ArchiveLoader` in `plugin_host.py`
+      read from the cache): Package Control works out its folders from `__file__`, so they can only be read with
+      `load_resource`, as in Sublime. A file of
       a later place overrides the same file of an earlier one (`find_resources`, `load_package`). Sources: Sublime's
       install `Packages`, Sublime's `Installed Packages`, our `Installed Packages`. Sublime's `Default` and `Package
       Control` are not imported (the first targets its core; the second uses the network at load: it runs only from our
@@ -271,9 +274,16 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [ ] **Libraries / dependencies**: ST4 `Lib/python38` (and Package Control's `dependencies.json` / `libraries`) on `sys.path`.
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
       Provide shims for removed modules (e.g. `imp`, gone in 3.12 — Sublime ships one for its 3.14 host) next to `sublime.py`.
+- [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
+      channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
+      It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,
+      else an empty `Lib/Packages`, because it drops from `ignored_packages` any package it does not find, and would
+      enable Vintage; `Lib/python38` (on `sys.path`) and `Lib/python33`; `Packages/Default/*` built-in defaults as
+      resources; `Settings.settings_id`.
 - [ ] **Package Control bootstrap**: `install_package_control` downloads `Package Control.sublime-package` into
-      `Installed Packages` (ask the user: it downloads and runs code). It uses urllib/ssl, threads, `set_timeout`,
-      `view.set_status` (progress), `show_quick_panel`, `ok_cancel_dialog`, `run_command("open_url")`, `sublime.version()`.
+      `Installed Packages` (ask the user: it downloads and runs code). There is no such command yet.
+- [ ] Packages installed by Package Control need Reload Packages: nothing watches `Installed Packages`, and a plugin
+      package's plugins start only then. Not tried yet: a package with plugins or libraries, upgrades, removal.
 - [ ] **Scopes** from the syntax engine (`syntax_engine.rs` / syntect parse state): `scope_name`, `match_selector`,
       `score_selector`, `extract_scope`, `style_for_scope`, `sublime.score_selector`, `view.meta_info`, `view.symbol_regions`.
 - [ ] **Completions**: `on_query_completions`, `CompletionItem`, `view.auto_complete` (needs an auto-complete UI first).
@@ -285,5 +295,6 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load, but their
 bindings need the `selector` context, so they stay inactive until **Scopes** below.
 
-Verification for phase C: install Package Control in a scratch profile (set `CODELIBRE_TEXT_DATA` to a temp folder), install a
-small package (e.g. a color scheme), then a plugin package, and run its commands.
+Verification for phase C: `package_control_loads_in_a_scratch_profile` in `crates/frameworks/tests/sublime_packages.rs`
+(`-- --ignored`, needs the network) copies the installed Package Control to a temporary profile and installs a color
+scheme. What is left is a plugin package and running its commands.

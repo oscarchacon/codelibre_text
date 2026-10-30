@@ -619,6 +619,11 @@ class Settings:
     def __init__(self, target):
         self.target = target
 
+    @property
+    def settings_id(self):
+        """Never 0, which in Sublime means an invalid object."""
+        return (hash(tuple(self.target)) & 0x7fffffff) or 1
+
     def __getitem__(self, key):
         found, value = sublime_api.settings_get(self.target, key)
         if not found:

@@ -4,7 +4,7 @@
 //! own process: a crash or an endless loop stops the host, not the editor.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
@@ -139,17 +139,36 @@ impl Drop for PythonPluginHost {
     }
 }
 
+/// Plugins find the packages that come with the editor in a `Packages` folder next to the
+/// executable. Package Control takes any ignored package it does not find for a leftover and
+/// removes it from `ignored_packages`, so it must see the ones Sublime Text ships (`Vintage`, or
+/// it would be enabled). Without Sublime Text, ours are built in: an empty folder.
+fn executable_folder(request: &PluginLoad, data: &Path) -> PathBuf {
+    match request.shipped_packages.as_deref().and_then(Path::parent) {
+        Some(sublime) => sublime.to_path_buf(),
+        None => {
+            let lib = data.join("Lib");
+            let _ = std::fs::create_dir_all(lib.join("Packages"));
+            lib
+        }
+    }
+}
+
 impl PluginHostGateway for PythonPluginHost {
     fn load(&mut self, request: &PluginLoad) -> Result<(), String> {
         self.start(request.interpreter.as_deref())?;
         let data = request.packages_path.parent().map(PathBuf::from).unwrap_or_default();
-        let executable = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+        let file_name = std::env::current_exe().ok().and_then(|p| p.file_name().map(PathBuf::from)).unwrap_or_default();
+        let executable = executable_folder(request, &data).join(file_name).display().to_string();
         self.send(json!({
             "op": "load",
             "packages": request.packages.iter().map(|p| json!({
                 "name": p.name,
                 "dirs": p.dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
+            "archives": request.archives.iter().map(|(unpacked, archives)| {
+                json!([unpacked.display().to_string(), archives.display().to_string()])
+            }).collect::<Vec<_>>(),
             "paths": {
                 "packages": request.packages_path.display().to_string(),
                 "installed_packages": data.join("Installed Packages").display().to_string(),

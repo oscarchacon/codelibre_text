@@ -941,3 +941,14 @@ fn a_listener_s_move_runs_during_the_event() {
     assert!(editor.save_active(false));
     assert_eq!(world.file_text("/p/a.txt"), "quiet");
 }
+
+#[test]
+fn the_default_keymap_binds_what_the_hooks_must_hear() {
+    let Value::Array(bindings) = sublime_json::parse(builtin_resources::KEYMAP).unwrap() else {
+        panic!("a keymap is a list");
+    };
+    let bound = |key: &str| bindings.iter().find(|b| b["keys"] == json!([key])).map(|b| b["command"].as_str().unwrap());
+    assert_eq!(bound("ctrl+z"), Some("undo"));
+    assert_eq!(bound("ctrl+y"), Some("redo_or_repeat"));
+    assert_eq!(bound("ctrl+a"), Some("select_all"));
+}

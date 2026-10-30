@@ -238,8 +238,15 @@ impl ResourceGateway for SublimeResourceGateway {
     }
 
     fn load_resource(&self, name: &str, include_sublime: bool) -> Result<Vec<u8>, String> {
-        let path = resource_path(&self.paths, include_sublime, name).ok_or_else(|| format!("resource not found: {name}"))?;
-        std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+        match resource_path(&self.paths, include_sublime, name) {
+            Some(path) => std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display())),
+            // Our `Default` package is built in; plugins read its defaults (Package Control does).
+            None => name
+                .strip_prefix("Packages/Default/")
+                .and_then(|file| self.default_resource(file))
+                .map(String::into_bytes)
+                .ok_or_else(|| format!("resource not found: {name}")),
+        }
     }
 
     fn unpack_packages(&self, include_sublime: bool, errors: &mut Vec<String>) {

@@ -103,6 +103,8 @@ impl Editor {
         let request = PluginLoad {
             packages,
             packages_path: self.gateways.resources.paths().packages.clone(),
+            archives: self.gateways.resources.paths().archive_folders.iter().map(|f| (f.unpacked.clone(), f.archives.clone())).collect(),
+            shipped_packages: self.gateways.resources.paths().archive_folders.iter().find(|f| f.shipped).map(|f| f.archives.clone()),
             interpreter: settings.str("python_interpreter").filter(|s| !s.is_empty()).map(String::from),
         };
         if let Err(e) = self.gateways.plugins.load(&request) {

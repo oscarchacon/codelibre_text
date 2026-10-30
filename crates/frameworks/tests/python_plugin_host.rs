@@ -40,6 +40,8 @@ fn host_with(dir: &Path, files: &[(&str, &str)]) -> Option<(PythonPluginHost, Pl
     host.load(&PluginLoad {
         packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
         packages_path: dir.join("Packages"),
+        archives: Vec::new(),
+        shipped_packages: None,
         interpreter: None,
     })
     .unwrap();
@@ -215,6 +217,51 @@ fn loads_plugins_and_runs_their_commands() {
 
     host.stop();
     assert!(host.receive().is_err(), "a stopped host answers nothing");
+}
+
+#[test]
+fn plugins_of_an_archive_see_the_paths_inside_it() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let unpacked = dir.path().join("Cache");
+    let package = unpacked.join("Zipped");
+    fs::create_dir_all(package.join("lib").join("deep")).unwrap();
+    fs::write(package.join("lib").join("__init__.py"), "").unwrap();
+    fs::write(package.join("lib").join("deep").join("__init__.py"), "VALUE = 'inner'\n").unwrap();
+    let plugin = r#"
+import sublime_plugin
+from .lib import deep
+print(__file__)
+print(__spec__.origin)
+print(deep.__file__)
+print(deep.VALUE)
+"#;
+    fs::write(package.join("plugin.py"), plugin).unwrap();
+    let archives = dir.path().join("Installed Packages");
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    host.load(&PluginLoad {
+        packages: vec![PluginPackage { name: "Zipped".into(), dirs: vec![package] }],
+        packages_path: dir.path().join("Packages"),
+        archives: vec![(unpacked, archives.clone())],
+        shipped_packages: None,
+        interpreter: None,
+    })
+    .unwrap();
+    let mut log = String::new();
+    match next(&mut host, &mut log) {
+        PluginMessage::Loaded { errors, .. } => assert_eq!(errors, Vec::<String>::new()),
+        other => panic!("{other:?}"),
+    }
+    let root = archives.join("Zipped.sublime-package");
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines[0], root.join("plugin.py").display().to_string());
+    assert_eq!(lines[1], root.join("plugin.py").display().to_string());
+    assert_eq!(lines[2], root.join("lib").join("deep").join("__init__.py").display().to_string());
+    assert_eq!(lines[3], "inner");
+    assert!(dir.path().join("Lib").join("Packages").is_dir(), "next to the executable plugins are told about");
+    host.stop();
 }
 
 #[test]
