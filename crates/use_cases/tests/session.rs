@@ -7,6 +7,7 @@ use serde_json::json;
 use test_support::{open, World};
 use use_cases::editing::TextCommand;
 use use_cases::editor::{CloseChoice, PendingClose};
+use use_cases::gateways::PluginMessage;
 use use_cases::session::{Session, SessionDocument};
 
 fn layout() -> Vec<(String, bool)> {
@@ -150,4 +151,24 @@ fn session_layout_is_empty_without_a_session() {
     let world = World::new();
     let editor = world.editor();
     assert!(editor.session_layout().is_empty());
+}
+
+#[test]
+fn listeners_hear_on_load_for_the_files_of_the_session() {
+    let document = |path: Option<PathBuf>, unsaved: Option<&str>| SessionDocument {
+        path,
+        unsaved_text: unsaved.map(String::from),
+        syntax: "Plain Text".into(),
+        selection: Selection::caret(0),
+    };
+    let session = Session {
+        folders: vec![],
+        documents: vec![document(Some("/p/a.txt".into()), None), document(None, Some("x"))],
+        active: 0,
+        layout: vec![],
+    };
+    let world = World::new().with_file("/p/a.txt", "a").with_session(session).with_plugins(&[], &["on_load"]);
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    let editor = world.editor();
+    assert_eq!(world.plugins.events.borrow().clone(), vec![("on_load".to_string(), editor.state().documents[0].id)]);
 }

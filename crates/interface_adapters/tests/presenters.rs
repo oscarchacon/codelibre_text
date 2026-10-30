@@ -469,3 +469,107 @@ fn plugin_regions_and_statuses_are_presented() {
     assert_eq!(model.show, Some((8, false, 1)));
     assert_eq!(status_bar::present(&editor).plugin_statuses, vec!["1 warning".to_string()]);
 }
+#[test]
+fn plugin_commands_decide_how_they_show_in_the_menu() {
+    let item = |caption: &str, command: &str, checkbox: bool| MenuItem {
+        caption: caption.into(),
+        id: None,
+        command: Some(Command::new(command)),
+        checkbox,
+        children: vec![],
+    };
+    let world = World::new()
+        .with_menu(MenuItem {
+            caption: "Tools".into(),
+            id: None,
+            command: None,
+            checkbox: false,
+            children: vec![item("Hidden", "hidden", false), item("Off", "off", true), item("", "described", false)],
+        })
+        .with_plugins(
+            &[
+                ("hidden", use_cases::gateways::PluginCommandKind::Window),
+                ("off", use_cases::gateways::PluginCommandKind::Window),
+                ("described", use_cases::gateways::PluginCommandKind::Window),
+            ],
+            &["command_states"],
+        );
+    let mut editor = world.editor();
+    world.plugins.then([use_cases::gateways::PluginMessage::Answer(json!([
+        { "visible": false },
+        { "enabled": false, "checked": true },
+        { "description": "From the plugin" },
+    ]))]);
+    editor.refresh_plugin_command_states();
+    let menu = menu::present(&editor);
+    let tools = &menu[0].children;
+    assert_eq!(tools.len(), 2, "the hidden one is left out");
+    assert!(!tools[0].enabled);
+    assert_eq!(tools[0].checked, Some(true));
+    assert_eq!(tools[1].caption, "From the plugin");
+    assert!(tools[1].enabled);
+}
+
+#[test]
+fn a_plugins_quick_panel_shows_kinds_and_may_stay_open() {
+    use interface_adapters::controllers::command_controller;
+    use interface_adapters::presenters::quick_panel;
+    use interface_adapters::view_state::ViewState;
+    use test_support::plugin_call;
+    use use_cases::gateways::{PluginCommandKind, PluginMessage};
+
+    let world = World::new().with_plugin_commands(&[("pick", PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([
+        plugin_call("window_show_quick_panel", json!([1, [["one", "", "note", "f"]], 2, -1, "", 7, false])),
+        PluginMessage::Done { error: None },
+    ]);
+    command_controller::run(&mut editor, &mut view, &Command::new("pick"));
+    let panel = quick_panel::present(&editor, &mut view).expect("the panel");
+    assert!(panel.keep_open);
+    assert_eq!(panel.items[0].kind, "f");
+    assert_eq!(panel.items[0].hint, "note");
+}
+
+#[test]
+fn the_output_panel_marks_the_result_visited_relative_to_the_lines_it_shows() {
+    let world = World::new().with_file("/p/a.py", "x\n");
+    let mut editor = world.editor();
+    editor.exec(&json!({ "cmd": ["x"], "file_regex": "^(a.py):(\\d+)", "working_dir": "/p" }));
+    editor.show_output_panel("exec");
+    let mut text: String = (0..output_panel::MAX_LINES + 5).map(|i| format!("line {i}\n")).collect();
+    text.push_str("a.py:1\n");
+    world.processes.events.borrow_mut().push_back(use_cases::gateways::ProcessEvent::Output(text));
+    editor.poll_builds();
+
+    let panel = output_panel::present(&editor).unwrap();
+    assert_eq!(panel.first_line, 6);
+    assert_eq!(panel.current_line, None);
+    let revision = panel.result_revision;
+
+    assert!(editor.next_result(true));
+    let panel = output_panel::present(&editor).unwrap();
+    assert_eq!(panel.current_line, Some(output_panel::MAX_LINES - 1));
+    assert_ne!(panel.result_revision, revision);
+}
+
+#[test]
+fn the_input_panel_shows_its_document() {
+    use interface_adapters::view_state::InputPanelState;
+    let world = World::new().with_plugin_commands(&[("ask", use_cases::gateways::PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(quick_panel::present_input_panel(&editor, &mut view).is_none());
+    world.plugins.then([
+        test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "bob", 3, false])),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&entities::command::Command::new("ask"), &mut |_, _| {});
+    view.input_panel = Some(InputPanelState { focus_requested: true });
+
+    let panel = quick_panel::present_input_panel(&editor, &mut view).unwrap();
+    assert_eq!((panel.caption.as_str(), panel.text.as_str(), panel.selection), ("Name:", "bob", (3, 3)));
+    assert!(panel.take_focus);
+    assert!(!quick_panel::present_input_panel(&editor, &mut view).unwrap().take_focus, "only once");
+}

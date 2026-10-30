@@ -102,11 +102,20 @@ pub struct MessageDialog {
     pub buttons: MessageButtons,
 }
 
+/// A kind of file a dialog offers (e.g. `Text files`, with `txt` and `md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileFilter {
+    pub name: String,
+    pub extensions: Vec<String>,
+}
+
 /// Native file pickers and message dialogs.
 pub trait DialogGateway {
-    fn pick_files(&self, start_dir: Option<&Path>) -> Vec<PathBuf>;
+    /// Any file when `filters` is empty.
+    fn pick_files(&self, start_dir: Option<&Path>, filters: &[FileFilter]) -> Vec<PathBuf>;
     fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf>;
-    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf>;
+    fn pick_folders(&self, start_dir: Option<&Path>) -> Vec<PathBuf>;
+    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf>;
     /// Shows a message and waits for the user's answer.
     fn show_message(&self, dialog: &MessageDialog) -> MessageAnswer;
 }
@@ -158,6 +167,8 @@ pub trait ResourceGateway {
     fn find_resources(&self, pattern: &str, include_sublime_packages: bool) -> Vec<String>;
     /// The bytes of a resource named `Packages/<package>/<path>`.
     fn load_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Vec<u8>, String>;
+    /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
+    fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
 }
 
 /// Syntax definitions and color schemes.
@@ -168,6 +179,8 @@ pub trait SyntaxGateway {
     fn detect(&self, path: &Path, first_line: &str) -> String;
     /// Resolves a syntax name or a `.sublime-syntax` path to a known syntax name.
     fn resolve(&self, name_or_path: &str) -> String;
+    /// The scope of a whole file in a syntax (`source.python`); what build `selector`s match.
+    fn base_scope(&self, syntax: &str) -> String;
     fn syntax_names(&self) -> Vec<String>;
     fn color_scheme_names(&self) -> Vec<String>;
     /// Functions, classes, headings… of a document, for Goto Symbol.
@@ -249,6 +262,43 @@ pub trait PluginHostGateway {
     /// The next message if there is one already (calls made outside a request); never waits.
     fn try_receive(&mut self) -> Result<Option<PluginMessage>, String>;
     fn stop(&mut self);
+}
+
+/// What a build runs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessCommand {
+    /// A line for the system's shell.
+    Shell(String),
+    /// A program and its arguments.
+    Program(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProcessRequest {
+    pub command: ProcessCommand,
+    pub working_dir: Option<PathBuf>,
+    /// Variables to set. `$NAME` and `%NAME%` in their values are the process's own environment.
+    pub env: Vec<(String, String)>,
+    /// Replaces `PATH`, expanded like `env`.
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessEvent {
+    /// Text the process wrote to its stdout or stderr.
+    Output(String),
+    /// It ended; `None` when it has no exit code (it was killed).
+    Finished(Option<i32>),
+}
+
+/// Runs one external process at a time (a build), without waiting for it.
+pub trait ProcessGateway {
+    /// Starts a process; events of an earlier one are dropped.
+    fn start(&mut self, request: &ProcessRequest) -> Result<(), String>;
+    /// What happened since the last call; never waits.
+    fn poll(&mut self) -> Vec<ProcessEvent>;
+    /// Kills the process and its children. It still reports `Finished`.
+    fn kill(&mut self);
 }
 
 /// Background list of the files in the open folders (for Goto Anything).

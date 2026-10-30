@@ -160,6 +160,10 @@ impl SyntaxEngine {
         self.syntax(&name).name.clone()
     }
 
+    pub fn base_scope(&self, syntax: &str) -> String {
+        find_syntax(&self.syntaxes, syntax).scope.to_string()
+    }
+
     pub fn syntax_names(&self) -> Vec<String> {
         self.syntaxes.syntaxes().iter().filter(|s| !s.hidden).map(|s| s.name.clone()).collect()
     }

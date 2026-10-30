@@ -6,6 +6,10 @@ use std::path::PathBuf;
 use use_cases::gateways::PackagePaths;
 
 pub fn package_paths() -> PackagePaths {
+    // A scratch profile for trying things out: nothing of the user's is read or written.
+    if let Some(data) = std::env::var_os("CODELIBRE_TEXT_DATA") {
+        return PackagePaths { packages: PathBuf::from(data).join("Packages"), sublime_packages: None };
+    }
     let packages = directories::ProjectDirs::from("", "", "codelibre_text")
         .map(|d| d.data_dir().join("Packages"))
         .unwrap_or_else(|| PathBuf::from("Packages"));

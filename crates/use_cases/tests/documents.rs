@@ -7,6 +7,7 @@ use entities::document::LineEnding;
 use entities::selection::Selection;
 use use_cases::editing::TextCommand;
 use use_cases::editor::{CloseChoice, PendingClose};
+use use_cases::gateways::PluginMessage;
 use test_support::{active_text, open, status, World};
 
 fn names(editor: &use_cases::Editor) -> Vec<String> {
@@ -341,4 +342,20 @@ fn the_text_widget_can_edit_documents_but_not_read_only_ones() {
     editor.open_scratch("Defaults", "{}", "JSON", true);
     let scratch = editor.active_document().unwrap().id;
     assert!(editor.text_for_editing(scratch).is_none());
+}
+
+#[test]
+fn listeners_hear_when_a_file_is_reverted_or_reloaded() {
+    let world = World::new().with_file("/p/a.txt", "old").with_plugins(&[], &["on_revert", "on_reload"]);
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    editor.revert_active_document();
+    assert_eq!(world.plugins.event_names(), vec!["on_revert"]);
+
+    world.disk.put("/p/a.txt", "new");
+    std::thread::sleep(Duration::from_millis(1600));
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    editor.check_external_changes();
+    assert_eq!(world.plugins.event_names(), vec!["on_revert", "on_reload"]);
 }

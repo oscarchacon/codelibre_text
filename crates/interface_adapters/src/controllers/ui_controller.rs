@@ -20,6 +20,8 @@ use crate::view_state::{ViewRequest, ViewState};
 pub enum UiEvent {
     /// A menu item or anything else that maps to a Sublime command.
     RunCommand(Command),
+    /// Every frame: whether a menu of the main menu is open.
+    MenuOpen(bool),
 
     ActivateTab(usize),
     CloseTab(usize),
@@ -34,9 +36,13 @@ pub enum UiEvent {
     QuickPanelAccepted(usize),
     QuickPanelDismissed,
 
-    /// A plugin's input panel: the text changed, Enter was pressed.
+    /// A plugin's input panel: the text changed, the caret moved, Enter was pressed.
     InputPanelChanged(String),
+    InputPanelSelected { anchor: usize, head: usize },
     InputPanelDone,
+
+    /// A line of the output panel was double-clicked (counting from the start of its text).
+    OutputPanelLineOpened(usize),
 
     FindOptionsChanged(FindOptions),
     ReplacementChanged(String),
@@ -54,6 +60,8 @@ pub enum UiEvent {
     TextEdited(DocumentId),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
+    /// Every frame: the chars on screen.
+    VisibleRange(DocumentId, usize, usize),
     /// Keys the editor handles with Sublime's indentation rules instead of the widget's.
     TabPressed,
     ShiftTabPressed,
@@ -71,6 +79,12 @@ pub enum UiEvent {
 pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
     match event {
         UiEvent::RunCommand(command) => view.queue_command(command),
+        UiEvent::MenuOpen(open) => {
+            if open && !view.menu_open {
+                editor.refresh_plugin_command_states();
+            }
+            view.menu_open = open;
+        }
 
         UiEvent::ActivateTab(index) => {
             editor.activate(index);
@@ -121,29 +135,35 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::QuickPanelAccepted(index) => {
+            view.focus_editor = true;
             if let Some(panel) = view.quick_panel.take() {
                 match panel.results.into_iter().nth(index).map(|c| c.target) {
                     Some(CandidateTarget::PluginItem(item)) => command_controller::answer_plugin_quick_panel(editor, view, Some(item)),
                     Some(target) => {
                         if let Some(command) = editor.accept_candidate(target) {
-                            view.queue_command(command);
+                            command_controller::run_from_palette(editor, view, command);
                         }
                     }
                     None if panel.kind == SearchKind::PluginItems => command_controller::answer_plugin_quick_panel(editor, view, None),
                     None => {}
                 }
             }
-            view.focus_editor = true;
         }
         UiEvent::QuickPanelDismissed => command_controller::close_quick_panel(editor, view),
 
         UiEvent::InputPanelChanged(text) => {
-            if let Some(panel) = &mut view.input_panel {
-                panel.text = text.clone();
+            if view.input_panel.is_some() {
                 command_controller::change_plugin_input(editor, view, &text);
             }
         }
+        UiEvent::InputPanelSelected { anchor, head } => editor.select_in_plugin_input_panel(Selection::new(anchor, head)),
         UiEvent::InputPanelDone => command_controller::finish_plugin_input(editor, view, true),
+
+        UiEvent::OutputPanelLineOpened(line) => {
+            if editor.open_result_at_line(line) {
+                view.focus_editor = true;
+            }
+        }
 
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
@@ -171,6 +191,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
 
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
         UiEvent::SelectionChanged(document, selection) => editor.sync_selection_from_view(document, selection),
+        UiEvent::VisibleRange(document, start, end) => editor.sync_visible_range(document, start, end),
         UiEvent::TabPressed => editor.run_text_command(TextCommand::InsertTab),
         UiEvent::ShiftTabPressed => editor.run_text_command(TextCommand::Unindent),
         UiEvent::EnterPressed => editor.run_text_command(TextCommand::NewlineAutoIndent),

@@ -221,6 +221,11 @@ fn file_dialogs_answer_with_paths() {
 
     *world.dialogs.folder_to_open.borrow_mut() = Some("/p".into());
     assert_eq!(call(&world, &mut editor, "select_folder_dialog", json!([null])), Ok(json!(["/p"])));
+    *world.dialogs.folders_to_open.borrow_mut() = vec!["/a".into(), "/b".into()];
+    assert_eq!(call(&world, &mut editor, "select_folder_dialog", json!([null, true])), Ok(json!(["/a", "/b"])));
+    call(&world, &mut editor, "open_dialog", json!([null, [["Text", ["txt", "md"]]]])).unwrap();
+    let filters = world.dialogs.last_filters.borrow().clone();
+    assert_eq!(filters, vec![use_cases::gateways::FileFilter { name: "Text".into(), extensions: vec!["txt".into(), "md".into()] }]);
 }
 
 #[test]
@@ -362,4 +367,43 @@ fn window_settings_live_in_memory() {
     call(&world, &mut editor, "settings_set", json!([target, "x", [1, 2]])).unwrap();
     assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "x"])), Ok(json!([true, [1, 2]])));
     assert!(call(&world, &mut editor, "settings_get", json!([["planet", 3], "x"])).is_err());
+}
+
+#[test]
+fn the_input_panel_is_a_view() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "Name:", "hello", 3, false])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_size", json!([id])), Ok(json!(5)));
+    assert_eq!(call(&world, &mut editor, "window_active_panel", json!([1])), Ok(json!("input")));
+
+    call(&world, &mut editor, "view_selection_set", json!([id, [[0, 5]]])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([id])), Ok(json!([[0, 5]])));
+    call(&world, &mut editor, "view_insert", json!([id, 5, "!"])).unwrap();
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "hello!");
+
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    editor.finish_plugin_input_panel(false, &mut |_, _| {});
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([id])), Ok(json!(false)), "gone with the panel");
+}
+
+#[test]
+fn built_in_commands_that_work_in_panels() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "", "hello", 3, false])).unwrap();
+    call(&world, &mut editor, "run_command", json!(["view", id, "select_all", null])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([id])), Ok(json!([[0, 5]])));
+    call(&world, &mut editor, "run_command", json!(["view", id, "insert", { "characters": "bye" }])).unwrap();
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bye");
+    let refused = call(&world, &mut editor, "run_command", json!(["view", id, "sort_lines", null]));
+    assert!(refused.unwrap_err().starts_with("sort_lines cannot run in a panel"));
+}
+
+#[test]
+fn expand_variables_uses_the_given_values() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let answer = call(&world, &mut editor, "expand_variables", json!(["$a ${b:c}", { "a": "x" }]));
+    assert_eq!(answer, Ok(json!("x c")));
 }

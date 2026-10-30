@@ -29,7 +29,12 @@ struct WithPlugins<'a> {
 
 impl KeyContext for WithPlugins<'_> {
     fn query(&self, key: &str, operator: &str, operand: &Value) -> Option<bool> {
-        self.context.query(key, operator, operand).or_else(|| self.editor.borrow_mut().plugin_query_context(key, operator, operand))
+        self.query_all(key, operator, operand, false)
+    }
+
+    fn query_all(&self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
+        let known = self.context.query(key, operator, operand);
+        known.or_else(|| self.editor.borrow_mut().plugin_query_context(key, operator, operand, match_all))
     }
 }
 
@@ -49,9 +54,9 @@ impl Editor {
 
     /// `on_query_context(view, key, operator, operand, match_all)`: true or false from the first
     /// listener that knows the key, `None` when none does.
-    fn plugin_query_context(&mut self, key: &str, operator: &str, operand: &Value) -> Option<bool> {
+    fn plugin_query_context(&mut self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
         let view = self.active_document()?.id;
-        let answer = self.plugin_query("on_query_context", Some(view), json!([key, operator, operand, false]))?;
+        let answer = self.plugin_query("on_query_context", Some(view), json!([key, operator, operand, match_all]))?;
         answer.as_bool()
     }
 
@@ -84,17 +89,38 @@ impl Editor {
         if target == CommandTarget::View && view.is_none() {
             return;
         }
-        self.plugin_query(event, view, json!([command.name, command.args]));
+        if self.wants_plugin_event(event) || self.wants_plugin_event(&format!("{event}_async")) {
+            self.ask_plugins(event, view, json!([command.name, command.args]));
+        }
     }
 
     pub(crate) fn wants_plugin_event(&self, name: &str) -> bool {
         self.state.plugins.wants(name)
     }
 
+    /// `on_init(views)`: the views that exist when the plugins are loaded.
+    pub(crate) fn plugin_init(&mut self) {
+        let views: Vec<DocumentId> = self.state.documents.iter().map(|d| d.id).collect();
+        self.plugin_query("on_init", None, json!([views]));
+    }
+
+    /// `on_exit()`: the window is closing.
+    pub fn plugin_exit(&mut self) {
+        self.plugin_query("on_exit", None, json!([]));
+    }
+
     /// Sends a query when some listener defines that method; the answer (`None` for `null`).
     /// Built-in commands the listeners run wait for the next `poll_plugins`, as in events.
-    fn plugin_query(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
-        if !self.wants_plugin_event(name) || !self.enter_plugin(name) {
+    pub(crate) fn plugin_query(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
+        if !self.wants_plugin_event(name) {
+            return None;
+        }
+        self.ask_plugins(name, view, args)
+    }
+
+    /// A query the host always understands, whether or not a listener wants it.
+    pub(crate) fn ask_plugins(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
+        if !self.enter_plugin(name) {
             return None;
         }
         let result = self.gateways.plugins.query(name, view, &args).and_then(|()| self.converse_queuing_commands());

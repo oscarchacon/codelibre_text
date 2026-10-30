@@ -118,6 +118,12 @@ impl Binding {
 /// Returning `None` means "unknown key", and the binding does not apply.
 pub trait KeyContext {
     fn query(&self, key: &str, operator: &str, operand: &Value) -> Option<bool>;
+
+    /// Like [`query`](Self::query), with the condition's `match_all`: whether every selection must
+    /// match, not just one. Only plugins' contexts tell the difference.
+    fn query_all(&self, key: &str, operator: &str, operand: &Value, _match_all: bool) -> Option<bool> {
+        self.query(key, operator, operand)
+    }
 }
 
 pub enum KeyResult {
@@ -209,6 +215,7 @@ fn context_matches(conditions: &[Value], context: &dyn KeyContext) -> bool {
         };
         let operator = condition.get("operator").and_then(Value::as_str).unwrap_or("equal");
         let operand = condition.get("operand").cloned().unwrap_or(Value::Bool(true));
-        context.query(key, operator, &operand).unwrap_or(false)
+        let match_all = condition.get("match_all").and_then(Value::as_bool).unwrap_or(false);
+        context.query_all(key, operator, &operand, match_all).unwrap_or(false)
     })
 }

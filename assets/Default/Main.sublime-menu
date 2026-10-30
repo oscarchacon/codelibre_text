@@ -132,6 +132,14 @@
 		"caption": "Tools", "id": "tools",
 		"children": [
 			{ "command": "show_overlay", "args": { "overlay": "command_palette" }, "caption": "Command Palette…" },
+			{ "caption": "-", "id": "build" },
+			{ "command": "build", "caption": "Build" },
+			{ "command": "build", "args": { "select": true }, "caption": "Build With…" },
+			{ "command": "cancel_build", "caption": "Cancel Build" },
+			{ "command": "set_build_system", "args": { "file": "" }, "caption": "Automatic Build System" },
+			{ "command": "show_panel", "args": { "panel": "output.exec" }, "caption": "Show Build Results" },
+			{ "command": "next_result", "caption": "Next Result" },
+			{ "command": "prev_result", "caption": "Previous Result" },
 			{ "caption": "-", "id": "packages" }
 		]
 	},

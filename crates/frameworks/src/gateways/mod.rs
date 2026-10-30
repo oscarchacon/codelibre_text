@@ -1,6 +1,7 @@
 //! Gateway implementations that use libraries or the operating system.
 
 pub mod app_directories;
+pub mod child_processes;
 pub mod folder_index;
 pub mod native_dialogs;
 pub mod os_shell;

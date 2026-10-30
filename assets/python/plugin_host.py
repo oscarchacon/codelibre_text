@@ -9,6 +9,7 @@ JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
     editor -> host   {"op": "event", "name": "on_modified", "view": id}
     editor -> host   {"op": "callback", "id": n, "name": "select", "args": [index]}   (a panel's answer)
     editor -> host   {"op": "query", "name": "on_query_context", "view": id, "window": 1, "args": [...]}
+                     (also "command_states", "command_input", "settings_changed", "on_init", "on_exit")
     host -> editor   {"op": "answer", "value": true / ["command", {args}] / null}       (ends a query)
     host -> editor   {"op": "call", "id": n, "fn": "view_insert", "args": [...]}     (any number of times)
     editor -> host   {"op": "result", "id": n, "value": ...}  or  {"op": "result", "id": n, "error": "..."}
@@ -38,16 +39,6 @@ import sublime_plugin  # noqa: E402
 _plugin_modules = []
 _package_names = []
 _next_edit_token = 0
-
-
-def call_with_args(function, args):
-    """Calls ``function(**args)``; like Sublime, falls back to no arguments if it takes none."""
-    try:
-        return function(**args)
-    except TypeError:
-        if not args:
-            raise
-        return function()
 
 
 def unload_plugins():
@@ -121,7 +112,7 @@ def run(message):
     error = None
     try:
         kind, command = sublime_plugin.command_object(name, message.get("view") or 0, message.get("window") or 1)
-        if call_with_args(command.is_enabled, args):
+        if sublime_plugin.call_with_args(command.is_enabled, args):
             if kind == "text":
                 _next_edit_token += 1
                 command.run(sublime.Edit(_next_edit_token), **args)

@@ -200,6 +200,7 @@ pub fn show(
                 }
                 shapes.extend(find_match_shapes(model, text, galley, origin, viewport, char_width, colors.find_highlight));
                 let visible = visible_chars(galley, origin, viewport);
+                events.push(UiEvent::VisibleRange(model.document, visible.start, visible.end));
                 for (regions, &color) in model.regions.iter().zip(&region_colors) {
                     shapes.extend(region_shapes(regions, color, galley, origin, visible.clone()));
                 }

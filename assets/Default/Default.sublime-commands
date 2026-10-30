@@ -10,6 +10,13 @@
 	{ "caption": "File: Close All", "command": "close_all" },
 	{ "caption": "File: Reopen Closed File", "command": "reopen_last_file" },
 	{ "caption": "Project: Close Folder", "command": "close_folder_list" },
+	{ "caption": "Build", "command": "build" },
+	{ "caption": "Build With…", "command": "build", "args": { "select": true } },
+	{ "caption": "Build: Cancel", "command": "cancel_build" },
+	{ "caption": "Build: Automatic Build System", "command": "set_build_system", "args": { "file": "" } },
+	{ "caption": "Build: Show Results", "command": "show_panel", "args": { "panel": "output.exec" } },
+	{ "caption": "Build: Next Result", "command": "next_result" },
+	{ "caption": "Build: Previous Result", "command": "prev_result" },
 	{ "caption": "Project: Refresh Folders", "command": "refresh_folder_list" },
 
 	{ "caption": "Selection: Split into Lines", "command": "split_selection_into_lines" },

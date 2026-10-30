@@ -888,3 +888,99 @@ msgstr "Oui"
 #: crates/use_cases/src/plugin_api.rs
 msgid "No"
 msgstr "Non"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Build"
+msgstr "Compiler"
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Build With…"
+msgstr "Compiler avec…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Build"
+msgstr "Annuler la compilation"
+
+#: assets/Default/Main.sublime-menu
+msgid "Automatic Build System"
+msgstr "Système de compilation automatique"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Build Results"
+msgstr "Afficher les résultats de la compilation"
+
+#: assets/Default/Main.sublime-menu
+msgid "Next Result"
+msgstr "Résultat suivant"
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous Result"
+msgstr "Résultat précédent"
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Cancel"
+msgstr "Compiler : annuler"
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Automatic Build System"
+msgstr "Compiler : système de compilation automatique"
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Show Results"
+msgstr "Compiler : afficher les résultats"
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Next Result"
+msgstr "Compiler : résultat suivant"
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Previous Result"
+msgstr "Compiler : résultat précédent"
+
+#: crates/use_cases/src/builds.rs
+msgid "No build system for this file"
+msgstr "Aucun système de compilation pour ce fichier"
+
+#: crates/use_cases/src/builds.rs
+msgid "Nothing to run: the build has no shell_cmd or cmd"
+msgstr "Rien à exécuter : la compilation n'a ni shell_cmd ni cmd"
+
+#: crates/use_cases/src/builds.rs
+msgid "[Could not run: {error}]"
+msgstr "[Exécution impossible : {error}]"
+
+#: crates/use_cases/src/builds.rs
+msgid "No build is running"
+msgstr "Aucune compilation en cours"
+
+#: crates/use_cases/src/builds.rs
+msgid "[Cancelled]"
+msgstr "[Annulé]"
+
+#: crates/use_cases/src/builds.rs
+msgid "[Finished in {time}s]"
+msgstr "[Terminé en {time} s]"
+
+#: crates/use_cases/src/builds.rs
+msgid "[Finished in {time}s with exit code {code}]"
+msgstr "[Terminé en {time} s avec le code de sortie {code}]"
+
+#: crates/use_cases/src/builds.rs
+msgid "Build finished"
+msgstr "Compilation terminée"
+
+#: crates/use_cases/src/output_panels.rs
+msgid "File not found: {path}"
+msgstr "Fichier introuvable : {path}"
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Select Build System"
+msgstr "Sélectionner un système de compilation"
+
+#: crates/use_cases/src/builds.rs
+msgid "Build finished with {count} error"
+msgid_plural "Build finished with {count} errors"
+msgstr[0] "Compilation terminée avec {count} erreur"
+msgstr[1] "Compilation terminée avec {count} erreurs"

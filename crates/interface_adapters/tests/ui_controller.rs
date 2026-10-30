@@ -11,6 +11,7 @@ use serde_json::json;
 use test_support::{active_text, open, World};
 use use_cases::editing::TextCommand;
 use use_cases::editor::{CloseChoice, PendingClose};
+use use_cases::gateways::{PluginCommandKind, PluginMessage};
 use use_cases::search::{Candidate, CandidateTarget, SearchKind};
 use use_cases::Editor;
 
@@ -374,8 +375,10 @@ fn a_plugin_input_panel_reports_changes_and_the_final_text() {
     let show = test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "bob", 3, true]));
     world.plugins.then([show, done()]);
     interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
-    let panel = view.input_panel.as_ref().unwrap();
-    assert_eq!((panel.caption.as_str(), panel.text.as_str()), ("Name:", "bob"));
+    assert!(view.input_panel.is_some());
+    let panel = editor.plugin_input_panel().unwrap();
+    assert_eq!((panel.caption.as_str(), panel.document.text.as_str()), ("Name:", "bob"));
+    assert_eq!(panel.document.selection(), Selection::caret(3), "the caret after the text");
     assert!(!view.find_panel.visible, "it takes the find panel's place");
 
     world.plugins.then([done(), done()]);
@@ -393,4 +396,73 @@ fn a_plugin_input_panel_reports_changes_and_the_final_text() {
     interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
     interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("hide_panel"));
     assert_eq!(callbacks(&world)[2], (4, "cancel".to_string(), json!([])));
+}
+
+#[test]
+fn the_caret_of_a_plugin_input_panel_reaches_its_view() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("ask", Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let show = test_support::plugin_call("window_show_input_panel", json!([1, "", "hello", 3, false]));
+    world.plugins.then([show, done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
+    handle(&mut editor, &mut view, UiEvent::InputPanelSelected { anchor: 1, head: 4 });
+    assert_eq!(editor.plugin_input_panel().unwrap().document.selection(), Selection::new(1, 4));
+}
+
+#[test]
+fn double_clicking_a_result_opens_its_file() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_file("/p/a.py", "one\ntwo\n").with_plugin_commands(&[("ask", Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.exec(&json!({ "cmd": ["x"], "file_regex": "^(.*):(\\d+)$", "working_dir": "/p" }));
+    editor.show_output_panel("exec");
+    world.processes.events.borrow_mut().push_back(use_cases::gateways::ProcessEvent::Output("building\na.py:2\n".into()));
+    editor.poll_builds();
+
+    view.focus_editor = false;
+    handle(&mut editor, &mut view, UiEvent::OutputPanelLineOpened(0));
+    assert!(!view.focus_editor, "that line is not a result");
+    handle(&mut editor, &mut view, UiEvent::OutputPanelLineOpened(1));
+    assert!(view.focus_editor);
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.path.as_deref(), Some(std::path::Path::new("/p/a.py")));
+    assert_eq!(doc.selection(), Selection::caret(4));
+}
+
+#[test]
+fn plugin_commands_are_asked_about_when_a_menu_opens() {
+    let world = World::new()
+        .with_palette(entities::menu::PaletteCommand { caption: "Mine".into(), command: Command::new("mine") })
+        .with_plugins(&[("mine", PluginCommandKind::Window)], &["command_states"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([PluginMessage::Answer(json!([{ "visible": false }]))]);
+    handle(&mut editor, &mut view, UiEvent::MenuOpen(false));
+    handle(&mut editor, &mut view, UiEvent::MenuOpen(true));
+    handle(&mut editor, &mut view, UiEvent::MenuOpen(true));
+    assert_eq!(world.plugins.queries.borrow().len(), 1, "once, however many frames it stays open");
+}
+
+#[test]
+fn a_palette_command_with_an_input_handler_does_not_run_yet() {
+    let world = World::new().with_plugins(&[("ask", PluginCommandKind::Window)], &["command_input"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let palette = || {
+        let mut panel = QuickPanel::new(SearchKind::Commands, String::new());
+        panel.results = vec![candidate("Ask", CandidateTarget::Command(Command::new("ask")))];
+        panel
+    };
+    view.quick_panel = Some(palette());
+    world.plugins.then([PluginMessage::Answer(json!(true))]);
+    handle(&mut editor, &mut view, UiEvent::QuickPanelAccepted(0));
+    assert!(queued(&mut view).is_empty());
+
+    view.quick_panel = Some(palette());
+    world.plugins.then([PluginMessage::Answer(json!(false))]);
+    handle(&mut editor, &mut view, UiEvent::QuickPanelAccepted(0));
+    assert_eq!(queued(&mut view), vec![Command::new("ask")]);
 }

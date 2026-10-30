@@ -37,7 +37,7 @@ cannot be told apart by the string scan and are listed under native.
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
 | Split layouts | `set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`, `new_pane`, `close_pane`, `clone_file` | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
-| Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `next_result`, `prev_result`, `cancel_find` | native |
+| Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
 | Auto-complete & snippets | `auto_complete`, `hide_auto_complete`, `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
 | Text editing | `wrap_lines` (Alt+Q), `reindent`, `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
@@ -47,7 +47,7 @@ cannot be told apart by the string scan and are listed under native.
 | Spelling | `next_misspelling`, `prev_misspelling` | native |
 | Side bar | `new_file_at`, `new_folder`, `rename_path`, `delete_file`, `delete_folder`, `remove_folder`, `open_containing_folder`, `reveal_in_side_bar`, `focus_side_bar`, `copy_path`, `rename_file` | native / py |
 | Recent / projects | `open_recent_file`, `open_recent_folder`, `clear_recent_files`, `*project_or_workspace*`, `new_window`, `save_workspace_as`, `close_workspace` | native |
-| Build | `build`, `cancel_build`, `exec`, `set_build_system`, `toggle_save_all_on_build` | native / py |
+| Build | `toggle_save_all_on_build` | native / py |
 | UI toggles | `toggle_minimap`, `toggle_menu`, `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |
 | Misc | `switch_file` (Alt+O), ~~`open_url`~~ (done), `open_in_browser`, `open_context_url`, `open_terminal`, `copy_as_html`, `html_print`, `view_resource`, `edit_syntax_settings`, `convert_syntax`, `chain`, `context_menu` | native / py |
 | Out of scope | `sublime_merge_*`, license/update commands, `install_package_control`, `new_plugin`, syntax-test/profiling commands | — |

@@ -237,3 +237,31 @@ fn binding_for_finds_the_shortcut_of_a_command() {
     );
     assert_eq!(keymap.binding_for(&Command::new("exit")), None);
 }
+
+#[test]
+fn a_conditions_match_all_reaches_the_context() {
+    use std::cell::Cell;
+
+    struct Recording(Cell<Option<bool>>);
+
+    impl KeyContext for Recording {
+        fn query(&self, _: &str, _: &str, _: &Value) -> Option<bool> {
+            Some(true)
+        }
+
+        fn query_all(&self, _: &str, _: &str, _: &Value, match_all: bool) -> Option<bool> {
+            self.0.set(Some(match_all));
+            Some(true)
+        }
+    }
+
+    let mut keymap = Keymap::default();
+    keymap.add(Binding {
+        keys: vec![KeyCombo::parse("f1").unwrap()],
+        command: Command::new("x"),
+        context: vec![serde_json::json!({ "key": "k", "match_all": true })],
+    });
+    let context = Recording(Cell::new(None));
+    keymap.press(&[KeyCombo::parse("f1").unwrap()], &context);
+    assert_eq!(context.0.get(), Some(true));
+}

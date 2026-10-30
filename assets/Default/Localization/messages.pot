@@ -337,6 +337,36 @@ msgid "Command Palette…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Build"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+#: assets/Default/Default.sublime-commands
+msgid "Build With…"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Build"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Automatic Build System"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Build Results"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Next Result"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous Result"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Preferences"
 msgstr ""
 
@@ -424,6 +454,26 @@ msgstr ""
 
 #: assets/Default/Default.sublime-commands
 msgid "Project: Close Folder"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Cancel"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Automatic Build System"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Show Results"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Next Result"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Build: Previous Result"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
@@ -610,6 +660,44 @@ msgstr ""
 msgid "Help: About CodeLibre Text"
 msgstr ""
 
+#: crates/use_cases/src/builds.rs
+msgid "No build system for this file"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "Nothing to run: the build has no shell_cmd or cmd"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "[Could not run: {error}]"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "No build is running"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "[Cancelled]"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "[Finished in {time}s]"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "[Finished in {time}s with exit code {code}]"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "Build finished"
+msgstr ""
+
+#: crates/use_cases/src/builds.rs
+msgid "Build finished with {count} error"
+msgid_plural "Build finished with {count} errors"
+msgstr[0] ""
+msgstr[1] ""
+
 #: crates/use_cases/src/documents.rs
 msgid "{path} looks like a binary file"
 msgstr ""
@@ -648,6 +736,10 @@ msgstr ""
 
 #: crates/use_cases/src/localization.rs
 msgid "untitled"
+msgstr ""
+
+#: crates/use_cases/src/output_panels.rs
+msgid "File not found: {path}"
 msgstr ""
 
 #: crates/use_cases/src/packages.rs
@@ -768,6 +860,10 @@ msgstr ""
 
 #: crates/interface_adapters/src/presenters/quick_panel.rs
 msgid "Select Language"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Select Build System"
 msgstr ""
 
 #: crates/interface_adapters/src/presenters/quick_panel.rs

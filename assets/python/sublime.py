@@ -171,19 +171,19 @@ def _answer_later(callback, value):
 
 
 def open_dialog(callback, file_types=[], directory=None, multi_select=False, allow_folders=False):
-    # ``file_types`` filters and ``allow_folders`` are not supported: any file can be picked.
-    files = sublime_api.open_dialog(directory)
+    # ``allow_folders`` is not supported: the native dialog picks either files or folders.
+    files = sublime_api.open_dialog(directory, list(file_types))
     if files is not None and not multi_select:
         files = files[0]
     _answer_later(callback, files)
 
 
 def save_dialog(callback, file_types=[], directory=None, name=None, extension=None):
-    _answer_later(callback, sublime_api.save_dialog(directory, name or "", extension or ""))
+    _answer_later(callback, sublime_api.save_dialog(directory, name or "", extension or "", list(file_types)))
 
 
 def select_folder_dialog(callback, directory=None, multi_select=False):
-    folders = sublime_api.select_folder_dialog(directory)
+    folders = sublime_api.select_folder_dialog(directory, multi_select)
     if folders is not None and not multi_select:
         folders = folders[0]
     _answer_later(callback, folders)
@@ -236,6 +236,18 @@ def _strip_json_comments(text):
             out.append(c)
             i += 1
     return "".join(out)
+
+
+def expand_variables(value, variables):
+    """``$name``, ``${name}``, ``${name:default}`` and ``${name/regex/replacement/}`` in a string,
+    or in every string of a list or dict."""
+    if isinstance(value, str):
+        return sublime_api.expand_variables(value, variables)
+    if isinstance(value, list):
+        return [expand_variables(item, variables) for item in value]
+    if isinstance(value, dict):
+        return {key: expand_variables(item, variables) for key, item in value.items()}
+    return value
 
 
 def decode_value(data):
@@ -364,12 +376,33 @@ class QuickPanelItem:
         return "QuickPanelItem(%r, %r, %r, %r)" % (self.trigger, self.details, self.annotation, self.kind)
 
 
+HistoricPosition = collections.namedtuple("HistoricPosition", ["pt", "row", "col", "col_utf16", "col_utf8"])
+TextChange = collections.namedtuple("TextChange", ["a", "b", "len_utf16", "len_utf8", "str"])
+
+
+class ListInputItem:
+    """A row of a ``ListInputHandler``: what it shows and the value the command gets."""
+
+    def __init__(self, text, value, details="", annotation="", kind=KIND_AMBIGUOUS):
+        self.text = text
+        self.value = value
+        self.details = details
+        self.annotation = annotation
+        self.kind = kind
+
+    def __repr__(self):
+        return "ListInputItem(%r, %r, %r, %r, %r)" % (self.text, self.value, self.details, self.annotation, self.kind)
+
+
 def _quick_panel_item(item):
     """A quick panel row as ``[caption, detail, hint]``: from a string, a list of strings (the
-    caption, then detail lines) or a QuickPanelItem."""
+    caption, then detail lines), a QuickPanelItem or a ListInputItem."""
+    if isinstance(item, ListInputItem):
+        item = QuickPanelItem(item.text, item.details, item.annotation, item.kind)
     if isinstance(item, QuickPanelItem):
         details = item.details if isinstance(item.details, (list, tuple)) else [item.details]
-        return [str(item.trigger), " · ".join(str(d) for d in details if d), str(item.annotation or "")]
+        letter = item.kind[1] if isinstance(item.kind, (list, tuple)) and len(item.kind) > 1 else ""
+        return [str(item.trigger), " · ".join(str(d) for d in details if d), str(item.annotation or ""), letter]
     if isinstance(item, (list, tuple)):
         return [str(item[0]) if item else "", " · ".join(str(d) for d in item[1:] if d), ""]
     return [str(item), "", ""]
@@ -572,7 +605,7 @@ _on_change = {}
 
 
 def _settings_changed(target):
-    """Calls the ``add_on_change`` callbacks of a settings object a plugin changed."""
+    """Calls the ``add_on_change`` callbacks of a settings object that changed."""
     for callback in list(_on_change.get(tuple(target), {}).values()):
         try:
             callback()
@@ -630,8 +663,9 @@ class Settings:
         return sublime_api.settings_all(self.target)
 
     def add_on_change(self, tag, callback):
-        # Called after a plugin's own changes; the editor's changes do not notify yet.
+        # A plugin's own changes call it at once; the editor reports its own (``settings_changed``).
         _on_change.setdefault(tuple(self.target), {})[tag] = callback
+        sublime_api.settings_watch(self.target)
 
     def clear_on_change(self, tag):
         _on_change.get(tuple(self.target), {}).pop(tag, None)
@@ -671,6 +705,9 @@ class View:
         return self.view_id
 
     def buffer(self):
+        return self
+
+    def primary_view(self):
         return self
 
     def is_valid(self):
@@ -822,9 +859,16 @@ class View:
             sublime_api.view_show(self.view_id, point, True)
 
     def visible_region(self):
-        return Region(0, self.size())
+        return Region(*sublime_api.view_visible_region(self.view_id))
 
     # Scopes need the syntax engine (phase C): nothing matches yet.
+    def find_all_results(self):
+        """The results of the view's ``result_*`` settings: ``(file, line, column)`` tuples."""
+        return [(file, row, col) for file, row, col, _ in sublime_api.view_find_all_results(self.view_id)]
+
+    def find_all_results_with_text(self):
+        return [tuple(result) for result in sublime_api.view_find_all_results(self.view_id)]
+
     def scope_name(self, pt):
         return ""
 
@@ -992,10 +1036,11 @@ class Window:
         )
 
     def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel):
-        """A one-line text field at the bottom. Returns a stand-in view: the field is not a view here."""
+        """A one-line text field at the bottom. Returns its view."""
         callback = _register_callbacks(("done", "cancel"), done=on_done, change=on_change, cancel=on_cancel)
-        sublime_api.window_show_input_panel(self.window_id, str(caption), str(initial_text), callback, on_change is not None)
-        return View(0)
+        return View(sublime_api.window_show_input_panel(
+            self.window_id, str(caption), str(initial_text), callback, on_change is not None
+        ))
 
     def status_message(self, msg):
         status_message(msg)

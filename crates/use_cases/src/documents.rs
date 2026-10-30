@@ -64,7 +64,7 @@ impl Editor {
     /// use `${packages}`) or else the active file's folder.
     pub fn prompt_open_files(&mut self, initial_directory: Option<&str>) {
         let start = self.dialog_start(initial_directory);
-        for path in self.gateways.dialogs.pick_files(start.as_deref()) {
+        for path in self.gateways.dialogs.pick_files(start.as_deref(), &[]) {
             self.open_file(&path);
         }
     }
@@ -239,9 +239,10 @@ impl Editor {
 
     /// Re-reads the active file from disk, discarding changes.
     pub fn revert_active_document(&mut self) {
-        if let Some(index) = self.active_document().map(|_| self.state.active) {
-            if let Err(e) = self.reload_document(index) {
-                self.notify(e);
+        if let Some((index, id)) = self.active_document().map(|d| (self.state.active, d.id)) {
+            match self.reload_document(index) {
+                Ok(()) => self.plugin_event("on_revert", id),
+                Err(e) => self.notify(e),
             }
         }
     }
@@ -281,8 +282,12 @@ impl Editor {
                 let name = self.document_name(doc);
                 self.state.documents[index].modified_at = on_disk;
                 self.notify(self.tr_args("{name} changed on disk; you have unsaved changes", &[("name", &name)]));
-            } else if let Err(e) = self.reload_document(index) {
-                self.notify(e);
+            } else {
+                let id = doc.id;
+                match self.reload_document(index) {
+                    Ok(()) => self.plugin_event("on_reload", id),
+                    Err(e) => self.notify(e),
+                }
             }
         }
     }
@@ -291,6 +296,13 @@ impl Editor {
     pub fn sync_selection_from_view(&mut self, id: DocumentId, selection: Selection) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].sync_selection_from_view(selection);
+        }
+    }
+
+    /// The view reports which chars are on screen.
+    pub fn sync_visible_range(&mut self, id: DocumentId, start: usize, end: usize) {
+        if let Some(index) = self.index_of(id) {
+            self.state.documents[index].set_visible_range(start, end);
         }
     }
 

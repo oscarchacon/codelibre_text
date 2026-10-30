@@ -242,6 +242,11 @@ impl ResourceGateway for SublimeResourceGateway {
         std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
+        let bytes = self.load_resource(name, include_sublime)?;
+        sublime_json::parse(&String::from_utf8_lossy(&bytes)).map_err(|e| e.to_string())
+    }
+
     fn system_language(&self) -> Option<String> {
         self.system_language.clone()
     }

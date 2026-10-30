@@ -5,7 +5,7 @@ Native desktop text editor compatible with Sublime Text resources, written with 
 edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architecture.md` first.
 
 ## Workspace = the four circles (dependencies point inwards only)
-- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `Keymap`, `Settings`, `Menu`).
+- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `Keymap`, `Settings`, `Menu`).
 - `crates/use_cases` — `Editor` + use case modules + gateway traits (`gateways.rs`).
 - `crates/interface_adapters` — controllers, presenters, view models, `ViewState`, Sublime file-format gateways.
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
@@ -70,12 +70,14 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Packages: `%APPDATA%\codelibre_text\data\Packages` (`User` inside); Sublime's `%APPDATA%\Sublime Text\Packages`
   is also read unless `import_sublime_packages` is false (its `Default` package is skipped).
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
+- `CODELIBRE_TEXT_DATA=<folder>` uses that folder instead of all of the above, to try things without touching the
+  real profile (setting `APPDATA` does not work: Windows answers the known folder).
 - Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python`.
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
-  dialogs, resources, scratch views, output panels, statuses and regions drawn, query_context, command hooks) — the rest
-  of B (input handlers, command metadata, other events, …) and C (Package Control,
+  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata) — the rest
+  of B (what each item lists as still missing) and C (Package Control,
   `.sublime-package`, scopes) are checklists with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and

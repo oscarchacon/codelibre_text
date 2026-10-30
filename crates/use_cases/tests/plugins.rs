@@ -278,3 +278,68 @@ fn built_in_commands_run_by_listeners_wait_for_the_next_poll() {
     editor.poll_plugins(&mut |_, command| builtins.push(command.clone()));
     assert_eq!(builtins, [Command::new("upper_case")]);
 }
+
+#[test]
+fn the_editors_own_setting_changes_reach_add_on_change() {
+    let world = World::new().with_plugins(&[("watch", Window)], &[]);
+    let mut editor = world.editor();
+    let target = json!(["file", "Preferences.sublime-settings"]);
+    world.plugins.then([plugin_call("settings_watch", json!([target])), done()]);
+    run(&mut editor, "watch", &mut Vec::new());
+
+    editor.poll_plugins(&mut |_, _| {});
+    assert!(world.plugins.queries.borrow().is_empty(), "nothing changed");
+
+    editor.set_setting("font_size", json!(20));
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(world.plugins.queries.borrow()[0], ("settings_changed".to_string(), None, json!([target])));
+
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(world.plugins.queries.borrow().len(), 1, "told once");
+}
+
+#[test]
+fn a_plugins_own_setting_change_is_not_reported_back() {
+    let world = World::new().with_plugins(&[("watch", Window)], &[]);
+    let mut editor = world.editor();
+    let target = json!(["window"]);
+    world.plugins.then([
+        plugin_call("settings_watch", json!([target])),
+        plugin_call("settings_set", json!([target, "a", 1])),
+        done(),
+    ]);
+    run(&mut editor, "watch", &mut Vec::new());
+    editor.poll_plugins(&mut |_, _| {});
+    assert!(world.plugins.queries.borrow().is_empty());
+}
+
+#[test]
+fn listeners_hear_when_the_views_exist_and_when_the_window_closes() {
+    let world = World::new().with_file("/p/a.txt", "a").with_plugins(&[], &["on_init", "on_exit"]);
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    let mut editor = world.editor();
+    let view = editor.active_document().unwrap().id;
+    assert_eq!(world.plugins.queries.borrow()[0], ("on_init".to_string(), None, json!([[view]])));
+
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    editor.plugin_exit();
+    assert_eq!(world.plugins.queries.borrow()[1], ("on_exit".to_string(), None, json!([])));
+}
+
+#[test]
+fn text_changes_reach_the_listeners_once_a_frame() {
+    let world = World::new().with_plugins(&[], &["on_text_changed"]);
+    let mut editor = world.editor();
+    editor.poll_plugins(&mut |_, _| {});
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push_str("hi");
+    editor.note_text_edited(id);
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    editor.poll_plugins(&mut |_, _| {});
+    editor.poll_plugins(&mut |_, _| {});
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries.len(), 1, "nothing changed in the second frame");
+    assert_eq!(queries[0].1, Some(id));
+    assert_eq!(queries[0].2, json!([[{ "a": [0, 0, 0], "b": [0, 0, 0], "text": "hi" }]]));
+}

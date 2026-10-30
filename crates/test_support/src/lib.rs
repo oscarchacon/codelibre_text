@@ -30,8 +30,8 @@ use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
     ClipboardGateway, DialogGateway, DirectoryEntry, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
-    PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ResourceGateway, SessionGateway, ShellGateway,
-    SyntaxGateway, UiResources,
+    FileFilter, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway, ProcessRequest,
+    ResourceGateway, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
 };
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
@@ -133,6 +133,10 @@ impl FileSystemGateway for FakeFileSystem {
 pub struct DialogScript {
     pub files_to_open: RefCell<Vec<PathBuf>>,
     pub folder_to_open: RefCell<Option<PathBuf>>,
+    /// What a dialog that picks several folders answers.
+    pub folders_to_open: RefCell<Vec<PathBuf>>,
+    /// The filters of the last file dialog.
+    pub last_filters: RefCell<Vec<FileFilter>>,
     pub save_path: RefCell<Option<PathBuf>>,
     /// File names suggested in "Save As" dialogs.
     pub save_requests: RefCell<Vec<String>>,
@@ -149,8 +153,9 @@ pub struct DialogScript {
 struct FakeDialogs(Rc<DialogScript>);
 
 impl DialogGateway for FakeDialogs {
-    fn pick_files(&self, start_dir: Option<&Path>) -> Vec<PathBuf> {
+    fn pick_files(&self, start_dir: Option<&Path>, filters: &[FileFilter]) -> Vec<PathBuf> {
         *self.0.last_open_dir.borrow_mut() = start_dir.map(Path::to_path_buf);
+        *self.0.last_filters.borrow_mut() = filters.to_vec();
         self.0.files_to_open.borrow().clone()
     }
 
@@ -159,7 +164,13 @@ impl DialogGateway for FakeDialogs {
         self.0.folder_to_open.borrow().clone()
     }
 
-    fn pick_save_path(&self, _start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf> {
+    fn pick_folders(&self, start_dir: Option<&Path>) -> Vec<PathBuf> {
+        *self.0.last_folder_dir.borrow_mut() = start_dir.map(Path::to_path_buf);
+        self.0.folders_to_open.borrow().clone()
+    }
+
+    fn pick_save_path(&self, _start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+        *self.0.last_filters.borrow_mut() = filters.to_vec();
         self.0.save_requests.borrow_mut().push(file_name.to_string());
         self.0.save_path.borrow().clone()
     }
@@ -313,6 +324,11 @@ impl ResourceGateway for FakeResources {
     fn load_resource(&self, name: &str, _include_sublime: bool) -> Result<Vec<u8>, String> {
         self.0.package_files.borrow().get(name).cloned().ok_or_else(|| format!("resource not found: {name}"))
     }
+
+    fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
+        let bytes = self.load_resource(name, include_sublime)?;
+        serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+    }
 }
 
 // ----- syntaxes ------------------------------------------------------------------------------------
@@ -357,6 +373,13 @@ impl SyntaxGateway for FakeSyntaxes {
             stem
         } else {
             "Plain Text".into()
+        }
+    }
+
+    fn base_scope(&self, syntax: &str) -> String {
+        match syntax {
+            "Plain Text" => "text.plain".into(),
+            other => format!("source.{}", other.to_lowercase()),
         }
     }
 
@@ -479,6 +502,40 @@ impl PluginHostGateway for FakePluginHost {
     }
 }
 
+// ----- processes -----------------------------------------------------------------------------------
+
+/// A scripted process: a test queues what it writes and checks what was asked of it.
+#[derive(Default)]
+pub struct ProcessScript {
+    /// Every process started.
+    pub started: RefCell<Vec<ProcessRequest>>,
+    /// What the next `poll` returns.
+    pub events: RefCell<VecDeque<ProcessEvent>>,
+    pub kills: Cell<usize>,
+    /// When set, `start` fails with this message.
+    pub start_error: RefCell<Option<String>>,
+}
+
+struct FakeProcesses(Rc<ProcessScript>);
+
+impl ProcessGateway for FakeProcesses {
+    fn start(&mut self, request: &ProcessRequest) -> Result<(), String> {
+        self.0.started.borrow_mut().push(request.clone());
+        match self.0.start_error.borrow().clone() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn poll(&mut self) -> Vec<ProcessEvent> {
+        self.0.events.borrow_mut().drain(..).collect()
+    }
+
+    fn kill(&mut self) {
+        self.0.kills.set(self.0.kills.get() + 1);
+    }
+}
+
 // ----- session and file index ----------------------------------------------------------------------
 
 struct FakeSessions(Rc<RefCell<Option<Session>>>);
@@ -545,6 +602,7 @@ pub struct World {
     /// Links opened in the browser.
     pub opened_urls: Rc<RefCell<Vec<String>>>,
     pub plugins: Rc<PluginScript>,
+    pub processes: Rc<ProcessScript>,
 }
 
 impl Default for World {
@@ -596,6 +654,7 @@ impl World {
             opened_folders: Rc::default(),
             opened_urls: Rc::default(),
             plugins: Rc::default(),
+            processes: Rc::default(),
         }
     }
 
@@ -705,6 +764,7 @@ impl World {
                 urls: self.opened_urls.clone(),
             }),
             plugins: Box::new(FakePluginHost(self.plugins.clone())),
+            processes: Box::new(FakeProcesses(self.processes.clone())),
         }
     }
 

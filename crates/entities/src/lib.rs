@@ -6,6 +6,7 @@
 //!
 //! Nothing in this crate knows that the other circles exist.
 
+pub mod build;
 pub mod command;
 pub mod document;
 pub mod find;

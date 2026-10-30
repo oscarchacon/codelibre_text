@@ -21,11 +21,13 @@
 //! | [`plugin_api`] | the `sublime_api` functions plugins call |
 //! | [`plugin_panels`] | the quick and input panels plugins open |
 //! | [`plugin_hooks`] | key presses (`on_query_context`) and commands (`on_text_command`, …) plugins take part in |
-//! | [`output_panels`] | output panels (build and plugin output at the bottom), the `append` command |
+//! | [`output_panels`] | output panels (build and plugin output at the bottom), the `append` command, `next_result` |
+//! | [`builds`] | build systems: `build`, `exec`, `cancel_build` |
 //! | [`project`] | folders, folder listing, file index |
 //! | [`search`] | command palette, Goto Anything, pickers |
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
 
+pub mod builds;
 pub mod documents;
 pub mod editing;
 pub mod editor;
@@ -36,6 +38,7 @@ pub mod localization;
 pub mod output_panels;
 pub mod packages;
 pub mod plugin_api;
+pub mod plugin_commands;
 pub mod plugin_hooks;
 pub mod plugin_panels;
 pub mod plugins;

@@ -11,10 +11,11 @@ use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
 
+use crate::builds::{BuildOption, BuildState};
 use crate::find_replace::FindCache;
 use crate::gateways::{
-    ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ResourceGateway,
-    SessionGateway, ShellGateway, SyntaxGateway,
+    ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
+    ResourceGateway, SessionGateway, ShellGateway, SyntaxGateway,
 };
 use crate::output_panels::OutputPanels;
 use crate::plugin_panels::PluginPanels;
@@ -31,6 +32,7 @@ pub struct Gateways {
     pub file_index: Box<dyn FileIndexGateway>,
     pub shell: Box<dyn ShellGateway>,
     pub plugins: Box<dyn PluginHostGateway>,
+    pub processes: Box<dyn ProcessGateway>,
 }
 
 /// A message for the status bar.
@@ -85,6 +87,9 @@ pub struct EditorState {
     pub(crate) plugin_panels: PluginPanels,
     /// The output panels plugins created (not tabs).
     pub(crate) output_panels: OutputPanels,
+    pub(crate) builds: BuildState,
+    /// What the build picker lists (read when it opens: `search` cannot load resources).
+    pub(crate) build_options: Vec<BuildOption>,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -121,6 +126,8 @@ impl Editor {
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),
+                builds: BuildState::default(),
+                build_options: Vec::new(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,
@@ -148,6 +155,7 @@ impl Editor {
         if self.state.documents.is_empty() {
             self.new_file();
         }
+        self.plugin_init();
         if !self.state.load_errors.is_empty() {
             self.notify(self.tr_n(
                 "{count} package resource failed to load (Help > Package Load Errors)",

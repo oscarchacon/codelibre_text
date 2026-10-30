@@ -79,6 +79,7 @@ impl Editor {
                 self.add_folder(folder);
             }
         }
+        let mut loaded = Vec::new();
         for saved in session.documents {
             let id = self.next_document_id();
             let mut doc = match &saved.path {
@@ -86,6 +87,7 @@ impl Editor {
                     let Ok(bytes) = self.gateways.file_system.read(path) else { continue };
                     let modified = self.gateways.file_system.modified(path);
                     let Ok(doc) = Document::from_bytes(id, path, bytes, modified) else { continue };
+                    loaded.push(id);
                     doc
                 }
                 path => {
@@ -104,5 +106,6 @@ impl Editor {
         if !self.state.documents.is_empty() {
             self.activate(session.active.min(self.state.documents.len() - 1));
         }
+        loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
     }
 }

@@ -24,6 +24,8 @@ pub enum SearchKind {
     Languages,
     /// The items of a plugin's `window.show_quick_panel`.
     PluginItems,
+    /// Build systems and their variants (`build {"select": true}`).
+    BuildSystems,
 }
 
 /// What choosing a result does.
@@ -80,7 +82,13 @@ impl Editor {
                 // Sublime's documentation and of prefilled queries such as `Set Syntax: `.
                 let score_both = |caption: &str, english: &str| score(caption, query).max(score(english, query));
                 for entry in &self.state.palette {
-                    let caption = self.tr(&entry.caption);
+                    // Sublime leaves out what a plugin command says is hidden or disabled.
+                    let state = self.plugin_command_state(&entry.command);
+                    if state.is_some_and(|s| !s.visible || !s.enabled) {
+                        continue;
+                    }
+                    let described = state.and_then(|s| s.description.as_deref()).filter(|_| entry.caption.is_empty());
+                    let caption = described.unwrap_or_else(|| self.tr(&entry.caption));
                     if let Some(s) = score_both(caption, &entry.caption) {
                         let mut c = Candidate::new(caption, CandidateTarget::Command(entry.command.clone()));
                         c.hint = self.state.keymap.binding_for(&entry.command).unwrap_or_default();
@@ -111,6 +119,17 @@ impl Editor {
                         let mut c = Candidate::new(name, CandidateTarget::Language(code.clone()));
                         c.hint = if code == AUTOMATIC { String::new() } else { code };
                         // An empty query keeps the order: automatic, English, then the others.
+                        scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
+                    }
+                }
+            }
+            SearchKind::BuildSystems => {
+                for option in &self.state.build_options {
+                    if let Some(s) = score(&option.caption, query) {
+                        let args = serde_json::json!({ "file": option.resource, "variant": option.variant });
+                        let mut c = Candidate::new(&option.caption, CandidateTarget::Command(Command::with_args("build", args)));
+                        c.detail = option.resource.clone();
+                        // An empty query keeps the order: each build, then its variants.
                         scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
                     }
                 }

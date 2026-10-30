@@ -1,13 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use use_cases::gateways::{DialogGateway, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use use_cases::gateways::{DialogGateway, FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
 
 /// [`DialogGateway`] with the operating system's file pickers and message boxes (`rfd`).
 pub struct NativeDialogs;
 
+fn with_filters(dialog: rfd::FileDialog, filters: &[FileFilter]) -> rfd::FileDialog {
+    filters.iter().fold(dialog, |dialog, filter| dialog.add_filter(&filter.name, &filter.extensions))
+}
+
 impl DialogGateway for NativeDialogs {
-    fn pick_files(&self, start_dir: Option<&Path>) -> Vec<PathBuf> {
-        let mut dialog = rfd::FileDialog::new();
+    fn pick_files(&self, start_dir: Option<&Path>, filters: &[FileFilter]) -> Vec<PathBuf> {
+        let mut dialog = with_filters(rfd::FileDialog::new(), filters);
         if let Some(dir) = start_dir {
             dialog = dialog.set_directory(dir);
         }
@@ -22,8 +26,16 @@ impl DialogGateway for NativeDialogs {
         dialog.pick_folder()
     }
 
-    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf> {
-        let mut dialog = rfd::FileDialog::new().set_file_name(file_name);
+    fn pick_folders(&self, start_dir: Option<&Path>) -> Vec<PathBuf> {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(dir) = start_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_folders().unwrap_or_default()
+    }
+
+    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+        let mut dialog = with_filters(rfd::FileDialog::new(), filters).set_file_name(file_name);
         if let Some(dir) = start_dir {
             dialog = dialog.set_directory(dir);
         }

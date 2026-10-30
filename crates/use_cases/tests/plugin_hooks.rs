@@ -102,3 +102,23 @@ fn a_failing_listener_is_logged_and_changes_nothing() {
     assert_eq!(editor.plugin_rewrite_command(&command, CommandTarget::View), command);
     assert!(editor.state().console.contains("on_text_command: Traceback: boom"));
 }
+
+#[test]
+fn match_all_goes_to_on_query_context() {
+    let mut binding = plugin_context_binding();
+    binding.context[0]["match_all"] = json!(true);
+    let world = World::new().with_binding(binding).with_plugins(&[], &["on_query_context"]);
+    let mut editor = world.editor();
+    world.plugins.then([PluginMessage::Answer(json!(true))]);
+    press(&mut editor);
+    assert_eq!(world.plugins.queries.borrow()[0].2[3], json!(true));
+}
+
+#[test]
+fn post_command_events_go_out_for_their_async_variant_too() {
+    let world = World::new().with_plugins(&[], &["on_post_text_command_async"]);
+    let mut editor = world.editor();
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    editor.plugin_command_ran(&Command::new("x"), CommandTarget::View);
+    assert_eq!(world.plugins.queries.borrow()[0].0, "on_post_text_command");
+}

@@ -137,7 +137,9 @@ impl App {
             self.editor.save_session(layout);
         } else if !self.editor.request_exit(layout) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            return;
         }
+        self.editor.plugin_exit();
     }
 
     fn draw(&mut self, ctx: &egui::Context, chrome: &Chrome) -> Vec<UiEvent> {
@@ -158,7 +160,7 @@ impl App {
                 .show(ctx, |ui| status_bar::show(ui, chrome, &translations, &status, &mut events));
         }
 
-        if let Some(input) = presenters::quick_panel::present_input_panel(&mut self.view) {
+        if let Some(input) = presenters::quick_panel::present_input_panel(&self.editor, &mut self.view) {
             egui::TopBottomPanel::bottom("input_panel")
                 .frame(
                     egui::Frame::new()
@@ -266,6 +268,7 @@ impl eframe::App for App {
         if self.editor.poll_file_index() {
             ctx.request_repaint();
         }
+        self.editor.poll_builds();
         self.editor.check_external_changes();
         self.handle_close_request(ctx);
 

@@ -2,7 +2,8 @@
 
 Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-10-28: request ids, calls
 outside commands, real timers, view events; then quick and input panels; 2026-10-29 dialogs, resources,
-scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks). The rest of B and phase C below are the pending work, in order.
+scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks;
+2026-10-30 output panel results, build systems, the input panel's view). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -31,7 +32,10 @@ command_controller ──run "foo"──▶ use_cases::plugins ──PluginHostG
 | Quick / input panels plugins open, and the answers to their callbacks | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
 | Showing them (`show_plugin_panels`), answers from the views (`SearchKind::PluginItems`, `UiEvent::InputPanel*`) | `crates/interface_adapters/src/controllers/{command,ui}_controller.rs` | Interface Adapters |
 | The input panel view | `crates/frameworks/src/views/input_panel.rs` | Frameworks |
-| Output panels (documents that are not tabs, `any_document`), the `append` command | `crates/use_cases/src/output_panels.rs` | Use Cases |
+| Output panels (documents that are not tabs, `any_document`), the `append` command, results (`next_result`) | `crates/use_cases/src/output_panels.rs` | Use Cases |
+| Build systems: `.sublime-build` parsing, `$file` expansion, selectors, output results | `crates/entities/src/build.rs` | Entities |
+| `build`, `exec`, `cancel_build`, `set_build_system`, `poll_builds` | `crates/use_cases/src/builds.rs` | Use Cases |
+| The process of a build (`ProcessGateway`) | `crates/frameworks/src/gateways/child_processes.rs` | Frameworks |
 | `show_panel output.<name>` (`show_output_panel`), its presenter and view | `command_controller.rs`, `presenters/output_panel.rs`, `frameworks/src/views/output_panel.rs` | Adapters / Frameworks |
 | Edits from plugins move every selection and region set (`Document::replace_range`, `RegionSet`, `request_show`) | `crates/entities/src/document.rs` | Entities |
 | Regions drawn (fill, outline, underlines, gutter icons), the scope's color (`SyntaxEngine::scope_color`), `view.show` scrolling | `crates/frameworks/src/views/editor_view.rs`, `presenters/editor.rs` (flags → `RegionViewModel`) | Frameworks / Adapters |
@@ -129,9 +133,15 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] **Event listeners** `EventListener` and `ViewEventListener` (`is_applicable`, one object per view, dropped at
       `on_close`): `on_new`, `on_load`, `on_activated`/`on_deactivated`, `on_pre_save`/`on_post_save`,
       `on_pre_close`/`on_close`, `on_modified`/`on_selection_modified`, and their `*_async` variants. `view.change_count()`.
-- [ ] Other events: `on_clone`, `on_load` for views restored by the session (now only `open_file`), `on_reload`,
-      `on_revert`, `on_init`, `on_exit`, `on_new_window`, `on_hover`,
-      `ViewEventListener.applies_to_primary_view_only`, `TextChangeListener` (`on_text_changed` with `TextChange`s).
+- [x] Other events: `on_load` also for the files the session restores, `on_revert`, `on_reload` (a file changed on
+      disk), `on_init(views)` (after `Editor::start` and after every reload of the plugins), `on_exit()` (the window
+      closes, `Editor::plugin_exit`).
+- [x] **`TextChangeListener`** (`on_text_changed`, `_async`, `on_revert`, `on_reload`): `Document::log_text_changes`
+      keeps a copy of the text and compares it after each edit (the widget edits in place), once a frame the
+      changes go in an `on_text_changed` query. Several carets count as one change from the first to the last.
+      The columns of `HistoricPosition` are chars, also in `col_utf8` / `col_utf16`.
+- [ ] Events still missing: `on_clone`, `on_new_window` and `applies_to_primary_view_only` wait for clones and several windows (phase C),
+      `on_hover` for popups (phase C).
 - [ ] Built-in commands run from inside a use-case event (e.g. `view.run_command("reindent")` in `on_pre_save`) wait
       for the next frame; running them at once needs the command controller inside `Editor` (a callback set by
       `compose()`, or `save`/`close` moved to the controller).
@@ -145,7 +155,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       commands have no hook); built-ins by `WINDOW_COMMANDS`, the rest are text commands (only with an open view).
       Built-in commands a listener runs while answering wait for the next frame, as in events.
 - [ ] Hooks, still missing: commands run by the text widget itself (typing, undo, the clipboard keys) are not
-      seen; `on_query_context` with `match_all`; `_async` variants of the post events.
+      seen. (`match_all` reaches `on_query_context` from the binding; `on_post_*_async` run on the async thread.)
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -153,9 +163,12 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       list, -1 when dismissed or replaced by another quick panel) and `highlight` (also for the first selection).
 - [x] **Input panel**: `window.show_input_panel(caption, initial, on_done, on_change, on_cancel)`, a one-line panel at
       the bottom in place of the find panel; Esc (`hide_panel`) or opening Find cancels it. Answers `done`, `change`,
-      `cancel`. It returns `View(0)`, not a real view: its `sel()` / text cannot be used yet.
-- [ ] `KEEP_OPEN_ON_FOCUS_LOST` (the quick panel always closes on a click outside), `kind` letters, `QuickPanelItem`
-      annotations right-aligned with their own color, `sublime.ListInputItem`.
+      `cancel`. It returns a real view: a `Document` in `PluginInputPanel` (found by `any_document`, gone with the
+      panel), so `sel()`, `substr`, `insert`, `settings` and plugin `TextCommand`s work on it; the view pushes edits
+      (`InputPanelChanged`) and the caret (`InputPanelSelected`) and takes selections by `selection_revision`.
+      `window.active_panel()` answers `input`. `on_change` is not called for a plugin's own edits.
+- [x] `KEEP_OPEN_ON_FOCUS_LOST`, the `kind` letter in a badge, annotations right-aligned, `sublime.ListInputItem`.
+      The badge has one color: the kinds' own colors and custom kinds are not drawn.
 - [x] **Output panels**: `window.create_output_panel(name)` (also `get_output_panel`) returns a view: a document kept
       apart from the tabs (`EditorState::output_panels`; view functions find it through `any_document`), never dirty,
       emptied when created again. `show_panel {"panel": "output.<name>", "toggle"}` shows it at the bottom in place of
@@ -164,21 +177,48 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       Sublime's `append` command (`characters`, `force` for read-only panels) runs in the use case, for panels and tabs;
       plugin `TextCommand`s run with the panel as their view; other built-in commands refuse to run in a panel.
       The view draws the last 2000 lines, following the end.
-- [ ] Output panels, still missing: clicking a `result_file_regex` line to open the file (`next_result`), the panel's
-      own syntax highlighting / `word_wrap`, selections drawn, `unlisted`, built-in commands other than `append` in a
-      panel (the command controller only knows tabs), the console as a panel (it is a tab). Build systems
-      (`.sublime-build`, `exec`) are not implemented: Sublime's `exec` lives in its `Default` package, which we skip.
-- [ ] **Command input handlers** (`input()` → `TextInputHandler`/`ListInputHandler`) in the command palette.
-- [ ] **Command metadata** for menus and the palette: `is_visible`, `is_checked`, `description` (ask the host when a menu opens).
+- [x] **Output panel results**: the view settings `result_file_regex` / `result_line_regex` / `result_base_dir` (Rust's
+      `regex`: no lookaround). `next_result` / `prev_result` (F4, Shift+F4) go through the last panel shown that has them
+      and wrap around; double-clicking a result opens it; the one visited is highlighted and scrolled to. Its message
+      goes to the status bar. `view.find_all_results()`, `find_all_results_with_text()`.
+- [x] **Build systems**: every `*.sublime-build` in the packages, with the platform's overrides and `variants`. `build`
+      (Ctrl+B, F7) uses the build set by `set_build_system` or picked before, else the one that applies by `selector` (the
+      syntax's base scope), `file_patterns` or `keyfiles` (next to the file or above it, or in an open folder); several
+      open the picker, as does `build {"select": true}` (Ctrl+Shift+B). `variant`, `target`, `cancel` work. Arguments expand
+      `$file`, `$file_path`, `$file_name`, `$file_base_name`, `$file_extension`, `$folder`, `$packages`, `$platform`, also
+      `${x:default}` and `${x/regex/replacement/}` (not in `file_regex` / `line_regex`); unknown names stay, for the shell.
+      `sublime.expand_variables`. Settings: `save_all_on_build`, `show_panel_on_build`.
+- [x] **`exec`** (a built-in here, since we skip `Default`): `shell_cmd`, `cmd` (`shell`), `working_dir` (default the
+      file's folder), `env`, `path`, `file_regex`, `line_regex`, `quiet`, `kill`. One process at a time (`ProcessGateway`),
+      read by threads that wake the window; a new build replaces the running one; `cancel_build` kills the whole tree. A
+      plugin's own `exec` command wins. Ignored: `encoding` (UTF-8, lossy), `syntax`, `word_wrap`.
+- [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), the Tools >
+      Build System list (`$build_systems`), `from Default.exec import ExecCommand`, and the builds inside Sublime's zipped
+      packages (`Python`, `C++`…), which need `.sublime-package` (phase C). There is no Ctrl+Break: egui has no such key.
+- [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
+      built-in commands other than `append`, `insert` and `select_all` in a panel (the command controller only knows
+      tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
+- [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
+      `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
+      (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
+      `cancel`, `next_input`, `BackInputHandler`, `sublime.ListInputItem`) and runs the command itself. Key bindings
+      and menus run the command directly. `preview` goes to the status bar.
+- [ ] Input handlers, still missing: they are not inside the palette as in Sublime (no breadcrumb, `Backspace` does
+      not go back to the previous handler), `initial_selection`, `want_event`, HTML previews.
+- [x] **Command metadata**: `is_visible`, `is_enabled`, `is_checked`, `description` of every plugin command in the
+      menus and the palette, asked in one `command_states` query when a menu or the palette opens (`plugin_commands.rs`)
+      and only if some command defines them. Menus hide, grey out and check their items; the palette leaves out
+      hidden and disabled commands; `description` is the caption of an entry without one.
 - [x] **`Settings.add_on_change`** / `clear_on_change`: kept by settings object in `sublime._on_change`, called after
       a plugin's own `set` / `erase` (through any `Settings` of the same file).
-- [ ] `add_on_change` for the editor's own changes (`set_setting`, `persist_setting`, the user saving
-      `Preferences.sublime-settings`, `reload_settings`): a `{"op":"settings_changed","target":…}` request.
+- [x] `add_on_change` for the editor's own changes: the callback's settings object is registered (`settings_watch`)
+      and `poll_plugins` compares its values every frame, so any change counts (`set_setting`, the user saving a
+      settings file…); a `settings_changed` query calls the callbacks. A plugin's own `set` does not come back.
 - [x] **Dialogs**: `message_dialog` / `error_message` (also logged to the console), `ok_cancel_dialog`,
       `yes_no_cancel_dialog` (`DialogGateway::show_message`, custom labels, the plugin's title or "CodeLibre Text"),
       `open_dialog`, `save_dialog` (`name.extension`), `select_folder_dialog`. File dialogs answer through a
-      `set_timeout` after the call, as in Sublime. `file_types` filters and `allow_folders` are ignored, and
-      `select_folder_dialog` picks one folder even with `multi_select`.
+      `set_timeout` after the call, as in Sublime. `file_types` become the dialog's filters and `multi_select`
+      works in `select_folder_dialog`. `allow_folders` is ignored: the native dialog picks either files or folders.
 - [x] **Statuses**: `view.set_status/get_status/erase_status`, kept by the editor per view
       (`PluginState::view_statuses`, dropped with the view) and shown after the caret position, in key order.
 - [x] **Regions drawn**: `view.add_regions(key, regions, scope, icon, flags)` / `get_regions` / `erase_regions` keep a
@@ -186,8 +226,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       (the color scheme's rule, or a built-in color for `region.<color>ish`): filled and outlined unless
       `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar, `HIDDEN` not
       drawn; `dot` / `circle` / `bookmark` icons in the gutter (any other icon is a dot).
-- [ ] Regions, still missing: edits made by the text widget or with several selections do not move them (only
-      kept within the text: plugins usually redraw on `on_modified`), annotations, `on_navigate`, `PERSISTENT`,
+- [x] Regions move with every edit, also the widget's: `add_regions` keeps a copy of the text, compared in
+      `Document::note_text_changed`. An edit with several selections is one change from the first caret to the
+      last, so regions between the carets collapse.
+- [ ] Regions, still missing: annotations, `on_navigate`, `PERSISTENT`,
       `DRAW_EMPTY_AS_OVERWRITE`, icon files, the minimap.
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
@@ -195,7 +237,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] `view.change_count()`, `view.is_scratch/set_scratch` (`Document::scratch`: never dirty), `view.close(on_close)`
       (a dirty view asks first and answers false).
 - [x] `view.show/show_at_center` (point, region or selection): `Document::request_show`, followed by the view
-      like `selection_revision`. `visible_region` / `viewport_*` still answer the whole text.
+      like `selection_revision`. `visible_region` is what the view last drew; `viewport_*` still answer the whole text.
 
 ## Phase C — Package Control and full compatibility
 
@@ -218,5 +260,5 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
 - [ ] Reload only the plugin that was saved (now every plugin reloads), and `sublime_plugin.reload_plugin`.
 
-Verification for phase C: install Package Control in a scratch profile (set `APPDATA` to a temp folder), install a
+Verification for phase C: install Package Control in a scratch profile (set `CODELIBRE_TEXT_DATA` to a temp folder), install a
 small package (e.g. a color scheme), then a plugin package, and run its commands.

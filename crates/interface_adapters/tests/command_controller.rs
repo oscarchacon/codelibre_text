@@ -11,8 +11,8 @@ use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
 use serde_json::{json, Value};
 use test_support::{active_text, open, plugin_call, status, World};
 use use_cases::editing::TextCommand;
-use use_cases::gateways::{PluginCommandKind, PluginMessage};
-use use_cases::search::SearchKind;
+use use_cases::gateways::{PluginCommandKind, PluginMessage, ProcessEvent};
+use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
 fn cmd(name: &str) -> Command {
@@ -238,7 +238,7 @@ fn missing_output_panels_are_reported() {
 
 #[test]
 fn output_panels_take_the_place_of_the_find_panel() {
-    let world = World::new().with_plugin_commands(&[("build", PluginCommandKind::Window)]);
+    let world = World::new().with_plugin_commands(&[("my_build", PluginCommandKind::Window)]);
     let mut editor = world.editor();
     let mut view = ViewState::default();
     world.plugins.then([
@@ -247,7 +247,7 @@ fn output_panels_take_the_place_of_the_find_panel() {
         PluginMessage::Done { error: None },
     ]);
     run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
-    run(&mut editor, &mut view, &cmd("build"));
+    run(&mut editor, &mut view, &cmd("my_build"));
     assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"));
     assert!(!view.find_panel.visible, "one panel at a time");
 
@@ -687,4 +687,100 @@ fn collect_commands(value: &Value, out: &mut Vec<Command>) {
         Value::Array(items) => items.iter().for_each(|v| collect_commands(v, out)),
         _ => {}
     }
+}
+
+const BUILD: &str = r#"{ "selector": "source.python", "cmd": ["python", "$file"], "file_regex": "^(.*):(\\d+)$" }"#;
+
+fn build_world() -> World {
+    World::new().with_file("/p/a.py", "one\ntwo\n").with_resource("Packages/U/Py.sublime-build", BUILD)
+}
+
+#[test]
+fn build_runs_the_target_and_shows_the_results_in_place_of_the_find_panel() {
+    let world = build_world();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(&mut editor, &mut view, &cmd("build"));
+    assert_eq!(world.processes.started.borrow().len(), 1);
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"));
+    assert!(!view.find_panel.visible);
+}
+
+#[test]
+fn show_panel_on_build_can_be_turned_off() {
+    let world = build_world().with_preferences(json!({ "show_panel_on_build": false }));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd("build"));
+    assert_eq!(world.processes.started.borrow().len(), 1);
+    assert!(editor.shown_output_panel().is_none());
+}
+
+#[test]
+fn build_with_opens_the_picker_and_a_choice_runs_it() {
+    let world = build_world();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd_with("build", json!({ "select": true })));
+    let panel = view.quick_panel.as_ref().expect("the picker");
+    assert_eq!(panel.kind, SearchKind::BuildSystems);
+    assert!(world.processes.started.borrow().is_empty());
+
+    let results = editor.search(SearchKind::BuildSystems, "");
+    let CandidateTarget::Command(command) = &results[0].target else {
+        panic!("choosing a build runs a command");
+    };
+    run(&mut editor, &mut view, &command.clone());
+    assert_eq!(world.processes.started.borrow().len(), 1);
+}
+
+#[test]
+fn several_builds_ask_which_one() {
+    let world = build_world().with_resource("Packages/U/Other.sublime-build", r#"{ "selector": "source.python", "cmd": ["x"] }"#);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd("build"));
+    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(SearchKind::BuildSystems));
+}
+
+#[test]
+fn cancel_build_stops_the_process() {
+    let world = build_world();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd("build"));
+    run(&mut editor, &mut view, &cmd("cancel_build"));
+    assert_eq!(world.processes.kills.get(), 1);
+}
+
+#[test]
+fn a_plugin_exec_command_replaces_the_built_in_one() {
+    let world = World::new().with_plugin_commands(&[("exec", PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    run(&mut editor, &mut view, &cmd_with("exec", json!({ "cmd": ["x"] })));
+    assert!(world.processes.started.borrow().is_empty());
+    assert_eq!(world.plugins.runs.borrow()[0].1, "exec");
+}
+
+#[test]
+fn next_result_goes_to_the_file_and_hides_the_find_panel() {
+    let world = build_world();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd("build"));
+    world.processes.events.borrow_mut().push_back(ProcessEvent::Output("a.py:2\n".into()));
+    editor.poll_builds();
+    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(&mut editor, &mut view, &cmd("next_result"));
+    assert!(!view.find_panel.visible && editor.shown_output_panel().is_some());
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
 }

@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use codelibre_text::gateways::{
-    folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
+    child_processes::ChildProcesses, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
     syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
 };
 use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
@@ -97,6 +97,7 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
         sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
+        processes: Box::new(ChildProcesses::default()),
         plugins: Box::new(PythonPluginHost::new(dir.join("Lib").join("python"))),
     });
     editor.start(Vec::new());
@@ -516,7 +517,7 @@ class AskCommand(sublime_plugin.WindowCommand):
         args,
         vec![
             json!(1),
-            json!([["plain", "", ""], ["caption", "detail one · detail two", ""], ["item", "a · b", "note"]]),
+            json!([["plain", "", ""], ["caption", "detail one · detail two", ""], ["item", "a · b", "note", ""]]),
             json!(4),
             json!(2),
             json!("Which?"),
@@ -577,11 +578,13 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     host.reply(Ok(json!("00ff"))).unwrap();
     expect_call(&mut host, &mut log, "load_resource");
     host.reply(Err("resource not found: Packages/T/nope".into())).unwrap();
+    assert_eq!(expect_call(&mut host, &mut log, "settings_watch"), vec![json!(["file", "T.sublime-settings"])]);
+    host.reply(Ok(Value::Null)).unwrap();
     for _ in 0..2 {
         expect_call(&mut host, &mut log, "settings_set");
         host.reply(Ok(Value::Null)).unwrap();
     }
-    assert_eq!(expect_call(&mut host, &mut log, "open_dialog"), vec![Value::Null]);
+    assert_eq!(expect_call(&mut host, &mut log, "open_dialog"), vec![Value::Null, json!([])]);
     host.reply(Ok(json!(["/a.txt", "/b.txt"]))).unwrap();
     assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None }, "{log}");
     assert_eq!(
@@ -649,7 +652,301 @@ class Broken(sublime_plugin.ViewEventListener):
 }
 
 #[test]
+fn commands_say_how_they_show_in_menus() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+
+class PlainCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        pass
+
+class FancyCommand(sublime_plugin.WindowCommand):
+    def run(self, on=False):
+        pass
+
+    def is_visible(self, on=False):
+        return on
+
+    def is_enabled(self):
+        return False
+
+    def is_checked(self, on=False):
+        return True
+
+    def description(self, on=False):
+        return "Fancy %s" % on
+
+class BrokenCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        pass
+
+    def is_visible(self):
+        raise ValueError("ignored")
+"#;
+    let Some((mut host, loaded)) = host_with(dir.path(), &[("meta.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { events, .. } = loaded else {
+        panic!("expected loaded, got {loaded:?}");
+    };
+    assert!(events.contains(&"command_states".to_string()), "{events:?}");
+    assert!(!events.contains(&"command_input".to_string()), "no command has input(): {events:?}");
+
+    let mut log = String::new();
+    let asked = json!([[["plain", null], ["fancy", {"on": true}], ["fancy", null], ["broken", null]]]);
+    host.query("command_states", None, &asked).unwrap();
+    let default = json!({"visible": true, "enabled": true, "checked": false, "description": null});
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Answer(json!([
+            default,
+            {"visible": true, "enabled": false, "checked": true, "description": "Fancy True"},
+            {"visible": false, "enabled": false, "checked": true, "description": "Fancy False"},
+            default,
+        ]))
+    );
+    assert!(log.contains("ValueError: ignored"), "{log}");
+}
+
+#[test]
+fn input_handlers_ask_for_the_arguments_and_run_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class GreetCommand(sublime_plugin.WindowCommand):
+    def run(self, who, words):
+        print("hello", who, words)
+
+    def input(self, args):
+        return WhoInputHandler() if "who" not in args else None
+
+class WhoInputHandler(sublime_plugin.ListInputHandler):
+    def list_items(self):
+        return ["Ana", ("Bob the builder", "bob"), sublime.ListInputItem("Zoe", "zoe")]
+
+    def next_input(self, args):
+        return WordsInputHandler()
+
+class WordsInputHandler(sublime_plugin.TextInputHandler):
+    def placeholder(self):
+        return "Words"
+
+    def validate(self, text):
+        return text != "bad"
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run_from_palette(&mut editor, &mut view, Command::with_args("greet", json!({ "who": "me" })));
+    assert_eq!(view.take_commands().len(), 1, "with the argument given it just runs");
+
+    command_controller::run_from_palette(&mut editor, &mut view, Command::new("greet"));
+    assert!(view.take_commands().is_empty(), "{}", editor.state().console);
+    let items = &editor.plugin_quick_panel().expect("the list").items;
+    assert_eq!(items[1].caption, "Bob the builder");
+    assert_eq!(items[2].caption, "Zoe");
+
+    command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(1));
+    assert!(view.input_panel.is_some());
+    assert_eq!(editor.plugin_input_panel().expect("the text field").caption, "Words");
+
+    command_controller::change_plugin_input(&mut editor, &mut view, "bad");
+    command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    assert!(view.input_panel.is_some(), "asked again after a failed validation");
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bad");
+    command_controller::change_plugin_input(&mut editor, &mut view, "good day");
+    command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    assert!(view.input_panel.is_none());
+    assert!(editor.state().console.contains("hello bob good day"), "{}", editor.state().console);
+}
+
+#[test]
+fn add_on_change_hears_the_editors_own_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+
+def plugin_loaded():
+    settings = sublime.load_settings("Preferences.sublime-settings")
+    settings.add_on_change("t", lambda: print("font", settings.get("font_size")))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    editor.set_setting("font_size", json!(99));
+    editor.poll_plugins(&mut |_, _| {});
+    assert!(editor.state().console.contains("font 99"), "{}", editor.state().console);
+}
+
+#[test]
 fn a_missing_interpreter_is_reported() {
     let error = find_interpreter(Some("/no/such/python")).unwrap_err();
     assert!(error.contains("python_interpreter"), "{error}");
+}
+
+#[test]
+fn text_change_listeners_hear_the_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+
+class Watch(sublime_plugin.TextChangeListener):
+    def on_text_changed(self, changes):
+        for c in changes:
+            print("changed", c.a.pt, c.a.row, c.b.pt, c.str, c.len_utf8, self.buffer.id())
+
+    def on_revert(self):
+        print("reverted")
+"#;
+    let Some((mut host, loaded)) = host_with(dir.path(), &[("watch.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { events, .. } = loaded else {
+        panic!("expected loaded, got {loaded:?}");
+    };
+    assert!(events.contains(&"on_text_changed".to_string()), "{events:?}");
+    let mut log = String::new();
+    let changes = json!([[{ "a": [5, 1, 2], "b": [6, 1, 3], "text": "é" }]]);
+    host.query("on_text_changed", Some(7), &changes).unwrap();
+    assert_eq!(next(&mut host, &mut log), PluginMessage::Answer(Value::Null));
+    host.event("on_revert", 7).unwrap();
+    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(log, "changed 5 1 6 é 2 7\nreverted\n");
+}
+
+#[test]
+fn quick_panel_items_send_their_kind_letter() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class PickCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        item = sublime.QuickPanelItem("one", annotation="note", kind=sublime.KIND_FUNCTION)
+        self.window.show_quick_panel([item], None, sublime.KEEP_OPEN_ON_FOCUS_LOST)
+"#;
+    let Some((mut host, _)) = host_with(dir.path(), &[("pick.py", plugin)]) else {
+        return;
+    };
+    let mut log = String::new();
+    host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
+    let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
+    assert_eq!(args[1], json!([["one", "", "note", "f"]]));
+    assert_eq!(args[2], json!(2));
+}
+
+#[test]
+fn a_build_from_a_package_runs_for_real_and_its_error_opens_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(mut editor) = editor_with(dir.path(), "") else {
+        return;
+    };
+    let build = r#"{ // Sublime's JSON, with a comment
+        "selector": "source.python",
+        "shell_cmd": "echo compiling && echo $file_name:2: boom && exit 1",
+        "file_regex": "^(\\S+):(\\d+):(\\d*) (.*?)\\s*$",
+    }"#;
+    fs::write(dir.path().join("Packages").join("MyPkg").join("Echo.sublime-build"), build).unwrap();
+    let file = dir.path().join("script.py");
+    fs::write(&file, "one\ntwo\n").unwrap();
+    assert!(editor.open_file(&file));
+
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("build"));
+    assert!(editor.build_is_running(), "{}", editor_status(&editor));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while editor.build_is_running() {
+        assert!(Instant::now() < deadline, "the build did not end");
+        editor.poll_builds();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = editor.shown_output_panel().expect("the results").document.text.clone();
+    assert!(output.starts_with("compiling") && output.contains("\nscript.py:2: boom"), "{output}");
+    assert!(output.contains("with exit code 1]"), "{output}");
+    assert_eq!(editor_status(&editor), "Build finished with 1 error");
+
+    command_controller::run(&mut editor, &mut view, &Command::new("next_result"));
+    assert_eq!(editor.active_document().unwrap().selection().head, 4);
+    assert_eq!(editor_status(&editor), "boom");
+}
+
+#[test]
+fn the_input_panel_returns_a_view_plugins_can_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class RenameCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        panel = self.window.show_input_panel("Name:", "report.txt", None, None, None)
+        panel.sel().clear()
+        panel.sel().add(sublime.Region(0, 6))
+        panel.settings().set("mine", 1)
+        print("panel", panel.substr(sublime.Region(0, panel.size())), panel.settings().get("mine"), self.window.active_panel())
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("rename"));
+    assert!(editor.state().console.contains("panel report.txt 1 input"), "{}", editor.state().console);
+    let document = &editor.plugin_input_panel().expect("the panel").document;
+    assert_eq!(document.selection(), entities::selection::Selection::new(0, 6));
+}
+
+#[test]
+fn expand_variables_goes_through_lists_and_dicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class ExpandCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        print(sublime.expand_variables({"cmd": ["$a", 1], "b": "${a}!"}, {"a": "x"}))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    command_controller::run(&mut editor, &mut ViewState::default(), &Command::new("expand"));
+    assert!(editor.state().console.contains("{'cmd': ['x', 1], 'b': 'x!'}"), "{}", editor.state().console);
+}
+
+#[test]
+fn an_input_panel_after_a_list_keeps_the_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+
+class AskCommand(sublime_plugin.WindowCommand):
+    def run(self, who, words):
+        pass
+
+    def input(self, args):
+        return WhoInputHandler()
+
+class WhoInputHandler(sublime_plugin.ListInputHandler):
+    def list_items(self):
+        return ["a"]
+
+    def next_input(self, args):
+        return WordsInputHandler()
+
+class WordsInputHandler(sublime_plugin.TextInputHandler):
+    pass
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run_from_palette(&mut editor, &mut view, Command::new("ask"));
+    command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
+    assert!(view.input_panel.is_some());
+    assert!(!view.focus_editor, "the text would take the keys typed for the panel");
 }

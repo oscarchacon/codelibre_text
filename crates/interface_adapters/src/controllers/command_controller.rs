@@ -7,6 +7,7 @@
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
+use use_cases::builds::BuildPlan;
 use use_cases::editing::{Expansion, TextCommand};
 use use_cases::gateways::PluginCommandKind;
 use use_cases::plugin_hooks::CommandTarget;
@@ -27,6 +28,8 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
 /// quick panel is open; its input panel replaces the find panel.
 fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
     while let Some(request) = editor.take_plugin_panel_request() {
+        // The panel takes the keyboard, even if answering the last one gave it back to the text.
+        view.focus_editor = false;
         match request {
             PluginPanelRequest::QuickPanel => {
                 let Some(selected) = editor.plugin_quick_panel().map(|p| p.selected) else {
@@ -42,14 +45,10 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                 highlight_plugin_item(editor, view, selected);
             }
             PluginPanelRequest::InputPanel => {
-                let Some(panel) = editor.plugin_input_panel() else {
+                if editor.plugin_input_panel().is_none() {
                     continue;
-                };
-                view.input_panel = Some(InputPanelState {
-                    caption: panel.caption.clone(),
-                    text: panel.initial_text.clone(),
-                    focus_requested: true,
-                });
+                }
+                view.input_panel = Some(InputPanelState { focus_requested: true });
                 view.find_panel.visible = false;
                 editor.hide_output_panel();
             }
@@ -72,6 +71,13 @@ fn show_output_panel(editor: &mut Editor, view: &mut ViewState, name: &str, togg
     }
 }
 
+/// `build {"select": true}`, or several builds for one file: choosing one runs `build` with it.
+fn show_build_picker(editor: &mut Editor, view: &mut ViewState) {
+    cancel_quick_panel(editor, view);
+    editor.refresh_build_options();
+    view.quick_panel = Some(QuickPanel::new(SearchKind::BuildSystems, String::new()));
+}
+
 /// The answers to a plugin's panels go back to it; the commands its callbacks run come back here.
 pub fn answer_plugin_quick_panel(editor: &mut Editor, view: &mut ViewState, item: Option<usize>) {
     editor.answer_plugin_quick_panel(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
@@ -89,13 +95,22 @@ pub fn change_plugin_input(editor: &mut Editor, view: &mut ViewState, text: &str
 
 /// Enter (`done`) or Esc in a plugin's input panel.
 pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool) {
-    let Some(panel) = view.input_panel.take() else {
+    if view.input_panel.take().is_none() {
         return;
-    };
-    let text = done.then_some(panel.text.as_str());
-    editor.finish_plugin_input_panel(text, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    }
+    editor.finish_plugin_input_panel(done, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
     view.focus_editor = true;
     show_plugin_panels(editor, view);
+}
+
+/// A command chosen in the palette: a plugin command with an input handler first asks for its
+/// arguments, in the plugin's panels, and then runs itself.
+pub fn run_from_palette(editor: &mut Editor, view: &mut ViewState, command: Command) {
+    if editor.start_plugin_command_input(&command) {
+        show_plugin_panels(editor, view);
+    } else {
+        view.queue_command(command);
+    }
 }
 
 /// Built-in commands that are window commands in Sublime (the others run on the active view), so
@@ -107,7 +122,8 @@ const WINDOW_COMMANDS: &[&str] = &[
     "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
     "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "show_load_errors",
-    "show_about_window", "open_url", "report_issue",
+    "show_about_window", "open_url", "report_issue", "build", "exec", "cancel_build", "set_build_system", "next_result",
+    "prev_result",
 ];
 
 /// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
@@ -177,6 +193,16 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 }
             };
             cancel_quick_panel(editor, view);
+            if kind == SearchKind::Commands {
+                editor.refresh_plugin_command_states();
+                // `{"overlay": "command_palette", "command": "foo", "args": {…}}` goes straight to `foo`.
+                let chosen = command.str_arg("command");
+                if !chosen.is_empty() {
+                    let args = command.args.get("args").cloned().unwrap_or(serde_json::Value::Null);
+                    run_from_palette(editor, view, Command::with_args(chosen, args));
+                    return;
+                }
+            }
             view.quick_panel = Some(QuickPanel::new(kind, command.str_arg("text").to_string()));
         }
         "hide_overlay" => close_quick_panel(editor, view),
@@ -238,6 +264,31 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             finish_plugin_input(editor, view, false);
             editor.hide_output_panel();
             view.focus_editor = true;
+        }
+
+        // ----- builds --------------------------------------------------------------------------
+        "build" if command.bool_arg("select", false) => show_build_picker(editor, view),
+        "build" => match editor.plan_build(command.str_arg("file"), command.str_arg("variant")) {
+            BuildPlan::Run(target) => run(editor, view, &target),
+            BuildPlan::Choose => show_build_picker(editor, view),
+            BuildPlan::Nothing => {}
+        },
+        // A plugin's own `exec` replaces this one, as it does in Sublime.
+        "exec" if editor.plugin_command_kind("exec").is_none() => {
+            if editor.exec(&command.args) {
+                show_output_panel(editor, view, "exec", false);
+            }
+        }
+        "cancel_build" => {
+            let cancel = editor.cancel_build_command();
+            run(editor, view, &cancel);
+        }
+        "set_build_system" => editor.set_build_system(command.str_arg("file"), command.str_arg("variant")),
+        "next_result" | "prev_result" => {
+            if editor.next_result(command.name == "next_result") {
+                view.find_panel.visible = false;
+                finish_plugin_input(editor, view, false);
+            }
         }
 
         // ----- find ----------------------------------------------------------------------------

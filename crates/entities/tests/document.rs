@@ -396,3 +396,56 @@ fn show_requests_are_counted_and_clamped() {
     doc.request_show(1, false);
     assert_eq!(doc.show_revision(), 2);
 }
+#[test]
+fn regions_follow_edits_the_widget_makes_in_place() {
+    let mut doc = Document::new_untitled(1, LineEnding::Unix);
+    doc.text = "héllo world".into();
+    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0 };
+    doc.add_regions(set);
+    doc.text = "XXhéllo world".into();
+    doc.note_text_changed();
+    assert_eq!(doc.regions("k"), vec![(8, 13)]);
+    doc.text = "XXhéllo wor".into();
+    doc.note_text_changed();
+    assert_eq!(doc.regions("k"), vec![(8, 11)], "deleted text inside the region shrinks it");
+}
+
+#[test]
+fn text_typed_right_before_a_region_stays_out_of_it() {
+    let mut doc = Document::new_untitled(1, LineEnding::Unix);
+    doc.text = "hello".into();
+    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0 };
+    doc.add_regions(set);
+    // The caret is at 0: the "h" went in front, even though the texts read the same either way.
+    doc.text = "hhello".into();
+    doc.note_text_changed();
+    assert_eq!(doc.regions("k"), vec![(1, 6)]);
+}
+
+#[test]
+fn the_change_log_has_each_edit_with_positions_before_it() {
+    let mut doc = Document::new_untitled(1, LineEnding::Unix);
+    doc.text = "one\ntwo".into();
+    doc.log_text_changes();
+    doc.text = "one\ntwao".into();
+    doc.note_text_changed();
+    doc.replace_range(0, 3, "1");
+    let changes = doc.take_text_changes();
+    assert_eq!(changes.len(), 2);
+    assert_eq!((changes[0].start, changes[0].end, changes[0].text.as_str()), (6, 6, "a"));
+    assert_eq!(changes[0].start_position, (1, 2));
+    assert_eq!((changes[1].start, changes[1].end, changes[1].text.as_str()), (0, 3, "1"));
+    assert_eq!(changes[1].end_position, (0, 3));
+    assert!(doc.take_text_changes().is_empty());
+}
+
+#[test]
+fn the_visible_range_is_the_whole_text_until_the_view_reports_it() {
+    let mut doc = Document::new_untitled(1, LineEnding::Unix);
+    doc.text = "abcdef".into();
+    assert_eq!(doc.visible_range(), (0, 6));
+    doc.set_visible_range(2, 4);
+    assert_eq!(doc.visible_range(), (2, 4));
+    doc.text = "abc".into();
+    assert_eq!(doc.visible_range(), (2, 3));
+}

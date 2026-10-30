@@ -22,6 +22,10 @@ impl SyntaxGateway for SyntectSyntaxes {
         self.0.borrow().resolve(name_or_path)
     }
 
+    fn base_scope(&self, syntax: &str) -> String {
+        self.0.borrow().base_scope(syntax)
+    }
+
     fn syntax_names(&self) -> Vec<String> {
         self.0.borrow().syntax_names()
     }

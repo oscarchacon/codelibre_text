@@ -57,6 +57,7 @@ pub struct MenuEntryViewModel {
     pub shortcut: Option<String>,
     /// `Some(checked)` for checkbox items.
     pub checked: Option<bool>,
+    pub enabled: bool,
     pub command: Option<Command>,
     pub children: Vec<MenuEntryViewModel>,
 }
@@ -65,10 +66,14 @@ pub struct QuickPanelItemViewModel {
     pub caption: String,
     pub detail: String,
     pub hint: String,
+    /// A letter shown in a badge before the caption; empty for none.
+    pub kind: String,
 }
 
 pub struct QuickPanelViewModel {
     pub placeholder: String,
+    /// A click outside does not close the panel.
+    pub keep_open: bool,
     /// Shown instead of the list when nothing matches.
     pub no_matches: String,
     pub query: String,
@@ -81,8 +86,13 @@ pub struct QuickPanelViewModel {
 }
 
 pub struct InputPanelViewModel {
+    /// The panel's view, so the caret of a closed panel is not taken for this one's.
+    pub id: u64,
     pub caption: String,
     pub text: String,
+    /// In chars. The view moves its caret here when `selection_revision` changes.
+    pub selection: (usize, usize),
+    pub selection_revision: u64,
     pub take_focus: bool,
 }
 
@@ -94,6 +104,12 @@ pub struct OutputPanelViewModel {
     /// [`presenters::output_panel::MAX_LINES`]: crate::presenters::output_panel::MAX_LINES
     pub text: String,
     pub font_size: f32,
+    /// The line of the panel's text that `text` starts with.
+    pub first_line: usize,
+    /// The line of `text` of the result visited last.
+    pub current_line: Option<usize>,
+    /// Changes when a result is visited: the view scrolls to it.
+    pub result_revision: u64,
 }
 
 pub struct FindPanelViewModel {

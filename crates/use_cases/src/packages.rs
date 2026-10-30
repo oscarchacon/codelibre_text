@@ -70,6 +70,8 @@ impl Editor {
             self.load_translations(&mut errors);
         }
         self.state.load_errors.extend(errors);
+        // Files plugins opened are read again, unless they hold changes not saved yet.
+        self.state.plugins.settings_files.retain(|_, file| !file.changes.is_empty());
     }
 
     /// `open_file` with a package path, e.g. `${packages}/User/Foo.sublime-settings`. With

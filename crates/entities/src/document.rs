@@ -92,10 +92,29 @@ pub struct Document {
     /// Where a plugin asked the view to scroll (`view.show`), and how many times it asked.
     show_request: Option<ShowRequest>,
     show_revision: u64,
+    /// A copy of the text, kept only while something needs to know what each edit changed (regions,
+    /// a change log): the widget edits `text` in place, so comparing is the way to find out.
+    tracked_text: Option<String>,
+    /// The changes not taken yet, when a plugin listens to them.
+    change_log: Option<Vec<TextChange>>,
+    /// The chars on screen, as the view last reported them.
+    visible_range: Option<(usize, usize)>,
+}
+
+/// One edit of the text, with positions as they were before it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextChange {
+    /// Chars `start..end` were replaced by `text`.
+    pub start: usize,
+    pub end: usize,
+    /// Zero-based line and column of `start` and `end`.
+    pub start_position: (usize, usize),
+    pub end_position: (usize, usize),
+    pub text: String,
 }
 
 /// A named set of regions a plugin marks (a linter's errors, a search's matches…). The regions
-/// move with the text when it is edited through the document's methods.
+/// move with the text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegionSet {
     pub key: String,
@@ -138,6 +157,9 @@ impl Document {
             region_sets: Vec::new(),
             show_request: None,
             show_revision: 0,
+            tracked_text: None,
+            change_log: None,
+            visible_range: None,
         }
     }
 
@@ -273,6 +295,65 @@ impl Document {
     /// Records that the text changed outside this type's methods (the text widget edits it in place).
     pub fn note_text_changed(&mut self) {
         self.change_count += 1;
+        let Some(before) = &self.tracked_text else {
+            return;
+        };
+        let mut prefix = common_prefix(before, &self.text);
+        let mut suffix = common_suffix(&before[prefix..], &self.text[prefix..]);
+        // Typing "h" before "hello" reads the same as typing it after the first "h". The caret,
+        // which has not moved yet, tells which: regions must not take in what was typed before them.
+        let caret = char_to_byte(before, self.selection.start());
+        if caret < prefix && before.is_char_boundary(caret) && self.text.is_char_boundary(caret) {
+            let at_caret = common_suffix(&before[caret..], &self.text[caret..]);
+            if caret + at_caret == prefix + suffix {
+                (prefix, suffix) = (caret, at_caret);
+            }
+        }
+        if prefix + suffix < before.len() || prefix + suffix < self.text.len() {
+            let (end, inserted) = (before.len() - suffix, self.text[prefix..self.text.len() - suffix].to_string());
+            self.record_change(prefix, end, &inserted);
+        }
+    }
+
+    /// Moves the regions over a change of the bytes `start..end` of the tracked text (the text
+    /// before the change), logs it, and brings the tracked text up to date.
+    fn record_change(&mut self, start: usize, end: usize, inserted: &str) {
+        let Some(before) = &mut self.tracked_text else {
+            return;
+        };
+        let (start_char, end_char) = (before[..start].chars().count(), before[..end].chars().count());
+        if let Some(log) = &mut self.change_log {
+            log.push(TextChange {
+                start: start_char,
+                end: end_char,
+                start_position: position_of(before, start),
+                end_position: position_of(before, end),
+                text: inserted.to_string(),
+            });
+        }
+        before.replace_range(start..end, inserted);
+        let inserted = inserted.chars().count();
+        for set in &mut self.region_sets {
+            for region in &mut set.regions {
+                *region = (
+                    moved_position(region.0, start_char, end_char, inserted),
+                    moved_position(region.1, start_char, end_char, inserted),
+                );
+            }
+        }
+    }
+
+    /// From now on [`take_text_changes`](Self::take_text_changes) has every edit of the text.
+    pub fn log_text_changes(&mut self) {
+        if self.change_log.is_none() {
+            self.change_log = Some(Vec::new());
+            self.tracked_text.get_or_insert_with(|| self.text.clone());
+        }
+    }
+
+    /// The edits since the last call.
+    pub fn take_text_changes(&mut self) -> Vec<TextChange> {
+        self.change_log.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// The selections besides the primary one, in the order they were added.
@@ -363,38 +444,28 @@ impl Document {
         let end = end.clamp(start, len);
         let (start_byte, end_byte) = (char_to_byte(&self.text, start), char_to_byte(&self.text, end));
         self.text.replace_range(start_byte..end_byte, insert);
-        self.note_text_changed();
+        self.change_count += 1;
+        // The exact change, not a comparison, which cannot tell which of two equal chars went.
+        self.record_change(start_byte, end_byte, insert);
         let inserted = insert.chars().count();
-        let map = |p: usize| {
-            if p < start || (p == start && start < end) {
-                p
-            } else if p >= end {
-                p - (end - start) + inserted
-            } else {
-                start + inserted
-            }
-        };
+        let map = |p: usize| moved_position(p, start, end, inserted);
         let moved = |s: &Selection| Selection::new(map(s.anchor), map(s.head));
         let primary = moved(&self.selection);
         let extra: Vec<Selection> = self.extra_selections.iter().map(moved).collect();
         self.set_selections(primary, extra);
-        for set in &mut self.region_sets {
-            for region in &mut set.regions {
-                *region = (map(region.0), map(region.1));
-            }
-        }
         true
     }
 
     /// Adds a region set, replacing the one with the same key.
     pub fn add_regions(&mut self, set: RegionSet) {
+        self.tracked_text.get_or_insert_with(|| self.text.clone());
         match self.region_sets.iter_mut().find(|s| s.key == set.key) {
             Some(existing) => *existing = set,
             None => self.region_sets.push(set),
         }
     }
 
-    /// The regions of a set, kept within the text (edits the widget made in place do not move them).
+    /// The regions of a set, kept within the text.
     pub fn regions(&self, key: &str) -> Vec<(usize, usize)> {
         let len = self.char_count();
         let set = self.region_sets.iter().find(|s| s.key == key);
@@ -403,10 +474,24 @@ impl Document {
 
     pub fn erase_regions(&mut self, key: &str) {
         self.region_sets.retain(|s| s.key != key);
+        if self.region_sets.is_empty() && self.change_log.is_none() {
+            self.tracked_text = None;
+        }
     }
 
     pub fn region_sets(&self) -> &[RegionSet] {
         &self.region_sets
+    }
+
+    /// The view reports which chars are on screen.
+    pub fn set_visible_range(&mut self, start: usize, end: usize) {
+        self.visible_range = Some((start, end));
+    }
+
+    /// The chars on screen; the whole text until the view has drawn the document.
+    pub fn visible_range(&self) -> (usize, usize) {
+        let len = self.char_count();
+        self.visible_range.map_or((0, len), |(start, end)| (start.min(len), end.min(len)))
     }
 
     /// Asks the view to scroll so that `point` is visible (centered when `center`).
@@ -447,6 +532,44 @@ impl Document {
         self.extra_selections = new;
         true
     }
+}
+
+/// Where a position goes when the chars `start..end` become `inserted` chars: positions after the
+/// change shift, positions inside it go to its end, and a caret where text is inserted ends up
+/// after the new text.
+fn moved_position(p: usize, start: usize, end: usize, inserted: usize) -> usize {
+    if p < start || (p == start && start < end) {
+        p
+    } else if p >= end {
+        p - (end - start) + inserted
+    } else {
+        start + inserted
+    }
+}
+
+/// How many bytes two texts share at the start, on a char boundary.
+fn common_prefix(a: &str, b: &str) -> usize {
+    let mut same = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+    while !a.is_char_boundary(same) || !b.is_char_boundary(same) {
+        same -= 1;
+    }
+    same
+}
+
+/// How many bytes two texts share at the end, on a char boundary.
+fn common_suffix(a: &str, b: &str) -> usize {
+    let mut same = a.bytes().rev().zip(b.bytes().rev()).take_while(|(x, y)| x == y).count();
+    while !a.is_char_boundary(a.len() - same) || !b.is_char_boundary(b.len() - same) {
+        same -= 1;
+    }
+    same
+}
+
+/// Zero-based line and column (in chars) of a byte offset.
+fn position_of(text: &str, byte: usize) -> (usize, usize) {
+    let before = &text[..byte];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    (before.matches('\n').count(), before[line_start..].chars().count())
 }
 
 fn decode(bytes: Vec<u8>) -> (String, Encoding) {

@@ -83,7 +83,7 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
     let clicked_outside = ctx.input(|i| {
         i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p))
     });
-    if clicked_outside {
+    if clicked_outside && !panel.keep_open {
         events.push(UiEvent::QuickPanelDismissed);
     }
 }
@@ -127,6 +127,9 @@ fn result_list(
                 }
                 let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 4.0))));
                 row.horizontal(|ui| {
+                    if !item.kind.is_empty() {
+                        ui.label(RichText::new(&item.kind).size(12.0).monospace().color(chrome.panel_bg).background_color(chrome.accent));
+                    }
                     ui.vertical(|ui| {
                         let color = if is_selected { chrome.accent } else { chrome.fg };
                         let caption = RichText::new(&item.caption).size(14.0).color(color);

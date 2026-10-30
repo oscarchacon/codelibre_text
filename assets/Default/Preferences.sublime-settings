@@ -82,4 +82,10 @@
 	// Path of the Python 3 interpreter for plugins. Empty: use py -3, python3,
 	// python or the one `uv python find` reports, whichever works first.
 	"python_interpreter": "",
+
+	// Save every file with a name before building.
+	"save_all_on_build": true,
+
+	// Show the build's output panel when a build starts.
+	"show_panel_on_build": true,
 }

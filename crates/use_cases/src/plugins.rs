@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 
 use crate::editor::Editor;
 use crate::gateways::{PluginCommandKind, PluginLoad, PluginMessage, PluginPackage};
+use crate::plugin_commands::PluginCommandState;
 
 /// The console keeps at most this many bytes; the oldest output goes first.
 const CONSOLE_LIMIT: usize = 200_000;
@@ -46,6 +47,10 @@ pub struct PluginState {
     pub(crate) view_statuses: HashMap<DocumentId, BTreeMap<String, String>>,
     pub(crate) settings_files: HashMap<String, SettingsFile>,
     pub(crate) window_settings: Map<String, Value>,
+    /// The settings objects with `add_on_change` callbacks, and the values they last heard about.
+    pub(crate) watched_settings: Vec<(Value, Map<String, Value>)>,
+    /// What plugin commands last answered (see `plugin_commands`).
+    pub(crate) command_states: HashMap<String, PluginCommandState>,
     /// The errors of the last load (also in the package load errors).
     pub(crate) errors: Vec<String>,
     /// The events some listener wants (`on_modified`, `on_load_async`…); others are not sent.
@@ -75,6 +80,8 @@ impl Editor {
         self.state.plugins.commands.clear();
         self.state.plugins.events.clear();
         self.state.plugins.settings_files.clear();
+        self.state.plugins.watched_settings.clear();
+        self.state.plugins.command_states.clear();
         let old_errors = std::mem::take(&mut self.state.plugins.errors);
         self.state.load_errors.retain(|e| !old_errors.contains(e));
         let settings = self.global_settings();
@@ -106,6 +113,10 @@ impl Editor {
             }
             Ok(_) => {}
             Err(e) => self.plugin_load_error(format!("Python plugins: {e}")),
+        }
+        // At startup the views come later: `Editor::start` tells the listeners about them.
+        if !self.state.documents.is_empty() {
+            self.plugin_init();
         }
     }
 
@@ -180,7 +191,9 @@ impl Editor {
         for command in std::mem::take(&mut self.state.plugins.queued_commands) {
             run_command(self, &command);
         }
+        self.notice_text_changes();
         self.notice_changes();
+        self.notice_settings_changes();
     }
 
     /// Tells the listeners about a view event, when one listens to it or to its `_async` variant.
@@ -236,6 +249,34 @@ impl Editor {
             self.plugin_event("on_deactivated", old);
         }
         self.plugin_event("on_activated", id);
+    }
+
+    /// `on_text_changed` for the listeners of each document's edits since the last frame.
+    fn notice_text_changes(&mut self) {
+        if !self.wants_plugin_event("on_text_changed") {
+            return;
+        }
+        let mut changed = Vec::new();
+        for doc in &mut self.state.documents {
+            doc.log_text_changes();
+            let changes = doc.take_text_changes();
+            if !changes.is_empty() {
+                changed.push((doc.id, changes));
+            }
+        }
+        for (id, changes) in changed {
+            let changes: Vec<Value> = changes
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "a": [c.start, c.start_position.0, c.start_position.1],
+                        "b": [c.end, c.end_position.0, c.end_position.1],
+                        "text": c.text,
+                    })
+                })
+                .collect();
+            self.plugin_query("on_text_changed", Some(id), serde_json::json!([changes]));
+        }
     }
 
     /// `on_modified` for every document whose text changed since the last check, and

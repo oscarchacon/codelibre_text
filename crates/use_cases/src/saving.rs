@@ -29,7 +29,7 @@ impl Editor {
         }
         let path = match (&doc.path, save_as) {
             (Some(path), false) => path.clone(),
-            _ => match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc)) {
+            _ => match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc), &[]) {
                 Some(path) => path,
                 None => return false,
             },

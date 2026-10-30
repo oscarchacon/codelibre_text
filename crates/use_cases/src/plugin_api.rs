@@ -5,6 +5,7 @@
 //! there is a single window. Functions not listed here answer "not implemented yet"; the next
 //! ones to add are listed in `docs/plugins.md`.
 
+use entities::build::expand_variables;
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
@@ -13,7 +14,7 @@ use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start,
 use serde_json::{json, Map, Value};
 
 use crate::editor::Editor;
-use crate::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
 use crate::plugins::CommandRunner;
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
@@ -68,6 +69,16 @@ fn settings_target(value: &Value) -> Result<SettingsTarget, String> {
     }
 }
 
+/// Sublime's `file_types`: `[(description, [extension, …]), …]`.
+fn file_filters(value: &Value) -> Vec<FileFilter> {
+    let filter = |entry: &Value| {
+        let name = entry.get(0)?.as_str()?.to_string();
+        let extensions = entry.get(1)?.as_array()?.iter().filter_map(|e| e.as_str().map(String::from)).collect();
+        Some(FileFilter { name, extensions })
+    };
+    value.as_array().map(|entries| entries.iter().filter_map(filter).collect()).unwrap_or_default()
+}
+
 fn region(a: usize, b: usize) -> Value {
     json!([a, b])
 }
@@ -109,7 +120,7 @@ impl Editor {
                 }))
             }
             "open_dialog" => {
-                let files = self.gateways.dialogs.pick_files(self.dialog_directory(a.value(0)).as_deref());
+                let files = self.gateways.dialogs.pick_files(self.dialog_directory(a.value(0)).as_deref(), &file_filters(a.value(1)));
                 let files: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
                 Ok(if files.is_empty() { Value::Null } else { json!(files) })
             }
@@ -120,12 +131,24 @@ impl Editor {
                     (name, "") => name.to_string(),
                     (name, extension) => format!("{name}.{extension}"),
                 };
-                let path = self.gateways.dialogs.pick_save_path(self.dialog_directory(a.value(0)).as_deref(), &file_name);
+                let filters = file_filters(a.value(3));
+                let path = self.gateways.dialogs.pick_save_path(self.dialog_directory(a.value(0)).as_deref(), &file_name, &filters);
                 Ok(path.map_or(Value::Null, |p| json!(p.display().to_string())))
             }
             "select_folder_dialog" => {
-                let folder = self.gateways.dialogs.pick_folder(self.dialog_directory(a.value(0)).as_deref());
-                Ok(folder.map_or(Value::Null, |p| json!([p.display().to_string()])))
+                let start = self.dialog_directory(a.value(0));
+                let folders = if a.bool(1) {
+                    self.gateways.dialogs.pick_folders(start.as_deref())
+                } else {
+                    self.gateways.dialogs.pick_folder(start.as_deref()).into_iter().collect()
+                };
+                let folders: Vec<String> = folders.iter().map(|p| p.display().to_string()).collect();
+                Ok(if folders.is_empty() { Value::Null } else { json!(folders) })
+            }
+            "expand_variables" => {
+                let variables = a.value(1).as_object().into_iter().flatten();
+                let variables = variables.filter_map(|(name, value)| Some((name.clone(), value.as_str()?.to_string()))).collect();
+                Ok(json!(expand_variables(a.str(0)?, &variables)))
             }
             "find_resources" => {
                 let include_sublime = self.global_settings().bool("import_sublime_packages", true);
@@ -151,8 +174,9 @@ impl Editor {
                 self.plugin_run_command(a.str(0)?, a.u64(1)?, &command, run_command)
             }
             "settings_get" => self.plugin_settings_get(&settings_target(a.value(0))?, a.str(1)?),
-            "settings_set" => self.plugin_settings_set(&settings_target(a.value(0))?, a.str(1)?, a.value(2).clone()),
-            "settings_erase" => self.plugin_settings_set(&settings_target(a.value(0))?, a.str(1)?, Value::Null),
+            "settings_set" => self.plugin_settings_set(a.value(0), a.str(1)?, a.value(2).clone()),
+            "settings_erase" => self.plugin_settings_set(a.value(0), a.str(1)?, Value::Null),
+            "settings_watch" => self.plugin_settings_watch(a.value(0)),
             "settings_all" => Ok(Value::Object(self.plugin_settings_all(&settings_target(a.value(0))?))),
             "save_settings" => self.plugin_save_settings(a.str(0)?),
             "window_active_view" => Ok(self.active_document().map_or(Value::Null, |d| json!(d.id))),
@@ -183,6 +207,10 @@ impl Editor {
                 .map(|f| f.display().to_string())
                 .collect::<Vec<_>>())),
             "view_is_valid" => Ok(json!(self.any_document(a.u64(0)?).is_some())),
+            "view_find_all_results" => {
+                let results = self.output_results(a.u64(0)?);
+                Ok(json!(results.iter().map(|r| json!([r.file, r.row, r.column, r.message])).collect::<Vec<_>>()))
+            }
             "view_set_status" | "view_erase_status" => {
                 let id = a.u64(0)?;
                 self.any_document(id).ok_or("the view is closed")?;
@@ -204,6 +232,7 @@ impl Editor {
                 self.destroy_output_panel(a.str(1)?);
                 Ok(Value::Null)
             }
+            "window_active_panel" if self.plugin_input_panel().is_some() => Ok(json!("input")),
             "window_active_panel" => Ok(self.shown_output_panel().map_or(Value::Null, |p| json!(format!("output.{}", p.name)))),
             "window_panels" => Ok(json!(self.output_panel_names())),
             "view_close" => {
@@ -257,6 +286,10 @@ impl Editor {
                 Value::Null
             }
             "view_size" => json!(len),
+            "view_visible_region" => {
+                let (start, end) = doc.visible_range();
+                region(start, end)
+            }
             "view_add_regions" => {
                 let regions = a
                     .value(2)
@@ -396,12 +429,11 @@ impl Editor {
             self.append_text(id, command.str_arg("characters"), command.bool_arg("force", false))?;
             return Ok(Value::Null);
         }
-        if kind == "view" && self.is_output_panel(target) {
+        if kind == "view" && self.is_panel_view(target) {
             if self.run_plugin_command_in(command, Some(target), run_command) {
                 return Ok(Value::Null);
             }
-            // The command controller only knows tabs.
-            return Err(format!("{} cannot run in an output panel yet (only append and plugin commands)", command.name));
+            return self.run_in_panel(target, command);
         }
         let previous = self.state.active;
         if kind == "view" {
@@ -412,6 +444,20 @@ impl Editor {
         }
         if kind == "view" && self.active_document().is_some_and(|d| d.id == target) && previous < self.state.documents.len() {
             self.state.active = previous;
+        }
+        Ok(Value::Null)
+    }
+
+    /// The built-in commands that work in a panel's view (the command controller only knows tabs).
+    fn run_in_panel(&mut self, id: DocumentId, command: &Command) -> Result<Value, String> {
+        let doc = self.any_document_mut(id).ok_or("the view is closed")?;
+        match command.name.as_str() {
+            "select_all" => doc.set_selection(Selection::new(0, doc.char_count())),
+            "insert" => {
+                let selection = doc.selection();
+                doc.replace_range(selection.start(), selection.end(), command.str_arg("characters"));
+            }
+            other => return Err(format!("{other} cannot run in a panel yet (only append, insert, select_all and plugin commands)")),
         }
         Ok(Value::Null)
     }
@@ -433,8 +479,48 @@ impl Editor {
         }
     }
 
-    /// Sets a setting; `Value::Null` erases it.
-    fn plugin_settings_set(&mut self, target: &SettingsTarget, key: &str, value: Value) -> Result<Value, String> {
+    /// `add_on_change`: the editor tells the plugins (`settings_changed`) when this object changes.
+    fn plugin_settings_watch(&mut self, target: &Value) -> Result<Value, String> {
+        let values = self.plugin_settings_all(&settings_target(target)?);
+        let watched = &mut self.state.plugins.watched_settings;
+        if !watched.iter().any(|(t, _)| t == target) {
+            watched.push((target.clone(), values));
+        }
+        Ok(Value::Null)
+    }
+
+    /// Tells the plugins which watched settings objects changed since the last check: any way the
+    /// editor changes them (`set_setting`, the user saving a settings file…) ends up here.
+    pub(crate) fn notice_settings_changes(&mut self) {
+        let mut watched = std::mem::take(&mut self.state.plugins.watched_settings);
+        let mut changed = Vec::new();
+        for (target, before) in &mut watched {
+            let Ok(object) = settings_target(target) else { continue };
+            let now = self.plugin_settings_all(&object);
+            if now != *before {
+                *before = now;
+                changed.push(target.clone());
+            }
+        }
+        self.state.plugins.watched_settings = watched;
+        for target in changed {
+            self.ask_plugins("settings_changed", None, json!([target]));
+        }
+    }
+
+    /// Sets a setting; `Value::Null` erases it. The plugin's side calls its own `add_on_change`
+    /// callbacks, so the object's remembered values move on too.
+    fn plugin_settings_set(&mut self, target: &Value, key: &str, value: Value) -> Result<Value, String> {
+        let object = settings_target(target)?;
+        self.set_plugin_setting(&object, key, value);
+        let now = self.plugin_settings_all(&object);
+        if let Some((_, values)) = self.state.plugins.watched_settings.iter_mut().find(|(t, _)| t == target) {
+            *values = now;
+        }
+        Ok(Value::Null)
+    }
+
+    fn set_plugin_setting(&mut self, target: &SettingsTarget, key: &str, value: Value) {
         let set = |map: &mut Map<String, Value>, value: Value| {
             if value.is_null() {
                 map.remove(key);
@@ -458,7 +544,6 @@ impl Editor {
             }
             SettingsTarget::Window => set(&mut self.state.plugins.window_settings, value),
         }
-        Ok(Value::Null)
     }
 
     /// `sublime.save_settings`: writes what plugins changed to the `User` package's copy.

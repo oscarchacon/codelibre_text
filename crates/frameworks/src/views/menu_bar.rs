@@ -4,14 +4,17 @@ use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::MenuEntryViewModel;
 
 pub fn show(ui: &mut egui::Ui, menu: &[MenuEntryViewModel], events: &mut Vec<UiEvent>) {
+    let mut open = false;
     egui::menu::bar(ui, |ui| {
         for top in menu {
-            ui.menu_button(&top.caption, |ui| {
+            let shown = ui.menu_button(&top.caption, |ui| {
                 ui.set_min_width(220.0);
                 entries(ui, &top.children, events);
             });
+            open |= shown.inner.is_some();
         }
     });
+    events.push(UiEvent::MenuOpen(open));
 }
 
 fn entries(ui: &mut egui::Ui, items: &[MenuEntryViewModel], events: &mut Vec<UiEvent>) {
@@ -40,7 +43,7 @@ fn entries(ui: &mut egui::Ui, items: &[MenuEntryViewModel], events: &mut Vec<UiE
         if let Some(shortcut) = &entry.shortcut {
             button = button.shortcut_text(shortcut);
         }
-        if ui.add(button).clicked() {
+        if ui.add_enabled(entry.enabled, button).clicked() {
             events.push(UiEvent::RunCommand(command.clone()));
             ui.close_menu();
         }

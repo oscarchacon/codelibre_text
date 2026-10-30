@@ -37,8 +37,6 @@ impl QuickPanel {
 
 /// The one-line panel at the bottom that a plugin opened (`window.show_input_panel`).
 pub struct InputPanelState {
-    pub caption: String,
-    pub text: String,
     pub focus_requested: bool,
 }
 
@@ -85,6 +83,8 @@ pub struct ViewState {
     pub text_has_focus: bool,
     /// The user already agreed to quit with unsaved changes.
     pub exit_confirmed: bool,
+    /// A menu of the main menu is open (plugin commands are asked about when it opens).
+    pub(crate) menu_open: bool,
     /// Side bar folder contents, read once per folder (cleared by "Refresh Folders").
     pub(crate) folder_listings: HashMap<PathBuf, Vec<(PathBuf, bool)>>,
     pub(crate) commands: VecDeque<Command>,
@@ -106,6 +106,7 @@ impl Default for ViewState {
             focus_editor: true,
             text_has_focus: false,
             exit_confirmed: false,
+            menu_open: false,
             folder_listings: HashMap::new(),
             commands: VecDeque::new(),
             requests: Vec::new(),

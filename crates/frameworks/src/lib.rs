@@ -26,7 +26,7 @@ use interface_adapters::view_state::ViewState;
 use use_cases::{Editor, Gateways};
 
 use gateways::{
-    app_directories, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
+    app_directories, child_processes::ChildProcesses, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
     python_plugin_host::PythonPluginHost, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
     system_clipboard::SystemClipboard,
 };
@@ -39,7 +39,8 @@ pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, S
     let session_file = app_directories::session_file(&package_paths);
     let engine: SharedSyntaxEngine = Rc::new(RefCell::new(SyntaxEngine::new(package_paths.clone())));
     let python_lib = app_directories::python_lib_dir(&package_paths);
-    let plugin_host = PythonPluginHost::new(python_lib).with_waker(Arc::new(move || ctx.request_repaint()));
+    let waker: Arc<dyn Fn() + Send + Sync> = Arc::new(move || ctx.request_repaint());
+    let plugin_host = PythonPluginHost::new(python_lib).with_waker(waker.clone());
 
     let gateways = Gateways {
         file_system: Box::new(StdFileSystem),
@@ -51,6 +52,7 @@ pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, S
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
         plugins: Box::new(plugin_host),
+        processes: Box::new(ChildProcesses::default().with_waker(waker)),
     };
     let mut editor = Editor::new(gateways);
     editor.start(paths);
