@@ -1,5 +1,7 @@
 //! Use cases: text commands on the active document.
 
+use entities::command::Command;
+use entities::document::DocumentId;
 use entities::selection::Selection;
 use entities::text::{line_to_char, word_at};
 use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
@@ -21,6 +23,9 @@ pub enum TextCommand {
     SelectWord,
     Indent,
     Unindent,
+    /// `whole_file`: with no selection, every line instead of the caret's; `force`: also lines
+    /// already indented.
+    Reindent { whole_file: bool, force: bool },
     /// Tab key: indent lines or insert a tab / spaces.
     InsertTab,
     /// Enter key with `auto_indent`.
@@ -47,7 +52,52 @@ pub enum Expansion {
     Smart,
 }
 
+/// Built-in commands that work on any view, also the panels', which are not the active document.
+pub(crate) const VIEW_COMMANDS: &[&str] = &["move", "move_to", "left_delete", "right_delete", "select_all", "insert"];
+
 impl Editor {
+    /// [`VIEW_COMMANDS`] on the active view; `move` and `move_to` work on every selection. The
+    /// widget does the keys bound to them: these are for plugins. Problems go to the status bar.
+    pub fn run_view_command_on_active(&mut self, command: &Command) {
+        let Some(id) = self.active_document().map(|d| d.id) else {
+            return;
+        };
+        if let Err(message) = self.run_view_command(id, command) {
+            self.notify(message);
+        }
+    }
+
+    pub(crate) fn run_view_command(&mut self, id: DocumentId, command: &Command) -> Result<(), String> {
+        let name = command.name.as_str();
+        let extend = command.bool_arg("extend", false);
+        let target = command.str_arg(if name == "move" { "by" } else { "to" }).to_string();
+        let doc = self.any_document_mut(id).ok_or("the view is closed")?;
+        match name {
+            "select_all" => doc.set_selection(Selection::new(0, doc.char_count())),
+            "insert" => {
+                let selection = doc.selection();
+                doc.replace_range(selection.start(), selection.end(), command.str_arg("characters"));
+            }
+            "left_delete" | "right_delete" => {
+                doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, name == "right_delete"));
+            }
+            _ => {
+                let forward = command.bool_arg("forward", true);
+                let motion = |text: &str, selection: Selection| match name {
+                    "move" => tc::move_by(text, selection, &target, forward, extend),
+                    _ => tc::move_to(text, selection, &target, extend),
+                };
+                let primary = motion(&doc.text, doc.selection());
+                let others: Option<Vec<Selection>> = doc.extra_selections().iter().map(|s| motion(&doc.text, *s)).collect();
+                match (primary, others) {
+                    (Some(primary), Some(others)) => doc.set_selections(primary, others),
+                    _ => return Err(self.tr_args("{command} to {target} is not supported", &[("command", &name), ("target", &target)])),
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Runs a text command on the active document with its settings (tab size, spaces…).
     pub fn run_text_command(&mut self, command: TextCommand) {
         let settings = self.view_settings();
@@ -76,6 +126,7 @@ impl Editor {
             TextCommand::SelectWord => Some(word_at(text, sel.head)),
             TextCommand::Indent => Some(tc::indent(text, sel, tab_size, spaces)),
             TextCommand::Unindent => Some(tc::unindent(text, sel, tab_size)),
+            TextCommand::Reindent { whole_file, force } => tc::reindent(text, sel, &syntax, (tab_size, spaces), whole_file, force),
             TextCommand::InsertTab => Some(tc::insert_tab(text, sel, tab_size, spaces)),
             TextCommand::NewlineAutoIndent => Some(tc::newline_auto_indent(text, sel, tab_size, spaces)),
             TextCommand::JoinLines => Some(tc::join_lines(text, sel)),
@@ -91,6 +142,17 @@ impl Editor {
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
             TextCommand::Insert(characters) => Some(tc::replace_selection(text, sel, &characters)),
         });
+    }
+
+    /// Sublime's `reindent`; it says so when the syntax has no indentation rules.
+    pub fn reindent(&mut self, single_line: bool, force: bool) {
+        match self.active_document().map(|d| d.syntax.clone()) {
+            Some(syntax) if !tc::can_reindent(&syntax) => {
+                self.notify(self.tr_args("No indentation rules for {syntax}", &[("syntax", &syntax)]));
+            }
+            Some(_) => self.run_text_command(TextCommand::Reindent { whole_file: !single_line, force }),
+            None => {}
+        }
     }
 
     /// Typing while there are several selections (Ctrl+D): the text goes into every one.

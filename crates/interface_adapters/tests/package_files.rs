@@ -29,7 +29,7 @@ fn packages_load_default_first_then_alphabetically_then_user_last() {
     for package in ["User", "zeta", "Default", "Alpha"] {
         write(&packages.join(package).join("Preferences.sublime-settings"));
     }
-    let paths = PackagePaths { packages, sublime_packages: None };
+    let paths = PackagePaths { packages, sublime_packages: None, archive_folders: Vec::new() };
     let found = find_resources(&paths, false, |n| n == "Preferences.sublime-settings");
     assert_eq!(
         short(&found),
@@ -49,7 +49,7 @@ fn only_matching_files_are_returned_including_subfolders() {
     write(&package.join("Rust.sublime-syntax"));
     write(&package.join("syntax").join("Cargo.sublime-syntax"));
     write(&package.join("README.md"));
-    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None };
+    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() };
     let found = find_resources(&paths, false, |n| n.ends_with(".sublime-syntax"));
     assert_eq!(found.len(), 2);
 }
@@ -60,7 +60,7 @@ fn very_deep_files_are_not_searched() {
     let deep = dir.path().join("Packages/P/a/b/c/d/e/f");
     write(&deep.join("Deep.sublime-syntax"));
     write(&dir.path().join("Packages/P/a/b/Shallow.sublime-syntax"));
-    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None };
+    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() };
     assert_eq!(short(&find_resources(&paths, false, |n| n.ends_with(".sublime-syntax"))), vec!["b/Shallow.sublime-syntax"]);
 }
 
@@ -72,6 +72,7 @@ fn sublime_text_packages_are_only_read_when_included() {
     let paths = PackagePaths {
         packages: dir.path().join("Packages"),
         sublime_packages: Some(dir.path().join("Sublime/Packages")),
+        archive_folders: Vec::new(),
     };
     let matches = |n: &str| n.ends_with(".sublime-color-scheme");
     assert_eq!(short(&find_resources(&paths, false, matches)), vec!["User/Mine.sublime-color-scheme"]);
@@ -83,7 +84,7 @@ fn sublime_text_packages_are_only_read_when_included() {
 
 #[test]
 fn missing_package_folders_find_nothing() {
-    let paths = PackagePaths { packages: PathBuf::from("/does/not/exist"), sublime_packages: None };
+    let paths = PackagePaths { packages: PathBuf::from("/does/not/exist"), sublime_packages: None, archive_folders: Vec::new() };
     assert!(find_resources(&paths, true, |_| true).is_empty());
 }
 
@@ -96,6 +97,7 @@ fn resource_names_and_their_files() {
     let paths = PackagePaths {
         packages: dir.path().join("Packages"),
         sublime_packages: Some(dir.path().join("Sublime/Packages")),
+        archive_folders: Vec::new(),
     };
     let ours = dir.path().join("Packages/Tool/Tool.sublime-settings");
     assert_eq!(resource_name(&paths, true, &ours).as_deref(), Some("Packages/Tool/Tool.sublime-settings"));

@@ -22,9 +22,31 @@ use crate::session::Session;
 pub struct PackagePaths {
     pub packages: PathBuf,
     pub sublime_packages: Option<PathBuf>,
+    /// Where `.sublime-package` files are, in load order.
+    pub archive_folders: Vec<ArchiveFolder>,
+}
+
+/// A folder of `.sublime-package` files and where the editor keeps them unpacked: a folder of
+/// packages like any other, with less priority than the unpacked ones.
+#[derive(Debug, Clone)]
+pub struct ArchiveFolder {
+    pub archives: PathBuf,
+    pub unpacked: PathBuf,
+    /// It belongs to Sublime Text, so it follows `import_sublime_packages`.
+    pub sublime: bool,
+    /// The packages that come with Sublime Text. Their syntaxes use features the syntax engine
+    /// lacks (it has its own for those languages), so they are left out.
+    pub shipped: bool,
 }
 
 impl PackagePaths {
+    /// The folders with one folder per package, in load order: what comes later wins.
+    pub fn roots(&self, include_sublime: bool) -> Vec<PathBuf> {
+        let unpacked = self.archive_folders.iter().filter(|f| include_sublime || !f.sublime).map(|f| f.unpacked.clone());
+        let sublime = self.sublime_packages.iter().filter(|_| include_sublime).cloned();
+        unpacked.chain(sublime).chain([self.packages.clone()]).collect()
+    }
+
     pub fn user_dir(&self) -> PathBuf {
         self.packages.join("User")
     }
@@ -167,6 +189,8 @@ pub trait ResourceGateway {
     fn find_resources(&self, pattern: &str, include_sublime_packages: bool) -> Vec<String>;
     /// The bytes of a resource named `Packages/<package>/<path>`.
     fn load_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Vec<u8>, String>;
+    /// Unpacks the `.sublime-package` files that changed. Problems are appended to `errors`.
+    fn unpack_packages(&self, include_sublime_packages: bool, errors: &mut Vec<String>);
     /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
     fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
 }

@@ -95,7 +95,7 @@ fn append_also_works_in_tabs_and_other_built_in_commands_do_not_run_in_panels() 
     assert_eq!(editor.active_document().unwrap().text, "x");
     assert_eq!(
         call(&world, &mut editor, "run_command", json!(["view", panel, "sort_lines", {}])),
-        Err("sort_lines cannot run in a panel yet (only append, insert, select_all and plugin commands)".into())
+        Err("sort_lines cannot run in a panel yet (only move, move_to, left_delete, right_delete, select_all, insert, append and plugin commands)".into())
     );
 }
 
@@ -214,4 +214,30 @@ fn the_results_of_a_build_are_followed() {
     assert_eq!(active_text(&editor), "one\ntwo\n");
     open(&mut editor, "/p/a.txt");
     assert_eq!(editor.active_document().unwrap().selection().head, 4);
+}
+
+#[test]
+fn a_plugin_goes_to_the_end_of_an_output_panel() {
+    let (world, mut editor, panel) = setup();
+    call(&world, &mut editor, "view_insert", json!([panel, 0, "one\ntwo\n"])).unwrap();
+    call(&world, &mut editor, "view_selection_set", json!([panel, [[0, 0]]])).unwrap();
+    call(&world, &mut editor, "run_command", json!(["view", panel, "move_to", { "to": "eof" }])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([panel])), Ok(json!([[8, 8]])));
+    call(&world, &mut editor, "run_command", json!(["view", panel, "move", { "by": "lines", "forward": false }])).unwrap();
+    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([panel])), Ok(json!([[4, 4]])));
+}
+
+#[test]
+fn a_plugin_deletes_in_the_input_panel() {
+    let (world, mut editor, _) = setup();
+    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "", "abc", 3, false])).unwrap();
+    call(&world, &mut editor, "run_command", json!(["view", id, "left_delete", null])).unwrap();
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "ab");
+}
+
+#[test]
+fn an_unknown_motion_is_an_error_for_the_plugin() {
+    let (world, mut editor, panel) = setup();
+    let answer = call(&world, &mut editor, "run_command", json!(["view", panel, "move_to", { "to": "nowhere" }]));
+    assert_eq!(answer, Err("move_to to nowhere is not supported".into()));
 }

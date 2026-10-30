@@ -15,11 +15,14 @@ use use_cases::plugin_panels::PluginPanelRequest;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
-use crate::view_state::{InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit};
+use crate::view_state::{InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetEditInProgress};
 
 /// Every frame: answers what plugins ask outside a command (timers, threads) and tells their
 /// listeners about edits; the commands they run come back here.
 pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
+    for (command, target) in view.take_finished_widget_edits() {
+        editor.plugin_command_ran(&command, target);
+    }
     editor.poll_plugins(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
     show_plugin_panels(editor, view);
 }
@@ -126,15 +129,31 @@ const WINDOW_COMMANDS: &[&str] = &[
     "prev_result",
 ];
 
+/// Built-in commands handled by [`run_editing_command`].
+const EDITING_COMMANDS: &[&str] = &[
+    "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
+    "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
+    "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert", "insert_snippet", "goto_line",
+    "move", "move_to", "left_delete", "right_delete",
+];
+
 /// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
-/// first, and hear `on_post_text_command` / `on_post_window_command` after it.
+/// first, and hear `on_post_text_command` / `on_post_window_command` after it (for what the text
+/// widget does, once it has done it: see [`poll_plugins`]).
 pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     let command = match hook_target(editor, &command.name) {
         Some(target) => editor.plugin_rewrite_command(command, target),
         None => command.clone(),
     };
+    let widget_edits = view.widget_edits_requested();
     run_command(editor, view, &command);
-    if let Some(target) = hook_target(editor, &command.name) {
+    let Some(target) = hook_target(editor, &command.name) else {
+        return;
+    };
+    if view.widget_edits_requested() > widget_edits {
+        // Listeners must see the result: the widget does the edit in the next frame.
+        view.widget_edits_in_progress.push(WidgetEditInProgress { command, target, applied_next_frame: true });
+    } else {
         editor.plugin_command_ran(&command, target);
     }
 }
@@ -332,48 +351,6 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
         }
 
-        // ----- text ----------------------------------------------------------------------------
-        "toggle_comment" => editor.run_text_command(TextCommand::ToggleComment { block: command.bool_arg("block", false) }),
-        "duplicate_line" => editor.run_text_command(TextCommand::DuplicateLine),
-        "swap_line_up" => editor.run_text_command(TextCommand::SwapLine { up: true }),
-        "swap_line_down" => editor.run_text_command(TextCommand::SwapLine { up: false }),
-        "expand_selection" => match command.str_arg("to") {
-            "line" => editor.run_text_command(TextCommand::ExpandSelectionToLine),
-            "word" => editor.run_text_command(TextCommand::SelectWord),
-            "line_prev" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineUpward)),
-            "line_without_eol" | "line_strict" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineContent)),
-            "brackets" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets)),
-            "indentation" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation)),
-            "smart" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Smart)),
-            other => editor.notify(editor.tr_args("expand_selection to {target} is not supported", &[("target", &other)])),
-        },
-        "indent" => editor.run_text_command(TextCommand::Indent),
-        "unindent" => editor.run_text_command(TextCommand::Unindent),
-        "join_lines" => editor.run_text_command(TextCommand::JoinLines),
-        "upper_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Upper)),
-        "lower_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Lower)),
-        "title_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Title)),
-        "swap_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Swap)),
-        "transpose" => editor.run_text_command(TextCommand::Transpose),
-        "expand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true }),
-        "unexpand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false }),
-        "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace {
-            only_modified: command.bool_arg("only_modified", false),
-            trim_on_caret: command.bool_arg("trim_on_caret", true),
-        }),
-        "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort {
-            case_sensitive: command.bool_arg("case_sensitive", false),
-        })),
-        "permute_lines" => match command.str_arg("operation") {
-            "reverse" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Reverse)),
-            "unique" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Unique)),
-            _ => editor.notify("permute_lines: only reverse and unique are supported"),
-        },
-        "run_macro_file" => run_macro(editor, command.str_arg("file")),
-        "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
-        "insert_snippet" => editor.run_text_command(TextCommand::Insert(strip_snippet_fields(command.str_arg("contents")))),
-        "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
-
         // ----- done by the text widget itself --------------------------------------------------
         "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
         "redo" | "redo_or_repeat" | "soft_redo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo)),
@@ -398,6 +375,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "report_issue" => editor.report_issue(),
 
         // ----- Python plugins: they can run other commands, which come back here ---------------
+        name if EDITING_COMMANDS.contains(&name) => run_editing_command(editor, command),
         other => {
             if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
                 editor.notify(editor.tr_args("Command not available: {name}", &[("name", &other)]));
@@ -410,6 +388,72 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     if view.quick_panel.is_none() && !view.find_panel.focus_requested && view.input_panel.is_none() {
         view.focus_editor = true;
     }
+}
+
+/// Commands that only need the text, so they can also run in the middle of a use case.
+fn run_editing_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "toggle_comment" => editor.run_text_command(TextCommand::ToggleComment { block: command.bool_arg("block", false) }),
+        "duplicate_line" => editor.run_text_command(TextCommand::DuplicateLine),
+        "swap_line_up" => editor.run_text_command(TextCommand::SwapLine { up: true }),
+        "swap_line_down" => editor.run_text_command(TextCommand::SwapLine { up: false }),
+        "expand_selection" => match command.str_arg("to") {
+            "line" => editor.run_text_command(TextCommand::ExpandSelectionToLine),
+            "word" => editor.run_text_command(TextCommand::SelectWord),
+            "line_prev" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineUpward)),
+            "line_without_eol" | "line_strict" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineContent)),
+            "brackets" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets)),
+            "indentation" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation)),
+            "smart" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Smart)),
+            other => editor.notify(editor.tr_args("expand_selection to {target} is not supported", &[("target", &other)])),
+        },
+        "indent" => editor.run_text_command(TextCommand::Indent),
+        "unindent" => editor.run_text_command(TextCommand::Unindent),
+        "reindent" => editor.reindent(command.bool_arg("single_line", true), command.bool_arg("force_indent", true)),
+        "join_lines" => editor.run_text_command(TextCommand::JoinLines),
+        "upper_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Upper)),
+        "lower_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Lower)),
+        "title_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Title)),
+        "swap_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Swap)),
+        "transpose" => editor.run_text_command(TextCommand::Transpose),
+        "expand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true }),
+        "unexpand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false }),
+        "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace {
+            only_modified: command.bool_arg("only_modified", false),
+            trim_on_caret: command.bool_arg("trim_on_caret", true),
+        }),
+        "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort {
+            case_sensitive: command.bool_arg("case_sensitive", false),
+        })),
+        "permute_lines" => match command.str_arg("operation") {
+            "reverse" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Reverse)),
+            "unique" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Unique)),
+            _ => editor.notify("permute_lines: only reverse and unique are supported"),
+        },
+        "run_macro_file" => run_macro(editor, command.str_arg("file")),
+        "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
+        "insert_snippet" => editor.run_text_command(TextCommand::Insert(strip_snippet_fields(command.str_arg("contents")))),
+        "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
+        "move" | "move_to" | "left_delete" | "right_delete" => editor.run_view_command_on_active(command),
+        other => unreachable!("{other} is not in EDITING_COMMANDS"),
+    }
+}
+
+/// Runs a built-in command a listener asked for during an event, at once when it only edits text:
+/// a formatter's command in `on_pre_save` must reach the file being saved. The others need the
+/// view state, which use cases do not have: false, and they wait for the next frame.
+pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
+    if !EDITING_COMMANDS.contains(&command.name.as_str()) {
+        return false;
+    }
+    let rewritten = editor.plugin_rewrite_command(command, CommandTarget::View);
+    if !EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
+        editor.queue_plugin_command(rewritten);
+        return true;
+    }
+    run_editing_command(editor, &rewritten);
+    editor.plugin_command_ran(&rewritten, CommandTarget::View);
+    true
 }
 
 /// Closes the quick panel and gives the focus back to the text.

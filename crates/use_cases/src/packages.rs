@@ -6,6 +6,9 @@ impl Editor {
     /// Loads (or reloads) settings, key bindings, menus, palette entries, syntaxes and color schemes.
     pub fn load_packages(&mut self) {
         let mut errors = Vec::new();
+        // First, since unpacked packages have settings too.
+        let import_sublime = self.gateways.resources.read_user_settings().get("import_sublime_packages").and_then(|v| v.as_bool());
+        self.gateways.resources.unpack_packages(import_sublime.unwrap_or(true), &mut errors);
         self.state.settings = self.gateways.resources.load_settings(&mut errors);
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
 

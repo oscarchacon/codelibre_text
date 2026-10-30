@@ -97,6 +97,10 @@ msgid "Unindent"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Reindent"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Swap Line Up"
 msgstr ""
 
@@ -621,6 +625,10 @@ msgid "Sort Lines (Case Sensitive)"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
+msgid "Indentation: Reindent Lines"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
 msgid "Set Syntax…"
 msgstr ""
 
@@ -704,6 +712,14 @@ msgstr ""
 
 #: crates/use_cases/src/documents.rs
 msgid "{name} changed on disk; you have unsaved changes"
+msgstr ""
+
+#: crates/use_cases/src/editing.rs
+msgid "{command} to {target} is not supported"
+msgstr ""
+
+#: crates/use_cases/src/editing.rs
+msgid "No indentation rules for {syntax}"
 msgstr ""
 
 #: crates/use_cases/src/editing.rs
@@ -820,11 +836,11 @@ msgid "Overlay not supported: {name}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
-msgid "expand_selection to {target} is not supported"
+msgid "Command not available: {name}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
-msgid "Command not available: {name}"
+msgid "expand_selection to {target} is not supported"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs

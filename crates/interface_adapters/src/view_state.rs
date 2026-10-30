@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use entities::command::Command;
+use use_cases::plugin_hooks::CommandTarget;
 use use_cases::search::{Candidate, SearchKind};
 
 /// The quick panel at the top of the window (Command Palette, Goto Anything, pickers).
@@ -89,6 +90,15 @@ pub struct ViewState {
     pub(crate) folder_listings: HashMap<PathBuf, Vec<(PathBuf, bool)>>,
     pub(crate) commands: VecDeque<Command>,
     pub(crate) requests: Vec<ViewRequest>,
+    /// Commands done by the text widget whose `on_post_*_command` waits for the widget.
+    pub(crate) widget_edits_in_progress: Vec<WidgetEditInProgress>,
+}
+
+/// A widget edit reaches the widget in the next frame's input, after the frame that asked for it.
+pub(crate) struct WidgetEditInProgress {
+    pub command: Command,
+    pub target: CommandTarget,
+    pub applied_next_frame: bool,
 }
 
 impl Default for ViewState {
@@ -110,6 +120,7 @@ impl Default for ViewState {
             folder_listings: HashMap::new(),
             commands: VecDeque::new(),
             requests: Vec::new(),
+            widget_edits_in_progress: Vec::new(),
         }
     }
 }
@@ -118,6 +129,19 @@ impl ViewState {
     /// Queues a command to run before the next frame is drawn.
     pub fn queue_command(&mut self, command: Command) {
         self.commands.push_back(command);
+    }
+
+    pub(crate) fn widget_edits_requested(&self) -> usize {
+        self.requests.iter().filter(|r| matches!(r, ViewRequest::WidgetEdit(_))).count()
+    }
+
+    /// Every frame, after the widgets: the edits the widget has done by now.
+    pub(crate) fn take_finished_widget_edits(&mut self) -> Vec<(Command, CommandTarget)> {
+        let (finished, waiting) = std::mem::take(&mut self.widget_edits_in_progress).into_iter().partition(|e| !e.applied_next_frame);
+        self.widget_edits_in_progress = waiting;
+        self.widget_edits_in_progress.iter_mut().for_each(|e| e.applied_next_frame = false);
+        let finished: Vec<WidgetEditInProgress> = finished;
+        finished.into_iter().map(|e| (e.command, e.target)).collect()
     }
 
     pub fn take_commands(&mut self) -> VecDeque<Command> {

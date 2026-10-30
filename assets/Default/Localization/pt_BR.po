@@ -984,3 +984,19 @@ msgid "Build finished with {count} error"
 msgid_plural "Build finished with {count} errors"
 msgstr[0] "Compilação concluída com {count} erro"
 msgstr[1] "Compilação concluída com {count} erros"
+
+#: assets/Default/Main.sublime-menu
+msgid "Reindent"
+msgstr "Reindentar"
+
+#: assets/Default/Default.sublime-commands
+msgid "Indentation: Reindent Lines"
+msgstr "Indentação: reindentar linhas"
+
+#: crates/use_cases/src/editing.rs
+msgid "No indentation rules for {syntax}"
+msgstr "Sem regras de indentação para {syntax}"
+
+#: crates/use_cases/src/editing.rs
+msgid "{command} to {target} is not supported"
+msgstr "{command} para {target} não é suportado"

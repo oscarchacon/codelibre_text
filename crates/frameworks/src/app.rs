@@ -122,6 +122,8 @@ impl App {
                         WidgetEdit::Paste(text) => Event::Paste(text),
                     });
                     self.view.focus_editor = true;
+                    // The widget gets it in the next frame, which must come even with no input.
+                    ctx.request_repaint();
                 }
             }
         }

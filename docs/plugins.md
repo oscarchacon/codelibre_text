@@ -85,8 +85,8 @@ which `app.rs` calls every frame; the gateway's reader threads wake the window (
 Events: the host reports in `loaded` which events some listener defines, and the editor sends only those
 (an `_async` listener makes the editor send the sync name; the host queues the async call). Listener
 tracebacks go to the console; the event still answers `done` with no error. Built-in commands that a
-listener runs are queued and run by the next `poll_plugins` (events fire inside use cases, which have no
-command controller); plugin commands run at once, so a formatter's own `TextCommand` in `on_pre_save`
+listener runs that only edit text run at once through `Editor::set_event_command_runner`; the others are queued for
+the next `poll_plugins` (events fire inside use cases, which have no `ViewState`); plugin commands run at once, so a formatter's own `TextCommand` in `on_pre_save`
 edits the text before it is written. `on_modified` / `on_selection_modified` are found by
 `poll_plugins` comparing each document's `change_count` (bumped by `Document` edits and by
 `UiEvent::TextEdited` from the text widget) and the active one's selections with the previous frame.
@@ -142,9 +142,12 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       The columns of `HistoricPosition` are chars, also in `col_utf8` / `col_utf16`.
 - [ ] Events still missing: `on_clone`, `on_new_window` and `applies_to_primary_view_only` wait for clones and several windows (phase C),
       `on_hover` for popups (phase C).
-- [ ] Built-in commands run from inside a use-case event (e.g. `view.run_command("reindent")` in `on_pre_save`) wait
-      for the next frame; running them at once needs the command controller inside `Editor` (a callback set by
-      `compose()`, or `save`/`close` moved to the controller).
+- [x] Built-in commands that edit text (`EDITING_COMMANDS` in `command_controller.rs`) run at once inside an event or
+      query, on the view that asked (`Editor::set_event_command_runner`, set by `compose()`), through the hooks, so a
+      formatter's `view.run_command(...)` in `on_pre_save` reaches the file.
+- [ ] Built-in commands that need `ViewState` (panels, the widget's undo / clipboard, `save`, `close`…) still wait for the
+      next frame when run from an event, and then on the active view; running them at once means moving their
+      `ViewState` changes out of those arms, or `save` / `close` into the controller.
 - [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
       listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
       becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
@@ -153,9 +156,13 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       answer runs instead (once: the new command is not asked about again). `on_post_text_command` /
       `on_post_window_command` after it, with the command that ran. Plugin commands go by their kind (application
       commands have no hook); built-ins by `WINDOW_COMMANDS`, the rest are text commands (only with an open view).
-      Built-in commands a listener runs while answering wait for the next frame, as in events.
-- [ ] Hooks, still missing: commands run by the text widget itself (typing, undo, the clipboard keys) are not
-      seen. (`match_all` reaches `on_query_context` from the binding; `on_post_*_async` run on the async thread.)
+      Built-in commands a listener runs while answering are handled as in events.
+- [x] Hooks around the widget: while a listener of text commands exists and the text has the focus, the keys of undo,
+      redo, select all, copy, cut and paste run as commands (`hooks_widget_edits` in `keyboard_controller.rs`), so a
+      listener can replace them; `on_post_text_command` waits for the frame in which the widget did the edit
+      (`ViewState::widget_edits_in_progress`). Without listeners the keys go straight to the widget, as always.
+- [ ] Hooks, still missing: typing, deleting and caret movement (`insert`, `left_delete`, `move`…) stay the widget's and
+      are not seen. (`match_all` reaches `on_query_context` from the binding; `on_post_*_async` run on the async thread.)
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -181,6 +188,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `regex`: no lookaround). `next_result` / `prev_result` (F4, Shift+F4) go through the last panel shown that has them
       and wrap around; double-clicking a result opens it; the one visited is highlighted and scrolled to. Its message
       goes to the status bar. `view.find_all_results()`, `find_all_results_with_text()`.
+- [x] **Motions as commands**: `move` (`by`: `characters`, `lines`, `words`, `word_ends`, `subwords` and `subword_ends`
+      as words; `forward`, `extend`) and `move_to` (`bol`, `eol`, `hardbol`, `hardeol`, `bof`, `eof`, `extend`), every
+      selection, in tabs, panels and events. Key bindings to them still go to the widget. Missing: `by: pages` / `stops`,
+      `to: brackets`, and `bol` / `eol` of wrapped lines (they go to the logical line's).
 - [x] **Build systems**: every `*.sublime-build` in the packages, with the platform's overrides and `variants`. `build`
       (Ctrl+B, F7) uses the build set by `set_build_system` or picked before, else the one that applies by `selector` (the
       syntax's base scope), `file_patterns` or `keyfiles` (next to the file or above it, or in an open folder); several
@@ -196,8 +207,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       Build System list (`$build_systems`), `from Default.exec import ExecCommand`, and the builds inside Sublime's zipped
       packages (`Python`, `C++`…), which need `.sublime-package` (phase C). There is no Ctrl+Break: egui has no such key.
 - [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
-      built-in commands other than `append`, `insert` and `select_all` in a panel (the command controller only knows
-      tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
+      built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
+      `select_all`, `insert`) and `append` in a panel (the command controller only knows tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
@@ -243,10 +254,20 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 
 Goal: install and run Package Control and the popular packages (LSP, GitGutter, …).
 
-- [ ] **`.sublime-package` files** (zips) in `Installed Packages` and Sublime's install `Packages` folder: resources
-      (syntaxes, keymaps, settings, menus) through the resource/syntax gateways, plugins through a zip importer in
-      `plugin_host.py` (`zipimport`), and `load_resource` from zips. Loose folders override zipped files, as in Sublime.
-- [ ] **`ignored_packages`**: skip those packages everywhere; Package Control toggles it while upgrading (needs `add_on_change`).
+- [x] **`.sublime-package` files**: unpacked by `gateways/package_archives.rs` at every `load_packages` (only those that
+      changed: a stamp file holds size and date) to `data/Cache/Packages/{shipped,sublime,own}`, which then are folders of
+      packages like any other (`PackagePaths::roots`, load order: those, Sublime's loose packages, ours). So resources,
+      `load_resource` and the plugin host (no `zipimport`) work on plain files; `__file__` points to the cache. A file of
+      a later place overrides the same file of an earlier one (`find_resources`, `load_package`). Sources: Sublime's
+      install `Packages`, Sublime's `Installed Packages`, our `Installed Packages`. Sublime's `Default` and `Package
+      Control` are not imported (the first targets its core; the second uses the network at load: it runs only from our
+      own `Installed Packages`). Names that climb out of the package are not written.
+- [x] Of what Sublime ships, syntaxes and `tests/` are left out (`ArchiveFolder::shipped`): syntect cannot load most of
+      them (`extends`, `branch_point`: 124 errors) and has its own for those languages. Packages the user installed
+      do load their syntaxes. The first start unpacks them (about 11 s in a debug build, in the window's thread).
+- [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
+      would take every key) and their plugins are not loaded. A change needs `reload_packages`; Package Control's
+      toggling while upgrading is not followed yet.
 - [ ] **Libraries / dependencies**: ST4 `Lib/python38` (and Package Control's `dependencies.json` / `libraries`) on `sys.path`.
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
       Provide shims for removed modules (e.g. `imp`, gone in 3.12 — Sublime ships one for its 3.14 host) next to `sublime.py`.
@@ -259,6 +280,10 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [ ] **Popups, phantoms, annotations, hover** (`show_popup` with minihtml, `PhantomSet`, `on_hover`).
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
 - [ ] Reload only the plugin that was saved (now every plugin reloads), and `sublime_plugin.reload_plugin`.
+
+`crates/frameworks/tests/sublime_packages.rs` (`-- --ignored`) loads the packages of the Sublime Text installed here:
+68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load, but their
+bindings need the `selector` context, so they stay inactive until **Scopes** below.
 
 Verification for phase C: install Package Control in a scratch profile (set `CODELIBRE_TEXT_DATA` to a temp folder), install a
 small package (e.g. a color scheme), then a plugin package, and run its commands.

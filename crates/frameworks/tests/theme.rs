@@ -7,7 +7,7 @@ use use_cases::gateways::PackagePaths;
 
 fn chrome(scheme: &str) -> Chrome {
     let dir = tempfile::tempdir().unwrap();
-    let engine = SyntaxEngine::new(PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None });
+    let engine = SyntaxEngine::new(PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() });
     Chrome::from_scheme(engine.scheme(scheme))
 }
 

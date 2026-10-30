@@ -550,6 +550,153 @@ pub fn comment_tokens(syntax: &str) -> (Option<&'static str>, Option<(&'static s
     }
 }
 
+/// Syntaxes whose blocks are marked by brackets, the ones `reindent` knows how to indent.
+/// (Sublime reads indentation rules from `.tmPreferences`.) Python is not here on purpose: its
+/// indentation is the meaning of the code, and cannot be worked out from the text.
+const BRACKET_SYNTAXES: &[&str] = &[
+    "c", "c++", "c#", "java", "javascript", "javascript (babel)", "typescript", "typescriptreact", "tsx", "jsx", "rust", "go",
+    "css", "scss", "sass", "less", "json", "php", "swift", "kotlin", "scala", "objective-c", "objective-c++", "dart", "d",
+    "groovy", "graphql", "glsl",
+];
+
+/// Syntaxes with lines that stay at the left margin whatever the depth (`#include`).
+const PREPROCESSOR_SYNTAXES: &[&str] = &["c", "c++", "c#", "objective-c", "objective-c++", "glsl"];
+
+pub fn can_reindent(syntax: &str) -> bool {
+    BRACKET_SYNTAXES.contains(&syntax.to_lowercase().as_str())
+}
+
+/// The brackets of one line, outside strings and comments.
+#[derive(Default)]
+struct LineBrackets {
+    /// Closers before anything else: the line itself goes one level out (`} else {`).
+    leading_closers: isize,
+    opens: isize,
+    closes: isize,
+    /// The line starts inside a block comment.
+    starts_in_comment: bool,
+}
+
+/// Reads a text line by line, remembering whether a block comment is open.
+struct BracketScanner {
+    line_comment: Option<&'static str>,
+    block_comment: Option<(&'static str, &'static str)>,
+    /// In Rust a `'` also starts a lifetime, which never closes.
+    lifetimes: bool,
+    in_block_comment: bool,
+}
+
+impl BracketScanner {
+    fn new(syntax: &str) -> Self {
+        let (line_comment, block_comment) = comment_tokens(syntax);
+        Self {
+            line_comment: line_comment.map(str::trim_end),
+            block_comment,
+            lifetimes: syntax.eq_ignore_ascii_case("rust"),
+            in_block_comment: false,
+        }
+    }
+
+    fn scan(&mut self, line: &str) -> LineBrackets {
+        let mut brackets = LineBrackets { starts_in_comment: self.in_block_comment, ..Default::default() };
+        let mut only_closers = true;
+        let mut rest = line;
+        while let Some(c) = rest.chars().next() {
+            if self.in_block_comment {
+                let close = self.block_comment.map_or("", |(_, close)| close);
+                match rest.find(close) {
+                    Some(at) => {
+                        self.in_block_comment = false;
+                        rest = &rest[at + close.len()..];
+                        continue;
+                    }
+                    None => break,
+                }
+            }
+            if self.line_comment.is_some_and(|token| rest.starts_with(token)) {
+                break;
+            }
+            if let Some(after) = self.block_comment.and_then(|(open, _)| rest.strip_prefix(open)) {
+                self.in_block_comment = true;
+                rest = after;
+                continue;
+            }
+            rest = &rest[c.len_utf8()..];
+            match c {
+                '"' | '`' | '\'' => {
+                    only_closers = false;
+                    rest = skip_string(c, rest, self.lifetimes);
+                }
+                '{' | '(' | '[' => {
+                    only_closers = false;
+                    brackets.opens += 1;
+                }
+                '}' | ')' | ']' => {
+                    brackets.closes += 1;
+                    brackets.leading_closers += isize::from(only_closers);
+                }
+                c if c.is_whitespace() => {}
+                _ => only_closers = false,
+            }
+        }
+        brackets
+    }
+}
+
+/// What follows a string that started just before `rest`; strings end with their line.
+fn skip_string(quote: char, rest: &str, lifetimes: bool) -> &str {
+    if quote == '\'' && lifetimes {
+        let mut chars = rest.chars();
+        let is_char = matches!((chars.next(), chars.next()), (Some('\\'), _) | (_, Some('\'')));
+        if !is_char {
+            return rest;
+        }
+    }
+    let mut chars = rest.char_indices();
+    while let Some((at, c)) = chars.next() {
+        if c == '\\' {
+            chars.next();
+        } else if c == quote {
+            return &rest[at + c.len_utf8()..];
+        }
+    }
+    ""
+}
+
+/// Sublime's `reindent`: each selected line gets the indentation of its bracket depth. With no
+/// selection, the caret's line, or every line with `whole_file`. Blank lines and comment blocks
+/// stay as they are. With `force` false, so do lines that have some indentation already. `None`
+/// when nothing changed or the syntax has no rules ([`can_reindent`]).
+pub fn reindent(text: &mut String, selection: Selection, syntax: &str, indent: (usize, bool), whole_file: bool, force: bool) -> Option<Selection> {
+    if !can_reindent(syntax) {
+        return None;
+    }
+    let (start, end) = if selection.is_empty() && whole_file { (0, text.len()) } else { selected_lines(text, selection) };
+    let preprocessor = PREPROCESSOR_SYNTAXES.contains(&syntax.to_lowercase().as_str());
+    let unit = indent_unit(indent.0, indent.1);
+    let mut scanner = BracketScanner::new(syntax);
+    let mut depth: isize = 0;
+    let mut edits = Vec::new();
+    for pos in line_starts(text, 0, end) {
+        let line = &text[pos..line_end(text, pos)];
+        let brackets = scanner.scan(line);
+        let content = line.trim_start_matches([' ', '\t']);
+        let old_indent = &line[..line.len() - content.len()];
+        let keep = content.is_empty()
+            || brackets.starts_in_comment
+            || (preprocessor && content.starts_with('#'))
+            || (!force && !old_indent.is_empty());
+        if pos >= start && !keep {
+            let wanted = unit.repeat((depth - brackets.leading_closers).max(0) as usize);
+            if wanted != old_indent {
+                edits.push(Edit { start: pos, end: pos + old_indent.len(), insert: wanted });
+            }
+        }
+        depth = (depth + brackets.opens - brackets.closes).max(0);
+    }
+    (!edits.is_empty()).then(|| apply_edits(text, edits, selection))
+}
+
 /// Comments or uncomments the selected lines (`block = false`) or the selection (`block = true`).
 pub fn toggle_comment(text: &mut String, selection: Selection, syntax: &str, block: bool) -> Option<Selection> {
     match (block, comment_tokens(syntax)) {
@@ -775,6 +922,115 @@ fn replace_char_ranges(text: &mut String, ranges: &[(usize, usize)], insert: &st
     out.push_str(&text[copied_byte..]);
     *text = out;
     carets
+}
+
+/// Sublime's `move_to`: where the selection's moving end goes for `to` (`bol` is the first char of
+/// the line, or its start when already there). `None` for targets not supported.
+pub fn move_to(text: &str, selection: Selection, to: &str, extend: bool) -> Option<Selection> {
+    let head = char_to_byte(text, selection.head);
+    let (start, end) = (line_start(text, head), line_end(text, head));
+    let target = match to {
+        "bof" => 0,
+        "eof" => text.len(),
+        "hardbol" => start,
+        "eol" | "hardeol" => end,
+        "bol" => {
+            let first = start + text[start..end].len() - text[start..end].trim_start().len();
+            if head == first { start } else { first }
+        }
+        _ => return None,
+    };
+    Some(moved(selection, byte_to_char(text, target), extend))
+}
+
+/// Sublime's `move`: by `characters`, `lines`, `words`, `word_ends`, `subwords` or `subword_ends`
+/// (subwords go like words). `None` for units not supported.
+pub fn move_by(text: &str, selection: Selection, by: &str, forward: bool, extend: bool) -> Option<Selection> {
+    let target = match by {
+        "characters" if !extend && !selection.is_empty() => return Some(Selection::caret(if forward { selection.end() } else { selection.start() })),
+        "characters" if forward => (selection.head + 1).min(text.chars().count()),
+        "characters" => selection.head.saturating_sub(1),
+        "lines" => line_above_or_below(text, selection.head, forward),
+        "words" | "subwords" => word_boundary(text, selection.head, forward, !forward),
+        "word_ends" | "subword_ends" => word_boundary(text, selection.head, forward, forward),
+        _ => return None,
+    };
+    Some(moved(selection, target, extend))
+}
+
+fn moved(selection: Selection, head: usize, extend: bool) -> Selection {
+    if extend { Selection::new(selection.anchor, head) } else { Selection::caret(head) }
+}
+
+/// The same column of the next or previous line; the end or start of the text from the last or first.
+fn line_above_or_below(text: &str, position: usize, forward: bool) -> usize {
+    let head = char_to_byte(text, position);
+    let (start, end) = (line_start(text, head), line_end(text, head));
+    let column = text[start..head].chars().count();
+    let line = if forward {
+        if end == text.len() {
+            return text.chars().count();
+        }
+        end + 1
+    } else {
+        if start == 0 {
+            return 0;
+        }
+        line_start(text, start - 1)
+    };
+    let length = text[line..line_end(text, line)].chars().count();
+    byte_to_char(text, line) + column.min(length)
+}
+
+/// What kind of text a char is, for moving by words.
+#[derive(PartialEq, Clone, Copy)]
+enum CharClass {
+    Word,
+    Punctuation,
+    Space,
+    Newline,
+}
+
+fn char_class(c: char) -> CharClass {
+    match c {
+        '\n' => CharClass::Newline,
+        c if c.is_whitespace() => CharClass::Space,
+        c if is_word_char(c) => CharClass::Word,
+        _ => CharClass::Punctuation,
+    }
+}
+
+/// The next stop from `position`: past the run of word chars or punctuation and the spaces
+/// around it. `spaces_first` skips the spaces before the run (ends of words forward, starts
+/// backward); otherwise after it (starts forward, ends backward). A line break is a stop.
+fn word_boundary(text: &str, position: usize, forward: bool, spaces_first: bool) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let step = |at: usize| if forward { (at < chars.len()).then(|| (chars[at], at + 1)) } else { (at > 0).then(|| (chars[at - 1], at - 1)) };
+    let skip_spaces = |mut at: usize| {
+        while let Some((c, next)) = step(at) {
+            if char_class(c) != CharClass::Space {
+                break;
+            }
+            at = next;
+        }
+        at
+    };
+    let mut at = if spaces_first { skip_spaces(position) } else { position };
+    let Some((first, next)) = step(at) else {
+        return at;
+    };
+    let class = char_class(first);
+    if class == CharClass::Newline {
+        return next;
+    }
+    at = next;
+    while let Some((c, next)) = step(at) {
+        if char_class(c) != class {
+            break;
+        }
+        at = next;
+    }
+    if spaces_first { at } else { skip_spaces(at) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

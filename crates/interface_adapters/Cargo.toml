@@ -10,6 +10,8 @@ entities.workspace = true
 use_cases.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# `.sublime-package` files are zips
+zip.workspace = true
 
 [dev-dependencies]
 test_support.workspace = true

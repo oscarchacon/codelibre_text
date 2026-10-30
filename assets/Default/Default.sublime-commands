@@ -64,6 +64,7 @@
 	{ "caption": "Duplicate Line", "command": "duplicate_line" },
 	{ "caption": "Delete Line", "command": "run_macro_file", "args": { "file": "res://Packages/Default/Delete Line.sublime-macro" } },
 	{ "caption": "Join Lines", "command": "join_lines" },
+	{ "caption": "Indentation: Reindent Lines", "command": "reindent", "args": { "single_line": false } },
 	{ "caption": "Trim Trailing White Space", "command": "trim_trailing_white_space" },
 
 	{ "caption": "Set Syntax…", "command": "show_overlay", "args": { "overlay": "command_palette", "text": "Set Syntax: " } },

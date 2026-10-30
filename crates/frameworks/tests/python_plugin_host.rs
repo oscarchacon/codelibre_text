@@ -86,7 +86,7 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
     let packages = dir.join("Packages");
     fs::create_dir_all(packages.join("MyPkg")).unwrap();
     fs::write(packages.join("MyPkg").join("plugin.py"), plugin).unwrap();
-    let paths = PackagePaths { packages, sublime_packages: None };
+    let paths = PackagePaths { packages, sublime_packages: None, archive_folders: Vec::new() };
     let engine = Rc::new(RefCell::new(SyntaxEngine::new(paths.clone())));
     let mut editor = Editor::new(Gateways {
         file_system: Box::new(StdFileSystem),
@@ -100,6 +100,7 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
         processes: Box::new(ChildProcesses::default()),
         plugins: Box::new(PythonPluginHost::new(dir.join("Lib").join("python"))),
     });
+    editor.set_event_command_runner(command_controller::run_during_event);
     editor.start(Vec::new());
     assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
     Some(editor)
@@ -485,6 +486,32 @@ class ShoutAllCommand(sublime_plugin.TextCommand):
     assert!(editor.save_active(false));
     assert_eq!(fs::read_to_string(&file).unwrap(), "ABC", "console:
 {}", editor.state().console);
+}
+
+#[test]
+fn a_built_in_command_in_on_pre_save_reaches_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Shout(sublime_plugin.EventListener):
+    def on_pre_save(self, view):
+        view.sel().clear()
+        view.sel().add(sublime.Region(0, view.size()))
+        view.run_command("upper_case")
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let file = dir.path().join("a.txt");
+    fs::write(&file, "quiet").unwrap();
+    assert!(editor.open_file(&file));
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false), "{}", editor.state().console);
+    assert_eq!(fs::read_to_string(&file).unwrap(), "QUIET!", "{}", editor.state().console);
+    assert!(!editor.active_document().unwrap().is_dirty());
 }
 
 #[test]

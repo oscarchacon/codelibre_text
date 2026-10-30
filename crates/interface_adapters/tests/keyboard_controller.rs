@@ -2,8 +2,9 @@
 
 use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo};
+use interface_adapters::controllers::command_controller::{poll_plugins, run};
 use interface_adapters::controllers::keyboard_controller::{clipboard_shortcut, key_pressed, KeyHandling};
-use interface_adapters::view_state::{QuickPanel, ViewState};
+use interface_adapters::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit};
 use serde_json::{json, Value};
 use test_support::{plugin_call, status, World};
 use use_cases::gateways::{PluginCommandKind, PluginMessage};
@@ -191,4 +192,72 @@ fn not_equal_context_operator() {
     assert!(press(&mut editor, &mut view, "f2"));
     view.quick_panel = Some(QuickPanel::new(SearchKind::Commands, String::new()));
     assert!(!press(&mut editor, &mut view, "f2"));
+}
+
+/// An editor whose plugins listen to `events`, with Ctrl+Z bound to undo and the text focused.
+fn hooked_editor(events: &[&str]) -> (World, Editor, ViewState) {
+    let world = World::new()
+        .with_binding(bind(&["ctrl+z"], Command::new("undo"), vec![]))
+        .with_binding(bind(&["ctrl+left"], Command::new("move"), vec![]))
+        .with_plugins(&[], events);
+    let editor = world.editor();
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    (world, editor, view)
+}
+
+#[test]
+fn widget_keys_become_commands_when_plugins_listen_to_text_commands() {
+    let (_world, mut editor, mut view) = hooked_editor(&["on_text_command"]);
+    assert!(press(&mut editor, &mut view, "ctrl+z"), "the widget must not undo as well");
+    assert_eq!(queued(&mut view), ["undo"]);
+    assert!(!press(&mut editor, &mut view, "ctrl+left"), "moving the caret stays the widget's");
+}
+
+#[test]
+fn widget_keys_stay_with_the_widget_without_listeners_or_focus() {
+    let (_world, mut editor, mut view) = hooked_editor(&["on_modified"]);
+    assert!(!press(&mut editor, &mut view, "ctrl+z"));
+
+    let (_world, mut editor, mut view) = hooked_editor(&["on_post_text_command"]);
+    view.text_has_focus = false;
+    assert!(!press(&mut editor, &mut view, "ctrl+z"), "it undoes in the find field");
+    assert!(queued(&mut view).is_empty());
+}
+
+#[test]
+fn clipboard_shortcuts_become_commands_when_plugins_listen() {
+    let (_world, mut editor, mut view) = hooked_editor(&["on_text_command"]);
+    assert!(matches!(clipboard_shortcut(&mut editor, &mut view, "paste"), KeyHandling::Consumed));
+    assert_eq!(queued(&mut view), ["paste"]);
+
+    view.text_has_focus = false;
+    assert!(matches!(clipboard_shortcut(&mut editor, &mut view, "paste"), KeyHandling::PassThrough));
+}
+
+#[test]
+fn a_listener_replaces_a_widget_command_and_hears_the_end_after_the_widget() {
+    let (world, mut editor, mut view) = hooked_editor(&["on_text_command", "on_post_text_command"]);
+    *world.clipboard.borrow_mut() = Ok("pasted".to_string());
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    run(&mut editor, &mut view, &Command::new("paste"));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Paste("pasted".to_string()))]);
+    let posts = |world: &World| world.plugins.queries.borrow().iter().filter(|q| q.0 == "on_post_text_command").count();
+
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(posts(&world), 0, "this frame's widgets ran before the edit was asked for");
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(posts(&world), 1, "the next frame's widget did it");
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(posts(&world), 1, "once");
+}
+
+#[test]
+fn a_listener_can_stop_a_widget_edit_by_replacing_it() {
+    let (world, mut editor, mut view) = hooked_editor(&["on_text_command"]);
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "mine" }]))]);
+    run(&mut editor, &mut view, &Command::new("paste"));
+    assert!(view.take_requests().is_empty());
+    assert!(editor.active_document().unwrap().text.contains("mine"));
 }

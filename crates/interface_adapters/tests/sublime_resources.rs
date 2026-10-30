@@ -41,7 +41,7 @@ impl Packages {
 
     fn gateway(&self) -> SublimeResourceGateway {
         let sublime = self.sublimes().is_dir().then(|| self.sublimes());
-        SublimeResourceGateway::new(PackagePaths { packages: self.ours(), sublime_packages: sublime })
+        SublimeResourceGateway::new(PackagePaths { packages: self.ours(), sublime_packages: sublime, archive_folders: Vec::new() })
     }
 }
 

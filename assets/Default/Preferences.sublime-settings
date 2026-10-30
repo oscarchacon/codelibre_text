@@ -83,6 +83,9 @@
 	// python or the one `uv python find` reports, whichever works first.
 	"python_interpreter": "",
 
+	// Packages that are not loaded at all. Package Control changes this list while it upgrades.
+	"ignored_packages": ["Vintage"],
+
 	// Save every file with a name before building.
 	"save_all_on_build": true,
 

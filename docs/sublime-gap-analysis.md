@@ -40,7 +40,7 @@ cannot be told apart by the string scan and are listed under native.
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
 | Auto-complete & snippets | `auto_complete`, `hide_auto_complete`, `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
-| Text editing | `wrap_lines` (Alt+Q), `reindent`, `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
+| Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |
 | Git / modifications | `next_modification`, `prev_modification`, `revert_modification`, `revert_hunk`, `toggle_inline_diff` (needs `mini_diff`) | native |
 | Encoding | `set_encoding`, `reopen` with `encoding`, `detect_indentation` | native |
@@ -70,6 +70,6 @@ cannot be told apart by the string scan and are listed under native.
 
 1. Multiple cursors (`select_lines`, `split_selection_into_lines`, `find_all_under`) — builds on `Document::edit_all`.
 2. Find panel toggles + `find_all` + Find in Files.
-3. `wrap_lines`, `reindent`, `expand_selection_to_paragraph`, `toggle_bookmark`/`next_bookmark`, `switch_file` — small entity-level work.
+3. `wrap_lines`, `expand_selection_to_paragraph`, `toggle_bookmark`/`next_bookmark`, `switch_file` — small entity-level work.
 4. Status-bar and display settings (`draw_white_space`, `match_brackets`, `font_face`, `show_encoding`…).
 5. Folding, auto-complete, split layouts, `mini_diff` — larger view work.

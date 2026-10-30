@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use interface_adapters::controllers::command_controller;
 use interface_adapters::gateways::session_file::SessionFileGateway;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use interface_adapters::view_state::ViewState;
@@ -55,6 +56,7 @@ pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, S
         processes: Box::new(ChildProcesses::default().with_waker(waker)),
     };
     let mut editor = Editor::new(gateways);
+    editor.set_event_command_runner(command_controller::run_during_event);
     editor.start(paths);
 
     let mut view = ViewState::default();

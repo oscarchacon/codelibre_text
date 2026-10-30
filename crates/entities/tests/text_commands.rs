@@ -501,3 +501,148 @@ fn trim_only_modified_lines_and_not_on_the_caret() {
     trim_trailing_whitespace_with(&mut text, caret(7), &options);
     assert_eq!(text, "a\nb  ", "the caret's line is kept");
 }
+
+/// Reindents the whole text with 4 spaces.
+fn reindented(text: &str, syntax: &str) -> String {
+    let mut text = text.to_string();
+    reindent(&mut text, Selection::caret(0), syntax, (4, true), true, true);
+    text
+}
+
+#[test]
+fn reindent_follows_the_brackets() {
+    assert_eq!(
+        reindented("fn main() {\nif a {\nb(\nc,\n);\n} else {\nd();\n}\n}\n", "Rust"),
+        "fn main() {\n    if a {\n        b(\n            c,\n        );\n    } else {\n        d();\n    }\n}\n"
+    );
+}
+
+#[test]
+fn reindent_uses_tabs_when_the_settings_say_so() {
+    let mut text = "a {\nb\n}".to_string();
+    reindent(&mut text, Selection::caret(0), "CSS", (4, false), true, true);
+    assert_eq!(text, "a {\n\tb\n}");
+}
+
+#[test]
+fn reindent_ignores_brackets_in_strings_and_comments() {
+    let source = "a {\nb = \"{\"; // {\nc = '(';\n/* {\n   x { */\nd\n}\n";
+    assert_eq!(reindented(source, "JavaScript"), "a {\n    b = \"{\"; // {\n    c = '(';\n    /* {\n   x { */\n    d\n}\n");
+}
+
+#[test]
+fn reindent_knows_rust_lifetimes_from_chars() {
+    let source = "fn f<'a>(x: &'a str) -> &'a str {\nlet c = '{';\nlet e = '\\'';\nx\n}\n";
+    assert_eq!(reindented(source, "Rust"), "fn f<'a>(x: &'a str) -> &'a str {\n    let c = '{';\n    let e = '\\'';\n    x\n}\n");
+}
+
+#[test]
+fn reindent_leaves_blank_lines_and_preprocessor_lines() {
+    assert_eq!(reindented("int f() {\n\n#ifdef A\nb;\n#endif\n}\n", "C++"), "int f() {\n\n#ifdef A\n    b;\n#endif\n}\n");
+    assert_eq!(reindented("fn f() {\n#[x]\ng();\n}", "Rust"), "fn f() {\n    #[x]\n    g();\n}");
+}
+
+#[test]
+fn reindent_with_a_caret_is_one_line_unless_the_whole_file_is_asked_for() {
+    let mut text = "a {\nb\nc\n}".to_string();
+    let selection = reindent(&mut text, Selection::caret(4), "CSS", (2, true), false, true);
+    assert_eq!(text, "a {\n  b\nc\n}");
+    assert_eq!(selection, Some(Selection::caret(6)), "the caret stays on its char");
+}
+
+#[test]
+fn reindent_changes_the_selected_lines_counting_depth_from_the_start() {
+    let source = "a {\nb {\nc\nd\n}\n}";
+    let mut text = source.to_string();
+    let lines = Selection::new(source.find('c').unwrap(), source.find('d').unwrap() + 1);
+    reindent(&mut text, lines, "CSS", (2, true), false, true);
+    assert_eq!(text, "a {\nb {\n    c\n    d\n}\n}");
+}
+
+#[test]
+fn reindent_without_force_keeps_lines_already_indented() {
+    let mut text = "a {\n b\nc\n}".to_string();
+    reindent(&mut text, Selection::caret(0), "CSS", (2, true), true, false);
+    assert_eq!(text, "a {\n b\n  c\n}");
+}
+
+#[test]
+fn reindent_never_goes_below_the_margin() {
+    assert_eq!(reindented("}\n}\na\n", "Rust"), "}\n}\na\n");
+}
+
+#[test]
+fn reindent_refuses_syntaxes_where_indentation_is_the_code() {
+    assert!(!can_reindent("Python"));
+    assert!(!can_reindent("Plain Text"));
+    let mut text = "if a:\nb\n".to_string();
+    assert_eq!(reindent(&mut text, Selection::caret(0), "Python", (4, true), true, true), None);
+    assert_eq!(text, "if a:\nb\n");
+}
+
+#[test]
+fn reindent_says_when_nothing_changed() {
+    let mut text = "a {\n  b\n}".to_string();
+    assert_eq!(reindent(&mut text, Selection::caret(0), "CSS", (2, true), true, true), None);
+}
+
+#[test]
+fn move_to_goes_to_the_ends_of_lines_and_of_the_text() {
+    let text = "  one\n  two\n";
+    let caret = Selection::caret(9);
+    assert_eq!(move_to(text, caret, "bof", false), Some(Selection::caret(0)));
+    assert_eq!(move_to(text, caret, "eof", false), Some(Selection::caret(12)));
+    assert_eq!(move_to(text, caret, "hardbol", false), Some(Selection::caret(6)));
+    assert_eq!(move_to(text, caret, "eol", false), Some(Selection::caret(11)));
+    assert_eq!(move_to(text, caret, "hardeol", false), Some(Selection::caret(11)));
+    assert_eq!(move_to(text, caret, "bol", false), Some(Selection::caret(8)), "the first char");
+    assert_eq!(move_to(text, Selection::caret(8), "bol", false), Some(Selection::caret(6)), "then the start");
+    assert_eq!(move_to(text, caret, "nowhere", false), None);
+}
+
+#[test]
+fn move_to_extends_from_the_anchor() {
+    assert_eq!(move_to("abc", Selection::new(1, 2), "eof", true), Some(Selection::new(1, 3)));
+    assert_eq!(move_to("abc", Selection::new(1, 2), "eof", false), Some(Selection::caret(3)));
+}
+
+#[test]
+fn moving_by_characters_collapses_a_selection_first() {
+    let selection = Selection::new(1, 3);
+    assert_eq!(move_by("abcd", selection, "characters", true, false), Some(Selection::caret(3)));
+    assert_eq!(move_by("abcd", selection, "characters", false, false), Some(Selection::caret(1)));
+    assert_eq!(move_by("abcd", selection, "characters", true, true), Some(Selection::new(1, 4)));
+    assert_eq!(move_by("ab", Selection::caret(2), "characters", true, false), Some(Selection::caret(2)));
+    assert_eq!(move_by("ab", Selection::caret(0), "characters", false, false), Some(Selection::caret(0)));
+}
+
+#[test]
+fn moving_by_lines_keeps_the_column_when_it_can() {
+    let text = "long line\nab\nanother";
+    assert_eq!(move_by(text, Selection::caret(5), "lines", true, false), Some(Selection::caret(12)), "the end of the short line");
+    assert_eq!(move_by(text, Selection::caret(11), "lines", false, false), Some(Selection::caret(1)));
+    assert_eq!(move_by(text, Selection::caret(14), "lines", true, false), Some(Selection::caret(20)), "from the last line, the end");
+    assert_eq!(move_by(text, Selection::caret(3), "lines", false, false), Some(Selection::caret(0)), "from the first, the start");
+}
+
+#[test]
+fn moving_by_words_stops_at_starts_and_ends() {
+    let text = "one, two\nthree";
+    let by = |at: usize, unit: &str, forward: bool| move_by(text, Selection::caret(at), unit, forward, false).unwrap().head;
+    assert_eq!(by(0, "words", true), 3, "the comma");
+    assert_eq!(by(3, "words", true), 5, "past the space");
+    assert_eq!(by(5, "words", true), 8, "the end of the line");
+    assert_eq!(by(8, "words", true), 9, "the line break is a stop");
+    assert_eq!(by(8, "words", false), 5);
+    assert_eq!(by(5, "words", false), 3);
+    assert_eq!(by(0, "word_ends", true), 3);
+    assert_eq!(by(4, "word_ends", true), 8, "over the space");
+    assert_eq!(by(8, "word_ends", false), 4, "the end of the comma");
+    assert_eq!(by(14, "words", true), 14, "nowhere to go");
+    assert_eq!(by(0, "words", false), 0);
+}
+
+#[test]
+fn moving_by_an_unknown_unit_is_refused() {
+    assert_eq!(move_by("a", Selection::caret(0), "pages", true, false), None);
+}

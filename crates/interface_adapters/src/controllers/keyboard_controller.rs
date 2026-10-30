@@ -16,6 +16,13 @@ const WIDGET_COMMANDS: &[&str] = &[
     "insert", "insert_best_completion", "commit_completion",
 ];
 
+/// Widget commands with a key event that also run as commands (see [`ViewRequest::WidgetEdit`]):
+/// listeners of text commands hear about them. (Copy, cut and paste have no key event: see
+/// `clipboard_shortcut`. Typing, deleting and moving the caret stay the widget's alone.)
+///
+/// [`ViewRequest::WidgetEdit`]: crate::view_state::ViewRequest::WidgetEdit
+const HOOKED_WIDGET_COMMANDS: &[&str] = &["undo", "redo", "redo_or_repeat", "soft_undo", "soft_redo", "select_all"];
+
 pub enum KeyHandling {
     /// The key belongs to the text / focused widget.
     PassThrough,
@@ -35,9 +42,14 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         settings: editor.view_settings(),
     };
     let was_waiting = editor.state().keymap.is_waiting_for_chord();
+    let hooked = hooks_widget_edits(editor, view);
     let handling = match editor.press_key(alternatives, &context) {
         KeyResult::Unbound => KeyHandling::PassThrough,
         KeyResult::WaitingForChord => KeyHandling::Consumed,
+        KeyResult::Command(command) if hooked && HOOKED_WIDGET_COMMANDS.contains(&command.name.as_str()) => {
+            view.queue_command(command);
+            KeyHandling::Consumed
+        }
         // (Whole-line copy/paste is decided once, on the clipboard event: see `clipboard_shortcut`.)
         KeyResult::Command(command) if WIDGET_COMMANDS.contains(&command.name.as_str()) => KeyHandling::PassThrough,
         KeyResult::Command(command) => {
@@ -56,11 +68,17 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
     handling
 }
 
+/// A widget edit in the text goes through the commands when plugins listen to them. Other fields
+/// keep their keys: the command would edit the text, not the find panel.
+fn hooks_widget_edits(editor: &Editor, view: &ViewState) -> bool {
+    view.text_has_focus && editor.plugins_hear_text_commands()
+}
+
 /// The system's copy / cut / paste shortcut (`command` is `copy`, `cut` or `paste`). The text
-/// widget does it, except for whole lines (see below): then the command is queued and the event
-/// must not reach the widget (returns `Consumed`).
+/// widget does it, except for whole lines (see below) or when plugins listen to text commands:
+/// then the command is queued and the event must not reach the widget (returns `Consumed`).
 pub fn clipboard_shortcut(editor: &mut Editor, view: &mut ViewState, command: &str) -> KeyHandling {
-    if takes_over_from_widget(editor, view, command) {
+    if takes_over_from_widget(editor, view, command) || hooks_widget_edits(editor, view) {
         view.queue_command(Command::new(command));
         KeyHandling::Consumed
     } else {

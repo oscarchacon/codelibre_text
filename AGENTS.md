@@ -63,12 +63,15 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   threads call the editor between frames (`Editor::poll_plugins`, every frame in `app.rs`). Python code must never write to the
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Every `command_controller::run` asks the plugins' `on_text_command` / `on_window_command` (when some listener has them)
-  and tells `on_post_*_command` after; with the fake host, script one `PluginMessage::Answer` per query.
+  and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); those listeners also turn undo / redo / select all / clipboard keys into commands; with the fake host, script one `PluginMessage::Answer` per query.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
 - Packages: `%APPDATA%\codelibre_text\data\Packages` (`User` inside); Sublime's `%APPDATA%\Sublime Text\Packages`
   is also read unless `import_sublime_packages` is false (its `Default` package is skipped).
+- `.sublime-package` zips (ours in `data\Installed Packages`, Sublime's installed and shipped ones) are unpacked to
+  `data\Cache\Packages`, then read as plain folders (`package_archives.rs`, `PackagePaths::roots`); loose files win. Of what
+  Sublime ships, syntaxes are left out. `ignored_packages` defaults to `Vintage`.
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
 - `CODELIBRE_TEXT_DATA=<folder>` uses that folder instead of all of the above, to try things without touching the
   real profile (setting `APPDATA` does not work: Windows answers the known folder).
@@ -85,5 +88,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin phase B and C
-(`docs/plugins.md`), `.sublime-package` zips, split groups, minimap, folding, auto-complete, find in files.
+(`docs/plugins.md`), split groups, minimap, folding, auto-complete, find in files.
 Highlighting is skipped above 4 MB.

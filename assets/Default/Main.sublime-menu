@@ -34,6 +34,7 @@
 				"children": [
 					{ "command": "indent", "caption": "Indent" },
 					{ "command": "unindent", "caption": "Unindent" },
+					{ "command": "reindent", "args": { "single_line": false }, "caption": "Reindent" },
 					{ "command": "swap_line_up", "caption": "Swap Line Up" },
 					{ "command": "swap_line_down", "caption": "Swap Line Down" },
 					{ "command": "duplicate_line", "caption": "Duplicate Line" },

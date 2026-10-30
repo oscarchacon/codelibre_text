@@ -94,6 +94,11 @@ impl Editor {
         }
     }
 
+    /// Some listener wants to hear about text commands, also the ones the text widget does itself.
+    pub fn plugins_hear_text_commands(&self) -> bool {
+        ["on_text_command", "on_post_text_command", "on_post_text_command_async"].iter().any(|e| self.wants_plugin_event(e))
+    }
+
     pub(crate) fn wants_plugin_event(&self, name: &str) -> bool {
         self.state.plugins.wants(name)
     }
@@ -110,7 +115,7 @@ impl Editor {
     }
 
     /// Sends a query when some listener defines that method; the answer (`None` for `null`).
-    /// Built-in commands the listeners run wait for the next `poll_plugins`, as in events.
+    /// Built-in commands the listeners run are handled as in events.
     pub(crate) fn plugin_query(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
         if !self.wants_plugin_event(name) {
             return None;
@@ -123,7 +128,7 @@ impl Editor {
         if !self.enter_plugin(name) {
             return None;
         }
-        let result = self.gateways.plugins.query(name, view, &args).and_then(|()| self.converse_queuing_commands());
+        let result = self.gateways.plugins.query(name, view, &args).and_then(|()| self.converse_during_event());
         self.leave_plugin();
         match result {
             Ok(PluginMessage::Answer(Value::Null)) => None,

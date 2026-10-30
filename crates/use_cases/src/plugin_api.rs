@@ -13,6 +13,7 @@ use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
+use crate::editing::VIEW_COMMANDS;
 use crate::editor::Editor;
 use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
 use crate::plugins::CommandRunner;
@@ -450,16 +451,10 @@ impl Editor {
 
     /// The built-in commands that work in a panel's view (the command controller only knows tabs).
     fn run_in_panel(&mut self, id: DocumentId, command: &Command) -> Result<Value, String> {
-        let doc = self.any_document_mut(id).ok_or("the view is closed")?;
-        match command.name.as_str() {
-            "select_all" => doc.set_selection(Selection::new(0, doc.char_count())),
-            "insert" => {
-                let selection = doc.selection();
-                doc.replace_range(selection.start(), selection.end(), command.str_arg("characters"));
-            }
-            other => return Err(format!("{other} cannot run in a panel yet (only append, insert, select_all and plugin commands)")),
+        if !VIEW_COMMANDS.contains(&command.name.as_str()) {
+            return Err(format!("{} cannot run in a panel yet (only {}, append and plugin commands)", command.name, VIEW_COMMANDS.join(", ")));
         }
-        Ok(Value::Null)
+        self.run_view_command(id, command).map(|()| Value::Null)
     }
 
     fn plugin_settings_get(&mut self, target: &SettingsTarget, key: &str) -> Result<Value, String> {

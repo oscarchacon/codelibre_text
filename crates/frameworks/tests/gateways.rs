@@ -129,7 +129,7 @@ fn rebuilding_with_no_folders_empties_the_index() {
 
 #[test]
 fn the_session_lives_next_to_the_packages_folder() {
-    let paths = PackagePaths { packages: PathBuf::from("/data/Packages"), sublime_packages: None };
+    let paths = PackagePaths { packages: PathBuf::from("/data/Packages"), sublime_packages: None, archive_folders: Vec::new() };
     assert_eq!(session_file(&paths), Path::new("/data").join("Local").join("Session.sublime_session"));
 }
 

@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use use_cases::gateways::{PackagePaths, SyntaxGateway};
 
 fn engine_in(dir: &TempDir) -> SyntaxEngine {
-    SyntaxEngine::new(PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None })
+    SyntaxEngine::new(PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() })
 }
 
 fn engine() -> (TempDir, SyntaxEngine) {

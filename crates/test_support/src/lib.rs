@@ -238,6 +238,8 @@ pub struct Resources {
     pub ui_loads: RefCell<Vec<bool>>,
     /// Package files by resource name (`Packages/<package>/<path>`).
     pub package_files: RefCell<BTreeMap<String, Vec<u8>>>,
+    /// `include_sublime_packages` of every `unpack_packages` call.
+    pub unpacks: RefCell<Vec<bool>>,
 }
 
 struct FakeResources(Rc<Resources>);
@@ -323,6 +325,10 @@ impl ResourceGateway for FakeResources {
 
     fn load_resource(&self, name: &str, _include_sublime: bool) -> Result<Vec<u8>, String> {
         self.0.package_files.borrow().get(name).cloned().ok_or_else(|| format!("resource not found: {name}"))
+    }
+
+    fn unpack_packages(&self, include_sublime: bool, _errors: &mut Vec<String>) {
+        self.0.unpacks.borrow_mut().push(include_sublime);
     }
 
     fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
@@ -622,6 +628,7 @@ impl World {
                 paths: PackagePaths {
                     packages: PathBuf::from(PACKAGES),
                     sublime_packages: None,
+                    archive_folders: Vec::new(),
                 },
                 preferences: RefCell::new(vec![json!({
                     "tab_size": 4,
@@ -647,6 +654,7 @@ impl World {
                 settings_loads: Cell::new(0),
                 ui_loads: RefCell::default(),
                 package_files: RefCell::default(),
+                unpacks: RefCell::default(),
             }),
             syntaxes: Rc::default(),
             session: Rc::default(),

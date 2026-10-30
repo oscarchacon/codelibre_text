@@ -61,15 +61,18 @@ def unload_plugins():
 
 def load_package(name, dirs, errors):
     """Imports the top-level ``.py`` files of a package as ``<package>.<file>`` so that relative
-    imports between them work, as in Sublime."""
+    imports between them work, as in Sublime. ``dirs`` go in load order: a file of a later one
+    overrides the same file of an earlier one."""
     package = importlib.util.module_from_spec(importlib.machinery.ModuleSpec(name, None, is_package=True))
-    package.__path__ = list(dirs)
+    package.__path__ = list(reversed(dirs))
     sys.modules[name] = package
     _package_names.append(name)
-    for directory in dirs:
+    loaded = set()
+    for directory in package.__path__:
         for file_name in sorted(os.listdir(directory)):
-            if not file_name.endswith(".py"):
+            if not file_name.endswith(".py") or file_name in loaded:
                 continue
+            loaded.add(file_name)
             module_name = "%s.%s" % (name, file_name[:-3])
             path = os.path.join(directory, file_name)
             try:

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::selection::Selection;
-use interface_adapters::controllers::command_controller::{close_quick_panel, run};
+use interface_adapters::controllers::command_controller::{close_quick_panel, poll_plugins, run, run_during_event};
 use interface_adapters::gateways::{builtin_resources, sublime_json};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
 use serde_json::{json, Value};
@@ -783,4 +783,161 @@ fn next_result_goes_to_the_file_and_hides_the_find_panel() {
     run(&mut editor, &mut view, &cmd("next_result"));
     assert!(!view.find_panel.visible && editor.shown_output_panel().is_some());
     assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+}
+
+fn listening_world(events: &[&str]) -> World {
+    let commands = [("probe", PluginCommandKind::Text)];
+    World::new().with_file("/p/a.txt", "quiet").with_file("/p/b.txt", "other").with_plugins(&commands, events)
+}
+
+#[test]
+fn a_listener_s_editing_command_reaches_the_file_being_saved() {
+    let world = listening_world(&["on_pre_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([plugin_call("view_selection_set", json!([id, [[0, 6]]])), PluginMessage::Done { error: None }]);
+    editor.run_plugin_command(&cmd("probe"), &mut |_, _| {});
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "upper_case", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/a.txt"), "QUIET!");
+}
+
+#[test]
+fn a_listener_s_command_runs_on_the_view_it_named() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/b.txt");
+    open(&mut editor, "/p/a.txt");
+    let a = editor.active_document().unwrap().id;
+    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    editor.text_for_editing(a).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", b, "insert", { "characters": "x" }])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    let text = |id| editor.state().documents.iter().find(|d| d.id == id).unwrap().text.clone();
+    assert!(text(b).contains('x'), "{}", text(b));
+    assert_eq!(text(a), "quiet!");
+    assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+}
+
+#[test]
+fn a_listener_s_command_that_needs_the_view_waits_for_the_next_frame() {
+    let world = listening_world(&["on_pre_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "show_panel", { "panel": "find" }])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert!(!view.find_panel.visible);
+    poll_plugins(&mut editor, &mut view);
+    assert!(view.find_panel.visible);
+}
+
+#[test]
+fn a_listener_s_editing_command_goes_through_the_hooks() {
+    let world = listening_world(&["on_pre_save", "on_text_command", "on_post_text_command"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "lower_case", null])),
+        PluginMessage::Answer(json!(["insert", { "characters": ">" }])),
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert!(world.file_text("/p/a.txt").contains('>'), "the listener replaced it");
+    let queries = world.plugins.queries.borrow();
+    let names: Vec<&str> = queries.iter().map(|(name, _, _)| name.as_str()).collect();
+    assert_eq!(names, ["on_text_command", "on_post_text_command"]);
+    assert_eq!(queries[1].2[0], "insert");
+}
+
+#[test]
+fn reindent_uses_the_view_s_settings_and_defaults_to_the_caret_s_line() {
+    let world = World::new().with_file("/p/a.rs", "fn f() {\ng();\nh();\n}\n").with_preferences(json!({ "translate_tabs_to_spaces": true, "tab_size": 2 }));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.rs");
+    editor.go_to_line(1);
+    run(&mut editor, &mut view, &cmd("reindent"));
+    assert_eq!(active_text(&editor), "fn f() {\n  g();\nh();\n}\n");
+    run(&mut editor, &mut view, &cmd_with("reindent", json!({ "single_line": false })));
+    assert_eq!(active_text(&editor), "fn f() {\n  g();\n  h();\n}\n");
+}
+
+#[test]
+fn reindent_says_when_a_syntax_has_no_rules() {
+    let world = World::new().with_file("/p/a.py", "if a:\nb\n");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.py");
+    run(&mut editor, &mut view, &cmd("reindent"));
+    assert_eq!(active_text(&editor), "if a:\nb\n");
+    assert_eq!(status(&editor), "No indentation rules for Python");
+}
+
+#[test]
+fn reindent_in_on_pre_save_reaches_the_file() {
+    let world = listening_world(&["on_pre_save"]).with_file("/p/a.rs", "fn f() {\ng();\n}\n");
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.rs");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('\n');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "reindent", { "single_line": false }])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert!(world.file_text("/p/a.rs").contains("\n\tg();\n"), "{}", world.file_text("/p/a.rs"));
+}
+
+#[test]
+fn motions_and_deletes_run_as_commands_on_every_selection() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "ab\ncd\n", Selection::caret(0));
+    run(&mut editor, &mut view, &cmd_with("move_to", json!({ "to": "eof" })));
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(6));
+    run(&mut editor, &mut view, &cmd_with("move", json!({ "by": "lines", "forward": false, "extend": true })));
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(6, 3));
+    run(&mut editor, &mut view, &cmd("right_delete"));
+    assert_eq!(active_text(&editor), "ab\n");
+
+    run(&mut editor, &mut view, &cmd_with("move_to", json!({ "to": "brackets" })));
+    assert_eq!(status(&editor), "move_to to brackets is not supported");
+}
+
+#[test]
+fn a_listener_s_move_runs_during_the_event() {
+    let world = listening_world(&["on_pre_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "move_to", { "to": "eof" }])),
+        plugin_call("run_command", json!(["view", id, "left_delete", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/a.txt"), "quiet");
 }

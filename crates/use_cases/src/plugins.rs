@@ -30,6 +30,10 @@ const CONSOLE_NAME: &str = "Console";
 /// controller passes itself in: built-in commands live in an outer circle.
 pub type CommandRunner<'a> = dyn FnMut(&mut Editor, &Command) + 'a;
 
+/// Runs a built-in command in the middle of an event, when it can: `compose()` hands the command
+/// controller's in. False leaves it for the next [`Editor::poll_plugins`].
+pub type EventCommandRunner = fn(&mut Editor, &Command) -> bool;
+
 /// A settings file opened by a plugin with `sublime.load_settings`.
 #[derive(Default)]
 pub(crate) struct SettingsFile {
@@ -55,8 +59,10 @@ pub struct PluginState {
     pub(crate) errors: Vec<String>,
     /// The events some listener wants (`on_modified`, `on_load_async`…); others are not sent.
     events: HashSet<String>,
-    /// Built-in commands that event listeners ran; the next [`Editor::poll_plugins`] runs them.
+    /// Built-in commands that event listeners ran and could not run at once; the next
+    /// [`Editor::poll_plugins`] runs them.
     queued_commands: Vec<Command>,
+    event_command_runner: Option<EventCommandRunner>,
     /// The view the listeners last heard `on_activated` for.
     active_view: Option<DocumentId>,
     /// Each document's change count and the active one's selections when `on_modified` /
@@ -118,6 +124,15 @@ impl Editor {
         if !self.state.documents.is_empty() {
             self.plugin_init();
         }
+    }
+
+    pub fn set_event_command_runner(&mut self, runner: EventCommandRunner) {
+        self.state.plugins.event_command_runner = Some(runner);
+    }
+
+    /// A built-in command for the next [`poll_plugins`](Self::poll_plugins).
+    pub fn queue_plugin_command(&mut self, command: Command) {
+        self.state.plugins.queued_commands.push(command);
     }
 
     /// Runs a plugin command on the active view (text commands) or the window.
@@ -197,7 +212,7 @@ impl Editor {
     }
 
     /// Tells the listeners about a view event, when one listens to it or to its `_async` variant.
-    /// Built-in commands they run wait for the next [`poll_plugins`](Self::poll_plugins).
+    /// Built-in commands they run go through [`converse_during_event`](Self::converse_during_event).
     pub(crate) fn plugin_event(&mut self, name: &str, view: DocumentId) {
         let plugins = &self.state.plugins;
         if !plugins.wants(name) && !plugins.wants(&format!("{name}_async")) {
@@ -206,7 +221,7 @@ impl Editor {
         if !self.enter_plugin(name) {
             return;
         }
-        let result = self.gateways.plugins.event(name, view).and_then(|()| self.converse_queuing_commands());
+        let result = self.gateways.plugins.event(name, view).and_then(|()| self.converse_during_event());
         self.leave_plugin();
         match result {
             Ok(PluginMessage::Done { error: Some(traceback) }) => self.log(&format!("{name}: {traceback}\n")),
@@ -372,11 +387,14 @@ impl Editor {
         self.state.plugins.depth -= 1;
     }
 
-    /// Like `converse`, for events: built-in commands the listeners run are queued for the next
-    /// [`poll_plugins`](Self::poll_plugins) (events fire inside use cases, which cannot run them).
-    pub(crate) fn converse_queuing_commands(&mut self) -> Result<PluginMessage, String> {
+    /// Like `converse`, for events, which fire inside use cases: built-in commands the listeners
+    /// run go to the [`EventCommandRunner`], or wait for the next [`poll_plugins`](Self::poll_plugins).
+    pub(crate) fn converse_during_event(&mut self) -> Result<PluginMessage, String> {
         self.converse(&mut |editor: &mut Editor, command: &Command| {
-            editor.state.plugins.queued_commands.push(command.clone());
+            let runner = editor.state.plugins.event_command_runner;
+            if !runner.is_some_and(|run| run(editor, command)) {
+                editor.queue_plugin_command(command.clone());
+            }
         })
     }
 
@@ -394,22 +412,20 @@ impl Editor {
         }
     }
 
-    /// Packages with `.py` files at their top level, in Sublime's order (`User` last). Sublime's
-    /// own `Default` package is skipped: it is written for Sublime's native core.
+    /// Packages with `.py` files at their top level, in Sublime's order (`User` last), each with
+    /// its folders in load order. Sublime's own `Default` package is skipped (it is written for
+    /// Sublime's native core), and so are the `ignored_packages`.
     fn plugin_packages(&self) -> Vec<PluginPackage> {
-        let paths = self.gateways.resources.paths().clone();
-        let mut roots = Vec::new();
-        if self.global_settings().bool("import_sublime_packages", true) {
-            roots.extend(paths.sublime_packages.map(|root| (root, true)));
-        }
-        roots.push((paths.packages, false));
-
+        let settings = self.global_settings();
+        let ignored = settings.get("ignored_packages").and_then(Value::as_array).cloned().unwrap_or_default();
+        let paths = self.gateways.resources.paths();
+        let own = paths.packages.clone();
         let fs = &self.gateways.file_system;
         let mut packages: Vec<PluginPackage> = Vec::new();
-        for (root, is_sublime) in roots {
+        for root in paths.roots(settings.bool("import_sublime_packages", true)) {
             for entry in fs.list_dir(&root).into_iter().filter(|e| e.is_dir) {
                 let name = entry.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if is_sublime && name == "Default" {
+                if (root != own && name == "Default") || ignored.iter().any(|i| i.as_str() == Some(&name)) {
                     continue;
                 }
                 let has_plugins = fs

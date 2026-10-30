@@ -12,7 +12,7 @@ use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResour
 use use_cases::project::matches_pattern;
 
 use super::package_files::{find_resources, is_in_default_package, resource_name, resource_path};
-use super::{builtin_resources, po_file, sublime_json};
+use super::{builtin_resources, package_archives, po_file, sublime_json};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 
@@ -240,6 +240,10 @@ impl ResourceGateway for SublimeResourceGateway {
     fn load_resource(&self, name: &str, include_sublime: bool) -> Result<Vec<u8>, String> {
         let path = resource_path(&self.paths, include_sublime, name).ok_or_else(|| format!("resource not found: {name}"))?;
         std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    fn unpack_packages(&self, include_sublime: bool, errors: &mut Vec<String>) {
+        package_archives::unpack_all(&self.paths, include_sublime, errors);
     }
 
     fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
