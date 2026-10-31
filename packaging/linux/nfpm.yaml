@@ -1,0 +1,51 @@
+# .deb and .rpm packages, built by .github/workflows/release.yml:
+#   VERSION=0.1.0-alpha ARCH=amd64 nfpm package --config packaging/linux/nfpm.yaml --packager deb --target dist/
+# Run it from the repository root, after `cargo build --release`.
+name: codelibre-text
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: editors
+maintainer: Oscar Chacon Cautin <oscarchaconcautin@gmail.com>
+description: Native text editor compatible with Sublime Text resources
+homepage: https://github.com/oscarchacon/codelibre_text
+license: MIT
+
+contents:
+  - src: target/release/codelibre_text
+    dst: /usr/bin/codelibre_text
+    file_info:
+      mode: 0755
+  - src: packaging/linux/codelibre_text.desktop
+    dst: /usr/share/applications/codelibre_text.desktop
+    file_info:
+      mode: 0644
+  - src: assets/icons/codelibre_text.png
+    dst: /usr/share/icons/hicolor/256x256/apps/codelibre_text.png
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/licenses/codelibre-text/LICENSE
+    file_info:
+      mode: 0644
+
+# Python runs the plugins and Vulkan or OpenGL draw the window; the editor installs without them.
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libgcc-s1
+      - libxkbcommon0
+    recommends:
+      - python3
+      - libvulkan1
+      - libgl1
+  rpm:
+    depends:
+      - glibc
+      - libgcc
+      - libxkbcommon
+    recommends:
+      - python3
+      - vulkan-loader
+      - mesa-libGL

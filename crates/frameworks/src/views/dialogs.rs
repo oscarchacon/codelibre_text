@@ -1,10 +1,21 @@
 //! Modal questions and small windows: unsaved changes, About, package load errors.
 
-use egui::RichText;
+use egui::{Align, Layout, RichText};
 use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{AboutViewModel, DialogViewModel};
 use use_cases::editor::CloseChoice;
+
+/// Width of the fixed dialogs: their text wraps inside it.
+const DIALOG_WIDTH: f32 = 460.0;
+const DIALOG_MARGIN: i8 = 20;
+/// Space between a dialog's paragraphs, and above its buttons.
+const PARAGRAPH_SPACE: f32 = 12.0;
+const BUTTON_SIZE: egui::Vec2 = egui::vec2(96.0, 30.0);
+
+fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(DIALOG_MARGIN))
+}
 
 pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &DialogViewModel, events: &mut Vec<UiEvent>) {
     let (body, choices): (String, Vec<(&str, CloseChoice)>) = match dialog {
@@ -25,12 +36,16 @@ pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &Dial
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .frame(dialog_frame(ctx))
         .show(ctx, |ui| {
+            ui.set_width(DIALOG_WIDTH);
             ui.label(body);
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                for (label, choice) in &choices {
-                    if ui.button(*label).clicked() {
+            ui.add_space(PARAGRAPH_SPACE);
+            // Right to left: the buttons sit at the right edge, so they are added last to first.
+            let row = egui::vec2(DIALOG_WIDTH, BUTTON_SIZE.y);
+            ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+                for (label, choice) in choices.iter().rev() {
+                    if ui.add(egui::Button::new(*label).min_size(BUTTON_SIZE)).clicked() {
                         events.push(UiEvent::CloseDialogAnswered(*choice));
                     }
                 }
@@ -45,15 +60,18 @@ pub fn show_about(ctx: &egui::Context, text: &Translations, about: &AboutViewMod
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .frame(dialog_frame(ctx))
         .show(ctx, |ui| {
+            ui.set_width(DIALOG_WIDTH);
             ui.heading("CodeLibre Text");
             ui.label(text.tr_args("Version {version}", &[("version", &about.version)]));
+            ui.add_space(PARAGRAPH_SPACE);
             ui.label(text.tr(
                 "An open-source native editor written in Rust,
 compatible with Sublime Text packages (syntaxes, color schemes,
 key bindings, menus, command palette and settings).",
             ));
-            ui.add_space(6.0);
+            ui.add_space(PARAGRAPH_SPACE);
             ui.label(text.tr_args("Packages: {path}", &[("path", &about.packages)]));
             if let Some(sublime) = &about.sublime_packages {
                 ui.label(text.tr_args("Sublime Text packages: {path}", &[("path", sublime)]));
@@ -69,6 +87,7 @@ pub fn show_load_errors(ctx: &egui::Context, text: &Translations, errors: &[Stri
     egui::Window::new(text.tr("Package Load Errors"))
         .open(&mut open)
         .default_size([640.0, 360.0])
+        .frame(dialog_frame(ctx))
         .show(ctx, |ui| {
             if errors.is_empty() {
                 ui.label(text.tr("No errors."));

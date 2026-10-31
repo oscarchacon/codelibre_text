@@ -1,0 +1,216 @@
+# Pushing a branch release/<version> (release/0.1.0-alpha) builds the installers of every platform
+# and uploads them to a draft GitHub Release. Publishing the draft stays a manual step, and pushing
+# to the branch again replaces its files. If all of that works, a pull request merges it into main
+# when it is a final version (no -alpha, -beta...) or no published release has downloads yet.
+name: Release
+
+on:
+  push:
+    branches:
+      - "release/**"
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.branch.outputs.version }}
+    steps:
+      - id: branch
+        name: Read the version from the branch name
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          version="${BRANCH#release/}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$version' is not a version: use a branch like release/0.1.0-alpha"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: version
+    # The oldest supported Ubuntu: the binary needs the glibc it was built against, or newer.
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ARCH: amd64
+      NFPM_VERSION: 2.48.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set the version
+        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+      - name: Install the system libraries
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Build
+        run: cargo build --release
+      - name: Install nfpm
+        run: |
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" nfpm
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Create the .deb and .rpm
+        run: |
+          mkdir -p dist
+          nfpm package --config packaging/linux/nfpm.yaml --packager deb --target dist/
+          nfpm package --config packaging/linux/nfpm.yaml --packager rpm --target dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set the version
+        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Build
+        run: cargo build --release
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Create the installer
+        run: '"/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "//DAppVersion=$VERSION" packaging/windows/codelibre_text.iss'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: x64
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+      APP: target/${{ matrix.target }}/release/CodeLibre Text.app
+      DMG: dist/codelibre-text-${{ needs.version.outputs.version }}-macos-${{ matrix.arch }}.dmg
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set the version
+        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target "$CARGO_BUILD_TARGET"
+          rustup default stable
+      - name: Build the app
+        run: sh packaging/macos/make_app.sh
+      # Ad hoc: without a certificate this only keeps the bundle's signature valid, so that macOS
+      # reports an unidentified developer and not a damaged app.
+      - name: Sign the app ad hoc
+        run: codesign --force --deep --sign - "$APP"
+      - name: Create the .dmg
+        run: |
+          mkdir -p dist dmg
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "CodeLibre Text" -srcfolder dmg -format UDZO "$DMG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: v${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the draft release
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            prerelease=""
+            [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+            gh release create "$TAG" --draft $prerelease --target "$GITHUB_SHA" --title "CodeLibre Text $TAG" \
+              --notes "The installers are not signed: Windows SmartScreen and macOS Gatekeeper warn when they are opened."
+          fi
+      - name: Upload the installers
+        run: gh release upload "$TAG" dist/* --clobber
+
+  # Once every installer is uploaded, a pull request takes the branch and its version to main and
+  # is merged at once (see the rule below). If it cannot be merged (a conflict), it stays open to
+  # solve by hand.
+  main:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BRANCH: ${{ github.ref_name }}
+      # This secret holds a token that can write contents, pull requests and workflows: by default
+      # github.token cannot create pull requests, nor change workflow files in main.
+      GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ env.GH_TOKEN }}
+      # Final versions reach main. A pre-release only does while no other published release has
+      # files to download.
+      - id: main
+        name: Decide if this version goes to main
+        env:
+          TAG: v${{ needs.version.outputs.version }}
+        run: |
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false and .tag_name != env.TAG and (.assets | length) > 0) | .tag_name')
+          if [ -z "$published" ] || [[ "$VERSION" != *-* ]]; then
+            echo "merge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$VERSION is a pre-release and there are downloads in $(echo "$published" | head -n 1): main stays as it is"
+          fi
+      # [skip ci]: this push must not start the workflow again.
+      - name: Commit the version
+        if: steps.main.outputs.merge == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          if ! git diff --quiet; then
+            git commit --all --message "chore: release $VERSION [skip ci]"
+            git push origin "HEAD:$BRANCH"
+          fi
+      - name: Merge the pull request
+        if: steps.main.outputs.merge == 'true'
+        run: |
+          if [ "$(git rev-list --count origin/main..HEAD)" = 0 ]; then
+            echo "main already has this branch"
+            exit 0
+          fi
+          number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')
+          if [ -z "$number" ]; then
+            gh pr create --head "$BRANCH" --base main --title "Release $VERSION" \
+              --body "Installers built and uploaded to the draft release v$VERSION."
+          fi
+          gh pr merge "$BRANCH" --merge

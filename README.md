@@ -165,6 +165,17 @@ also needs it where it shows installed applications:
 - **macOS**: `packaging/macos/make_app.sh` creates `target/release/CodeLibre Text.app` with the
   `.icns` icon; drag it to Applications.
 
+### Release installers
+
+Pushing a branch `release/<version>` (for example `release/0.1.0-alpha`) runs
+`.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
+setup, the macOS `.dmg` (Apple Silicon and Intel) and the Linux `.deb` and `.rpm` (x86_64). They are
+uploaded to a draft GitHub Release to review and publish by hand; pushing again replaces its files.
+The installers are not signed. When every build succeeds, a pull request takes the branch to `main`
+with its version in `Cargo.toml` and is merged at once. Final versions always do; a pre-release only
+does while no other published release has files to download. This needs a token that can write
+contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
+
 ## Roadmap
 
 CodeLibre Text grows feature by feature. Next up, roughly in this order:
