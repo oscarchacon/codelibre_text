@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/target/
+Cargo.lock
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# User settings (contains local paths)
+*(User).sublime-settings
+sublime-clone.sublime-project
+
+# Logs
+*.log
+logs/
+
+# Temporary / build output
+*.bak
+*.tmp
+*.orig

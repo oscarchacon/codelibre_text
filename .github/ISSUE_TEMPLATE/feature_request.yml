@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a feature, or a Sublime Text command / setting that is missing.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New features are added continuously; requests help decide what comes next.
+        Check the Roadmap in the README and docs/sublime-gap-analysis.md first.
+  - type: textarea
+    id: feature
+    attributes:
+      label: What would you like?
+      description: Describe the feature and the problem it solves for you.
+    validations:
+      required: true
+  - type: input
+    id: sublime
+    attributes:
+      label: Sublime Text equivalent
+      description: The Sublime command, setting or key binding, if there is one.
+      placeholder: "e.g. fold (Ctrl+Shift+[)"
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: A key binding, setting or snippet showing how you would use it (formatted as code).
+      render: json

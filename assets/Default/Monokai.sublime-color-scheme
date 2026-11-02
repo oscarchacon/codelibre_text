@@ -1,0 +1,50 @@
+{
+    "name": "Monokai",
+    "variables": {
+        "black": "#272822",
+        "black2": "#3e3d32",
+        "grey": "#75715e",
+        "white": "#f8f8f2",
+        "yellow": "#e6db74",
+        "orange": "#fd971f",
+        "red": "#f92672",
+        "purple": "#ae81ff",
+        "blue": "#66d9ef",
+        "green": "#a6e22e"
+    },
+    "globals": {
+        "foreground": "var(white)",
+        "background": "var(black)",
+        "caret": "#f8f8f0",
+        "line_highlight": "var(black2)",
+        "selection": "#49483e",
+        "selection_border": "#222218",
+        "gutter": "var(black)",
+        "gutter_foreground": "#90908a",
+        "find_highlight": "#ffe792",
+        "find_highlight_foreground": "#000000",
+        "guide": "#3b3a32",
+        "accent": "var(orange)"
+    },
+    "rules": [
+        { "scope": "comment, punctuation.definition.comment", "foreground": "var(grey)" },
+        { "scope": "string", "foreground": "var(yellow)" },
+        { "scope": "constant.numeric, constant.language, constant.character, constant.other", "foreground": "var(purple)" },
+        { "scope": "variable.language", "foreground": "var(orange)", "font_style": "italic" },
+        { "scope": "keyword, storage.modifier, keyword.operator", "foreground": "var(red)" },
+        { "scope": "storage.type", "foreground": "var(blue)", "font_style": "italic" },
+        { "scope": "entity.name.class, entity.name.struct, entity.name.enum, entity.name.type, entity.name.trait, entity.other.inherited-class", "foreground": "var(green)" },
+        { "scope": "entity.name.function, support.function, variable.function", "foreground": "var(green)" },
+        { "scope": "variable.parameter", "foreground": "var(orange)", "font_style": "italic" },
+        { "scope": "entity.name.tag", "foreground": "var(red)" },
+        { "scope": "entity.other.attribute-name", "foreground": "var(green)" },
+        { "scope": "support.constant, support.type, support.class", "foreground": "var(blue)" },
+        { "scope": "meta.preprocessor, keyword.control.import", "foreground": "var(red)" },
+        { "scope": "markup.heading", "foreground": "var(green)", "font_style": "bold" },
+        { "scope": "markup.bold", "font_style": "bold" },
+        { "scope": "markup.italic", "font_style": "italic" },
+        { "scope": "markup.inserted", "foreground": "var(green)" },
+        { "scope": "markup.deleted", "foreground": "var(red)" },
+        { "scope": "invalid", "foreground": "var(white)", "background": "var(red)" }
+    ]
+}

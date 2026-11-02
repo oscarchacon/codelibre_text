@@ -1,0 +1,44 @@
+{
+    "name": "Daylight",
+    "variables": {
+        "bg": "#fafafa",
+        "fg": "#383a42",
+        "grey": "#a0a1a7",
+        "red": "#e45649",
+        "orange": "#c18401",
+        "green": "#50a14f",
+        "blue": "#4078f2",
+        "purple": "#a626a4",
+        "cyan": "#0184bc"
+    },
+    "globals": {
+        "foreground": "var(fg)",
+        "background": "var(bg)",
+        "caret": "#526fff",
+        "line_highlight": "#f0f0f1",
+        "selection": "#d7dcef",
+        "gutter": "var(bg)",
+        "gutter_foreground": "#9d9d9f",
+        "find_highlight": "#f5d76e",
+        "find_highlight_foreground": "#000000",
+        "guide": "#e5e5e6",
+        "accent": "var(blue)"
+    },
+    "rules": [
+        { "scope": "comment, punctuation.definition.comment", "foreground": "var(grey)", "font_style": "italic" },
+        { "scope": "string", "foreground": "var(green)" },
+        { "scope": "constant.numeric, constant.language, constant.character, constant.other", "foreground": "var(orange)" },
+        { "scope": "keyword, storage.modifier", "foreground": "var(purple)" },
+        { "scope": "keyword.operator", "foreground": "var(cyan)" },
+        { "scope": "storage.type", "foreground": "var(purple)" },
+        { "scope": "entity.name.class, entity.name.struct, entity.name.enum, entity.name.type, entity.name.trait, support.type, support.class", "foreground": "var(orange)" },
+        { "scope": "entity.name.function, support.function, variable.function", "foreground": "var(blue)" },
+        { "scope": "variable.parameter, variable.language", "foreground": "var(red)" },
+        { "scope": "entity.name.tag", "foreground": "var(red)" },
+        { "scope": "entity.other.attribute-name", "foreground": "var(orange)" },
+        { "scope": "markup.heading", "foreground": "var(red)", "font_style": "bold" },
+        { "scope": "markup.bold", "font_style": "bold" },
+        { "scope": "markup.italic", "font_style": "italic" },
+        { "scope": "invalid", "foreground": "#ffffff", "background": "var(red)" }
+    ]
+}
