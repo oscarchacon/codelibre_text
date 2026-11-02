@@ -1,0 +1,47 @@
+# Tests and clippy on Linux, Windows and macOS: for every push to main or develop and every pull
+# request into main, develop or a release/<version> branch. The release workflow calls it too, so
+# no installer is built from code whose tests fail.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+      - "release/**"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev
+      - name: Install Rust
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      # Python runs the plugin host tests (crates/frameworks/tests/python_plugin_host.rs).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
