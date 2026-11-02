@@ -1,0 +1,46 @@
+# CodeLibre Text follows Clean Architecture. Each circle is a crate, so the compiler enforces the
+# Dependency Rule: a crate can only depend on the crates of the circles inside it.
+#
+#   entities  <-  use_cases  <-  interface_adapters  <-  frameworks (binary)
+#
+# See docs/architecture.md.
+[workspace]
+resolver = "2"
+members = [
+    "crates/entities",
+    "crates/use_cases",
+    "crates/interface_adapters",
+    "crates/frameworks",
+    # Test doubles shared by the tests of the other crates (not part of the application).
+    "crates/test_support",
+]
+# `cargo run` / `cargo build` from the root build the application.
+default-members = ["crates/frameworks"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+entities = { path = "crates/entities" }
+use_cases = { path = "crates/use_cases" }
+interface_adapters = { path = "crates/interface_adapters" }
+test_support = { path = "crates/test_support" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+fuzzy-matcher = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Tests only
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+# syntect's regex engine is very slow unoptimized; keep dependencies fast in debug builds
+[profile.dev.package."*"]
+opt-level = 2
