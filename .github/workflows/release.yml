@@ -153,10 +153,11 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # Apple Silicon only: Intel Macs are not built.
+  # Apple Silicon only: Intel Macs are not built. macos-15 (arm64), not macos-latest (macOS 26,
+  # often without a free runner).
   macos:
     needs: version
-    runs-on: macos-latest
+    runs-on: macos-15
     env:
       VERSION: ${{ needs.version.outputs.version }}
       CARGO_BUILD_TARGET: aarch64-apple-darwin

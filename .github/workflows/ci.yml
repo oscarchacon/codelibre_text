@@ -1,5 +1,5 @@
 # Tests and clippy on Linux, Windows and macOS: for every push to main or develop and every pull
-# request into main, develop or a release/<version> branch (those skip macOS). The release workflow calls it too, so
+# request into main, develop or a release/<version> branch. The release workflow calls it too, so
 # no installer is built from code whose tests fail.
 name: CI
 
@@ -24,9 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runners are scarce and a pull request could wait long for one: pull requests test
-        # Linux and Windows; pushes to main / develop and every release test macOS too.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-22.04", "windows-latest"]') || fromJSON('["ubuntu-22.04", "windows-latest", "macos-latest"]') }}
+        # macos-15 is Apple Silicon (arm64). Not macos-latest: it moved to macOS 26, whose runners
+        # were often busy for over 15 minutes and the job was cancelled.
+        os: [ubuntu-22.04, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
