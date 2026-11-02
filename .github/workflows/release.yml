@@ -66,6 +66,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
+      # The compiled dependencies, reused by the next push to this branch (or a rerun).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-linux-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
       - name: Install nfpm
@@ -123,6 +127,9 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --target "$CARGO_BUILD_TARGET"
           rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
       - name: Install Inno Setup
@@ -146,7 +153,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # Apple Silicon only: Intel Macs are not built.
+  # Apple Silicon only (macos-latest is arm64): Intel Macs are not built.
   macos:
     needs: version
     runs-on: macos-latest
@@ -163,6 +170,9 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --target "$CARGO_BUILD_TARGET"
           rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos-arm64
       - name: Build the app
         run: sh packaging/macos/make_app.sh
       # Ad hoc: without a certificate this only keeps the bundle's signature valid, so that macOS
