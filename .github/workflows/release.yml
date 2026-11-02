@@ -198,6 +198,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # nfpm writes 0.1.0~alpha in .deb / .rpm names and GitHub would upload them as 0.1.0.alpha:
+      # renamed first, SHA256SUMS and the attestations name the files people download.
+      - name: Name the files as GitHub will
+        run: |
+          for file in dist/*~*; do
+            [ -e "$file" ] && mv "$file" "${file//\~/.}"
+          done
+          ls dist
       - name: Attest where the installers come from
         uses: actions/attest-build-provenance@v2
         with:
