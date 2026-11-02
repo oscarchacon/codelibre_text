@@ -29,6 +29,15 @@ contents:
     file_info:
       mode: 0644
 
+# Signed with the release GPG key (packaging/codelibre-text-release.asc) when GPG_KEY_FILE names
+# its private key and NFPM_PASSPHRASE holds its passphrase; unsigned when it is empty.
+deb:
+  signature:
+    key_file: ${GPG_KEY_FILE}
+rpm:
+  signature:
+    key_file: ${GPG_KEY_FILE}
+
 # Python runs the plugins and Vulkan or OpenGL draw the window; the editor installs without them.
 overrides:
   deb:
