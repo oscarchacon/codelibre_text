@@ -24,7 +24,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Build / verify
 - `cargo build` / `cargo run -- <folder-or-file>...` (root `default-members` is the frameworks crate).
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
-- CI (`.github/workflows/ci.yml`) runs both on Linux, Windows and macOS (`macos-15`, Apple Silicon) (clippy with `-D warnings`) for pushes to `main` / `develop`,
+- CI (`.github/workflows/ci.yml`) runs both on Linux, Windows and macOS (clippy with `-D warnings`) for pushes to `main` / `develop`,
   pull requests into them or a `release/**` branch, and before every release build.
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
