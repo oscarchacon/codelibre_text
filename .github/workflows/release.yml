@@ -1,6 +1,7 @@
 # Pushing a branch release/<version> (release/0.1.0-alpha) builds the installers of every platform
 # (.deb, .rpm and a portable .tar.xz; a setup .exe and a portable .zip; a .dmg per Mac architecture)
-# and uploads them to a draft GitHub Release. Publishing the draft stays a manual step, and pushing
+# and uploads them to a draft GitHub Release, with a SHA256SUMS signed by the release GPG key (which
+# also signs the .deb and .rpm) and build provenance attestations. Publishing the draft stays a manual step, and pushing
 # to the branch again replaces its files. If all of that works, a pull request merges it into main
 # when it is a final version (no -alpha, -beta...) or no published release has downloads yet.
 name: Release
@@ -54,9 +55,15 @@ jobs:
           curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP" nfpm
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # Signed with the release GPG key (see packaging/linux/nfpm.yaml).
       - name: Create the .deb and .rpm
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          NFPM_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           mkdir -p dist
+          export GPG_KEY_FILE="$RUNNER_TEMP/release-key.asc"
+          printf '%s\n' "$GPG_PRIVATE_KEY" > "$GPG_KEY_FILE"
           nfpm package --config packaging/linux/nfpm.yaml --packager deb --target dist/
           nfpm package --config packaging/linux/nfpm.yaml --packager rpm --target dist/
       # Portable: unpack anywhere and run codelibre_text (the .desktop and icon are for the menu).
@@ -153,6 +160,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance attestations (gh attestation verify <file> --repo <owner/repo>).
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -162,13 +172,29 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Attest where the installers come from
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      # SHA256SUMS lists every file; SHA256SUMS.asc is its signature with the release GPG key.
+      - name: Write and sign the checksums
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign SHA256SUMS
       - name: Create the draft release
         run: |
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             prerelease=""
             [[ "$TAG" == *-* ]] && prerelease="--prerelease"
-            gh release create "$TAG" --draft $prerelease --target "$GITHUB_SHA" --title "CodeLibre Text $TAG" \
-              --notes "The installers are not signed: Windows SmartScreen and macOS Gatekeeper warn when they are opened."
+            notes="Windows and macOS installers are not signed yet: SmartScreen and Gatekeeper warn when they are opened.
+
+          Verify a download: \`SHA256SUMS\` is signed (\`SHA256SUMS.asc\`) with the release key [codelibre-text-release.asc](https://github.com/$GH_REPO/blob/main/packaging/codelibre-text-release.asc), which also signs the .deb and .rpm; \`gh attestation verify <file> --repo $GH_REPO\` checks it was built by this workflow."
+            gh release create "$TAG" --draft $prerelease --target "$GITHUB_SHA" --title "CodeLibre Text $TAG" --notes "$notes"
           fi
       - name: Upload the installers
         run: gh release upload "$TAG" dist/* --clobber
