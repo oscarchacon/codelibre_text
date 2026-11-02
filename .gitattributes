@@ -1,10 +1,7 @@
-# Packaging files run on Linux / macOS: keep LF line endings even on Windows checkouts.
-*.sh text eol=lf
-*.desktop text eol=lf
-*.plist text eol=lf
+# LF everywhere, Windows checkouts included: a string literal spanning lines in a .rs file would
+# otherwise hold "\r\n" on Windows and miss its translation; packaging files run on Linux / macOS,
+# and Poedit and the generated translation template diff cleanly.
+* text=auto eol=lf
 *.ico binary
 *.icns binary
 *.png binary
-# Translations: keep LF so Poedit and the generated template diff cleanly.
-*.po text eol=lf
-*.pot text eol=lf
