@@ -1,4 +1,5 @@
 # Pushing a branch release/<version> (release/0.1.0-alpha) builds the installers of every platform
+# (.deb, .rpm and a portable .tar.xz; a setup .exe and a portable .zip; a .dmg per Mac architecture)
 # and uploads them to a draft GitHub Release. Publishing the draft stays a manual step, and pushing
 # to the branch again replaces its files. If all of that works, a pull request merges it into main
 # when it is a final version (no -alpha, -beta...) or no published release has downloads yet.
@@ -58,6 +59,13 @@ jobs:
           mkdir -p dist
           nfpm package --config packaging/linux/nfpm.yaml --packager deb --target dist/
           nfpm package --config packaging/linux/nfpm.yaml --packager rpm --target dist/
+      # Portable: unpack anywhere and run codelibre_text (the .desktop and icon are for the menu).
+      - name: Create the .tar.xz
+        run: |
+          name="codelibre-text-$VERSION-linux-x64"
+          mkdir -p "$RUNNER_TEMP/$name"
+          cp target/release/codelibre_text LICENSE assets/icons/codelibre_text.png packaging/linux/codelibre_text.desktop "$RUNNER_TEMP/$name/"
+          tar -C "$RUNNER_TEMP" -cJf "dist/$name.tar.xz" "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -84,6 +92,15 @@ jobs:
         run: choco install innosetup --yes --no-progress
       - name: Create the installer
         run: '"/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "//DAppVersion=$VERSION" packaging/windows/codelibre_text.iss'
+      # Portable: unzip anywhere and run codelibre_text.exe, without installing.
+      - name: Create the .zip
+        run: |
+          name="codelibre-text-$VERSION-windows-x64"
+          mkdir -p "$RUNNER_TEMP/$name"
+          cp target/release/codelibre_text.exe "$RUNNER_TEMP/$name/"
+          cp LICENSE "$RUNNER_TEMP/$name/LICENSE.txt"
+          (cd "$RUNNER_TEMP" && 7z a -tzip "$name.zip" "$name")
+          mv "$RUNNER_TEMP/$name.zip" dist/
       - uses: actions/upload-artifact@v4
         with:
           name: windows
