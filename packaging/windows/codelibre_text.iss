@@ -1,9 +1,21 @@
 ; Windows installer, built by .github/workflows/release.yml with Inno Setup:
 ;   ISCC.exe /DAppVersion=0.1.0-alpha packaging\windows\codelibre_text.iss
 ; Run it after `cargo build --release`. The setup goes to dist\ in the repository root.
+; For ARM64: /DAppArch=arm64 /DBinDir=..\..\target\aarch64-pc-windows-msvc\release
 
 #ifndef AppVersion
   #error Pass the version: ISCC.exe /DAppVersion=0.1.0-alpha
+#endif
+#ifndef AppArch
+  #define AppArch "x64"
+#endif
+#ifndef BinDir
+  #define BinDir "..\..\target\release"
+#endif
+#if AppArch == "arm64"
+  #define InstallArchitectures "arm64"
+#else
+  #define InstallArchitectures "x64compatible"
 #endif
 
 [Setup]
@@ -18,12 +30,12 @@ DefaultGroupName=CodeLibre Text
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#InstallArchitectures}
+ArchitecturesInstallIn64BitMode={#InstallArchitectures}
 SetupIconFile=..\..\assets\icons\codelibre_text.ico
 UninstallDisplayIcon={app}\codelibre_text.exe
 OutputDir=..\..\dist
-OutputBaseFilename=codelibre-text-{#AppVersion}-windows-x64-setup
+OutputBaseFilename=codelibre-text-{#AppVersion}-windows-{#AppArch}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -36,7 +48,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\..\target\release\codelibre_text.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BinDir}\codelibre_text.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]

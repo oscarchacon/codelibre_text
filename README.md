@@ -169,8 +169,8 @@ also needs it where it shows installed applications:
 
 Pushing a branch `release/<version>` (for example `release/0.1.0-alpha`) runs
 `.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
-setup and portable `.zip`, the macOS `.dmg` (Apple Silicon and Intel) and the Linux `.deb`, `.rpm`
-and portable `.tar.xz` (x86_64). They are uploaded to a draft GitHub Release to review and publish
+setup and portable `.zip` (x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux
+`.deb`, `.rpm` and portable `.tar.xz` (x64 and ARM64). They are uploaded to a draft GitHub Release to review and publish
 by hand; pushing again replaces its files. The `.deb`, `.rpm` and a `SHA256SUMS` of every file are
 signed with the release GPG key (secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has
 a build provenance attestation; the Windows and macOS installers are not signed yet. See the
