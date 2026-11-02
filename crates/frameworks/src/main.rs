@@ -1,6 +1,10 @@
 //! `codelibre_text` binary: parses the command line and opens the window.
 //! Everything else lives in the library (`lib.rs`).
 
+// Release builds on Windows are GUI programs: no console window opens behind the editor. Started
+// from a terminal, they write to it anyway (`attach_parent_console`). Debug builds keep the console.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod cli;
 
 use std::cell::Cell;
@@ -15,6 +19,8 @@ use eframe::Renderer;
 use cli::Cli;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    attach_parent_console();
     let cli = Cli::parse();
     tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
     let paths: Vec<PathBuf> = cli.files.iter().map(PathBuf::from).collect();
@@ -66,4 +72,15 @@ fn run(renderer: Renderer, cli: &Cli, paths: Vec<PathBuf>, started: &Rc<Cell<boo
         }),
     )
     .map_err(|e| e.into())
+}
+
+/// A GUI program has no console of its own: started from a terminal, `--help`, errors and logs
+/// go to that terminal. Without one (Start menu, Explorer) it does nothing.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // SAFETY: takes no pointers; it only fails (harmlessly) when there is no parent console.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
 }
