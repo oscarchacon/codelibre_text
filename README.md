@@ -169,9 +169,12 @@ also needs it where it shows installed applications:
 
 Pushing a branch `release/<version>` (for example `release/0.1.0-alpha`) runs
 `.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
-setup, the macOS `.dmg` (Apple Silicon and Intel) and the Linux `.deb` and `.rpm` (x86_64). They are
-uploaded to a draft GitHub Release to review and publish by hand; pushing again replaces its files.
-The installers are not signed. When every build succeeds, a pull request takes the branch to `main`
+setup and portable `.zip`, the macOS `.dmg` (Apple Silicon and Intel) and the Linux `.deb`, `.rpm`
+and portable `.tar.xz` (x86_64). They are uploaded to a draft GitHub Release to review and publish
+by hand; pushing again replaces its files. The `.deb`, `.rpm` and a `SHA256SUMS` of every file are
+signed with the release GPG key (secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has
+a build provenance attestation; the Windows and macOS installers are not signed yet. See the
+[Code signing policy](docs/code-signing.md). When every build succeeds, a pull request takes the branch to `main`
 with its version in `Cargo.toml` and is merged at once. Final versions always do; a pre-release only
 does while no other published release has files to download. This needs a token that can write
 contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
