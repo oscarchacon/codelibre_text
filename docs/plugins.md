@@ -304,6 +304,16 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [ ] Reloading restarts the plugin host, which stops a Package Control thread still working (several packages, its
       libraries); Sublime loads only the new package's plugins. Not tried yet: a package with plugins or libraries,
       upgrades, removal.
+- [ ] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
+      `ignored_packages` (and `in_process_packages` in `Package Control.sublime-settings`, `package_disabler.py`), expecting
+      the editor to unload / load those packages at once; here they apply only after Reload Packages. Needs the
+      `ignored_packages` setting watched (as `add_on_change` is) and a reload of just those packages.
+- [ ] Package Control > Settings (`edit_settings` with `${packages}/Package Control/…`) opens only the user file: the
+      left "Default" view comes from `ResourcesGateway::default_resource`, which knows only Preferences and keymaps; it
+      should read the package's file (`load_resource`, also inside archives). The two views open as tabs (no groups).
+- [ ] `$packages` without braces (Package Control's `open_file` of `Package Control.user-ca-bundle`) is not expanded:
+      `PackagePaths::expand` only knows `${packages}` and `${platform}`. `semi_transient` is ignored.
+- [ ] `window.set_view_index` / `set_sheet_index` are stand-ins (Package Control moves its message view with them).
 - [x] **Scopes** from the syntax engine: `SyntaxGateway::line_scopes` parses one line again from the parser state the
       highlighting cache keeps for its start (`SyntaxEngine::line_scopes`); the use cases (`use_cases/src/scopes.rs`)
       turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,

@@ -185,6 +185,13 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 - [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`, dialogs, `find_resources` / `load_resource`, scratch views, output panels, `set_status`, `add_regions`
 - [ ] Python plugins phase B rest: output panel results, build systems
 - [x] Python plugins phase C: installing Package Control from the editor
+- [ ] Package Control, the whole package lifecycle (details in [docs/plugins.md](docs/plugins.md), phase C):
+  - [ ] Follow `ignored_packages` changes without Reload Packages (Disable / Enable Package, and the disabling around Upgrade / Remove)
+  - [ ] Load only the packages that changed, without restarting the plugin host (now a reload stops Package Control's threads mid-install)
+  - [ ] Verify installing a package with plugins and libraries, Upgrade, Remove and Satisfy Libraries end to end
+  - [ ] Package settings opened by Package Control > Settings show their defaults (`edit_settings` only knows Preferences and keymaps)
+  - [ ] `$packages` (without braces) in command arguments, used by Package Control's own `open_file` entries
+  - [ ] Package Control 3 dependencies (`dependencies.json`) for old packages, and more shims for Pythons newer than 3.8
 - [ ] Split layouts (groups)
 - [ ] Minimap, code folding, auto-complete, bookmarks
 - [ ] Build systems
