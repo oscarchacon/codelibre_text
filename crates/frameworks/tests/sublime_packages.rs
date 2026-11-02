@@ -26,9 +26,29 @@ use use_cases::gateways::{
 };
 use use_cases::{Editor, Gateways};
 
+/// The `Packages` folder of the Sublime Text installation, with the packages it ships.
 fn install_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(std::env::var_os("ProgramFiles")?).join("Sublime Text").join("Packages");
+    let dir = if cfg!(target_os = "windows") {
+        PathBuf::from(std::env::var_os("ProgramFiles")?).join("Sublime Text")
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from("/Applications/Sublime Text.app/Contents/MacOS")
+    } else {
+        PathBuf::from("/opt/sublime_text")
+    }
+    .join("Packages");
     dir.is_dir().then_some(dir)
+}
+
+/// Sublime Text's data folder (the parent of its `Packages` and `Installed Packages`).
+fn sublime_data_dir() -> Option<PathBuf> {
+    let base = directories::BaseDirs::new()?;
+    Some(if cfg!(target_os = "windows") {
+        base.config_dir().join("Sublime Text")
+    } else if cfg!(target_os = "macos") {
+        base.data_dir().join("Sublime Text")
+    } else {
+        base.config_dir().join("sublime-text")
+    })
 }
 
 fn paths(dir: &Path, archives: PathBuf) -> PackagePaths {
@@ -292,10 +312,10 @@ fn install_package_control_downloads_and_loads_it() {
 #[test]
 #[ignore = "runs the Package Control installed in Sublime Text, in a temporary profile"]
 fn package_control_loads_in_a_scratch_profile() {
-    let Some(config) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+    let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = config.join("Sublime Text").join("Installed Packages").join("Package Control.sublime-package");
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;

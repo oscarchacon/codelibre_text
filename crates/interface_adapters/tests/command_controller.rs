@@ -664,7 +664,7 @@ fn show_panel_console_opens_the_console() {
 #[test]
 fn every_command_in_the_builtin_resources_is_implemented() {
     let mut commands = Vec::new();
-    for source in [builtin_resources::KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
+    for source in [builtin_resources::PC_KEYMAP, builtin_resources::OSX_KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
         collect_commands(&sublime_json::parse(source).unwrap(), &mut commands);
     }
     for command in commands {
@@ -943,12 +943,14 @@ fn a_listener_s_move_runs_during_the_event() {
 }
 
 #[test]
-fn the_default_keymap_binds_what_the_hooks_must_hear() {
-    let Value::Array(bindings) = sublime_json::parse(builtin_resources::KEYMAP).unwrap() else {
-        panic!("a keymap is a list");
-    };
-    let bound = |key: &str| bindings.iter().find(|b| b["keys"] == json!([key])).map(|b| b["command"].as_str().unwrap());
-    assert_eq!(bound("ctrl+z"), Some("undo"));
-    assert_eq!(bound("ctrl+y"), Some("redo_or_repeat"));
-    assert_eq!(bound("ctrl+a"), Some("select_all"));
+fn the_default_keymaps_bind_what_the_hooks_must_hear() {
+    for (source, primary) in [(builtin_resources::PC_KEYMAP, "ctrl"), (builtin_resources::OSX_KEYMAP, "super")] {
+        let Value::Array(bindings) = sublime_json::parse(source).unwrap() else {
+            panic!("a keymap is a list");
+        };
+        let bound = |key: &str| bindings.iter().find(|b| b["keys"] == json!([key])).map(|b| b["command"].as_str().unwrap());
+        assert_eq!(bound(&format!("{primary}+z")), Some("undo"));
+        assert_eq!(bound(&format!("{primary}+y")), Some("redo_or_repeat"));
+        assert_eq!(bound(&format!("{primary}+a")), Some("select_all"));
+    }
 }

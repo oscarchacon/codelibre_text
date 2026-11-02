@@ -92,9 +92,16 @@ fn unknown_modifiers_and_empty_specs_are_invalid() {
 fn display_is_human_readable() {
     assert_eq!(key("ctrl+shift+p").display(), "Ctrl+Shift+P");
     assert_eq!(key("f11").display(), "F11");
-    assert_eq!(key("alt+pageup").display(), "Alt+Pageup");
+    assert_eq!(key("alt+pageup").display_for(false), "Alt+Pageup");
     let chord = binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar"));
     assert_eq!(chord.display(), "Ctrl+K, Ctrl+B");
+}
+
+#[test]
+fn display_uses_the_macos_modifier_names() {
+    assert_eq!(key("super+shift+p").display_for(true), "Shift+Cmd+P");
+    assert_eq!(key("ctrl+alt+super+g").display_for(true), "Ctrl+Option+Cmd+G");
+    assert_eq!(key("super+shift+p").display_for(false), "Shift+Super+P");
 }
 
 // ----- resolving key presses -----------------------------------------------------------------------

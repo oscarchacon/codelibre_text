@@ -169,8 +169,9 @@ fn paths_are_the_ones_given() {
 fn builtin_key_bindings_are_loaded() {
     let (resources, errors) = ui(&Packages::new().gateway(), false);
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(bound_command(&resources, "ctrl+shift+p").as_deref(), Some("show_overlay"));
-    assert_eq!(bound_command(&resources, "ctrl+s").as_deref(), Some("save"));
+    // `primary` is Cmd on macOS, whose built-in keymap is another one.
+    assert_eq!(bound_command(&resources, "primary+shift+p").as_deref(), Some("show_overlay"));
+    assert_eq!(bound_command(&resources, "primary+s").as_deref(), Some("save"));
 }
 
 #[test]
@@ -211,9 +212,9 @@ fn bindings_with_invalid_keys_are_skipped() {
 #[test]
 fn sublime_texts_own_default_keymap_is_ignored() {
     let packages = Packages::new();
-    packages.sublime_file("Default", "Default.sublime-keymap", r#"[{ "keys": ["ctrl+s"], "command": "native_save" }]"#);
+    packages.sublime_file("Default", "Default.sublime-keymap", r#"[{ "keys": ["primary+s"], "command": "native_save" }]"#);
     let (resources, _) = ui(&packages.gateway(), true);
-    assert_eq!(bound_command(&resources, "ctrl+s").as_deref(), Some("save"));
+    assert_eq!(bound_command(&resources, "primary+s").as_deref(), Some("save"));
 }
 
 #[test]

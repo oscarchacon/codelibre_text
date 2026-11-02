@@ -97,6 +97,23 @@ class ArchiveFinder:
 sys.meta_path.insert(0, ArchiveFinder)
 
 
+def allow_post_handshake_auth():
+    """Apple's ``/usr/bin/python3`` is built with LibreSSL: its ``SSLContext`` has
+    ``post_handshake_auth`` but refuses to set it, and Package Control sets it before every
+    download. Contexts made from then on ignore it (it only matters with client certificates)."""
+    import ssl
+
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).post_handshake_auth = True
+    except AttributeError:
+        ssl.SSLContext.post_handshake_auth = property(lambda self: False, lambda self, value: None)
+    except Exception:
+        pass
+
+
+allow_post_handshake_auth()
+
+
 def visible_path(directory, archives):
     """The path plugins see for a package's folder; registers it when it was unpacked."""
     parent, name = os.path.split(directory)

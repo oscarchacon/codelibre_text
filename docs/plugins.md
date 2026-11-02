@@ -286,6 +286,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
       More shims as plugins need them (`asyncore` / `asynchat`, the rest of `distutils`).
+      On macOS that is often Apple's `/usr/bin/python3` (3.9, LibreSSL), whose `SSLContext.post_handshake_auth` cannot be
+      set: `plugin_host.py::allow_post_handshake_auth` makes it a no-op, or every Package Control download fails.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
       It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,

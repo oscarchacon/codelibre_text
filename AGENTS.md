@@ -32,6 +32,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Only positional `files` and `--fullscreen` are used from `crates/frameworks/src/cli.rs`.
 
 ## Adding things
+- Key binding: in both `assets/Default/Default.sublime-keymap` (Windows/Linux, `ctrl`) and `Default (OSX).sublime-keymap`
+  (macOS, `super` = Cmd, Sublime's macOS keys); `builtin_resources::KEYMAP` picks one, and a test checks they bind the same commands.
 - Text users see: never a bare literal. Use `tr` / `tr_args` / `tr_n` (on `Editor`, or `Translations` in views) with a
   string literal, then `UPDATE_TRANSLATIONS=1 cargo test -p interface_adapters --test builtin_resources` and translate
   the new entries in every `assets/Default/Localization/*.po` (that test fails otherwise). See `docs/translating.md`.

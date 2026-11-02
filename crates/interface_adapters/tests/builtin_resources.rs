@@ -1,16 +1,16 @@
 //! Tests for the built-in resources in `assets/Default/` (compiled into the binary).
 
+use entities::keymap::KeyCombo;
 use interface_adapters::gateways::{builtin_resources, color_scheme_file, po_file, sublime_json};
 use serde_json::Value;
 
 #[test]
 fn every_builtin_json_resource_is_valid() {
-    for (name, source) in [
-        ("Default.sublime-keymap", builtin_resources::KEYMAP),
+    for (name, source) in builtin_resources::KEYMAPS.iter().copied().chain([
         ("Default.sublime-commands", builtin_resources::PALETTE_COMMANDS),
         ("Main.sublime-menu", builtin_resources::MAIN_MENU),
         ("Preferences.sublime-settings", builtin_resources::PREFERENCES),
-    ] {
+    ]) {
         sublime_json::parse(source).unwrap_or_else(|e| panic!("{name}: {e}"));
     }
 }
@@ -29,11 +29,30 @@ fn the_default_preferences_cover_the_documented_settings() {
 
 #[test]
 fn every_keymap_entry_has_keys_and_a_command() {
-    let keymap = sublime_json::parse(builtin_resources::KEYMAP).unwrap();
-    for binding in keymap.as_array().unwrap() {
-        assert!(binding["keys"].as_array().is_some_and(|k| !k.is_empty()), "{binding}");
-        assert!(binding["command"].is_string(), "{binding}");
+    for (name, source) in builtin_resources::KEYMAPS {
+        let keymap = sublime_json::parse(source).unwrap();
+        for binding in keymap.as_array().unwrap() {
+            assert!(binding["keys"].as_array().is_some_and(|k| !k.is_empty()), "{name}: {binding}");
+            assert!(binding["command"].is_string(), "{name}: {binding}");
+            for key in binding["keys"].as_array().unwrap() {
+                assert!(KeyCombo::parse(key.as_str().unwrap()).is_some(), "{name}: {binding}");
+            }
+        }
     }
+}
+
+/// Each keymap binds the same commands, so both platforms have every built-in shortcut.
+#[test]
+fn the_macos_keymap_binds_the_same_commands_as_the_others() {
+    let commands = |source: &str| {
+        let mut found = Vec::new();
+        commands_in(&sublime_json::parse(source).unwrap(), &mut found);
+        found.into_iter().collect::<std::collections::BTreeSet<_>>()
+    };
+    let mut pc = commands(builtin_resources::PC_KEYMAP);
+    // Cmd+Shift+Z is redo on macOS; Ctrl+Y does it on the others.
+    pc.insert("redo".to_string());
+    assert_eq!(commands(builtin_resources::OSX_KEYMAP), pc);
 }
 
 #[test]
@@ -79,7 +98,7 @@ pub fn commands_in(value: &Value, out: &mut Vec<String>) {
 #[test]
 fn the_builtin_resources_reference_commands() {
     let mut commands = Vec::new();
-    for source in [builtin_resources::KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
+    for source in [builtin_resources::PC_KEYMAP, builtin_resources::OSX_KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
         commands_in(&sublime_json::parse(source).unwrap(), &mut commands);
     }
     assert!(commands.len() > 100);

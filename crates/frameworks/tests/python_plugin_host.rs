@@ -453,6 +453,32 @@ class FancyCommand(sublime_plugin.TextCommand):
     assert_eq!(editor_status(&editor), "True (0, 4) 0 1 'text.plain ' True", "console:\n{}", editor.state().console);
 }
 
+/// Package Control sets `post_handshake_auth` before every download, which Apple's
+/// `/usr/bin/python3` (LibreSSL) refuses unless the host lets it.
+#[test]
+fn plugins_can_set_up_tls_contexts_like_package_control() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import ssl
+import sublime
+import sublime_plugin
+
+class TlsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        if hasattr(context, 'post_handshake_auth'):
+            context.post_handshake_auth = True
+        context.load_default_certs(ssl.Purpose.SERVER_AUTH)
+        sublime.status_message("ready %s" % type(ssl.create_default_context()).__name__)
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("tls"));
+    assert_eq!(editor_status(&editor), "ready SSLContext", "console:\n{}", editor.state().console);
+}
+
 fn editor_status(editor: &Editor) -> String {
     editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default()
 }

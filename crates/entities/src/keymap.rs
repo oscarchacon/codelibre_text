@@ -49,20 +49,28 @@ impl KeyCombo {
         (!combo.key.is_empty()).then_some(combo)
     }
 
-    /// Human readable form for menus and the command palette, e.g. `Ctrl+Shift+P`.
+    /// Human readable form for menus and the command palette, e.g. `Ctrl+Shift+P`
+    /// (`Shift+Cmd+P` on macOS).
     pub fn display(&self) -> String {
+        self.display_for(cfg!(target_os = "macos"))
+    }
+
+    /// [`display`](Self::display) with the modifier names and order of macOS (Ctrl, Option,
+    /// Shift, Cmd) or of the other systems.
+    pub fn display_for(&self, macos: bool) -> String {
+        let (alt, super_key) = if macos { ("Option", "Cmd") } else { ("Alt", "Super") };
         let mut parts = Vec::new();
         if self.ctrl {
             parts.push("Ctrl".to_string());
         }
         if self.alt {
-            parts.push("Alt".to_string());
+            parts.push(alt.to_string());
         }
         if self.shift {
             parts.push("Shift".to_string());
         }
         if self.super_key {
-            parts.push("Super".to_string());
+            parts.push(super_key.to_string());
         }
         let mut chars = self.key.chars();
         let key = match (chars.next(), self.key.chars().count()) {

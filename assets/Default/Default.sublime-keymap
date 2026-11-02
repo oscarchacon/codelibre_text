@@ -1,4 +1,5 @@
-// Built-in key bindings, using Sublime Text's command names.
+// Built-in key bindings for Windows and Linux, using Sublime Text's command names
+// (macOS uses Default (OSX).sublime-keymap instead).
 // Override them in Packages/User/Default (<platform>).sublime-keymap (Preferences > Key Bindings).
 // Undo/redo, clipboard, selection and caret movement are handled natively by the editor.
 [
