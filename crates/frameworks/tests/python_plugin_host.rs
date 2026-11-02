@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use codelibre_text::gateways::{
-    child_processes::ChildProcesses, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
+    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
     syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
 };
 use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
@@ -100,6 +100,8 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
+        downloads: Box::new(CurlDownloads::default()),
+        error_log: Box::new(FileErrorLog::new(dir.join("Errors.log"))),
         plugins: Box::new(PythonPluginHost::new(dir.join("Lib").join("python"))),
     });
     editor.set_event_command_runner(command_controller::run_during_event);
@@ -419,6 +421,36 @@ class MarkCommand(sublime_plugin.TextCommand):
     assert_eq!(doc.region_sets()[0].flags, 32 | 256 | 2048);
     assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 11, center: true }));
     assert_eq!(editor.plugin_statuses(doc.id), ["2 marks"]);
+}
+
+#[test]
+fn plugins_using_what_is_not_implemented_still_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import imp
+from distutils.version import LooseVersion
+import sublime
+import sublime_plugin
+
+class FancyCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        self.view.insert(edit, 0, "word")
+        phantoms = sublime.PhantomSet(self.view, "lint")
+        phantoms.update([sublime.Phantom(sublime.Region(0, 4), "<b>x</b>", sublime.LAYOUT_BELOW)])
+        self.view.show_popup("<p>hi</p>", sublime.HIDE_ON_MOUSE_MOVE_AWAY)
+        self.view.window().set_layout(self.view.window().layout())
+        newer = LooseVersion("1.10") > LooseVersion("1.9")
+        sublime.status_message("%s %s %s %s %r %s" % (
+            newer, self.view.extract_scope(1), sublime.score_selector("source.python string", "source - string"),
+            sublime.score_selector("source.python", "source"), self.view.scope_name(1),
+            self.view.match_selector(1, "text")))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("fancy"));
+    assert_eq!(editor_status(&editor), "True (0, 4) 0 1 'text.plain ' True", "console:\n{}", editor.state().console);
 }
 
 fn editor_status(editor: &Editor) -> String {
@@ -912,6 +944,38 @@ class PickCommand(sublime_plugin.WindowCommand):
     let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
     assert_eq!(args[1], json!([["one", "", "note", "f"]]));
     assert_eq!(args[2], json!(2));
+}
+
+#[test]
+fn quick_panel_item_details_and_annotations_are_minihtml_shown_as_text() {
+    let dir = tempfile::tempdir().unwrap();
+    // As Package Control 4 lists packages.
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class PickCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        item = sublime.QuickPanelItem("1337", [
+            "<em>1337 - A &amp; B for &#x27;Sublime&#x27;</em>",
+            "<em>install v2.0.0</em> <a href=\"https://github.com/x/y\">github.com/x/y</a><br>more",
+        ], "<i>Updated on Wed Jul 04, 2018</i>")
+        plain = ["caption", "<b>kept</b> as written"]
+        self.window.show_quick_panel([item, plain], None)
+"#;
+    let Some((mut host, _)) = host_with(dir.path(), &[("pick.py", plugin)]) else {
+        return;
+    };
+    let mut log = String::new();
+    host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
+    let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
+    assert_eq!(
+        args[1],
+        json!([
+            ["1337", "1337 - A & B for 'Sublime' · install v2.0.0 github.com/x/y more", "Updated on Wed Jul 04, 2018", ""],
+            ["caption", "<b>kept</b> as written", ""],
+        ])
+    );
 }
 
 #[test]

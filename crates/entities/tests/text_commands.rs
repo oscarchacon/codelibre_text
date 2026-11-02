@@ -29,6 +29,31 @@ fn replace_selection_puts_the_caret_after_the_insert() {
 }
 
 #[test]
+fn insert_snippet_wraps_the_selection_and_keeps_it_selected() {
+    let (text, selection) = run("a word b", sel(2, 6), |t, s| insert_snippet(t, s, "*${0:$SELECTION}*"));
+    assert_eq!(text, "a *word* b");
+    assert_eq!(selection, sel(3, 7));
+}
+
+#[test]
+fn insert_snippet_puts_the_caret_on_the_first_field() {
+    let (text, selection) = run("", caret(0), |t, s| insert_snippet(t, s, "fn ${1:name}($2) {$0}"));
+    assert_eq!(text, "fn name() {}");
+    assert_eq!(selection, sel(3, 7), "the first field's default is selected");
+    let (text, selection) = run("x", caret(1), |t, s| insert_snippet(t, s, "\"$0\""));
+    assert_eq!(text, "x\"\"");
+    assert_eq!(selection, caret(2));
+}
+
+#[test]
+fn insert_snippet_without_fields_ends_after_the_text_and_keeps_other_variables() {
+    let (text, selection) = run("", caret(0), |t, s| insert_snippet(t, s, "'"));
+    assert_eq!((text.as_str(), selection), ("'", caret(1)));
+    let (text, _) = run("", caret(0), |t, s| insert_snippet(t, s, "\\$${SELECTION} $TM_FILENAME ${1/a/b/}"));
+    assert_eq!(text, "$ $TM_FILENAME ");
+}
+
+#[test]
 fn insert_tab_inserts_a_tab_character() {
     let (text, selection) = run("ab", caret(1), |t, s| insert_tab(t, s, 4, false));
     assert_eq!(text, "a\tb");

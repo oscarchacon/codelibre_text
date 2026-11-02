@@ -93,16 +93,10 @@ fn arguments(merged: &Map<String, Value>) -> Map<String, Value> {
     merged.iter().filter(|(key, _)| !SELECTION_KEYS.contains(&key.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-/// Whether a scope selector matches the scope of a file (`source.python`). Alternatives go with
-/// `,` or `|`, spaces mean "and", ` - ` excludes.
+/// Whether a build's scope selector matches the scope of a file (`source.python`); an empty one
+/// matches nothing (the build is chosen by its other keys).
 pub fn selector_matches(selector: &str, scope: &str) -> bool {
-    let has = |wanted: &str| scope.split_whitespace().any(|s| s == wanted || s.strip_prefix(wanted).is_some_and(|r| r.starts_with('.')));
-    let alternative = |text: &str| {
-        let mut parts = text.split(" - ");
-        let wanted = parts.next().unwrap_or_default().split_whitespace().collect::<Vec<_>>();
-        !wanted.is_empty() && wanted.iter().all(|w| has(w)) && parts.all(|excluded| !has(excluded.trim()))
-    };
-    selector.split([',', '|']).any(alternative)
+    !selector.trim().is_empty() && crate::selector::matches_selector(scope, selector)
 }
 
 /// Expands `$name`, `${name}`, `${name:default}` and `${name/regex/replacement/}`. `\$` is a

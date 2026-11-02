@@ -2,7 +2,7 @@ use std::path::Path;
 
 use entities::document::DocumentId;
 use entities::symbol::Symbol;
-use use_cases::gateways::SyntaxGateway;
+use use_cases::gateways::{ScopeSpan, SyntaxGateway};
 
 use crate::syntax_engine::SharedSyntaxEngine;
 
@@ -36,6 +36,10 @@ impl SyntaxGateway for SyntectSyntaxes {
 
     fn symbols(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol> {
         self.0.borrow_mut().symbols(document, text, syntax)
+    }
+
+    fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
+        self.0.borrow_mut().line_scopes(document, text, syntax, line)
     }
 
     fn forget(&self, document: DocumentId) {

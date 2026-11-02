@@ -50,5 +50,5 @@ body:
     id: logs
     attributes:
       label: Errors
-      description: Messages from Help > Package Load Errors and from the console (Ctrl+`).
+      description: Filled in by Help > Report an Issue with this session's errors. Older ones are in Help > Error Log; also see the console (Ctrl+`).
       render: text

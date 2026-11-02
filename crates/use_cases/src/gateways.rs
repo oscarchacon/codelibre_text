@@ -151,6 +151,17 @@ pub trait ClipboardGateway {
 pub trait ShellGateway {
     fn open_in_file_manager(&self, path: &Path);
     fn open_url(&self, url: &str);
+    /// The user's home folder, left out of bug reports (it holds their name).
+    fn home_folder(&self) -> Option<PathBuf>;
+}
+
+/// The error log (`data\Local\Errors.log`): every error the user was told about, with its time,
+/// for bug reports.
+pub trait ErrorLogGateway {
+    /// Adds the errors (each one or more lines) under the current time. Never fails: a log that
+    /// cannot be written must not become another error.
+    fn append(&self, errors: &[String]);
+    fn path(&self) -> PathBuf;
 }
 
 /// Key bindings, menus and command palette entries read from packages.
@@ -195,6 +206,13 @@ pub trait ResourceGateway {
     fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
 }
 
+/// A piece of a line and its scope, e.g. `source.python string.quoted.double.python`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeSpan {
+    pub range: std::ops::Range<usize>,
+    pub scope: String,
+}
+
 /// Syntax definitions and color schemes.
 pub trait SyntaxGateway {
     /// Reloads syntaxes and color schemes from packages. Problems are appended to `errors`.
@@ -209,6 +227,9 @@ pub trait SyntaxGateway {
     fn color_scheme_names(&self) -> Vec<String>;
     /// Functions, classes, headings… of a document, for Goto Symbol.
     fn symbols(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol>;
+    /// The scopes of line `line` of `text` (lines end after `\n`), in order, covering the whole
+    /// line. Ranges are bytes of the line. Nothing for a line past the end.
+    fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan>;
     /// The document was closed; cached data about it can go.
     fn forget(&self, document: DocumentId);
 }
@@ -328,6 +349,15 @@ pub trait ProcessGateway {
     fn poll(&mut self) -> Vec<ProcessEvent>;
     /// Kills the process and its children. It still reports `Finished`.
     fn kill(&mut self);
+}
+
+/// Downloads a file in the background (Package Control's installer).
+pub trait DownloadGateway {
+    /// Starts downloading `url` to `destination`, which appears only once complete. A download
+    /// still running is forgotten.
+    fn start(&mut self, url: &str, destination: &Path) -> Result<(), String>;
+    /// The download that finished since the last call, once; never waits.
+    fn poll(&mut self) -> Option<Result<(), String>>;
 }
 
 /// Background list of the files in the open folders (for Goto Anything).

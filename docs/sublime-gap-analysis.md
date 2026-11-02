@@ -50,7 +50,7 @@ cannot be told apart by the string scan and are listed under native.
 | Build | `toggle_save_all_on_build` | native / py |
 | UI toggles | `toggle_minimap`, `toggle_menu`, `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |
 | Misc | `switch_file` (Alt+O), ~~`open_url`~~ (done), `open_in_browser`, `open_context_url`, `open_terminal`, `copy_as_html`, `html_print`, `view_resource`, `edit_syntax_settings`, `convert_syntax`, `chain`, `context_menu` | native / py |
-| Out of scope | `sublime_merge_*`, license/update commands, `install_package_control`, `new_plugin`, syntax-test/profiling commands | — |
+| Out of scope | `sublime_merge_*`, license/update commands, `new_plugin`, syntax-test/profiling commands | — |
 
 ## Settings not yet read (most user-visible first)
 

@@ -50,6 +50,7 @@ impl App {
         let events = ctx.input(|i| i.events.clone());
         let real_events = events.len().saturating_sub(self.injected_event_count);
         let mut consumed = Vec::new();
+        let mut last_combos = Vec::new();
         for (index, event) in events.iter().enumerate().take(real_events) {
             match event {
                 Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
@@ -57,9 +58,20 @@ impl App {
                     if let KeyHandling::Consumed = keyboard_controller::key_pressed(&mut self.editor, &mut self.view, &combos) {
                         consumed.push(index);
                     }
+                    last_combos = combos;
                 }
                 // A consumed key must not also type its character (e.g. Alt+1 typing "1").
                 Event::Text(_) if index > 0 && consumed.last() == Some(&(index - 1)) => consumed.push(index),
+                // Keymaps bind symbols by the character (`*`, `"`): asked once it is typed, unless
+                // its key event already had that name.
+                Event::Text(text) => {
+                    let typed = input::typed_combo(text).filter(|combo| !last_combos.contains(combo));
+                    if let Some(combo) = typed {
+                        if let KeyHandling::Consumed = keyboard_controller::key_pressed(&mut self.editor, &mut self.view, &[combo]) {
+                            consumed.push(index);
+                        }
+                    }
+                }
                 // egui turns Ctrl+C/X/V into these events, without a key event.
                 Event::Copy | Event::Cut | Event::Paste(_) => {
                     let command = match event {
@@ -271,6 +283,7 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
         self.editor.poll_builds();
+        self.editor.poll_downloads();
         self.editor.check_external_changes();
         self.handle_close_request(ctx);
 

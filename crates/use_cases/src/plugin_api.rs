@@ -10,6 +10,7 @@ use entities::command::Command;
 use entities::document::{DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
 use entities::selection::Selection;
+use entities::selector::score_selector;
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
@@ -236,6 +237,17 @@ impl Editor {
             "window_active_panel" if self.plugin_input_panel().is_some() => Ok(json!("input")),
             "window_active_panel" => Ok(self.shown_output_panel().map_or(Value::Null, |p| json!(format!("output.{}", p.name)))),
             "window_panels" => Ok(json!(self.output_panel_names())),
+            "score_selector" => Ok(json!(score_selector(a.str(0)?, a.str(1)?))),
+            "view_scope_name" => Ok(json!(self.scope_name(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?)),
+            "view_extract_scope" => {
+                let (start, end) = self.extract_scope(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?;
+                Ok(json!([start, end]))
+            }
+            "view_find_by_selector" => Ok(json!(self.find_by_selector(a.u64(0)?, a.str(1)?))),
+            "view_extract_tokens_with_scopes" => {
+                let tokens = self.scoped_ranges(a.u64(0)?, a.usize(1)?, a.usize(2)?);
+                Ok(json!(tokens.into_iter().map(|t| json!([[t.start, t.end], format!("{} ", t.scope)])).collect::<Vec<_>>()))
+            }
             "view_close" => {
                 // A dirty view asks to save first, so it may still be open.
                 let id = a.u64(0)?;

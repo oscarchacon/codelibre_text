@@ -45,6 +45,7 @@ pub mod plugins;
 pub mod preferences;
 pub mod project;
 pub mod saving;
+pub mod scopes;
 pub mod search;
 pub mod session;
 

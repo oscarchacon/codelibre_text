@@ -2,11 +2,13 @@
 
 Written from the public API reference (https://www.sublimetext.com/docs/api_reference.html).
 Regions, selections, views, the window, settings, commands and timers.
-What is not implemented yet is listed in ``docs/plugins.md``; calling it raises AttributeError.
+What is not implemented yet is listed in ``docs/plugins.md``; most of it has a stand-in that does
+nothing (popups, phantoms, folding, groups, symbols), so plugins that use it still load.
 """
 
 import collections
 import heapq
+import html
 import itertools
 import json
 import os
@@ -90,9 +92,29 @@ HOVER_MARGIN = 3
 COOPERATE_WITH_AUTO_COMPLETE = 2
 HIDE_ON_MOUSE_MOVE = 4
 HIDE_ON_MOUSE_MOVE_AWAY = 8
+KEEP_ON_SELECTION_MODIFIED = 16
+HIDE_ON_CHARACTER_EVENT = 32
 
 INHIBIT_WORD_COMPLETIONS = 8
 INHIBIT_EXPLICIT_COMPLETIONS = 16
+DYNAMIC_COMPLETIONS = 32
+INHIBIT_REORDER = 128
+
+COMPLETION_FORMAT_TEXT = 0
+COMPLETION_FORMAT_SNIPPET = 1
+COMPLETION_FORMAT_COMMAND = 2
+COMPLETION_FLAG_KEEP_PREFIX = 1
+
+LAYOUT_INLINE = 0
+LAYOUT_BELOW = 1
+LAYOUT_BLOCK = 2
+
+SYMBOL_SOURCE_ANY = 0
+SYMBOL_SOURCE_INDEX = 1
+SYMBOL_SOURCE_OPEN_FILES = 2
+SYMBOL_TYPE_ANY = 0
+SYMBOL_TYPE_DEFINITION = 1
+SYMBOL_TYPE_REFERENCE = 2
 
 OP_EQUAL = 0
 OP_NOT_EQUAL = 1
@@ -394,6 +416,14 @@ class ListInputItem:
         return "ListInputItem(%r, %r, %r, %r, %r)" % (self.text, self.value, self.details, self.annotation, self.kind)
 
 
+def _html_text(text):
+    """The text of Sublime's minihtml (what QuickPanelItem details and annotations hold): tags
+    dropped, ``<br>`` as a space, entities decoded, runs of spaces as one."""
+    text = re.sub(r"<br\s*/?>", " ", str(text), flags=re.IGNORECASE)
+    text = html.unescape(re.sub(r"<[^>]*>", "", text))
+    return " ".join(text.split())
+
+
 def _quick_panel_item(item):
     """A quick panel row as ``[caption, detail, hint]``: from a string, a list of strings (the
     caption, then detail lines), a QuickPanelItem or a ListInputItem."""
@@ -402,7 +432,8 @@ def _quick_panel_item(item):
     if isinstance(item, QuickPanelItem):
         details = item.details if isinstance(item.details, (list, tuple)) else [item.details]
         letter = item.kind[1] if isinstance(item.kind, (list, tuple)) and len(item.kind) > 1 else ""
-        return [str(item.trigger), " · ".join(str(d) for d in details if d), str(item.annotation or ""), letter]
+        details = (_html_text(d) for d in details if d)
+        return [str(item.trigger), " · ".join(d for d in details if d), _html_text(item.annotation or ""), letter]
     if isinstance(item, (list, tuple)):
         return [str(item[0]) if item else "", " · ".join(str(d) for d in item[1:] if d), ""]
     return [str(item), "", ""]
@@ -438,6 +469,104 @@ def log_input(flag=None):
 
 def log_result_regex(flag=None):
     pass
+
+
+def log_indexing(flag=None):
+    pass
+
+
+def log_build_systems(flag=None):
+    pass
+
+
+def log_control_tree(flag=None):
+    pass
+
+
+def log_fps(flag=None):
+    pass
+
+
+def get_log_commands():
+    return False
+
+
+def get_log_input():
+    return False
+
+
+def get_log_result_regex():
+    return False
+
+
+def get_log_indexing():
+    return False
+
+
+def get_log_build_systems():
+    return False
+
+
+def get_log_control_tree():
+    return False
+
+
+def get_log_fps():
+    return False
+
+
+def get_clipboard_async(callback, size_limit=16777216):
+    text = get_clipboard(size_limit)
+    set_timeout(lambda: callback(text))
+
+
+def get_macro():
+    return []
+
+
+def ui_info():
+    preferences = load_settings("Preferences.sublime-settings")
+    return {"theme": {"resolved_value": preferences.get("theme", "")},
+            "color_scheme": {"resolved_value": preferences.get("color_scheme", "")}}
+
+
+def command_url(cmd, args=None):
+    return "subl:%s %s" % (cmd, json.dumps(args)) if args else "subl:%s" % cmd
+
+
+def html_format_command(cmd, args=None):
+    return cmd
+
+
+def format_command(cmd, args=None):
+    return "%s %s" % (cmd, json.dumps(args)) if args else cmd
+
+
+# Syntax definitions are syntect's (``syntax_engine.rs``) and not listed to plugins yet.
+def list_syntaxes():
+    return []
+
+
+def syntax_from_path(path):
+    return None
+
+
+def find_syntax_by_name(name):
+    return []
+
+
+def find_syntax_by_scope(scope):
+    return []
+
+
+def find_syntax_for_file(path, first_line=""):
+    return None
+
+
+def score_selector(scope_name, selector):
+    """How well ``selector`` matches ``scope_name`` (space-separated scopes, outermost first): 0 when
+    it does not (``entities::selector`` in the editor)."""
+    return sublime_api.score_selector(scope_name, selector)
 
 
 # ----- regions and selections --------------------------------------------------------------------
@@ -866,7 +995,6 @@ class View:
     def visible_region(self):
         return Region(*sublime_api.view_visible_region(self.view_id))
 
-    # Scopes need the syntax engine (phase C): nothing matches yet.
     def find_all_results(self):
         """The results of the view's ``result_*`` settings: ``(file, line, column)`` tuples."""
         return [(file, row, col) for file, row, col, _ in sublime_api.view_find_all_results(self.view_id)]
@@ -874,14 +1002,227 @@ class View:
     def find_all_results_with_text(self):
         return [tuple(result) for result in sublime_api.view_find_all_results(self.view_id)]
 
+    # Scopes come from the syntax engine (syntect), one line parsed again per question.
     def scope_name(self, pt):
-        return ""
+        return sublime_api.view_scope_name(self.view_id, pt)
 
     def match_selector(self, pt, selector):
-        return False
+        return self.score_selector(pt, selector) > 0
 
     def score_selector(self, pt, selector):
+        return score_selector(self.scope_name(pt), selector)
+
+    def extract_scope(self, pt):
+        return Region(*sublime_api.view_extract_scope(self.view_id, pt))
+
+    def expand_to_scope(self, pt, selector):
+        """The run of text around ``pt`` that ``selector`` matches, or None."""
+        for a, b in sublime_api.view_find_by_selector(self.view_id, selector):
+            if a <= pt <= b:
+                return Region(a, b)
+        return None
+
+    def find_by_selector(self, selector):
+        return [Region(a, b) for a, b in sublime_api.view_find_by_selector(self.view_id, selector)]
+
+    def extract_tokens_with_scopes(self, region):
+        return [(Region(a, b), scope) for (a, b), scope in
+                sublime_api.view_extract_tokens_with_scopes(self.view_id, region.begin(), region.end())]
+
+    def context_backtrace(self, pt):
+        return []
+
+    def meta_info(self, key, pt):
+        return None
+
+    def style(self):
+        return {"foreground": "#000000", "background": "#ffffff", "caret": "#000000",
+                "selection": "#c0d8f0", "line_highlight": "#f0f0f0"}
+
+    def style_for_scope(self, scope):
+        style = self.style()
+        return {"foreground": style["foreground"], "source_line": 0, "source_column": 0, "source_file": ""}
+
+    # Symbols need scopes; folding, popups, phantoms and auto-complete are not implemented. These
+    # stand-ins let plugins that use them load and run (nothing shows).
+    def symbol_regions(self):
+        return []
+
+    def indexed_symbol_regions(self, type=SYMBOL_TYPE_ANY):
+        return []
+
+    def symbols(self):
+        return []
+
+    def indexed_symbols(self):
+        return []
+
+    def indexed_references(self):
+        return []
+
+    def get_symbols(self):
+        return []
+
+    def classify(self, pt):
         return 0
+
+    def find_by_class(self, pt, forward, classes, separators="", sub_word_separators=""):
+        word = self.word(pt)
+        if forward:
+            return word.end() if word.end() > pt else min(pt + 1, self.size())
+        return word.begin() if word.begin() < pt else max(pt - 1, 0)
+
+    def expand_by_class(self, x, classes, separators="", sub_word_separators=""):
+        return self.word(x)
+
+    def show_popup(self, content, flags=0, location=-1, max_width=320, max_height=240, on_navigate=None,
+                   on_hide=None):
+        pass
+
+    def update_popup(self, content):
+        pass
+
+    def is_popup_visible(self):
+        return False
+
+    def hide_popup(self):
+        pass
+
+    def show_popup_menu(self, items, on_select, flags=0):
+        """A menu at the caret: shown as a quick panel."""
+        self.window().show_quick_panel(items, on_select, flags)
+
+    def add_phantom(self, key, region, content, layout, on_navigate=None):
+        return next(_phantom_ids)
+
+    def erase_phantoms(self, key):
+        pass
+
+    def erase_phantom_by_id(self, pid):
+        pass
+
+    def query_phantom(self, pid):
+        return []
+
+    def query_phantoms(self, pids):
+        return []
+
+    def is_auto_complete_visible(self):
+        return False
+
+    def preserve_auto_complete_on_focus_lost(self):
+        pass
+
+    def extract_completions(self, prefix, tp=-1):
+        return []
+
+    def fold(self, x):
+        return False
+
+    def unfold(self, x):
+        return []
+
+    def folded_regions(self):
+        return []
+
+    def is_folded(self, region):
+        return False
+
+    def overwrite_status(self):
+        return False
+
+    def set_overwrite_status(self, value):
+        pass
+
+    def command_history(self, index, modifying_only=False):
+        return ("", None, 0)
+
+    def clear_undo_stack(self):
+        pass
+
+    def has_non_empty_selection_region(self):
+        return any(not r.empty() for r in self.sel())
+
+    def is_in_edit(self):
+        return False
+
+    def element(self):
+        return None
+
+    def sheet(self):
+        return Sheet(self.view_id)
+
+    def sheet_id(self):
+        return self.view_id
+
+    def set_encoding(self, encoding_name):
+        pass
+
+    def export_to_html(self, regions=None, minihtml=False, enclosing_tags=False, font_size=True,
+                       font_family=True):
+        return ""
+
+    def transform_region_from(self, region, change_id):
+        return region
+
+    def change_id(self):
+        return (self.change_count(), 0, 0)
+
+    def rowcol_utf8(self, tp):
+        row, col = self.rowcol(tp)
+        line = self.substr(Region(self.text_point(row, 0), tp))
+        return (row, len(line.encode("utf-8")))
+
+    def rowcol_utf16(self, tp):
+        row, col = self.rowcol(tp)
+        line = self.substr(Region(self.text_point(row, 0), tp))
+        return (row, len(line.encode("utf-16-le")) // 2)
+
+    def text_point_utf8(self, row, col_utf8, clamp_column=False):
+        start = self.text_point(row, 0)
+        line = self.substr(self.line(start)).encode("utf-8")[:col_utf8]
+        return start + len(line.decode("utf-8", errors="ignore"))
+
+    def text_point_utf16(self, row, col_utf16, clamp_column=False):
+        start = self.text_point(row, 0)
+        line = self.substr(self.line(start)).encode("utf-16-le")[:2 * col_utf16]
+        return start + len(line.decode("utf-16-le", errors="ignore"))
+
+    # The view's geometry is the widget's: these answer a fixed font and an unscrolled view.
+    def line_height(self):
+        return 16.0
+
+    def em_width(self):
+        return 8.0
+
+    def viewport_position(self):
+        return (0.0, 0.0)
+
+    def set_viewport_position(self, xy, animate=True):
+        pass
+
+    def viewport_extent(self):
+        return (800.0, 600.0)
+
+    def layout_extent(self):
+        rows = self.rowcol(self.size())[0] + 1
+        return (800.0, rows * self.line_height())
+
+    def text_to_layout(self, tp):
+        row, col = self.rowcol(tp)
+        return (col * self.em_width(), row * self.line_height())
+
+    def text_to_window(self, tp):
+        return self.text_to_layout(tp)
+
+    def layout_to_text(self, vector):
+        return self.text_point(int(vector[1] // self.line_height()), int(vector[0] // self.em_width()))
+
+    def window_to_layout(self, vector):
+        return vector
+
+    def window_to_text(self, vector):
+        return self.layout_to_text(vector)
 
     def add_regions(self, key, regions, scope="", icon="", flags=0, annotations=None, annotation_color="",
                     on_navigate=None, on_close=None, **kwargs):
@@ -918,6 +1259,143 @@ def _point_of(x):
     if isinstance(x, (list, tuple)) and x:
         return _point_of(x[0])
     return None
+
+
+class Sheet:
+    """What a tab holds; here always a view (``sheet_id`` is the view's id)."""
+
+    def __init__(self, sheet_id):
+        self.sheet_id = sheet_id
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, Sheet) and self.sheet_id == rhs.sheet_id
+
+    def __hash__(self):
+        return self.sheet_id
+
+    def __repr__(self):
+        return "Sheet(%d)" % self.sheet_id
+
+    def id(self):
+        return self.sheet_id
+
+    def window(self):
+        return self.view().window()
+
+    def view(self):
+        return View(self.sheet_id)
+
+    def file_name(self):
+        return self.view().file_name()
+
+    def group(self):
+        return 0
+
+    def is_semi_transient(self):
+        return False
+
+    def is_transient(self):
+        return False
+
+    def close(self, on_close=None):
+        return self.view().close(on_close)
+
+
+class TextSheet(Sheet):
+    pass
+
+
+class HtmlSheet(Sheet):
+    def set_name(self, name):
+        pass
+
+    def set_contents(self, contents):
+        pass
+
+
+class ImageSheet(Sheet):
+    pass
+
+
+_phantom_ids = itertools.count(1)
+
+
+class Phantom:
+    """HTML shown in the text. Phantoms are not drawn yet."""
+
+    def __init__(self, region, content, layout, on_navigate=None):
+        self.region = region
+        self.content = content
+        self.layout = layout
+        self.on_navigate = on_navigate
+        self.id = None
+
+    def __eq__(self, rhs):
+        return (isinstance(rhs, Phantom) and self.region == rhs.region and self.content == rhs.content
+                and self.layout == rhs.layout)
+
+    def __repr__(self):
+        return "Phantom(%r, %r, %r)" % (self.region, self.content, self.layout)
+
+
+class PhantomSet:
+    def __init__(self, view, key=""):
+        self.view = view
+        self.key = key
+        self.phantoms = []
+
+    def __del__(self):
+        for phantom in self.phantoms:
+            self.view.erase_phantom_by_id(phantom.id)
+
+    def update(self, phantoms):
+        for phantom in phantoms:
+            phantom.id = self.view.add_phantom(self.key, phantom.region, phantom.content, phantom.layout,
+                                               phantom.on_navigate)
+        self.phantoms = list(phantoms)
+
+
+class Html:
+    def __init__(self, text):
+        self.text = text
+
+    def __repr__(self):
+        return "Html(%r)" % self.text
+
+
+class CompletionItem:
+    """A completion a plugin offers. There is no auto-complete list yet, so none is shown."""
+
+    def __init__(self, trigger, annotation="", completion="", completion_format=COMPLETION_FORMAT_TEXT,
+                 kind=KIND_AMBIGUOUS, details="", flags=0):
+        self.trigger = trigger
+        self.annotation = annotation
+        self.completion = completion
+        self.completion_format = completion_format
+        self.kind = kind
+        self.details = details
+        self.flags = flags
+
+    def __repr__(self):
+        return "CompletionItem(%r, %r)" % (self.trigger, self.completion)
+
+    @classmethod
+    def snippet_completion(cls, trigger, snippet, annotation="", kind=KIND_SNIPPET, details=""):
+        return cls(trigger, annotation, snippet, COMPLETION_FORMAT_SNIPPET, kind, details)
+
+    @classmethod
+    def command_completion(cls, trigger, command, args={}, annotation="", kind=KIND_AMBIGUOUS, details=""):
+        return cls(trigger, annotation, format_command(command, args), COMPLETION_FORMAT_COMMAND, kind, details)
+
+
+class CompletionList:
+    def __init__(self, completions=None, flags=0):
+        self.completions = completions
+        self.flags = flags
+
+    def set_completions(self, completions, flags=0):
+        self.completions = completions
+        self.flags = flags
 
 
 
@@ -1056,8 +1534,131 @@ class Window:
     def project_file_name(self):
         return None
 
+    def workspace_file_name(self):
+        return None
+
     def project_data(self):
         return {"folders": [{"path": folder} for folder in self.folders()]}
+
+    def set_project_data(self, data):
+        pass
+
+    # One group, no sidebar of its own, no symbol index: stand-ins so plugins that ask still run.
+    def layout(self):
+        return {"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]}
+
+    def get_layout(self):
+        return self.layout()
+
+    def set_layout(self, layout):
+        pass
+
+    def focus_group(self, group):
+        pass
+
+    def active_sheet(self):
+        view = self.active_view()
+        return view.sheet() if view else None
+
+    def active_sheet_in_group(self, group):
+        return self.active_sheet()
+
+    def sheets(self):
+        return [view.sheet() for view in self.views()]
+
+    def sheets_in_group(self, group):
+        return self.sheets()
+
+    def selected_sheets(self):
+        sheet = self.active_sheet()
+        return [sheet] if sheet else []
+
+    def selected_sheets_in_group(self, group):
+        return self.selected_sheets()
+
+    def transient_sheet_in_group(self, group):
+        return None
+
+    def transient_view_in_group(self, group):
+        return None
+
+    def focus_sheet(self, sheet):
+        if sheet and sheet.view():
+            self.focus_view(sheet.view())
+
+    def select_sheets(self, sheets):
+        if sheets:
+            self.focus_sheet(sheets[0])
+
+    def get_sheet_index(self, sheet):
+        return self.get_view_index(sheet.view()) if sheet and sheet.view() else (-1, -1)
+
+    def set_view_index(self, view, group, index):
+        pass
+
+    def set_sheet_index(self, sheet, group, index):
+        pass
+
+    def move_sheets_to_group(self, sheets, group, insertion_idx=-1, select=True):
+        pass
+
+    def new_html_sheet(self, name, contents, flags=0, group=-1):
+        return None
+
+    def promote_sheet(self, sheet):
+        pass
+
+    def lookup_symbol_in_index(self, symbol):
+        return []
+
+    def lookup_symbol_in_open_files(self, symbol):
+        return []
+
+    def lookup_references_in_index(self, symbol):
+        return []
+
+    def lookup_references_in_open_files(self, symbol):
+        return []
+
+    def symbol_locations(self, sym, source=SYMBOL_SOURCE_ANY, type=SYMBOL_TYPE_ANY, kind_id=KIND_ID_AMBIGUOUS,
+                         kind_letter=""):
+        return []
+
+    def is_sidebar_visible(self):
+        return True
+
+    def set_sidebar_visible(self, flag, animate=True):
+        pass
+
+    def is_minimap_visible(self):
+        return False
+
+    def set_minimap_visible(self, flag):
+        pass
+
+    def is_status_bar_visible(self):
+        return True
+
+    def set_status_bar_visible(self, flag):
+        pass
+
+    def get_tabs_visible(self):
+        return True
+
+    def set_tabs_visible(self, flag):
+        pass
+
+    def is_menu_visible(self):
+        return True
+
+    def set_menu_visible(self, flag):
+        pass
+
+    def bring_to_front(self):
+        pass
+
+    def hwnd(self):
+        return 0
 
     def extract_variables(self):
         variables = {"packages": packages_path(), "platform": platform().capitalize()

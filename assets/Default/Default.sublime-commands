@@ -74,7 +74,9 @@
 	{ "caption": "Preferences: Key Bindings", "command": "edit_settings", "args": { "base_file": "${packages}/Default/Default (${platform}).sublime-keymap", "default": "[\n\t$0\n]\n" } },
 	{ "caption": "Preferences: Browse Packages", "command": "open_dir", "args": { "dir": "${packages}" } },
 	{ "caption": "Preferences: Reload Packages", "command": "reload_packages" },
+	{ "caption": "Install Package Control", "command": "install_package_control" },
 	{ "caption": "Help: Show Package Load Errors", "command": "show_load_errors" },
+	{ "caption": "Help: Open Error Log", "command": "open_error_log" },
 	{ "caption": "Help: Report an Issue", "command": "report_issue" },
 	{ "caption": "Help: About CodeLibre Text", "command": "show_about_window" },
 ]

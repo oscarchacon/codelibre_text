@@ -170,7 +170,7 @@ fn setting_and_selection_contexts() {
         .with_binding(bind(&["j"], Command::new("move_down"), vec![json!({ "key": "setting.vintage", "operand": true })]))
         .with_binding(bind(&["ctrl+x"], Command::new("cut_line"), vec![json!({ "key": "selection_empty", "operand": true })]))
         .with_binding(bind(&["tab"], Command::new("next_field"), vec![json!({ "key": "has_next_field", "operand": true })]))
-        .with_binding(bind(&["f9"], Command::new("weird"), vec![json!({ "key": "selector", "operand": "source.rust" })]));
+        .with_binding(bind(&["f9"], Command::new("weird"), vec![json!({ "key": "unknown_context", "operand": true })]));
     let mut editor = world.editor();
     let mut view = ViewState::default();
     assert!(press(&mut editor, &mut view, "j"));
@@ -178,6 +178,24 @@ fn setting_and_selection_contexts() {
     assert!(!press(&mut editor, &mut view, "tab"), "no snippet fields");
     assert!(!press(&mut editor, &mut view, "f9"), "unknown contexts never match");
     assert_eq!(queued(&mut view), vec!["move_down", "cut_line"]);
+}
+
+#[test]
+fn selector_context_matches_the_scope_at_a_caret() {
+    let selector = |operator: &str| json!({ "key": "selector", "operator": operator, "operand": "source.python string" });
+    let world = World::new()
+        .with_file("/p/a.py", "x = \"hi\"")
+        .with_binding(bind(&["*"], Command::new("wrap"), vec![selector("equal")]))
+        .with_binding(bind(&["f9"], Command::new("outside"), vec![selector("not_equal")]));
+    let mut editor = world.editor_opening(&["/p/a.py"]);
+    let mut view = ViewState::default();
+    assert!(!press(&mut editor, &mut view, "*"), "the caret is at the start, outside the string");
+    assert!(press(&mut editor, &mut view, "f9"));
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(5));
+    assert!(press(&mut editor, &mut view, "*"));
+    assert!(!press(&mut editor, &mut view, "f9"));
+    assert_eq!(queued(&mut view), vec!["outside", "wrap"]);
 }
 
 #[test]

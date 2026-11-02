@@ -38,6 +38,8 @@ pub enum TextCommand {
     TrimTrailingWhitespace { only_modified: bool, trim_on_caret: bool },
     ReorderLines(LineOrder),
     Insert(String),
+    /// `insert_snippet`'s `contents` (see `text_commands::insert_snippet`).
+    InsertSnippet(String),
 }
 
 /// The `to` values of `expand_selection` besides `line` and `word`.
@@ -141,6 +143,7 @@ impl Editor {
             }
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
             TextCommand::Insert(characters) => Some(tc::replace_selection(text, sel, &characters)),
+            TextCommand::InsertSnippet(contents) => Some(tc::insert_snippet(text, sel, &contents)),
         });
     }
 

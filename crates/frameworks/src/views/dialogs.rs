@@ -1,6 +1,7 @@
 //! Modal questions and small windows: unsaved changes, About, package load errors.
 
 use egui::{Align, Layout, RichText};
+use entities::command::Command;
 use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{AboutViewModel, DialogViewModel};
@@ -92,6 +93,15 @@ pub fn show_load_errors(ctx: &egui::Context, text: &Translations, errors: &[Stri
             if errors.is_empty() {
                 ui.label(text.tr("No errors."));
             }
+            // Above the list, which takes the rest of the window.
+            ui.horizontal(|ui| {
+                for (label, command) in [(text.tr("Report an Issue…"), "report_issue"), (text.tr("Error Log"), "open_error_log")] {
+                    if ui.add(egui::Button::new(label).sense(egui::Sense::CLICK)).clicked() {
+                        events.push(UiEvent::RunCommand(Command::new(command)));
+                    }
+                }
+            });
+            ui.separator();
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for error in errors {
                     ui.label(RichText::new(error).monospace().size(11.0));

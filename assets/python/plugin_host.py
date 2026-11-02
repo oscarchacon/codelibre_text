@@ -167,6 +167,10 @@ def add_library_folders():
     os.makedirs(folder, exist_ok=True)
     if folder not in sys.path:
         sys.path.append(folder)
+    # Last, so the standard library wins where it still has them (``imp``, ``distutils``).
+    shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
+    if shims not in sys.path:
+        sys.path.append(shims)
 
 
 def load(message):

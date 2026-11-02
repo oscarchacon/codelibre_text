@@ -3,7 +3,8 @@
 Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-10-28: request ids, calls
 outside commands, real timers, view events; then quick and input panels; 2026-10-29 dialogs, resources,
 scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks;
-2026-10-30 output panel results, build systems, the input panel's view). The rest of B and phase C below are the pending work, in order.
+2026-10-30 output panel results, build systems, the input panel's view; 2026-11-02 stand-ins for the rest of the API,
+`imp` shim, `install_package_control`, `Installed Packages` watched, scopes and the `selector` context). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -102,6 +103,9 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   Sublime's, except its `Default`), each package imported as a Python package so relative imports work.
 - Settings: `python_plugins` (default true), `python_interpreter` (default: `py -3`, `python3`, `python`, `uv python find`).
 - Output and tracebacks go to the console (`Ctrl+\``, View > Show Console); load errors also go to Help > Package Load Errors.
+  Load errors, plugin command failures, a dead host and Package Control install failures are also written, with
+  their UTC time, to the error log (`data\Local\Errors.log`, Help > Error Log; `Editor::record_errors`), and
+  Help > Report an Issue fills the bug form's Errors field with this session's ones.
 - Saving a `.py` file in a package reloads the plugins (`reload_plugins`); Preferences > Reload Packages too.
 
 ### Adding an API function (the usual change)
@@ -120,7 +124,11 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   `Window` (active_view, views, new_file, open_file incl. `ENCODED_POSITION`, find_open_file, focus_view, folders,
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
-- Stand-ins (so plugins do not crash, but nothing visible happens yet): `scope_name` is `""`, `match_selector` is false.
+- Stand-ins (so plugins do not crash, but nothing visible happens yet), for what phase C will implement:
+  `style_for_scope`, `meta_info`, symbols, popups
+  (`show_popup_menu` is a quick panel), phantoms (`Phantom`, `PhantomSet`), `CompletionItem` / `CompletionList`,
+  folding, the view's geometry (`text_to_layout`…, a fixed 8×16 font), groups / layouts / sheets (`Sheet`), the symbol
+  index, `list_syntaxes` / `find_syntax_*`. (Scopes were stand-ins too; phase C made them real.)
   (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
 ## Phase B — events, panels, async (in progress)
@@ -164,7 +172,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [ ] Hooks, still missing: typing, deleting and caret movement (`insert`, `left_delete`, `move`…) stay the widget's and
       are not seen. (`match_all` reaches `on_query_context` from the binding; `on_post_*_async` run on the async thread.)
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
-      items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `,
+      items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `; the minihtml of details and annotations is shown as text,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
       Python keeps the callbacks by id (`sublime._callbacks`); the editor answers `select` (index in the plugin's
       list, -1 when dismissed or replaced by another quick panel) and `highlight` (also for the first selection).
@@ -271,29 +279,51 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
       would take every key) and their plugins are not loaded. A change needs `reload_packages`; Package Control's
       toggling while upgrading is not followed yet.
-- [ ] **Libraries / dependencies**: ST4 `Lib/python38` (and Package Control's `dependencies.json` / `libraries`) on `sys.path`.
+- [x] **Libraries**: `Lib/python38`, where Package Control 4 installs libraries, is on `sys.path` (`add_library_folders`
+      in `plugin_host.py`).
+- [ ] Libraries, still missing: Package Control 3's `dependencies.json` / dependency packages (`Packages/<dep>/all`, `st3`…).
+- [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
+      has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
-      Provide shims for removed modules (e.g. `imp`, gone in 3.12 — Sublime ships one for its 3.14 host) next to `sublime.py`.
+      More shims as plugins need them (`asyncore` / `asynchat`, the rest of `distutils`).
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
       It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,
       else an empty `Lib/Packages`, because it drops from `ignored_packages` any package it does not find, and would
       enable Vintage; `Lib/python38` (on `sys.path`) and `Lib/python33`; `Packages/Default/*` built-in defaults as
       resources; `Settings.settings_id`.
-- [ ] **Package Control bootstrap**: `install_package_control` downloads `Package Control.sublime-package` into
-      `Installed Packages` (ask the user: it downloads and runs code). There is no such command yet.
-- [ ] Packages installed by Package Control need Reload Packages: nothing watches `Installed Packages`, and a plugin
-      package's plugins start only then. Not tried yet: a package with plugins or libraries, upgrades, removal.
-- [ ] **Scopes** from the syntax engine (`syntax_engine.rs` / syntect parse state): `scope_name`, `match_selector`,
-      `score_selector`, `extract_scope`, `style_for_scope`, `sublime.score_selector`, `view.meta_info`, `view.symbol_regions`.
+- [x] **Package Control bootstrap**: `install_package_control` (Tools > Install Package Control…, the palette) asks
+      first (it downloads and runs code), then downloads `PACKAGE_CONTROL_URL` (`use_cases/src/packages.rs`: the latest GitHub release; packagecontrol.io still serves 3.4.1, which fails on Python 3.11+) into our
+      `Installed Packages` through `DownloadGateway` (`curl_downloads.rs`: `curl` in a thread, to `<file>.download`, renamed
+      when complete) and reloads the packages when it arrives (`Editor::poll_downloads`, every frame). It says
+      "installed" only if Package Control's commands loaded; otherwise "downloaded but did not load (Help > Package Load
+      Errors)". Download failures (curl's message) also go to the console. A reload with load errors says how many
+      instead of the counts, so a package Package Control installs and that fails to load is noticed.
+- [x] **`Installed Packages` is watched**: `check_installed_packages` (with `check_external_changes`, every 1.5 s) reloads
+      the packages when a `.sublime-package` there is added, replaced or removed and the folder held still for one check.
+- [ ] Reloading restarts the plugin host, which stops a Package Control thread still working (several packages, its
+      libraries); Sublime loads only the new package's plugins. Not tried yet: a package with plugins or libraries,
+      upgrades, removal.
+- [x] **Scopes** from the syntax engine: `SyntaxGateway::line_scopes` parses one line again from the parser state the
+      highlighting cache keeps for its start (`SyntaxEngine::line_scopes`); the use cases (`use_cases/src/scopes.rs`)
+      turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,
+      `extract_scope` (the run of text with the same scope, across lines), `find_by_selector`, `expand_to_scope`,
+      `extract_tokens_with_scopes`. Selectors (`entities/src/selector.rs`, also `sublime.score_selector` and build
+      systems): `,` / `|`, ` - `, descendants, parentheses ignored. Plain text and files over 4 MB are the base scope.
+- [x] The **`selector` key binding context** (`keyboard_controller.rs`): it matches when the scope at some caret does.
+      Language keymaps now apply when their other contexts are known (`insert_snippet` expands `$SELECTION` and puts the
+      caret on the first field: `text_commands::insert_snippet`); those with `preceding_text` / `following_text` still do not.
+- [ ] Scopes, still missing: `style_for_scope` and `view.style` (the color scheme's colors), `meta_info`
+      (`.tmPreferences`), `symbol_regions` / `indexed_symbols`, `context_backtrace`, Sublime's exact `extract_scope` and
+      score values, `match_all` in contexts; `find_by_selector` and `extract_scope` parse the whole file every call.
 - [ ] **Completions**: `on_query_completions`, `CompletionItem`, `view.auto_complete` (needs an auto-complete UI first).
 - [ ] **Popups, phantoms, annotations, hover** (`show_popup` with minihtml, `PhantomSet`, `on_hover`).
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
 - [ ] Reload only the plugin that was saved (now every plugin reloads), and `sublime_plugin.reload_plugin`.
 
 `crates/frameworks/tests/sublime_packages.rs` (`-- --ignored`) loads the packages of the Sublime Text installed here:
-68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load, but their
-bindings need the `selector` context, so they stay inactive until **Scopes** below.
+68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load; their
+bindings apply through the `selector` context (above) when they need no other unknown context.
 
 Verification for phase C: `package_control_loads_in_a_scratch_profile` in `crates/frameworks/tests/sublime_packages.rs`
 (`-- --ignored`, needs the network) copies the installed Package Control to a temporary profile and installs a color

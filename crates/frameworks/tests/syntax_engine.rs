@@ -33,6 +33,30 @@ fn font() -> FontId {
     FontId::monospace(14.0)
 }
 
+// ----- scopes --------------------------------------------------------------------------------------
+
+#[test]
+fn line_scopes_cover_the_line_with_the_parser_scopes() {
+    let (_dir, mut engine) = engine();
+    let text = "x = 1\ns = \"hi\"\n";
+    let spans = engine.line_scopes(1, text, "Python", 1);
+    assert_eq!(spans.first().unwrap().range.start, 0);
+    assert_eq!(spans.last().unwrap().range.end, "s = \"hi\"\n".len());
+    assert!(spans.windows(2).all(|w| w[0].range.end == w[1].range.start), "{spans:?}");
+    let at = |byte: usize| spans.iter().find(|s| s.range.contains(&byte)).unwrap().scope.clone();
+    assert!(at(0).starts_with("source.python"), "{}", at(0));
+    assert!(at(6).contains("string.quoted.double"), "{}", at(6));
+    assert!(engine.line_scopes(1, text, "Python", 9).is_empty(), "past the end");
+}
+
+#[test]
+fn line_scopes_of_plain_text_are_its_base_scope() {
+    let (_dir, mut engine) = engine();
+    let spans = engine.line_scopes(1, "a \"b\"", "Plain Text", 0);
+    assert_eq!(spans.len(), 1);
+    assert_eq!((spans[0].range.clone(), spans[0].scope.as_str()), (0..5, "text.plain"));
+}
+
 // ----- syntaxes ------------------------------------------------------------------------------------
 
 #[test]

@@ -14,6 +14,7 @@ pub mod keymap;
 pub mod localization;
 pub mod menu;
 pub mod selection;
+pub mod selector;
 pub mod settings;
 pub mod symbol;
 pub mod text;

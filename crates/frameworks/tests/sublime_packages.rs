@@ -8,17 +8,22 @@ use std::time::{Duration, Instant};
 
 use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
 use codelibre_text::gateways::{
-    child_processes::ChildProcesses, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
+    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
     std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
 };
 use codelibre_text::syntax_engine::SyntaxEngine;
 use entities::command::Command;
+use entities::keymap::KeyCombo;
+use entities::selection::Selection;
 use interface_adapters::controllers::command_controller;
+use interface_adapters::controllers::keyboard_controller::{key_pressed, KeyHandling};
 use interface_adapters::gateways::package_archives::unpack_all;
 use interface_adapters::gateways::session_file::SessionFileGateway;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use interface_adapters::view_state::ViewState;
-use use_cases::gateways::{ArchiveFolder, PackagePaths, ResourceGateway};
+use use_cases::gateways::{
+    ArchiveFolder, DialogGateway, FileFilter, MessageAnswer, MessageDialog, PackagePaths, ResourceGateway,
+};
 use use_cases::{Editor, Gateways};
 
 fn install_dir() -> Option<PathBuf> {
@@ -92,6 +97,8 @@ fn the_plugins_sublime_ships_load() {
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
+        downloads: Box::new(CurlDownloads::default()),
+        error_log: Box::new(FileErrorLog::new(dir.path().join("Errors.log"))),
         plugins: Box::new(PythonPluginHost::new(dir.path().join("Lib").join("python"))),
     });
     let started = Instant::now();
@@ -102,6 +109,182 @@ fn the_plugins_sublime_ships_load() {
         println!("error: {error}");
     }
     assert!(editor.state().load_errors.is_empty());
+}
+
+/// Answers OK to every message dialog (the install question); never picks a file.
+struct SayOk;
+
+impl DialogGateway for SayOk {
+    fn pick_files(&self, _: Option<&Path>, _: &[FileFilter]) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn pick_folder(&self, _: Option<&Path>) -> Option<PathBuf> {
+        None
+    }
+    fn pick_folders(&self, _: Option<&Path>) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn pick_save_path(&self, _: Option<&Path>, _: &str, _: &[FileFilter]) -> Option<PathBuf> {
+        None
+    }
+    fn show_message(&self, _: &MessageDialog) -> MessageAnswer {
+        MessageAnswer::Ok
+    }
+}
+
+/// An editor on a temporary profile in `dir` with the real gateways, Sublime's shipped packages
+/// (if installed) and our own `Installed Packages`.
+fn scratch_editor(dir: &Path) -> Editor {
+    let own = ArchiveFolder {
+        archives: dir.join("Installed Packages"),
+        unpacked: dir.join("Cache").join("own"),
+        sublime: false,
+        shipped: false,
+    };
+    let shipped = install_dir().map(|archives| ArchiveFolder { archives, unpacked: dir.join("Cache").join("shipped"), sublime: true, shipped: true });
+    let paths = PackagePaths { packages: dir.join("Packages"), sublime_packages: None, archive_folders: shipped.into_iter().chain([own]).collect() };
+    let engine = Rc::new(RefCell::new(SyntaxEngine::new(paths.clone())));
+    let mut editor = Editor::new(Gateways {
+        file_system: Box::new(StdFileSystem),
+        dialogs: Box::new(SayOk),
+        clipboard: Box::new(SystemClipboard),
+        resources: Box::new(SublimeResourceGateway::new(paths)),
+        syntaxes: Box::new(SyntectSyntaxes(engine)),
+        sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
+        file_index: Box::new(FolderIndex::default()),
+        shell: Box::new(OsShell),
+        processes: Box::new(ChildProcesses::default()),
+        downloads: Box::new(CurlDownloads::default()),
+        error_log: Box::new(FileErrorLog::new(dir.join("Errors.log"))),
+        plugins: Box::new(PythonPluginHost::new(dir.join("Lib").join("python"))),
+    });
+    editor.set_event_command_runner(command_controller::run_during_event);
+    editor
+}
+
+/// Presses `key` like the window does and runs what it queued; true when a binding took it.
+fn press(editor: &mut Editor, view: &mut ViewState, key: &str) -> bool {
+    let taken = matches!(key_pressed(editor, view, &[KeyCombo::parse(key).unwrap()]), KeyHandling::Consumed);
+    for command in view.take_commands() {
+        command_controller::run(editor, view, &command);
+    }
+    taken
+}
+
+/// The `selector` context with Sublime's real language keymaps and syntect's scopes: Markdown's
+/// `*` wraps the selection (`insert_snippet` with `${0:$SELECTION}`) only in Markdown text.
+#[test]
+#[ignore = "reads the Sublime Text installed here"]
+fn language_key_bindings_apply_by_scope() {
+    if install_dir().is_none() {
+        eprintln!("skipped: no Sublime Text here");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let user = dir.path().join("Packages").join("User");
+    std::fs::create_dir_all(&user).unwrap();
+    std::fs::write(user.join("Preferences.sublime-settings"), r#"{ "auto_match_enabled": true }"#).unwrap();
+    let (notes, code) = (dir.path().join("notes.md"), dir.path().join("a.py"));
+    std::fs::write(&notes, "a word b\n").unwrap();
+    std::fs::write(&code, "a word b\n").unwrap();
+    let mut editor = scratch_editor(dir.path());
+    editor.start(vec![code.clone(), notes.clone()]);
+    let mut view = ViewState::default();
+
+    let id = editor.active_document().unwrap().id;
+    println!("syntax {:?}, scope at 2: {:?}", editor.active_document().unwrap().syntax, editor.scope_name(id, 2));
+    editor.sync_selection_from_view(id, Selection::new(2, 6));
+    assert!(press(&mut editor, &mut view, "*"), "Markdown's binding takes `*`");
+    let doc = editor.active_document().unwrap();
+    println!("markdown: {:?} {:?}", doc.text, doc.selection());
+    assert_eq!(doc.text, "a *word* b\n");
+    assert_eq!(doc.selection(), Selection::new(3, 7), "the word stays selected");
+
+    editor.open_file(&code);
+    let id = editor.active_document().unwrap().id;
+    println!("syntax {:?}, scope at 2: {:?}", editor.active_document().unwrap().syntax, editor.scope_name(id, 2));
+    editor.sync_selection_from_view(id, Selection::new(2, 6));
+    assert!(!press(&mut editor, &mut view, "*"), "no binding for `*` in Python: the widget types it");
+    assert_eq!(editor.active_document().unwrap().text, "a word b\n");
+}
+
+/// A plugin asks the scopes of a Python file (syntect's), through the real plugin host.
+#[test]
+#[ignore = "runs Python"]
+fn plugins_read_the_scopes_of_the_text() {
+    if let Err(e) = find_interpreter(None) {
+        eprintln!("skipped: {e}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("Packages").join("MyPkg");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(
+        package.join("probe.py"),
+        r#"
+import sublime, sublime_plugin
+
+class ProbeCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        v = self.view
+        sublime.status_message(repr([v.scope_name(5), v.match_selector(5, "string"), v.match_selector(0, "string"),
+                                     v.extract_scope(5), v.find_by_selector("string.quoted"),
+                                     v.expand_to_scope(5, "string")]))
+"#,
+    )
+    .unwrap();
+    let code = dir.path().join("a.py");
+    std::fs::write(&code, "s = \"hi\"\nn = 1\n").unwrap();
+    let mut editor = scratch_editor(dir.path());
+    editor.start(vec![code]);
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    println!("{status}\nconsole:\n{}", editor.state().console);
+    assert!(status.contains("string.quoted.double.python"), "{status}");
+    assert!(status.contains("True, False, Region(4, 8)"), "the string with its quotes: {status}");
+}
+
+/// `install_package_control` with the network: downloads it into a temporary profile, the
+/// packages reload by themselves and Package Control's commands are there.
+#[test]
+#[ignore = "downloads Package Control and runs it, in a temporary profile"]
+fn install_package_control_downloads_and_loads_it() {
+    if let Err(e) = find_interpreter(None) {
+        eprintln!("skipped: {e}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    let mut view = ViewState::default();
+    assert!(!editor.is_plugin_command("install_package"));
+    command_controller::run(&mut editor, &mut view, &Command::new("install_package_control"));
+    let status = |editor: &Editor| editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    println!("after the command: {}", status(&editor));
+
+    let installed = dir.path().join("Installed Packages").join("Package Control.sublime-package");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while Instant::now() < deadline && !editor.is_plugin_command("install_package") {
+        editor.poll_downloads();
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    println!("file: {} ({:?} bytes)", installed.is_file(), std::fs::metadata(&installed).map(|m| m.len()).ok());
+    println!("status: {}", status(&editor));
+    assert!(installed.is_file());
+    assert!(!dir.path().join("Installed Packages").join("Package Control.sublime-package.download").exists());
+    assert!(editor.is_plugin_command("install_package"), "console:\n{}", editor.state().console);
+
+    // A second time it only says so.
+    command_controller::run(&mut editor, &mut view, &Command::new("install_package_control"));
+    assert_eq!(status(&editor), "Package Control is already installed");
+    // Removing it unloads it once the folder holds still.
+    std::fs::remove_file(&installed).unwrap();
+    editor.check_installed_packages();
+    editor.check_installed_packages();
+    assert!(!editor.is_plugin_command("install_package"));
+    assert!(!editor.state().console.contains("Traceback"), "{}", editor.state().console);
 }
 
 /// Package Control copied to a temporary profile, with nothing else: nothing of the user's is
@@ -144,6 +327,8 @@ fn package_control_loads_in_a_scratch_profile() {
         file_index: Box::new(FolderIndex::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
+        downloads: Box::new(CurlDownloads::default()),
+        error_log: Box::new(FileErrorLog::new(dir.path().join("Errors.log"))),
         plugins: Box::new(PythonPluginHost::new(dir.path().join("Lib").join("python"))),
     });
     editor.set_event_command_runner(command_controller::run_during_event);

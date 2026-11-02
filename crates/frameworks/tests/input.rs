@@ -60,3 +60,15 @@ fn keys_without_a_sublime_name_are_dropped() {
     assert!(key_combos(Key::F20, None, Modifiers::NONE).is_empty());
     assert_eq!(key_combos(Key::F20, Some(Key::F2), Modifiers::NONE), vec![parse("f2")]);
 }
+
+#[test]
+fn typed_symbols_are_named_by_their_character() {
+    use codelibre_text::input::typed_combo;
+    assert_eq!(typed_combo("*"), Some(parse("*")), "Shift+8, or Shift++ on a Spanish keyboard");
+    assert_eq!(typed_combo("\""), Some(parse("\"")));
+    assert_eq!(typed_combo("("), Some(parse("(")));
+    assert_eq!(typed_combo("a"), None, "letters have their key event");
+    assert_eq!(typed_combo("ñ"), None);
+    assert_eq!(typed_combo(" "), None);
+    assert_eq!(typed_combo("ab"), None);
+}

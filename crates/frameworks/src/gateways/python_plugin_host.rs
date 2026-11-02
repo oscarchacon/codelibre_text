@@ -21,6 +21,10 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("sublime_api.py", include_str!("../../../../assets/python/sublime_api.py")),
     ("sublime.py", include_str!("../../../../assets/python/sublime.py")),
     ("sublime_plugin.py", include_str!("../../../../assets/python/sublime_plugin.py")),
+    // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
+    ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
+    ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
+    ("shims/distutils/version.py", include_str!("../../../../assets/python/shims/distutils/version.py")),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).
@@ -75,6 +79,9 @@ impl PythonPluginHost {
         std::fs::create_dir_all(&self.lib_dir).map_err(|e| format!("{}: {e}", self.lib_dir.display()))?;
         for (name, contents) in SUPPORT_FILES {
             let path = self.lib_dir.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
             std::fs::write(&path, contents).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         let python = find_interpreter(interpreter)?;

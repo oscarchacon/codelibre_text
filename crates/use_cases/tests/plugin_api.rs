@@ -43,6 +43,22 @@ fn reading_the_text() {
 }
 
 #[test]
+fn scopes() {
+    let world = plugin_world().with_file("/p/a.py", "s = \"x\"");
+    let mut editor = world.editor_opening(&["/p/a.py"]);
+    let v = view_id(&editor);
+    let string = "source.python string.quoted.double ";
+    assert_eq!(call(&world, &mut editor, "view_scope_name", json!([v, 5])), Ok(json!(string)));
+    assert_eq!(call(&world, &mut editor, "view_extract_scope", json!([v, 5])), Ok(json!([4, 7])));
+    assert_eq!(call(&world, &mut editor, "view_find_by_selector", json!([v, "string"])), Ok(json!([[4, 7]])));
+    assert_eq!(
+        call(&world, &mut editor, "view_extract_tokens_with_scopes", json!([v, 3, 5])),
+        Ok(json!([[[3, 4], "source.python "], [[4, 5], string]]))
+    );
+    assert_eq!(call(&world, &mut editor, "score_selector", json!([string, "comment"])), Ok(json!(0)));
+}
+
+#[test]
 fn lines_and_words() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "one two\nthree\nfour");

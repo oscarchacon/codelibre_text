@@ -14,10 +14,11 @@ use entities::settings::{Settings, SettingsLayers};
 use crate::builds::{BuildOption, BuildState};
 use crate::find_replace::FindCache;
 use crate::gateways::{
-    ClipboardGateway, DialogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
+    ClipboardGateway, DialogGateway, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
     ResourceGateway, SessionGateway, ShellGateway, SyntaxGateway,
 };
 use crate::output_panels::OutputPanels;
+use crate::packages::FolderStamp;
 use crate::plugin_panels::PluginPanels;
 use crate::plugins::PluginState;
 
@@ -33,6 +34,8 @@ pub struct Gateways {
     pub shell: Box<dyn ShellGateway>,
     pub plugins: Box<dyn PluginHostGateway>,
     pub processes: Box<dyn ProcessGateway>,
+    pub downloads: Box<dyn DownloadGateway>,
+    pub error_log: Box<dyn ErrorLogGateway>,
 }
 
 /// A message for the status bar.
@@ -80,6 +83,9 @@ pub struct EditorState {
     pub pending_close: Option<PendingClose>,
     /// What plugins printed, and their errors (View > Show Console).
     pub console: String,
+    /// This session's errors, oldest first and each once, for Help > Report an Issue (all of
+    /// them, with their times, go to the error log too).
+    pub session_errors: Vec<String>,
     /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
     pub(crate) line_clipboard: Option<String>,
     pub(crate) plugins: PluginState,
@@ -96,6 +102,10 @@ pub struct EditorState {
     pub(crate) next_id: DocumentId,
     pub(crate) find_cache: Option<FindCache>,
     pub(crate) last_disk_check: Instant,
+    /// Our `Installed Packages` when packages were last loaded, and a change seen since (reloaded
+    /// once it holds still, see [`Editor::check_installed_packages`]).
+    pub(crate) installed_packages: FolderStamp,
+    pub(crate) installed_packages_changed: Option<FolderStamp>,
 }
 
 pub struct Editor {
@@ -122,6 +132,7 @@ impl Editor {
                 status: None,
                 pending_close: None,
                 console: String::new(),
+                session_errors: Vec::new(),
                 line_clipboard: None,
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
@@ -133,6 +144,8 @@ impl Editor {
                 next_id: 0,
                 find_cache: None,
                 last_disk_check: Instant::now(),
+                installed_packages: Vec::new(),
+                installed_packages_changed: None,
             },
             gateways,
         }

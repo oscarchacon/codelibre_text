@@ -22,7 +22,7 @@ use syntect::highlighting::{
     Theme, ThemeItem, ThemeSet, ThemeSettings,
 };
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxDefinition, SyntaxReference, SyntaxSet};
-use use_cases::gateways::PackagePaths;
+use use_cases::gateways::{PackagePaths, ScopeSpan};
 
 pub type SharedSyntaxEngine = Rc<RefCell<SyntaxEngine>>;
 
@@ -194,6 +194,48 @@ impl SyntaxEngine {
         let cache = self.caches.entry(document).or_default();
         cache.update(text, &self.syntaxes, &syntax, &theme);
         cache.symbols()
+    }
+
+    /// The scopes of one line: parsed again from the state the highlighting cache keeps for its
+    /// start, so only that line is parsed (and what changed since the last paint). Text too big
+    /// to highlight, or plain text, is the syntax's base scope.
+    pub fn line_scopes(&mut self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
+        let Some(line_text) = text.split_inclusive('\n').nth(line) else {
+            return Vec::new();
+        };
+        let syntax = self.syntax(syntax).clone();
+        let whole = || vec![ScopeSpan { range: 0..line_text.len(), scope: syntax.scope.to_string() }];
+        if text.len() > MAX_HIGHLIGHT_BYTES || syntax.name == "Plain Text" {
+            return whole();
+        }
+        let theme = self.scheme(&self.current_scheme).clone();
+        let cache = self.caches.entry(document).or_default();
+        cache.update(text, &self.syntaxes, &syntax, &theme);
+        let Some(cached) = cache.lines.get(line) else { return whole() };
+        let mut parser = cached.state_before.0.clone();
+        let mut stack = cached.state_before.1.path.clone();
+        let Ok(ops) = parser.parse_line(line_text, &self.syntaxes) else { return whole() };
+
+        let mut spans: Vec<ScopeSpan> = Vec::new();
+        let mut push = |stack: &ScopeStack, range: Range<usize>| {
+            let scope = stack.as_slice().iter().map(|s| s.build_string()).collect::<Vec<_>>().join(" ");
+            match spans.last_mut() {
+                Some(last) if last.scope == scope => last.range.end = range.end,
+                _ => spans.push(ScopeSpan { range, scope }),
+            }
+        };
+        let mut last = 0;
+        for (pos, op) in &ops {
+            if *pos > last {
+                push(&stack, last..*pos);
+                last = *pos;
+            }
+            let _ = stack.apply(op);
+        }
+        if last < line_text.len() {
+            push(&stack, last..line_text.len());
+        }
+        spans
     }
 
     /// The text of a document as colored egui text, re-highlighting only what changed.

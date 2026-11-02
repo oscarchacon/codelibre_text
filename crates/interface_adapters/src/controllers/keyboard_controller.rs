@@ -2,6 +2,7 @@
 
 use entities::command::Command;
 use entities::keymap::{KeyCombo, KeyContext, KeyResult};
+use entities::selector::matches_selector;
 use entities::settings::Settings;
 use serde_json::Value;
 use use_cases::Editor;
@@ -40,6 +41,8 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         selection_empty: editor.active_document().is_none_or(|d| d.selection().is_empty()),
         num_selections: editor.active_document().map_or(1, |d| d.extra_selections().len() + 1),
         settings: editor.view_settings(),
+        // One line parsed again per caret (from the highlighting cache) at every key.
+        caret_scopes: editor.caret_scopes(),
     };
     let was_waiting = editor.state().keymap.is_waiting_for_chord();
     let hooked = hooks_widget_edits(editor, view);
@@ -105,10 +108,25 @@ struct ViewKeyContext {
     selection_empty: bool,
     num_selections: usize,
     settings: Settings,
+    /// The scope at every caret of the active view (`selector`: it matches when one does, as
+    /// with Sublime's default `match_all: false`).
+    caret_scopes: Vec<String>,
 }
 
 impl KeyContext for ViewKeyContext {
     fn query(&self, key: &str, operator: &str, operand: &Value) -> Option<bool> {
+        if key == "selector" {
+            let selector = operand.as_str()?;
+            if self.caret_scopes.is_empty() {
+                return None;
+            }
+            let matches = self.caret_scopes.iter().any(|scope| matches_selector(scope, selector));
+            return match operator {
+                "equal" => Some(matches),
+                "not_equal" => Some(!matches),
+                _ => None,
+            };
+        }
         let value = match key {
             "overlay_visible" | "overlay_has_focus" => Value::Bool(self.overlay_visible),
             "panel_visible" => Value::Bool(self.panel_visible),

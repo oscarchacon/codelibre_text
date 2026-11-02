@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use use_cases::gateways::ShellGateway;
 
@@ -39,5 +39,9 @@ impl ShellGateway for OsShell {
         if let Err(e) = Self::open_url_command(url).spawn() {
             tracing::warn!("could not open {url}: {e}");
         }
+    }
+
+    fn home_folder(&self) -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
     }
 }

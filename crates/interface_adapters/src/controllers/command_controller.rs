@@ -124,8 +124,8 @@ const WINDOW_COMMANDS: &[&str] = &[
     "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
     "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
-    "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "show_load_errors",
-    "show_about_window", "open_url", "report_issue", "build", "exec", "cancel_build", "set_build_system", "next_result",
+    "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
+    "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
     "prev_result",
 ];
 
@@ -369,10 +369,12 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         // ----- preferences and help ------------------------------------------------------------
         "edit_settings" => editor.edit_settings(command.str_arg("base_file"), command.str_arg("default")),
         "reload_packages" => editor.reload_packages(),
+        "install_package_control" => editor.install_package_control(),
         "show_load_errors" => view.show_load_errors = true,
         "show_about_window" => view.show_about = true,
         "open_url" => editor.open_url(command.str_arg("url")),
         "report_issue" => editor.report_issue(),
+        "open_error_log" => editor.open_error_log(),
 
         // ----- Python plugins: they can run other commands, which come back here ---------------
         name if EDITING_COMMANDS.contains(&name) => run_editing_command(editor, command),
@@ -432,7 +434,7 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
         },
         "run_macro_file" => run_macro(editor, command.str_arg("file")),
         "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
-        "insert_snippet" => editor.run_text_command(TextCommand::Insert(strip_snippet_fields(command.str_arg("contents")))),
+        "insert_snippet" => editor.run_text_command(TextCommand::InsertSnippet(command.str_arg("contents").to_string())),
         "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
         "move" | "move_to" | "left_delete" | "right_delete" => editor.run_view_command_on_active(command),
         other => unreachable!("{other} is not in EDITING_COMMANDS"),
@@ -501,38 +503,3 @@ fn run_macro(editor: &mut Editor, file: &str) {
     editor.run_text_command(command);
 }
 
-/// `${1:default}` becomes `default`; `$1` and `$0` are removed.
-fn strip_snippet_fields(snippet: &str) -> String {
-    let mut out = String::new();
-    let mut chars = snippet.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some(d) if d.is_ascii_digit() => {
-                while chars.peek().is_some_and(char::is_ascii_digit) {
-                    chars.next();
-                }
-            }
-            Some('{') => {
-                chars.next();
-                while chars.peek().is_some_and(char::is_ascii_digit) {
-                    chars.next();
-                }
-                if chars.peek() == Some(&':') {
-                    chars.next();
-                }
-                for c in chars.by_ref() {
-                    if c == '}' {
-                        break;
-                    }
-                    out.push(c);
-                }
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}

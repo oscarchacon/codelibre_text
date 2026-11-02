@@ -141,7 +141,8 @@
 			{ "command": "show_panel", "args": { "panel": "output.exec" }, "caption": "Show Build Results" },
 			{ "command": "next_result", "caption": "Next Result" },
 			{ "command": "prev_result", "caption": "Previous Result" },
-			{ "caption": "-", "id": "packages" }
+			{ "caption": "-", "id": "packages" },
+			{ "command": "install_package_control", "caption": "Install Package Control…" }
 		]
 	},
 	{
@@ -161,6 +162,7 @@
 		"caption": "Help", "id": "help",
 		"children": [
 			{ "command": "show_load_errors", "caption": "Package Load Errors" },
+			{ "command": "open_error_log", "caption": "Error Log" },
 			{ "command": "report_issue", "caption": "Report an Issue…" },
 			{ "caption": "-" },
 			{ "command": "show_about_window", "caption": "About CodeLibre Text" }

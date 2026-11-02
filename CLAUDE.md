@@ -5,7 +5,7 @@ Native desktop text editor compatible with Sublime Text resources, written with 
 edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architecture.md` first.
 
 ## Workspace = the four circles (dependencies point inwards only)
-- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `Keymap`, `Settings`, `Menu`).
+- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `selector`, `Keymap`, `Settings`, `Menu`).
 - `crates/use_cases` — `Editor` + use case modules + gateway traits (`gateways.rs`).
 - `crates/interface_adapters` — controllers, presenters, view models, `ViewState`, Sublime file-format gateways.
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
@@ -52,7 +52,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
-- `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1").
+- `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1"), and asks the keymap about
+  a typed symbol (`*`, `"`: egui has no key for most, `input::typed_combo`), as Sublime binds them by character.
 - Multiple selections (Ctrl+D, Alt+F3 `find_all_under`, Ctrl+Alt+Up/Down `select_lines`, Ctrl+Shift+L
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
@@ -74,15 +75,20 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   Sublime ships, syntaxes are left out. `ignored_packages` defaults to `Vintage`. Plugins see paths inside the archive
   (`ArchiveFinder` in `plugin_host.py`): Package Control depends on them and on `executable_path()` (see `docs/plugins.md`).
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
+- Error log: `…\data\Local\Errors.log` (`FileErrorLog`; Help > Error Log). Errors the user is told about go through
+  `Editor::record_errors` (log + `session_errors`, which Help > Report an Issue puts in the bug form, home folder as `~`).
 - `CODELIBRE_TEXT_DATA=<folder>` uses that folder instead of all of the above, to try things without touching the
   real profile (setting `APPDATA` does not work: Windows answers the known folder).
-- Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python`.
+- Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python` (`shims/`: `imp`,
+  `distutils.version`, last on `sys.path` for Pythons that dropped them).
+- A `.sublime-package` added to or removed from our `Installed Packages` reloads the packages
+  (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata) — the rest
-  of B (what each item lists as still missing) and C (Package Control,
-  `.sublime-package`, scopes) are checklists with the files to touch.
+  of B (what each item lists as still missing) and C (completions, popups / phantoms, several windows; most
+  of that API has do-nothing stand-ins in `sublime.py`) are checklists with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.

@@ -2,6 +2,8 @@
 
 pub mod app_directories;
 pub mod child_processes;
+pub mod curl_downloads;
+pub mod file_error_log;
 pub mod folder_index;
 pub mod native_dialogs;
 pub mod os_shell;

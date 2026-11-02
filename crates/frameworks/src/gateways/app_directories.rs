@@ -49,11 +49,16 @@ fn sublime_install_packages() -> Option<PathBuf> {
 }
 
 pub fn session_file(paths: &PackagePaths) -> PathBuf {
-    paths
-        .packages
-        .parent()
-        .map(|data| data.join("Local").join("Session.sublime_session"))
-        .unwrap_or_else(|| PathBuf::from("Session.sublime_session"))
+    local_file(paths, "Session.sublime_session")
+}
+
+/// Where errors are logged for bug reports (`…\data\Local\Errors.log`).
+pub fn error_log_file(paths: &PackagePaths) -> PathBuf {
+    local_file(paths, "Errors.log")
+}
+
+fn local_file(paths: &PackagePaths, name: &str) -> PathBuf {
+    paths.packages.parent().map(|data| data.join("Local").join(name)).unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// Where the plugin host's Python modules are written (`…\data\Lib\python`, as in Sublime).

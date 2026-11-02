@@ -29,9 +29,9 @@ use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
-    ClipboardGateway, DialogGateway, DirectoryEntry, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
+    ArchiveFolder, ClipboardGateway, DialogGateway, DirectoryEntry, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
     FileFilter, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway, ProcessRequest,
-    ResourceGateway, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
+    ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
 };
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
@@ -39,6 +39,8 @@ use use_cases::{Editor, Gateways};
 
 /// Where the fake packages live.
 pub const PACKAGES: &str = "/packages";
+/// Where [`World::with_installed_packages`] puts our `Installed Packages`.
+pub const INSTALLED_PACKAGES: &str = "/data/Installed Packages";
 
 /// Syntaxes the fake syntax gateway knows, by file extension.
 const SYNTAXES: &[(&str, &str)] = &[("rs", "Rust"), ("py", "Python"), ("json", "JSON"), ("md", "Markdown"), ("html", "HTML")];
@@ -206,6 +208,32 @@ impl ShellGateway for FakeShell {
 
     fn open_url(&self, url: &str) {
         self.urls.borrow_mut().push(url.to_string());
+    }
+
+    fn home_folder(&self) -> Option<PathBuf> {
+        Some(PathBuf::from(HOME_FOLDER))
+    }
+}
+
+/// The fake user's home folder.
+pub const HOME_FOLDER: &str = "/home/user";
+/// Where the fake error log is written, on the memory disk.
+pub const ERROR_LOG: &str = "/data/Local/Errors.log";
+
+/// Keeps what is logged (without times) and writes it to [`ERROR_LOG`] on the memory disk.
+struct FakeErrorLog {
+    disk: Rc<MemoryDisk>,
+    errors: Rc<RefCell<Vec<String>>>,
+}
+
+impl ErrorLogGateway for FakeErrorLog {
+    fn append(&self, errors: &[String]) {
+        self.errors.borrow_mut().extend(errors.iter().cloned());
+        self.disk.put(ERROR_LOG, self.errors.borrow().join("\n"));
+    }
+
+    fn path(&self) -> PathBuf {
+        PathBuf::from(ERROR_LOG)
     }
 }
 
@@ -401,6 +429,27 @@ impl SyntaxGateway for FakeSyntaxes {
         self.0.symbols.borrow().clone()
     }
 
+    /// The syntax's base scope; text between double quotes (quotes included) is also
+    /// `string.quoted.double`.
+    fn line_scopes(&self, _document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
+        let Some(line_text) = text.split_inclusive('\n').nth(line) else { return Vec::new() };
+        let base = self.base_scope(syntax);
+        let string = format!("{base} string.quoted.double");
+        let mut spans = Vec::new();
+        let (mut start, mut quoted) = (0, false);
+        for (at, c) in line_text.char_indices().filter(|(_, c)| *c == '"') {
+            let end = if quoted { at + c.len_utf8() } else { at };
+            if end > start {
+                spans.push(ScopeSpan { range: start..end, scope: if quoted { string.clone() } else { base.clone() } });
+            }
+            (start, quoted) = (end, !quoted);
+        }
+        if start < line_text.len() {
+            spans.push(ScopeSpan { range: start..line_text.len(), scope: if quoted { string } else { base } });
+        }
+        spans
+    }
+
     fn forget(&self, document: DocumentId) {
         self.0.forgotten.borrow_mut().push(document);
     }
@@ -542,6 +591,30 @@ impl ProcessGateway for FakeProcesses {
     }
 }
 
+// ----- downloads -----------------------------------------------------------------------------------
+
+/// Scripted downloads: the test sees what was asked and says when one finishes.
+#[derive(Default)]
+pub struct DownloadScript {
+    /// Every download started: (url, destination).
+    pub started: RefCell<Vec<(String, PathBuf)>>,
+    /// What the next `poll` returns.
+    pub finished: RefCell<Option<Result<(), String>>>,
+}
+
+struct FakeDownloads(Rc<DownloadScript>);
+
+impl DownloadGateway for FakeDownloads {
+    fn start(&mut self, url: &str, destination: &Path) -> Result<(), String> {
+        self.0.started.borrow_mut().push((url.to_string(), destination.to_path_buf()));
+        Ok(())
+    }
+
+    fn poll(&mut self) -> Option<Result<(), String>> {
+        self.0.finished.borrow_mut().take()
+    }
+}
+
 // ----- session and file index ----------------------------------------------------------------------
 
 struct FakeSessions(Rc<RefCell<Option<Session>>>);
@@ -609,6 +682,9 @@ pub struct World {
     pub opened_urls: Rc<RefCell<Vec<String>>>,
     pub plugins: Rc<PluginScript>,
     pub processes: Rc<ProcessScript>,
+    pub downloads: Rc<DownloadScript>,
+    /// Errors written to the error log.
+    pub logged_errors: Rc<RefCell<Vec<String>>>,
 }
 
 impl Default for World {
@@ -663,6 +739,8 @@ impl World {
             opened_urls: Rc::default(),
             plugins: Rc::default(),
             processes: Rc::default(),
+            downloads: Rc::default(),
+            logged_errors: Rc::default(),
         }
     }
 
@@ -749,6 +827,22 @@ impl World {
         self
     }
 
+    /// Our own `Installed Packages` folder, [`INSTALLED_PACKAGES`] (empty).
+    pub fn with_installed_packages(mut self) -> Self {
+        Rc::get_mut(&mut self.resources)
+            .expect("add Installed Packages before building the editor")
+            .paths
+            .archive_folders
+            .push(ArchiveFolder {
+                archives: PathBuf::from(INSTALLED_PACKAGES),
+                unpacked: PathBuf::from("/data/Cache/own"),
+                sublime: false,
+                shipped: false,
+            });
+        self.disk.mkdir(INSTALLED_PACKAGES);
+        self
+    }
+
     pub fn with_session(self, session: Session) -> Self {
         *self.session.borrow_mut() = Some(session);
         self
@@ -773,6 +867,8 @@ impl World {
             }),
             plugins: Box::new(FakePluginHost(self.plugins.clone())),
             processes: Box::new(FakeProcesses(self.processes.clone())),
+            downloads: Box::new(FakeDownloads(self.downloads.clone())),
+            error_log: Box::new(FakeErrorLog { disk: self.disk.clone(), errors: self.logged_errors.clone() }),
         }
     }
 

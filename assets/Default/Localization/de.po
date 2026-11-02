@@ -1000,3 +1000,52 @@ msgstr "Keine Einrückungsregeln für {syntax}"
 #: crates/use_cases/src/editing.rs
 msgid "{command} to {target} is not supported"
 msgstr "{command} nach {target} wird nicht unterstützt"
+
+#: assets/Default/Main.sublime-menu
+msgid "Install Package Control…"
+msgstr "Package Control installieren…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Install Package Control"
+msgstr "Package Control installieren"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control is already installed"
+msgstr "Package Control ist bereits installiert"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control will be downloaded from {url} and run as a plugin. Install it?"
+msgstr "Package Control wird von {url} heruntergeladen und als Plugin ausgeführt. Installieren?"
+
+#: crates/use_cases/src/packages.rs
+msgid "Install"
+msgstr "Installieren"
+
+#: crates/use_cases/src/packages.rs
+msgid "Downloading Package Control…"
+msgstr "Package Control wird heruntergeladen…"
+
+#: crates/use_cases/src/packages.rs
+msgid "Could not download Package Control: {error}"
+msgstr "Package Control konnte nicht heruntergeladen werden: {error}"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control installed: open the Command Palette and type Package Control"
+msgstr "Package Control installiert: Befehlspalette öffnen und Package Control eingeben"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control cannot be installed: there is no Installed Packages folder"
+msgstr "Package Control kann nicht installiert werden: Der Ordner Installed Packages fehlt"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control was downloaded but did not load (Help > Package Load Errors)"
+msgstr "Package Control wurde heruntergeladen, konnte aber nicht geladen werden (Hilfe > Fehler beim Laden der Pakete)"
+
+msgid "Error Log"
+msgstr "Fehlerprotokoll"
+
+msgid "Help: Open Error Log"
+msgstr "Hilfe: Fehlerprotokoll öffnen"
+
+msgid "No errors have been logged"
+msgstr "Es wurden keine Fehler protokolliert"

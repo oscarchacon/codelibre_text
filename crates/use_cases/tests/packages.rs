@@ -6,7 +6,10 @@ use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo};
 use entities::menu::{MenuItem, PaletteCommand};
 use serde_json::json;
-use test_support::{status, World};
+use test_support::{status, World, INSTALLED_PACKAGES};
+use use_cases::gateways::PluginCommandKind::Window;
+use use_cases::gateways::{MessageAnswer, PluginMessage};
+use use_cases::packages::PACKAGE_CONTROL_URL;
 
 fn save_binding() -> Binding {
     Binding { keys: vec![KeyCombo::parse("ctrl+s").unwrap()], command: Command::new("save"), context: vec![] }
@@ -92,6 +95,128 @@ fn open_package_folder_opens_the_file_manager() {
     let mut editor = world.editor();
     editor.open_package_folder("${packages}");
     assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/packages")]);
+}
+
+fn package_control_file() -> PathBuf {
+    PathBuf::from(INSTALLED_PACKAGES).join("Package Control.sublime-package")
+}
+
+#[test]
+fn install_package_control_asks_then_downloads_it_into_installed_packages() {
+    let world = World::new().with_installed_packages();
+    world.dialogs.message_answers.borrow_mut().push_back(MessageAnswer::Ok);
+    let mut editor = world.editor();
+    editor.install_package_control();
+    let asked = world.dialogs.messages.borrow();
+    assert_eq!(asked.len(), 1);
+    assert!(asked[0].text.contains(PACKAGE_CONTROL_URL));
+    assert_eq!(*world.downloads.started.borrow(), vec![(PACKAGE_CONTROL_URL.to_string(), package_control_file())]);
+    assert_eq!(status(&editor), "Downloading Package Control…");
+}
+
+#[test]
+fn install_package_control_does_nothing_when_the_user_cancels() {
+    let world = World::new().with_installed_packages();
+    let mut editor = world.editor();
+    editor.install_package_control();
+    assert!(world.downloads.started.borrow().is_empty());
+}
+
+#[test]
+fn install_package_control_when_it_is_there_only_says_so() {
+    let world = World::new().with_installed_packages();
+    world.disk.put(package_control_file(), "zip");
+    let mut editor = world.editor();
+    editor.install_package_control();
+    assert!(world.dialogs.messages.borrow().is_empty());
+    assert!(world.downloads.started.borrow().is_empty());
+    assert_eq!(status(&editor), "Package Control is already installed");
+}
+
+#[test]
+fn a_finished_download_reloads_the_packages_and_package_control_loads() {
+    let world = World::new().with_installed_packages().with_plugin_commands(&[("other", Window)]);
+    let mut editor = world.editor();
+    world.plugins.then([PluginMessage::Loaded {
+        commands: vec![("install_package".into(), Window)],
+        events: Vec::new(),
+        errors: Vec::new(),
+    }]);
+    *world.downloads.finished.borrow_mut() = Some(Ok(()));
+    editor.poll_downloads();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2);
+    assert!(status(&editor).starts_with("Package Control installed"), "{}", status(&editor));
+}
+
+#[test]
+fn a_download_that_does_not_load_is_not_called_installed() {
+    let world = World::new().with_installed_packages();
+    let mut editor = world.editor();
+    *world.downloads.finished.borrow_mut() = Some(Ok(()));
+    editor.poll_downloads();
+    let message = "Package Control was downloaded but did not load (Help > Package Load Errors)";
+    assert_eq!(status(&editor), message);
+    assert!(editor.state().console.contains(message));
+}
+
+#[test]
+fn a_failed_download_is_reported_and_kept_in_the_console() {
+    let world = World::new().with_installed_packages();
+    let mut editor = world.editor();
+    *world.downloads.finished.borrow_mut() = Some(Err("curl: (6) Could not resolve host: github.com".into()));
+    editor.poll_downloads();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1);
+    let message = "Could not download Package Control: curl: (6) Could not resolve host: github.com";
+    assert_eq!(status(&editor), message);
+    assert!(editor.state().console.contains(message));
+    assert_eq!(*world.logged_errors.borrow(), vec![message.to_string()]);
+}
+
+#[test]
+fn install_package_control_without_installed_packages_says_why() {
+    let world = World::new();
+    let mut editor = world.editor();
+    editor.install_package_control();
+    assert_eq!(status(&editor), "Package Control cannot be installed: there is no Installed Packages folder");
+    assert!(world.downloads.started.borrow().is_empty());
+}
+
+#[test]
+fn a_reload_with_problems_says_so() {
+    let world = World::new();
+    let mut editor = world.editor();
+    world.resources.errors.borrow_mut().push("Broken.sublime-package: invalid Zip archive".into());
+    editor.reload_packages();
+    assert_eq!(status(&editor), "1 package resource failed to load (Help > Package Load Errors)");
+}
+
+#[test]
+fn a_new_installed_package_reloads_the_packages_once_the_folder_holds_still() {
+    let world = World::new().with_installed_packages();
+    let mut editor = world.editor();
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "nothing changed");
+
+    world.disk.put(format!("{INSTALLED_PACKAGES}/Theme.sublime-package"), "zip");
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "it may still be changing");
+    world.disk.put(format!("{INSTALLED_PACKAGES}/Linter.sublime-package"), "zip");
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "it changed again");
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2);
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2, "loaded already");
+}
+
+#[test]
+fn other_files_in_installed_packages_are_not_watched() {
+    let world = World::new().with_installed_packages();
+    let mut editor = world.editor();
+    world.disk.put(format!("{INSTALLED_PACKAGES}/Theme.sublime-package.download"), "partial");
+    editor.check_installed_packages();
+    editor.check_installed_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1);
 }
 
 #[test]

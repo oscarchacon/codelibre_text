@@ -13,6 +13,18 @@ pub fn key_combos(key: Key, physical_key: Option<Key>, modifiers: Modifiers) -> 
         .collect()
 }
 
+/// A typed symbol as Sublime's keymaps write it (`*`, `"`, `(`, `_`…), whatever keys made it:
+/// egui has no key for most of them (`*` is Shift+8, or Shift++ on a Spanish keyboard). `None`
+/// for letters, digits and spaces, which the key event already names, and for longer text.
+pub fn typed_combo(text: &str) -> Option<KeyCombo> {
+    let mut chars = text.chars();
+    let c = chars.next()?;
+    if chars.next().is_some() || c.is_alphanumeric() || c.is_whitespace() || c.is_control() {
+        return None;
+    }
+    Some(KeyCombo { ctrl: false, alt: false, shift: false, super_key: false, key: c.to_string() })
+}
+
 fn combo(key: Key, modifiers: Modifiers) -> Option<KeyCombo> {
     Some(KeyCombo {
         ctrl: modifiers.ctrl || (modifiers.command && !cfg!(target_os = "macos")),

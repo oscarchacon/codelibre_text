@@ -457,17 +457,20 @@ impl Editor {
     /// The host died or stopped answering: say so, and stop sending it events.
     pub(crate) fn plugin_host_failed(&mut self, error: &str) {
         self.log(&format!("Python plugins: {error}\n"));
+        self.record_errors(&[format!("Python plugins: {error}")]);
         self.state.plugins.events.clear();
     }
 
     fn plugin_load_error(&mut self, error: String) {
         self.log(&format!("{error}\n"));
+        self.record_errors(std::slice::from_ref(&error));
         self.state.plugins.errors.push(error.clone());
         self.state.load_errors.push(error);
     }
 
     fn report_plugin_error(&mut self, name: &str, error: &str) {
         self.log(&format!("{name}: {error}\n"));
+        self.record_errors(&[format!("{name}: {error}")]);
         let summary = error.trim_end().lines().last().unwrap_or(error).to_string();
         self.notify(self.tr_args("{name} failed: {error} (View > Show Console)", &[("name", &name), ("error", &summary)]));
     }

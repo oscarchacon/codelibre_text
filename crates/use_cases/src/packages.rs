@@ -1,6 +1,21 @@
-//! Use cases: load Sublime resources from packages.
+//! Use cases: load Sublime resources from packages, install Package Control.
+
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 use crate::editor::Editor;
+use crate::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+
+/// The `.sublime-package` files of a folder and their dates, sorted.
+pub(crate) type FolderStamp = Vec<(PathBuf, Option<SystemTime>)>;
+
+/// Package Control's latest release (4.x). packagecontrol.io's own link still serves 3.4.1, whose
+/// regular expressions Python 3.11 and later reject.
+pub const PACKAGE_CONTROL_URL: &str =
+    "https://github.com/wbond/package_control/releases/latest/download/Package.Control.sublime-package";
+const PACKAGE_CONTROL_FILE: &str = "Package Control.sublime-package";
+/// A command Package Control defines: there once it loaded.
+const PACKAGE_CONTROL_COMMAND: &str = "install_package";
 
 impl Editor {
     /// Loads (or reloads) settings, key bindings, menus, palette entries, syntaxes and color schemes.
@@ -18,6 +33,7 @@ impl Editor {
         self.state.palette = resources.palette;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
         self.load_translations(&mut errors);
+        self.record_errors(&errors);
         self.state.load_errors = errors;
 
         // Documents whose syntax no longer exists fall back to a known one.
@@ -25,12 +41,121 @@ impl Editor {
             doc.syntax = self.gateways.syntaxes.resolve(&doc.syntax);
         }
         self.refresh_file_index();
+        self.state.installed_packages = self.installed_packages_stamp();
+        self.state.installed_packages_changed = None;
     }
 
-    /// `reload_packages`, with a summary in the status bar.
+    /// Our own `Installed Packages` folder (where Package Control puts what it installs).
+    fn own_installed_packages(&self) -> Option<PathBuf> {
+        let paths = self.gateways.resources.paths();
+        paths.archive_folders.iter().find(|f| !f.sublime && !f.shipped).map(|f| f.archives.clone())
+    }
+
+    fn installed_packages_stamp(&self) -> FolderStamp {
+        let Some(folder) = self.own_installed_packages() else { return Vec::new() };
+        let file_system = &self.gateways.file_system;
+        let mut stamp: FolderStamp = file_system
+            .list_dir(&folder)
+            .into_iter()
+            .filter(|entry| !entry.is_dir && entry.path.extension().is_some_and(|e| e == "sublime-package"))
+            .map(|entry| {
+                let modified = file_system.modified(&entry.path);
+                (entry.path, modified)
+            })
+            .collect();
+        stamp.sort();
+        stamp
+    }
+
+    /// Reloads the packages when Package Control (or the user) added, upgraded or removed a
+    /// `.sublime-package` in our `Installed Packages`, as Sublime does. Reloading restarts the
+    /// plugin host, so it waits until the folder held still for one check: Package Control may be
+    /// installing several. Called by [`Editor::check_external_changes`].
+    pub fn check_installed_packages(&mut self) {
+        let stamp = self.installed_packages_stamp();
+        if stamp == self.state.installed_packages {
+            self.state.installed_packages_changed = None;
+        } else if self.state.installed_packages_changed.as_ref() == Some(&stamp) {
+            self.reload_packages();
+        } else {
+            self.state.installed_packages_changed = Some(stamp);
+        }
+    }
+
+    /// `install_package_control`: after the user agrees, downloads Package Control into our
+    /// `Installed Packages`; [`Editor::poll_downloads`] loads it when it arrives.
+    pub fn install_package_control(&mut self) {
+        let Some(folder) = self.own_installed_packages() else {
+            self.package_control_failed(self.tr("Package Control cannot be installed: there is no Installed Packages folder").to_string());
+            return;
+        };
+        let destination = folder.join(PACKAGE_CONTROL_FILE);
+        if self.gateways.file_system.exists(&destination) {
+            self.notify(self.tr("Package Control is already installed").to_string());
+            return;
+        }
+        let dialog = MessageDialog {
+            level: MessageLevel::Warning,
+            title: self.tr("Install Package Control").to_string(),
+            text: self.tr_args(
+                "Package Control will be downloaded from {url} and run as a plugin. Install it?",
+                &[("url", &PACKAGE_CONTROL_URL)],
+            ),
+            buttons: MessageButtons::OkCancel { ok: self.tr("Install").to_string(), cancel: self.tr("Cancel").to_string() },
+        };
+        if self.gateways.dialogs.show_message(&dialog) != MessageAnswer::Ok {
+            return;
+        }
+        match self.gateways.downloads.start(PACKAGE_CONTROL_URL, &destination) {
+            Ok(()) => self.notify(self.tr("Downloading Package Control…").to_string()),
+            Err(error) => self.package_control_failed(self.tr_args("Could not download Package Control: {error}", &[("error", &error)])),
+        }
+    }
+
+    /// Picks up a finished download (cheap to call every frame). Package Control is installed
+    /// only if its commands loaded: a download can arrive and still fail to run (no Python, a
+    /// broken archive, a version our Python rejects).
+    pub fn poll_downloads(&mut self) {
+        match self.gateways.downloads.poll() {
+            Some(Ok(())) => {
+                self.reload_packages();
+                if self.is_plugin_command(PACKAGE_CONTROL_COMMAND) {
+                    self.notify(self.tr("Package Control installed: open the Command Palette and type Package Control").to_string());
+                } else {
+                    self.package_control_failed(
+                        self.tr("Package Control was downloaded but did not load (Help > Package Load Errors)").to_string(),
+                    );
+                }
+            }
+            Some(Err(error)) => {
+                self.package_control_failed(self.tr_args("Could not download Package Control: {error}", &[("error", &error)]));
+            }
+            None => {}
+        }
+    }
+
+    /// In the status bar, which it soon leaves, and in the console and the error log, where it stays.
+    fn package_control_failed(&mut self, message: String) {
+        self.log(&format!("{message}\n"));
+        self.record_errors(std::slice::from_ref(&message));
+        self.notify(message);
+    }
+
+    /// `reload_packages`, with a summary in the status bar: the problems, if any (the reload
+    /// after Package Control installs a package is the only sign the user gets of them).
     pub fn reload_packages(&mut self) {
         self.load_packages();
         self.load_plugins();
+        let failed = self.state.load_errors.len();
+        if failed > 0 {
+            self.notify(self.tr_n(
+                "{count} package resource failed to load (Help > Package Load Errors)",
+                "{count} package resources failed to load (Help > Package Load Errors)",
+                failed,
+                &[],
+            ));
+            return;
+        }
         self.notify(self.tr_args(
             "Packages reloaded: {syntaxes} syntaxes, {schemes} color schemes, {bindings} key bindings, {commands} plugin commands",
             &[
@@ -72,6 +197,7 @@ impl Editor {
         if self.language_setting() != language {
             self.load_translations(&mut errors);
         }
+        self.record_errors(&errors);
         self.state.load_errors.extend(errors);
         // Files plugins opened are read again, unless they hold changes not saved yet.
         self.state.plugins.settings_files.retain(|_, file| !file.changes.is_empty());

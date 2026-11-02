@@ -83,7 +83,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | `Main.sublime-menu` | Yes, merged by `id` |
 | `.sublime-commands` | Yes |
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, `open_url`, …) |
-| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, statuses and regions work; Package Control runs when copied to `Installed Packages`, but cannot be installed from the editor yet — see [docs/plugins.md](docs/plugins.md) |
+| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, statuses and regions work; Package Control installs from Tools > Install Package Control… (needs `curl`) and the packages it installs load by themselves — see [docs/plugins.md](docs/plugins.md) |
 | Build systems (`.sublime-build`) | `build`, `exec`, variants, `cancel_build`, results (`next_result`) |
 | `.sublime-package` archives | Yes: unpacked to a cache and read like folders; loose files override them. Of the packages Sublime ships, syntaxes are left out (syntect has its own) |
 
@@ -184,7 +184,7 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 - [ ] Find panel toggles and Find in Files
 - [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`, dialogs, `find_resources` / `load_resource`, scratch views, output panels, `set_status`, `add_regions`
 - [ ] Python plugins phase B rest: output panel results, build systems
-- [ ] Python plugins phase C: installing Package Control (it runs if copied to `Installed Packages`)
+- [x] Python plugins phase C: installing Package Control from the editor
 - [ ] Split layouts (groups)
 - [ ] Minimap, code folding, auto-complete, bookmarks
 - [ ] Build systems
@@ -199,8 +199,11 @@ CodeLibre Text **does not collect telemetry or usage data**. Everything we know 
 for you comes from what you tell us, so feedback is very welcome:
 
 - **Found a bug?** Use **Help > Report an Issue…** (or `Help: Report an Issue` in the Command Palette):
-  it opens the bug report form in your browser with the editor's version and your operating system
-  already filled in. Nothing is sent until you submit the form yourself. You can also
+  it opens the bug report form in your browser with the editor's version, your operating system and
+  this session's errors (with your home folder replaced by `~`) already filled in. Nothing is sent
+  until you submit the form yourself. Every error is also kept, with its time, in **Help > Error Log**
+  (`Local/Errors.log` in the data folder; on Windows `%APPDATA%\codelibre_text\data\Local\Errors.log`).
+  The Package Load Errors window has buttons for both. You can also
   [open a bug report](https://github.com/oscarchacon/codelibre_text/issues/new?template=bug_report.yml) directly.
 - **Missing a feature or a Sublime Text command?** [Request a feature](https://github.com/oscarchacon/codelibre_text/issues/new?template=feature_request.yml).
 
@@ -208,7 +211,8 @@ To help us reproduce a problem, please include:
 
 1. The **version** (shown in **Help > About CodeLibre Text**) and your operating system — already
    filled in when you use Help > Report an Issue.
-2. Any messages from **Help > Package Load Errors** and from the console (`` Ctrl+` ``).
+2. Any messages from **Help > Package Load Errors**, **Help > Error Log** and the console (`` Ctrl+` ``) —
+   this session's errors are filled in when you use Help > Report an Issue.
 3. The smallest file, package or setting that shows the problem, as a code block:
 
    ````markdown

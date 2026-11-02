@@ -290,6 +290,7 @@ impl Editor {
                 }
             }
         }
+        self.check_installed_packages();
     }
 
     /// The view reports where the user moved the caret.

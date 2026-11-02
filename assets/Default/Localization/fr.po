@@ -1000,3 +1000,52 @@ msgstr "Aucune règle d'indentation pour {syntax}"
 #: crates/use_cases/src/editing.rs
 msgid "{command} to {target} is not supported"
 msgstr "{command} vers {target} n'est pas pris en charge"
+
+#: assets/Default/Main.sublime-menu
+msgid "Install Package Control…"
+msgstr "Installer Package Control…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Install Package Control"
+msgstr "Installer Package Control"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control is already installed"
+msgstr "Package Control est déjà installé"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control will be downloaded from {url} and run as a plugin. Install it?"
+msgstr "Package Control sera téléchargé depuis {url} et exécuté comme plugin. L’installer ?"
+
+#: crates/use_cases/src/packages.rs
+msgid "Install"
+msgstr "Installer"
+
+#: crates/use_cases/src/packages.rs
+msgid "Downloading Package Control…"
+msgstr "Téléchargement de Package Control…"
+
+#: crates/use_cases/src/packages.rs
+msgid "Could not download Package Control: {error}"
+msgstr "Impossible de télécharger Package Control : {error}"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control installed: open the Command Palette and type Package Control"
+msgstr "Package Control installé : ouvrez la palette de commandes et tapez Package Control"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control cannot be installed: there is no Installed Packages folder"
+msgstr "Impossible d'installer Package Control : le dossier Installed Packages n'existe pas"
+
+#: crates/use_cases/src/packages.rs
+msgid "Package Control was downloaded but did not load (Help > Package Load Errors)"
+msgstr "Package Control a été téléchargé mais n'a pas pu être chargé (Aide > Erreurs de chargement des paquets)"
+
+msgid "Error Log"
+msgstr "Journal des erreurs"
+
+msgid "Help: Open Error Log"
+msgstr "Aide : Ouvrir le journal des erreurs"
+
+msgid "No errors have been logged"
+msgstr "Aucune erreur n’a été enregistrée"

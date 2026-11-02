@@ -126,23 +126,26 @@ fn result_list(
                     ui.painter().rect_filled(rect, 4.0, fill);
                 }
                 let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 4.0))));
-                row.horizontal(|ui| {
-                    if !item.kind.is_empty() {
-                        ui.label(RichText::new(&item.kind).size(12.0).monospace().color(chrome.panel_bg).background_color(chrome.accent));
-                    }
-                    ui.vertical(|ui| {
-                        let color = if is_selected { chrome.accent } else { chrome.fg };
-                        let caption = RichText::new(&item.caption).size(14.0).color(color);
-                        ui.label(if panel.monospace { caption.monospace() } else { caption });
-                        if !item.detail.is_empty() {
-                            ui.label(RichText::new(&item.detail).size(11.5).color(chrome.fg_dim));
-                        }
-                    });
+                // The hint first, from the right, so the caption and detail get what is left and
+                // are cut to one line each: the row has a fixed height.
+                row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if !item.hint.is_empty() {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(&item.hint).size(12.0).color(chrome.fg_dim));
-                        });
+                        ui.add(egui::Label::new(RichText::new(&item.hint).size(12.0).color(chrome.fg_dim)).extend());
+                        ui.add_space(12.0);
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        if !item.kind.is_empty() {
+                            ui.label(RichText::new(&item.kind).size(12.0).monospace().color(chrome.panel_bg).background_color(chrome.accent));
+                        }
+                        ui.vertical(|ui| {
+                            let color = if is_selected { chrome.accent } else { chrome.fg };
+                            let caption = RichText::new(&item.caption).size(14.0).color(color);
+                            ui.add(egui::Label::new(if panel.monospace { caption.monospace() } else { caption }).truncate());
+                            if !item.detail.is_empty() {
+                                ui.add(egui::Label::new(RichText::new(&item.detail).size(11.5).color(chrome.fg_dim)).truncate());
+                            }
+                        });
+                    });
                 });
                 if is_selected && scroll_to_selected {
                     response.scroll_to_me(None);

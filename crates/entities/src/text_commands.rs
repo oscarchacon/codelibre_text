@@ -95,6 +95,87 @@ pub fn replace_selection(text: &mut String, selection: Selection, insert: &str) 
     Selection::caret(selection.start() + insert.chars().count())
 }
 
+/// Sublime's `insert_snippet` without the field navigation: replaces the selection with
+/// `snippet`, where `$SELECTION` is the selected text, `${1:default}` its default and `$1` / `$0`
+/// nothing. The first field (`$1`, else `$0`) ends selected (its default) or as the caret; with no
+/// field, the caret ends after the text. `\$` is a `$`; other variables stay as written.
+pub fn insert_snippet(text: &mut String, selection: Selection, snippet: &str) -> Selection {
+    let selected = selected_text(text, selection).to_string();
+    let mut out = String::new();
+    let mut fields = Vec::new();
+    expand_snippet(&mut snippet.chars().peekable(), &selected, &mut out, &mut fields, false);
+    let inserted = replace_selection(text, selection, &out);
+    let start = selection.start();
+    // Field 0 is where the caret ends after the others: it goes last.
+    match fields.iter().min_by_key(|(number, _, _)| if *number == 0 { u32::MAX } else { *number }) {
+        Some(&(_, a, b)) => Selection::new(start + a, start + b),
+        None => inserted,
+    }
+}
+
+/// Appends the expansion of `chars` to `out` until the end, or the `}` that closes a field
+/// (`in_field`). `fields` gets (number, start, end) in chars of `out`.
+fn expand_snippet(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    selected: &str,
+    out: &mut String,
+    fields: &mut Vec<(u32, usize, usize)>,
+    in_field: bool,
+) {
+    while let Some(c) = chars.next() {
+        match c {
+            '}' if in_field => return,
+            '\\' if matches!(chars.peek(), Some('$' | '}' | '\\')) => out.push(chars.next().unwrap_or(c)),
+            '$' => {
+                let braced = chars.peek() == Some(&'{');
+                if braced {
+                    chars.next();
+                }
+                let mut name = String::new();
+                while let Some(&n) = chars.peek().filter(|n| n.is_ascii_alphanumeric() || **n == '_') {
+                    name.push(n);
+                    chars.next();
+                }
+                let start = out.chars().count();
+                if name == "SELECTION" || name == "TM_SELECTED_TEXT" {
+                    out.push_str(selected);
+                    if braced {
+                        skip_to_closing_brace(chars);
+                    }
+                } else if let Ok(number) = name.parse::<u32>() {
+                    if braced && chars.peek() == Some(&':') {
+                        chars.next();
+                        expand_snippet(chars, selected, out, fields, true);
+                    } else if braced {
+                        skip_to_closing_brace(chars);
+                    }
+                    fields.push((number, start, out.chars().count()));
+                } else {
+                    out.push('$');
+                    if braced {
+                        out.push('{');
+                    }
+                    out.push_str(&name);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+}
+
+/// Skips the rest of a `${…}` (a transformation we do not apply), nested braces included.
+fn skip_to_closing_brace(chars: &mut std::iter::Peekable<std::str::Chars>) {
+    let mut depth = 0;
+    for c in chars.by_ref() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 0 => return,
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+}
+
 /// Tab key: indents a multi-line selection, otherwise inserts a tab (or spaces up to the next tab stop).
 pub fn insert_tab(text: &mut String, selection: Selection, tab_size: usize, use_spaces: bool) -> Selection {
     let (s, e) = selected_lines(text, selection);
