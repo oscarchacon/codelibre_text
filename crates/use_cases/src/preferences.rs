@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::editor::Editor;
-use crate::gateways::platform_name;
+use crate::gateways::{expand_variable, platform_name};
 
 const DEFAULT_COLOR_SCHEME: &str = "Monokai";
 
@@ -79,13 +79,16 @@ impl Editor {
         self.set_setting("color_scheme", Value::String(name.to_string()));
     }
 
-    /// Sublime's `edit_settings`: opens the built-in defaults (read only) next to the user's file,
-    /// creating the user's file from `default_contents` if needed.
+    /// Sublime's `edit_settings`: opens the defaults (read only) next to the user's file,
+    /// creating the user's file from `default_contents` if needed. The defaults are the package's
+    /// file (`${packages}/<package>/<file>`, also inside a `.sublime-package`), so the settings of
+    /// any package (Preferences > Package Settings, the palette) can be adjusted; those of our
+    /// `Default` package are built in.
     pub fn edit_settings(&mut self, base_file: &str, default_contents: &str) {
-        let base_file = base_file.replace("${platform}", platform_name());
+        let base_file = expand_variable(base_file, "platform", platform_name());
         let file_name = base_file.rsplit('/').next().unwrap_or(&base_file).to_string();
 
-        if let Some(defaults) = self.gateways.resources.default_resource(&file_name) {
+        if let Some(defaults) = self.default_settings(&base_file, &file_name) {
             self.open_scratch(&format!("{file_name} — Default"), &defaults, "JSON", true);
         }
         let user_file = self.gateways.resources.paths().user_dir().join(&file_name);
@@ -97,6 +100,19 @@ impl Editor {
         }
         if self.open_file(&user_file) {
             self.set_syntax("JSON");
+        }
+    }
+
+    /// The text of `edit_settings`'s left view: a package's own file, or our built-in one.
+    fn default_settings(&self, base_file: &str, file_name: &str) -> Option<String> {
+        let in_packages = ["${packages}/", "$packages/"].iter().find_map(|prefix| base_file.strip_prefix(prefix));
+        match in_packages {
+            Some(path) if !path.starts_with("Default/") => {
+                let include_sublime = self.global_settings().bool("import_sublime_packages", true);
+                let bytes = self.gateways.resources.load_resource(&format!("Packages/{path}"), include_sublime).ok()?;
+                Some(String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
+            }
+            _ => self.gateways.resources.default_resource(file_name),
         }
     }
 }

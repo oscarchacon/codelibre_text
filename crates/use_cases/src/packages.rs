@@ -43,6 +43,18 @@ impl Editor {
         self.refresh_file_index();
         self.state.installed_packages = self.installed_packages_stamp();
         self.state.installed_packages_changed = None;
+        self.state.ignored_packages = self.global_settings().get("ignored_packages").cloned();
+    }
+
+    /// Package Control disables and enables packages (Disable / Enable Package, and around an
+    /// upgrade or a removal) only by changing `ignored_packages`, expecting the editor to unload
+    /// or load them at once, as Sublime does: reloads the packages when the setting is not the
+    /// one they were loaded with (only the plugins of the packages concerned reload). Called by
+    /// [`Editor::check_external_changes`].
+    pub fn check_ignored_packages(&mut self) {
+        if self.global_settings().get("ignored_packages") != self.state.ignored_packages.as_ref() {
+            self.reload_packages();
+        }
     }
 
     /// Our own `Installed Packages` folder (where Package Control puts what it installs).
@@ -68,9 +80,9 @@ impl Editor {
     }
 
     /// Reloads the packages when Package Control (or the user) added, upgraded or removed a
-    /// `.sublime-package` in our `Installed Packages`, as Sublime does. Reloading restarts the
-    /// plugin host, so it waits until the folder held still for one check: Package Control may be
-    /// installing several. Called by [`Editor::check_external_changes`].
+    /// `.sublime-package` in our `Installed Packages`, as Sublime does. It waits until the folder
+    /// held still for one check: Package Control may be installing several. The plugin host keeps
+    /// running (only changed packages reload). Called by [`Editor::check_external_changes`].
     pub fn check_installed_packages(&mut self) {
         let stamp = self.installed_packages_stamp();
         if stamp == self.state.installed_packages {

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use entities::command::Command;
 use entities::document::DocumentId;
+use entities::keymap::KeyCombo;
 use entities::selection::Selection;
 
 pub struct TabViewModel {
@@ -51,15 +52,35 @@ pub struct StatusBarViewModel {
     pub syntax: String,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct MenuEntryViewModel {
     pub caption: String,
+    /// The `id` packages extend it by (`"preferences"`, `"help"`…).
+    pub id: Option<String>,
     pub separator: bool,
     pub shortcut: Option<String>,
+    /// The key of `shortcut`, unless it is a chord (native menus take one key).
+    pub key: Option<KeyCombo>,
     /// `Some(checked)` for checkbox items.
     pub checked: Option<bool>,
     pub enabled: bool,
     pub command: Option<Command>,
     pub children: Vec<MenuEntryViewModel>,
+}
+
+/// The menu bar of macOS: the application menu first (About, Preferences, the system's Services /
+/// Hide items, Quit), then the main menu without the entries moved there.
+#[derive(Clone, PartialEq)]
+pub struct MacMenuViewModel {
+    pub app_name: String,
+    pub about: Option<MenuEntryViewModel>,
+    pub preferences: Option<MenuEntryViewModel>,
+    pub services: String,
+    pub hide: String,
+    pub hide_others: String,
+    pub show_all: String,
+    pub quit: Option<MenuEntryViewModel>,
+    pub menus: Vec<MenuEntryViewModel>,
 }
 
 pub struct QuickPanelItemViewModel {

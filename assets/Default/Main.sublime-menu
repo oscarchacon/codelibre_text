@@ -155,7 +155,8 @@
 			{ "command": "select_color_scheme", "caption": "Select Color Scheme…" },
 			{ "command": "select_language", "caption": "Language…" },
 			{ "command": "reload_packages", "caption": "Reload Packages" },
-			{ "caption": "-", "id": "package-settings" }
+			{ "caption": "-" },
+			{ "caption": "Package Settings", "mnemonic": "P", "id": "package-settings", "children": [] }
 		]
 	},
 	{

@@ -50,36 +50,48 @@ impl KeyCombo {
     }
 
     /// Human readable form for menus and the command palette, e.g. `Ctrl+Shift+P`
-    /// (`Shift+Cmd+P` on macOS).
+    /// (`⇧+⌘+P` on macOS).
     pub fn display(&self) -> String {
         self.display_for(cfg!(target_os = "macos"))
     }
 
-    /// [`display`](Self::display) with the modifier names and order of macOS (Ctrl, Option,
-    /// Shift, Cmd) or of the other systems.
+    /// [`display`](Self::display) as the system writes it: modifier names joined by `+`, or on
+    /// macOS its symbols in its order (⌃⌥⇧⌘), with symbols for keys such as ↩ ⌫ ↑ too.
     pub fn display_for(&self, macos: bool) -> String {
-        let (alt, super_key) = if macos { ("Option", "Cmd") } else { ("Alt", "Super") };
-        let mut parts = Vec::new();
-        if self.ctrl {
-            parts.push("Ctrl".to_string());
-        }
-        if self.alt {
-            parts.push(alt.to_string());
-        }
-        if self.shift {
-            parts.push("Shift".to_string());
-        }
-        if self.super_key {
-            parts.push(super_key.to_string());
-        }
-        let mut chars = self.key.chars();
-        let key = match (chars.next(), self.key.chars().count()) {
-            (Some(first), 1) => first.to_uppercase().collect(),
-            (Some(first), _) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            (None, _) => String::new(),
+        let modifiers = if macos {
+            [(self.ctrl, "⌃"), (self.alt, "⌥"), (self.shift, "⇧"), (self.super_key, "⌘")]
+        } else {
+            [(self.ctrl, "Ctrl"), (self.alt, "Alt"), (self.shift, "Shift"), (self.super_key, "Super")]
         };
-        parts.push(key);
+        let mut parts: Vec<String> = modifiers.iter().filter(|(on, _)| *on).map(|(_, name)| name.to_string()).collect();
+        let symbol = match self.key.as_str() {
+            _ if !macos => None,
+            "enter" => Some("↩"),
+            "tab" => Some("⇥"),
+            "escape" => Some("⎋"),
+            "backspace" => Some("⌫"),
+            "delete" => Some("⌦"),
+            "up" => Some("↑"),
+            "down" => Some("↓"),
+            "left" => Some("←"),
+            "right" => Some("→"),
+            "pageup" => Some("⇞"),
+            "pagedown" => Some("⇟"),
+            "home" => Some("↖"),
+            "end" => Some("↘"),
+            _ => None,
+        };
+        parts.push(symbol.map_or_else(|| self.key_name(), str::to_string));
         parts.join("+")
+    }
+
+    /// The key with a capital first letter (`P`, `F11`, `Pageup`).
+    fn key_name(&self) -> String {
+        let mut chars = self.key.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            None => String::new(),
+        }
     }
 
     /// A single printable symbol such as `/` or `?`.
@@ -208,11 +220,19 @@ impl Keymap {
 
     /// The key binding shown next to a command in menus and the palette.
     pub fn binding_for(&self, command: &Command) -> Option<String> {
-        self.bindings
-            .iter()
-            .rev()
-            .find(|b| b.command.same_as(command))
-            .map(Binding::display)
+        self.binding(command).map(Binding::display)
+    }
+
+    /// The key of [`binding_for`](Self::binding_for)'s binding, when it is one key and not a chord.
+    pub fn key_for(&self, command: &Command) -> Option<&KeyCombo> {
+        match self.binding(command)?.keys.as_slice() {
+            [key] => Some(key),
+            _ => None,
+        }
+    }
+
+    fn binding(&self, command: &Command) -> Option<&Binding> {
+        self.bindings.iter().rev().find(|b| b.command.same_as(command))
     }
 }
 

@@ -55,6 +55,8 @@ struct HostProcess {
     /// The ids of the calls being answered, innermost last (a call can be answered while the
     /// editor serves another one, e.g. a plugin command run by a plugin).
     open_calls: Vec<Value>,
+    /// The `python_interpreter` setting it was started with.
+    interpreter: Option<String>,
 }
 
 pub struct PythonPluginHost {
@@ -101,7 +103,7 @@ impl PythonPluginHost {
         let stdin = child.stdin.take().expect("piped stdin");
         spawn_reader(stdout, sender.clone(), true, self.waker.clone());
         spawn_reader(stderr, sender, false, self.waker.clone());
-        self.process = Some(HostProcess { child, stdin, lines, open_calls: Vec::new() });
+        self.process = Some(HostProcess { child, stdin, lines, open_calls: Vec::new(), interpreter: interpreter.map(String::from) });
         Ok(())
     }
 
@@ -162,8 +164,14 @@ fn executable_folder(request: &PluginLoad, data: &Path) -> PathBuf {
 }
 
 impl PluginHostGateway for PythonPluginHost {
-    fn load(&mut self, request: &PluginLoad) -> Result<(), String> {
-        self.start(request.interpreter.as_deref())?;
+    fn load(&mut self, request: &PluginLoad) -> Result<bool, String> {
+        let running = self
+            .process
+            .as_mut()
+            .is_some_and(|p| p.interpreter == request.interpreter && matches!(p.child.try_wait(), Ok(None)));
+        if !running {
+            self.start(request.interpreter.as_deref())?;
+        }
         let data = request.packages_path.parent().map(PathBuf::from).unwrap_or_default();
         let file_name = std::env::current_exe().ok().and_then(|p| p.file_name().map(PathBuf::from)).unwrap_or_default();
         let executable = executable_folder(request, &data).join(file_name).display().to_string();
@@ -182,7 +190,8 @@ impl PluginHostGateway for PythonPluginHost {
                 "cache": data.join("Cache").display().to_string(),
                 "executable": executable,
             },
-        }))
+        }))?;
+        Ok(!running)
     }
 
     fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String> {

@@ -90,17 +90,19 @@ fn unknown_modifiers_and_empty_specs_are_invalid() {
 
 #[test]
 fn display_is_human_readable() {
-    assert_eq!(key("ctrl+shift+p").display(), "Ctrl+Shift+P");
-    assert_eq!(key("f11").display(), "F11");
+    assert_eq!(key("ctrl+shift+p").display_for(false), "Ctrl+Shift+P");
+    assert_eq!(key("f11").display_for(false), "F11");
     assert_eq!(key("alt+pageup").display_for(false), "Alt+Pageup");
     let chord = binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar"));
-    assert_eq!(chord.display(), "Ctrl+K, Ctrl+B");
+    assert_eq!(chord.display(), if cfg!(target_os = "macos") { "⌃+K, ⌃+B" } else { "Ctrl+K, Ctrl+B" });
 }
 
 #[test]
-fn display_uses_the_macos_modifier_names() {
-    assert_eq!(key("super+shift+p").display_for(true), "Shift+Cmd+P");
-    assert_eq!(key("ctrl+alt+super+g").display_for(true), "Ctrl+Option+Cmd+G");
+fn display_uses_the_macos_symbols() {
+    assert_eq!(key("super+shift+p").display_for(true), "⇧+⌘+P");
+    assert_eq!(key("ctrl+alt+super+g").display_for(true), "⌃+⌥+⌘+G");
+    assert_eq!(key("super+alt+up").display_for(true), "⌥+⌘+↑");
+    assert_eq!(key("f11").display_for(true), "F11");
     assert_eq!(key("super+shift+p").display_for(false), "Shift+Super+P");
 }
 
@@ -133,7 +135,7 @@ fn chords_wait_for_the_second_key() {
     keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
     assert_eq!(command_name(press(&mut keymap, "ctrl+k")), "<chord>");
     assert!(keymap.is_waiting_for_chord());
-    assert_eq!(keymap.pending_chord_display(), "Ctrl+K");
+    assert_eq!(keymap.pending_chord_display(), key("ctrl+k").display());
     assert_eq!(command_name(press(&mut keymap, "ctrl+b")), "toggle_side_bar");
     assert!(!keymap.is_waiting_for_chord());
 }
@@ -236,13 +238,24 @@ fn binding_for_finds_the_shortcut_of_a_command() {
     keymap.add(binding(&["ctrl+f"], Command::with_args("show_panel", json!({ "panel": "find" }))));
     keymap.add(binding(&["ctrl+h"], Command::with_args("show_panel", json!({ "panel": "replace" }))));
 
-    assert_eq!(keymap.binding_for(&Command::with_args("save", json!({}))), Some("Ctrl+S".into()));
-    assert_eq!(keymap.binding_for(&Command::new("toggle_side_bar")), Some("Ctrl+K, Ctrl+B".into()));
+    assert_eq!(keymap.binding_for(&Command::with_args("save", json!({}))), Some(key("ctrl+s").display()));
+    assert_eq!(keymap.binding_for(&Command::new("toggle_side_bar")), Some(format!("{}, {}", key("ctrl+k").display(), key("ctrl+b").display())));
     assert_eq!(
         keymap.binding_for(&Command::with_args("show_panel", json!({ "panel": "replace" }))),
-        Some("Ctrl+H".into())
+        Some(key("ctrl+h").display())
     );
     assert_eq!(keymap.binding_for(&Command::new("exit")), None);
+}
+
+#[test]
+fn key_for_is_the_key_of_that_shortcut_unless_it_is_a_chord() {
+    let mut keymap = Keymap::default();
+    keymap.add(binding(&["ctrl+s"], Command::new("save")));
+    keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
+
+    assert_eq!(keymap.key_for(&Command::new("save")), KeyCombo::parse("ctrl+s").as_ref());
+    assert_eq!(keymap.key_for(&Command::new("toggle_side_bar")), None);
+    assert_eq!(keymap.key_for(&Command::new("exit")), None);
 }
 
 #[test]

@@ -117,6 +117,18 @@ impl Editor {
         }
     }
 
+    /// Moves a tab to `index` (the last place when beyond it); the active tab stays active.
+    pub fn move_document(&mut self, id: DocumentId, index: usize) {
+        let Some(from) = self.index_of(id) else { return };
+        let active = self.state.documents.get(self.state.active).map(|d| d.id);
+        let doc = self.state.documents.remove(from);
+        let to = index.min(self.state.documents.len());
+        self.state.documents.insert(to, doc);
+        if let Some(active) = active.and_then(|a| self.index_of(a)) {
+            self.state.active = active;
+        }
+    }
+
     /// Next / previous tab in tab order.
     pub fn cycle_documents(&mut self, forward: bool) {
         let count = self.state.documents.len();
@@ -291,6 +303,7 @@ impl Editor {
             }
         }
         self.check_installed_packages();
+        self.check_ignored_packages();
     }
 
     /// The view reports where the user moved the caret.

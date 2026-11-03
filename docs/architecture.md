@@ -100,7 +100,7 @@ Everything tied to a library or the OS:
 | `lib.rs` | `compose()`, the composition root: builds every gateway implementation and starts the `Editor`. |
 | `main.rs` | Thin binary: command line and window. (Library + thin `main.rs` so `tests/` can use the code.) |
 | `app.rs` | The eframe loop (see below). |
-| `views/` | egui views. They draw view models and return `UiEvent`s. |
+| `views/` | egui views. They draw view models and return `UiEvent`s. On macOS the menu is native (`native_menu.rs`, `muda`) instead of `menu_bar.rs`. |
 | `input.rs` | egui keys → `KeyCombo`. |
 | `syntax_engine.rs` | syntect: syntaxes, color schemes, incremental per-line highlighting. |
 | `gateways/` | Disk (`std_file_system`), `rfd` dialogs, `arboard` clipboard, syntect `SyntaxGateway`, `ignore` file index, OS shell, platform directories. |

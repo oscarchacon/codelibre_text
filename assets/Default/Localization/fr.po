@@ -367,6 +367,30 @@ msgid "Reload Packages"
 msgstr "Recharger les paquets"
 
 #: assets/Default/Main.sublime-menu
+msgid "Package Settings"
+msgstr "Paramètres des paquets"
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Quit CodeLibre Text"
+msgstr "Quitter CodeLibre Text"
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Services"
+msgstr "Services"
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Hide CodeLibre Text"
+msgstr "Masquer CodeLibre Text"
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Hide Others"
+msgstr "Masquer les autres"
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Show All"
+msgstr "Tout afficher"
+
+#: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Aide"
 

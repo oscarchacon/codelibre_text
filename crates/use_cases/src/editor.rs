@@ -10,6 +10,7 @@ use entities::keymap::Keymap;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
+use serde_json::Value;
 
 use crate::builds::{BuildOption, BuildState};
 use crate::find_replace::FindCache;
@@ -106,6 +107,9 @@ pub struct EditorState {
     /// once it holds still, see [`Editor::check_installed_packages`]).
     pub(crate) installed_packages: FolderStamp,
     pub(crate) installed_packages_changed: Option<FolderStamp>,
+    /// The `ignored_packages` setting when packages were last loaded (see
+    /// [`Editor::check_ignored_packages`]).
+    pub(crate) ignored_packages: Option<Value>,
 }
 
 pub struct Editor {
@@ -146,6 +150,7 @@ impl Editor {
                 last_disk_check: Instant::now(),
                 installed_packages: Vec::new(),
                 installed_packages_changed: None,
+                ignored_packages: None,
             },
             gateways,
         }

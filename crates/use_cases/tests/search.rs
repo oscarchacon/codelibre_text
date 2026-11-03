@@ -30,7 +30,7 @@ fn the_palette_lists_entries_with_their_key_binding() {
     let editor = world.editor();
     let results = editor.search(SearchKind::Commands, "save");
     assert_eq!(results[0].caption, "File: Save");
-    assert_eq!(results[0].hint, "Ctrl+S");
+    assert_eq!(results[0].hint, KeyCombo::parse("ctrl+s").unwrap().display());
     assert_eq!(results[0].target, CandidateTarget::Command(Command::new("save")));
 }
 

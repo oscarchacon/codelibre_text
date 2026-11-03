@@ -1,5 +1,6 @@
+use entities::command::Command;
 use entities::document::RegionSet;
-use serde_json::Value;
+use serde_json::{json, Value};
 use use_cases::Editor;
 
 use crate::view_models::{EditorViewModel, RegionViewModel, Underline};
@@ -13,6 +14,24 @@ const DRAW_NO_OUTLINE: u64 = 256;
 const DRAW_SOLID_UNDERLINE: u64 = 512;
 const DRAW_STIPPLED_UNDERLINE: u64 = 1024;
 const DRAW_SQUIGGLY_UNDERLINE: u64 = 2048;
+
+/// What the empty window suggests, one line each: the key bound to a command (Ctrl+N, or ⌘ keys
+/// on macOS, as the keymap says) and what it does. Commands without a key are left out.
+pub fn present_hints(editor: &Editor) -> Vec<String> {
+    let hints = [
+        (Command::new("new_file"), editor.tr("New File")),
+        (Command::new("prompt_open_file"), editor.tr("Open File")),
+        (Command::new("prompt_open_folder"), editor.tr("Open Folder")),
+        (Command::with_args("show_overlay", json!({ "overlay": "command_palette" })), editor.tr("Command Palette")),
+    ];
+    hints
+        .iter()
+        .filter_map(|(command, action)| {
+            let keys = editor.state().keymap.binding_for(command)?;
+            Some(format!("{keys}  {action}"))
+        })
+        .collect()
+}
 
 /// The active document as the text area should show it.
 pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewModel> {
