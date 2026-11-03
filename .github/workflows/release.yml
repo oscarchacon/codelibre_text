@@ -6,7 +6,7 @@
 # included) run first: nothing is built if they fail. Publishing the draft stays a manual step, and
 # pushing to the branch again replaces its files. If all of that works, a final version (no -alpha,
 # -beta, -rc...) is merged into main (to-main.yml); a pre-release only when a tag to-main/<version>
-# or main/<version> is pushed.
+# or main/<version> exists, pushed before this build or after it.
 name: Release
 
 on:
@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.branch.outputs.version }}
+      to_main: ${{ steps.main.outputs.to_main }}
     steps:
       - id: branch
         name: Read the version from the branch name
@@ -40,6 +41,26 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # A final version goes to main; a pre-release when a tag to-main/<version> or main/<version>
+      # exists (pushed before the build, or after it: then to-main.yml merges it).
+      - id: main
+        name: Decide if this version goes to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.branch.outputs.version }}
+        run: |
+          to_main=false
+          if [[ "$VERSION" != *-* ]]; then
+            to_main=true
+          else
+            for tag in "to-main/$VERSION" "main/$VERSION"; do
+              if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2> /dev/null; then
+                echo "tag $tag: this pre-release goes to main"
+                to_main=true
+              fi
+            done
+          fi
+          echo "to_main=$to_main" >> "$GITHUB_OUTPUT"
 
   # Built natively on x64 and arm64 runners. The oldest supported Ubuntu: the binary needs the glibc
   # it was built against, or newer.
@@ -250,7 +271,7 @@ jobs:
   # (-alpha, -beta, -rc...) stays out until a tag to-main/<version> or main/<version> asks for it.
   main:
     needs: [version, release]
-    if: ${{ !contains(needs.version.outputs.version, '-') }}
+    if: needs.version.outputs.to_main == 'true'
     permissions:
       contents: write
       pull-requests: write

@@ -4,8 +4,9 @@
 # - The release workflow calls it for final versions (no -alpha, -beta, -rc...) once every
 #   installer is uploaded.
 # - A pre-release goes to main only when asked: push a tag to-main/<version> or main/<version>
-#   (git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha). Its installers must be
-#   built first (the release v<version> has files), so main never gets a version whose builds failed.
+#   (git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha). Main never gets a version
+#   whose builds failed: pushed before the build, the tag only tells the release workflow, which
+#   calls this when every installer is uploaded; pushed after it, this merges at once.
 name: To main
 
 on:
@@ -46,23 +47,29 @@ jobs:
             echo "::error::'$version' is not a version: use a tag like to-main/0.1.0-alpha"
             exit 1
           fi
-          if ! gh api "repos/$GH_REPO/branches/release/$version" --silent 2> /dev/null; then
-            echo "::error::there is no branch release/$version"
-            exit 1
-          fi
-          files=$(gh release view "v$version" --json assets --jq '.assets | length' 2> /dev/null || echo 0)
-          if [ "$files" = 0 ]; then
-            echo "::error::release v$version has no installers yet: push release/$version and let it build first"
-            exit 1
-          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          files=0
+          if gh api "repos/$GH_REPO/branches/release/$version" --silent 2> /dev/null; then
+            files=$(gh release view "v$version" --json assets --jq '.assets | length' 2> /dev/null || echo 0)
+          fi
+          if [ "$files" != 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            # A tag pushed before the build: the release workflow sees it and merges when it ends.
+            echo "::notice::release v$version is not built yet: release.yml takes it to main once release/$version builds"
+          else
+            echo "::error::release v$version has no installers"
+            exit 1
+          fi
       - uses: actions/checkout@v4
+        if: steps.version.outputs.ready == 'true'
         with:
           ref: release/${{ steps.version.outputs.version }}
           fetch-depth: 0
           token: ${{ env.GH_TOKEN }}
       # [skip ci]: this push must not start the release workflow again.
       - name: Commit the version
+        if: steps.version.outputs.ready == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -74,6 +81,7 @@ jobs:
             git push origin "HEAD:release/$VERSION"
           fi
       - name: Merge the pull request
+        if: steps.version.outputs.ready == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |

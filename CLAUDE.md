@@ -29,7 +29,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   with it: `git push --atomic -f origin develop macos-test`; the tag starts no run of its own), a manual run with
   `macos` checked, and before every release build.
 - Releases (`release.yml`): a final version is merged into `main` (`to-main.yml`); a pre-release (`-alpha`, `-rc`…) only
-  when a tag `to-main/<version>` or `main/<version>` is pushed after its installers are built.
+  when a tag `to-main/<version>` or `main/<version>` exists (pushed before the build: merged when it ends; after: at once).
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).

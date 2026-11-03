@@ -177,7 +177,8 @@ a build provenance attestation; the Windows and macOS installers are not signed 
 [Code signing policy](docs/code-signing.md). When every build of a final version succeeds, a pull
 request takes the branch to `main` with its version in `Cargo.toml` and is merged at once
 (`.github/workflows/to-main.yml`). A pre-release (`-alpha`, `-beta`, `-rc`…) stays out of `main` until
-a tag `to-main/<version>` (or `main/<version>`) is pushed, once its installers are built:
+a tag `to-main/<version>` (or `main/<version>`) exists. Pushed before the build, it goes to `main`
+when the build ends; pushed after it, at once. A build that fails never reaches `main`:
 
 ```bash
 git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha
