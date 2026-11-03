@@ -1,9 +1,10 @@
 # Tests and clippy on Linux and Windows: for every push to main or develop and every pull request
-# into main, develop or a release/<version> branch. macOS runs only when asked, since its runners
-# are slow and scarce:
-# - pushing a tag macos-test (or macos-test-<anything>) runs them on Linux, Windows and macOS, on the
-#   tagged commit, and the push of the branch with that commit runs nothing (see plan below);
-# - running the workflow by hand (Actions > CI > Run workflow) with "macos" checked adds macOS;
+# into main, develop or a release/<version> branch. macOS joins them only when asked, since its
+# runners are slow and scarce:
+# - the commit pushed (or a pull request's last one) has a tag macos-test (or macos-test-<anything>):
+#   git tag -f macos-test && git push --atomic -f origin develop macos-test
+#   The tag itself starts nothing: the push of the branch is the one run, on all three platforms;
+# - running the workflow by hand (Actions > CI > Run workflow) with "macos" checked;
 # - the release workflow calls it with macos: true, so no installer is built from code whose tests
 #   fail on any platform.
 name: CI
@@ -13,8 +14,6 @@ on:
     branches:
       - main
       - develop
-    tags:
-      - "macos-test*"
   pull_request:
     branches:
       - main
@@ -37,10 +36,8 @@ permissions:
   contents: read
 
 jobs:
-  # Where the tests run. A push of main or develop whose commit also has a macos-test tag runs
-  # nothing: the tag's run tests that commit on every platform, so there is one run, not two. Push
-  # both at once so the tag is there when this looks:
-  #   git tag -f macos-test && git push --atomic -f origin develop macos-test
+  # Where the tests run: Linux and Windows, plus macOS when asked (above). Push the branch and the
+  # tag at once (--atomic) so the tag is there when this looks for it.
   plan:
     runs-on: ubuntu-latest
     outputs:
@@ -49,16 +46,15 @@ jobs:
       - id: os
         env:
           GH_TOKEN: ${{ github.token }}
-          MACOS: ${{ startsWith(github.ref, 'refs/tags/macos-test') || inputs.macos }}
-          BRANCH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && !inputs.macos }}
+          MACOS: ${{ inputs.macos }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "$BRANCH_PUSH" = true ]; then
+          if [ "$MACOS" != true ]; then
             tagged=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/macos-test" \
-              --jq ".[] | select(.object.sha == \"$GITHUB_SHA\") | .ref" | head -n 1)
+              --jq ".[] | select(.object.sha == \"$COMMIT\") | .ref" | head -n 1)
             if [ -n "$tagged" ]; then
-              echo "$tagged is on this commit: its run tests it"
-              echo 'os=[]' >> "$GITHUB_OUTPUT"
-              exit 0
+              echo "$tagged is on this commit: macOS too"
+              MACOS=true
             fi
           fi
           if [ "$MACOS" = true ]; then
@@ -69,7 +65,6 @@ jobs:
 
   test:
     needs: plan
-    if: needs.plan.outputs.os != '[]'
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
