@@ -281,8 +281,10 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
       would take every key) and their plugins are not loaded. A change reloads the packages (Package Control's
       disabling, below).
-- [x] **Libraries**: `Lib/python38`, where Package Control 4 installs libraries, is on `sys.path` (`add_library_folders`
-      in `plugin_host.py`).
+- [x] **Libraries**: `Lib/python38` and `Lib/python33`, where Package Control 4 installs libraries, are on `sys.path`
+      (`add_library_folders` in `plugin_host.py`, `python38` first). Package Control puts those of a package whose
+      `.python-version` is 3.3 in `python33`, since it finds Sublime's `plugin_host-3.3` next to `executable_path()`;
+      we run every package in one Python and do not read `.python-version`.
 - [ ] Libraries, still missing: Package Control 3's `dependencies.json` / dependency packages (`Packages/<dep>/all`, `st3`…).
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
       has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).

@@ -453,6 +453,29 @@ class FancyCommand(sublime_plugin.TextCommand):
     assert_eq!(editor_status(&editor), "True (0, 4) 0 1 'text.plain ' True", "console:\n{}", editor.state().console);
 }
 
+/// Package Control installs libraries in `Lib/python38`, and in `Lib/python33` for packages of
+/// Python 3.3; plugins import from both, `python38` first.
+#[test]
+fn plugins_import_the_libraries_package_control_installs() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("Lib");
+    for (folder, files) in [("python38", ["shared.py", "lib38.py"]), ("python33", ["shared.py", "lib33.py"])] {
+        fs::create_dir_all(lib.join(folder)).unwrap();
+        for file in files {
+            fs::write(lib.join(folder).join(file), format!("WHERE = '{folder}'\n")).unwrap();
+        }
+    }
+    let plugin = "import lib33, lib38, shared\nassert (lib33.WHERE, lib38.WHERE, shared.WHERE) == \
+                  ('python33', 'python38', 'python38')\n";
+    let Some((_host, loaded)) = host_with(dir.path(), &[("uses_libs.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { errors, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
 /// Package Control sets `post_handshake_auth` before every download, which Apple's
 /// `/usr/bin/python3` (LibreSSL) refuses unless the host lets it.
 #[test]

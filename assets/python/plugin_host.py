@@ -207,14 +207,16 @@ def load_package(name, dirs, archives, signature):
 
 
 def add_library_folders():
-    """``Lib/python38``, next to this file's folder, where Package Control installs libraries.
-    It also lists ``python33``, whose libraries are for a Python we do not run."""
+    """``Lib/python38`` and ``Lib/python33``, next to this file's folder, where Package Control installs
+    libraries. It puts those of a package with a ``.python-version`` of 3.3 in ``python33`` (it sees
+    Sublime's ``plugin_host-3.3`` next to the executable); we run every package in one Python, so
+    both are on the path, ``python38`` first where a library is in both."""
     lib = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    os.makedirs(os.path.join(lib, "python33"), exist_ok=True)
-    folder = os.path.join(lib, "python38")
-    os.makedirs(folder, exist_ok=True)
-    if folder not in sys.path:
-        sys.path.append(folder)
+    for name in ("python38", "python33"):
+        folder = os.path.join(lib, name)
+        os.makedirs(folder, exist_ok=True)
+        if folder not in sys.path:
+            sys.path.append(folder)
     # Last, so the standard library wins where it still has them (``imp``, ``distutils``).
     shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
     if shims not in sys.path:
