@@ -174,10 +174,23 @@ setup and portable `.zip` (x64 and ARM64), the macOS `.dmg` (Apple Silicon only)
 by hand; pushing again replaces its files. The `.deb`, `.rpm` and a `SHA256SUMS` of every file are
 signed with the release GPG key (secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has
 a build provenance attestation; the Windows and macOS installers are not signed yet. See the
-[Code signing policy](docs/code-signing.md). When every build succeeds, a pull request takes the branch to `main`
-with its version in `Cargo.toml` and is merged at once. Final versions always do; a pre-release only
-does while no other published release has files to download. This needs a token that can write
-contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
+[Code signing policy](docs/code-signing.md). When every build of a final version succeeds, a pull
+request takes the branch to `main` with its version in `Cargo.toml` and is merged at once
+(`.github/workflows/to-main.yml`). A pre-release (`-alpha`, `-beta`, `-rc`…) stays out of `main` until
+a tag `to-main/<version>` (or `main/<version>`) is pushed, once its installers are built:
+
+```bash
+git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha
+```
+
+This needs a token that can write contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
+
+The tests run on Linux and Windows for every push and pull request; macOS only before a release, or
+when a tag `macos-test` (or `macos-test-<anything>`) is pushed, which tests that commit on macOS:
+
+```bash
+git tag -f macos-test && git push -f origin macos-test
+```
 
 ## Roadmap
 

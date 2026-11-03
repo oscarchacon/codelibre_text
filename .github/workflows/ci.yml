@@ -1,6 +1,11 @@
-# Tests and clippy on Linux, Windows and macOS: for every push to main or develop and every pull
-# request into main, develop or a release/<version> branch. The release workflow calls it too, so
-# no installer is built from code whose tests fail.
+# Tests and clippy on Linux and Windows: for every push to main or develop and every pull request
+# into main, develop or a release/<version> branch. macOS runs only when asked, since its runners
+# are slow and scarce:
+# - pushing a tag macos-test (or macos-test-<anything>) runs them on macOS alone, on the tagged commit
+#   (git tag -f macos-test && git push -f origin macos-test);
+# - running the workflow by hand (Actions > CI > Run workflow) with "macos" checked adds macOS;
+# - the release workflow calls it with macos: true, so no installer is built from code whose tests
+#   fail on any platform.
 name: CI
 
 on:
@@ -8,12 +13,25 @@ on:
     branches:
       - main
       - develop
+    tags:
+      - "macos-test*"
   pull_request:
     branches:
       - main
       - develop
       - "release/**"
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Also on macOS
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      macos:
+        description: Also on macOS
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +42,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        os: >-
+          ${{ fromJSON(startsWith(github.ref, 'refs/tags/macos-test') && '["macos-latest"]'
+          || inputs.macos && '["ubuntu-22.04", "windows-latest", "macos-latest"]'
+          || '["ubuntu-22.04", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
