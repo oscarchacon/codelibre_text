@@ -26,7 +26,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
 - CI (`.github/workflows/ci.yml`) runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
   and pull requests into them or a `release/**` branch. All three, macOS included, for a pushed tag `macos-test*`, a manual
-  run with `macos` checked, and before every release build.
+  run with `macos` checked, and before every release build. A branch push whose commit has a `macos-test*` tag
+  skips its tests (the tag's run does them): `git push --atomic -f origin develop macos-test`.
 - Releases (`release.yml`): a final version is merged into `main` (`to-main.yml`); a pre-release (`-alpha`, `-rc`…) only
   when a tag `to-main/<version>` or `main/<version>` is pushed after its installers are built.
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).

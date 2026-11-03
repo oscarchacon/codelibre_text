@@ -190,8 +190,11 @@ when a tag `macos-test` (or `macos-test-<anything>`) is pushed, which tests that
 Windows and macOS:
 
 ```bash
-git tag -f macos-test && git push -f origin macos-test
+git tag -f macos-test && git push --atomic -f origin develop macos-test
 ```
+
+The run of the branch push then sees the tag on its commit and tests nothing, so only the tag's run
+works.
 
 ## Roadmap
 
