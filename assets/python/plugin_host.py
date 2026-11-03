@@ -36,10 +36,20 @@ codelibre_rpc.setup()
 import sublime  # noqa: E402
 import sublime_plugin  # noqa: E402
 
-# Modules of the loaded plugins, to call plugin_unloaded() and forget them on reload.
-_plugin_modules = []
-_package_names = []
+# The loaded packages by name, in load order (see ``LoadedPackage``).
+_packages = {}
 _next_edit_token = 0
+
+
+class LoadedPackage:
+    """A package whose plugins are loaded: what its files looked like (``package_signature``),
+    its plugin modules, the archive paths it registered and its load errors."""
+
+    def __init__(self, signature):
+        self.signature = signature
+        self.modules = []
+        self.roots = []
+        self.errors = []
 
 
 class ArchiveLoader(importlib.abc.SourceLoader):
@@ -125,34 +135,54 @@ def visible_path(directory, archives):
     return directory
 
 
-def unload_plugins():
-    for module in _plugin_modules:
+def package_signature(dirs):
+    """Every ``.py`` file of a package's folders (subfolders too) with its size and date: when it
+    changes (a plugin saved, a package upgraded), the package is loaded again."""
+    files = []
+    for directory in dirs:
+        for root, folders, names in os.walk(directory):
+            folders.sort()
+            for name in sorted(names):
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    continue
+                files.append((path, stat.st_size, stat.st_mtime_ns))
+    return (tuple(dirs), tuple(files))
+
+
+def unload_package(name):
+    """Calls the package's ``plugin_unloaded()`` and forgets its modules, listeners and commands.
+    Its timers and threads are left alone, as in Sublime."""
+    package = _packages.pop(name)
+    for module in package.modules:
         unloaded = getattr(module, "plugin_unloaded", None)
         if callable(unloaded):
             try:
                 unloaded()
             except Exception:
                 traceback.print_exc()
-    for name in list(sys.modules):
-        if any(name == p or name.startswith(p + ".") for p in _package_names):
-            del sys.modules[name]
-    del _plugin_modules[:]
-    del _package_names[:]
-    ArchiveFinder.roots.clear()
-    importlib.invalidate_caches()
-    sublime_plugin.reset()
-    sublime._main_timers.clear()
-    sublime._async_timers.clear()
+    sublime_plugin.unregister_package(name)
+    for module_name in list(sys.modules):
+        if module_name == name or module_name.startswith(name + "."):
+            del sys.modules[module_name]
+    for virtual in package.roots:
+        ArchiveFinder.roots.pop(virtual, None)
 
 
-def load_package(name, dirs, archives, errors):
+def load_package(name, dirs, archives, signature):
     """Imports the top-level ``.py`` files of a package as ``<package>.<file>`` so that relative
     imports between them work, as in Sublime. ``dirs`` go in load order: a file of a later one
     overrides the same file of an earlier one."""
+    loaded_package = LoadedPackage(signature)
+    errors = loaded_package.errors
     package = importlib.util.module_from_spec(importlib.machinery.ModuleSpec(name, None, is_package=True))
     package.__path__ = [visible_path(directory, archives) for directory in reversed(dirs)]
+    loaded_package.roots = [p for p, d in zip(package.__path__, reversed(dirs)) if p != d]
     sys.modules[name] = package
-    _package_names.append(name)
     loaded = set()
     for directory, visible in zip(reversed(dirs), package.__path__):
         for file_name in sorted(os.listdir(directory)):
@@ -171,8 +201,9 @@ def load_package(name, dirs, archives, errors):
                 sys.modules.pop(module_name, None)
                 errors.append("%s:\n%s" % (path, traceback.format_exc()))
                 continue
-            sublime_plugin.register_module(module)
-            _plugin_modules.append(module)
+            sublime_plugin.register_listeners(module)
+            loaded_package.modules.append(module)
+    return loaded_package
 
 
 def add_library_folders():
@@ -191,21 +222,38 @@ def add_library_folders():
 
 
 def load(message):
-    unload_plugins()
+    """Loads the packages listed, which may be a second time: the packages that are gone or whose
+    files changed are unloaded, the new ones loaded, and the others keep running (with their
+    threads: Package Control may be installing more packages). ``errors`` are those of every
+    loaded package."""
     sublime._paths.update(message.get("paths") or {})
     add_library_folders()
-    errors = []
-    for package in message.get("packages", []):
-        load_package(package["name"], package["dirs"], message.get("archives") or [], errors)
-    for module in _plugin_modules:
-        loaded = getattr(module, "plugin_loaded", None)
-        if callable(loaded):
-            try:
-                loaded()
-            except Exception:
-                errors.append("%s plugin_loaded():\n%s" % (module.__name__, traceback.format_exc()))
+    wanted = [(package["name"], package["dirs"]) for package in message.get("packages", [])]
+    signatures = {name: package_signature(dirs) for name, dirs in wanted}
+    for name in reversed(list(_packages)):
+        if _packages[name].signature != signatures.get(name):
+            unload_package(name)
+    importlib.invalidate_caches()
+    new = []
+    for name, dirs in wanted:
+        if name not in _packages:
+            _packages[name] = load_package(name, dirs, message.get("archives") or [], signatures[name])
+            new.append(_packages[name])
+    order = [name for name, _ in wanted]
+    for name in sorted(_packages, key=order.index):
+        _packages[name] = _packages.pop(name)
+    sublime_plugin.set_commands([module for package in _packages.values() for module in package.modules])
+    for package in new:
+        for module in package.modules:
+            loaded = getattr(module, "plugin_loaded", None)
+            if callable(loaded):
+                try:
+                    loaded()
+                except Exception:
+                    package.errors.append("%s plugin_loaded():\n%s" % (module.__name__, traceback.format_exc()))
     finish_command()
     commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
+    errors = [error for package in _packages.values() for error in package.errors]
     return {"op": "loaded", "commands": commands, "events": sublime_plugin.events(), "errors": errors}
 
 

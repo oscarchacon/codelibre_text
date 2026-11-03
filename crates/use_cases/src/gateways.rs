@@ -55,13 +55,33 @@ impl PackagePaths {
         self.user_dir().join("Preferences.sublime-settings")
     }
 
-    /// Expands Sublime variables used in command arguments (`${packages}`, `${platform}`).
+    /// Expands Sublime variables used in command arguments (`${packages}`, `${platform}`, also
+    /// without braces: Package Control opens `$packages/User/…`).
     pub fn expand(&self, path: &str) -> PathBuf {
-        PathBuf::from(
-            path.replace("${packages}", &self.packages.to_string_lossy())
-                .replace("${platform}", platform_name()),
-        )
+        let packages = self.packages.to_string_lossy();
+        let path = expand_variable(path, "packages", &packages);
+        PathBuf::from(expand_variable(&path, "platform", platform_name()))
     }
+}
+
+/// Replaces `${name}` and `$name` (not followed by a letter, digit or `_`) with `value`.
+pub fn expand_variable(text: &str, name: &str, value: &str) -> String {
+    let text = text.replace(&format!("${{{name}}}"), value);
+    let bare = format!("${name}");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find(&bare) {
+        let after = &rest[at + bare.len()..];
+        out.push_str(&rest[..at]);
+        if after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            out.push_str(&bare);
+        } else {
+            out.push_str(value);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Sublime's platform name, used in file names such as `Default (Windows).sublime-keymap`.
@@ -292,8 +312,10 @@ pub enum PluginMessage {
 /// Between requests, timers and other threads of the plugins may call too
 /// ([`try_receive`](Self::try_receive)).
 pub trait PluginHostGateway {
-    /// (Re)starts the host and asks it to load the plugins.
-    fn load(&mut self, request: &PluginLoad) -> Result<(), String>;
+    /// Asks the host to load the plugins, starting it when it is not running (or the interpreter
+    /// changed). A running host keeps the packages whose files did not change, and their threads.
+    /// True when the host started, so nothing of the plugins loaded before is left.
+    fn load(&mut self, request: &PluginLoad) -> Result<bool, String>;
     /// Asks the host to run a plugin command on a view (text commands) or the window.
     fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String>;
     /// Tells the listeners about a view event (`on_load`, `on_modified`…).

@@ -80,13 +80,12 @@ impl PluginState {
 }
 
 impl Editor {
-    /// Starts the plugin host with the plugins of every package (when there are any) and
-    /// registers their commands. Problems go to the package load errors and the console.
+    /// Loads the plugins of every package (when there are any) and registers their commands.
+    /// The host keeps running across reloads: only the packages added, removed or changed are
+    /// loaded again, as in Sublime. Problems go to the package load errors and the console.
     pub fn load_plugins(&mut self) {
         self.state.plugins.commands.clear();
         self.state.plugins.events.clear();
-        self.state.plugins.settings_files.clear();
-        self.state.plugins.watched_settings.clear();
         self.state.plugins.command_states.clear();
         let old_errors = std::mem::take(&mut self.state.plugins.errors);
         self.state.load_errors.retain(|e| !old_errors.contains(e));
@@ -98,6 +97,7 @@ impl Editor {
         };
         if packages.is_empty() {
             self.gateways.plugins.stop();
+            self.forget_plugin_settings();
             return;
         }
         let request = PluginLoad {
@@ -107,9 +107,14 @@ impl Editor {
             shipped_packages: self.gateways.resources.paths().archive_folders.iter().find(|f| f.shipped).map(|f| f.archives.clone()),
             interpreter: settings.str("python_interpreter").filter(|s| !s.is_empty()).map(String::from),
         };
-        if let Err(e) = self.gateways.plugins.load(&request) {
-            self.plugin_load_error(format!("Python plugins: {e}"));
-            return;
+        match self.gateways.plugins.load(&request) {
+            Ok(true) => self.forget_plugin_settings(),
+            Ok(false) => {}
+            Err(e) => {
+                self.forget_plugin_settings();
+                self.plugin_load_error(format!("Python plugins: {e}"));
+                return;
+            }
         }
         match self.converse(&mut |editor: &mut Editor, command: &Command| {
             editor.log(&format!("{}: built-in commands cannot run while plugins load\n", command.name));
@@ -126,6 +131,12 @@ impl Editor {
         if !self.state.documents.is_empty() {
             self.plugin_init();
         }
+    }
+
+    /// The settings files plugins opened and those they watch belong to a host that is gone.
+    fn forget_plugin_settings(&mut self) {
+        self.state.plugins.settings_files.clear();
+        self.state.plugins.watched_settings.clear();
     }
 
     pub fn set_event_command_runner(&mut self, runner: EventCommandRunner) {

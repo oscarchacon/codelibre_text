@@ -479,6 +479,8 @@ pub struct PluginScript {
     /// The editor's answers to the `Call` messages, in order.
     pub replies: RefCell<Vec<Result<Value, String>>>,
     pub stops: Cell<usize>,
+    /// Between the first `load` and a `stop`: a `load` then keeps the host.
+    pub running: Cell<bool>,
     /// When set, `load` fails with this message (e.g. no Python installed).
     pub load_error: RefCell<Option<String>>,
 }
@@ -511,11 +513,11 @@ pub fn plugin_call(function: &str, args: Value) -> PluginMessage {
 struct FakePluginHost(Rc<PluginScript>);
 
 impl PluginHostGateway for FakePluginHost {
-    fn load(&mut self, request: &PluginLoad) -> Result<(), String> {
+    fn load(&mut self, request: &PluginLoad) -> Result<bool, String> {
         self.0.loads.borrow_mut().push(request.clone());
         match self.0.load_error.borrow().clone() {
             Some(error) => Err(error),
-            None => Ok(()),
+            None => Ok(!self.0.running.replace(true)),
         }
     }
 
@@ -554,6 +556,7 @@ impl PluginHostGateway for FakePluginHost {
 
     fn stop(&mut self) {
         self.0.stops.set(self.0.stops.get() + 1);
+        self.0.running.set(false);
     }
 }
 

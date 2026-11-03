@@ -106,7 +106,9 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   Load errors, plugin command failures, a dead host and Package Control install failures are also written, with
   their UTC time, to the error log (`data\Local\Errors.log`, Help > Error Log; `Editor::record_errors`), and
   Help > Report an Issue fills the bug form's Errors field with this session's ones.
-- Saving a `.py` file in a package reloads the plugins (`reload_plugins`); Preferences > Reload Packages too.
+- Saving a `.py` file in a package reloads the plugins (`reload_plugins`); Preferences > Reload Packages too. The host
+  keeps running: only the packages added, removed or whose `.py` files changed (size or date, subfolders too) are loaded
+  again (`load` in `plugin_host.py`); the others keep their modules, listeners and threads.
 
 ### Adding an API function (the usual change)
 
@@ -142,7 +144,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `on_close`): `on_new`, `on_load`, `on_activated`/`on_deactivated`, `on_pre_save`/`on_post_save`,
       `on_pre_close`/`on_close`, `on_modified`/`on_selection_modified`, and their `*_async` variants. `view.change_count()`.
 - [x] Other events: `on_load` also for the files the session restores, `on_revert`, `on_reload` (a file changed on
-      disk), `on_init(views)` (after `Editor::start` and after every reload of the plugins), `on_exit()` (the window
+      disk), `on_init(views)` (after `Editor::start`, and after a reload for the listeners it loaded), `on_exit()` (the window
       closes, `Editor::plugin_exit`).
 - [x] **`TextChangeListener`** (`on_text_changed`, `_async`, `on_revert`, `on_reload`): `Document::log_text_changes`
       keeps a copy of the text and compares it after each edit (the widget edits in place), once a frame the
@@ -277,8 +279,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       them (`extends`, `branch_point`: 124 errors) and has its own for those languages. Packages the user installed
       do load their syntaxes. The first start unpacks them (about 11 s in a debug build, in the window's thread).
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
-      would take every key) and their plugins are not loaded. A change needs `reload_packages`; Package Control's
-      toggling while upgrading is not followed yet.
+      would take every key) and their plugins are not loaded. A change reloads the packages (Package Control's
+      disabling, below).
 - [x] **Libraries**: `Lib/python38`, where Package Control 4 installs libraries, is on `sys.path` (`add_library_folders`
       in `plugin_host.py`).
 - [ ] Libraries, still missing: Package Control 3's `dependencies.json` / dependency packages (`Packages/<dep>/all`, `st3`…).
@@ -303,19 +305,28 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       instead of the counts, so a package Package Control installs and that fails to load is noticed.
 - [x] **`Installed Packages` is watched**: `check_installed_packages` (with `check_external_changes`, every 1.5 s) reloads
       the packages when a `.sublime-package` there is added, replaced or removed and the folder held still for one check.
-- [ ] Reloading restarts the plugin host, which stops a Package Control thread still working (several packages, its
-      libraries); Sublime loads only the new package's plugins. Not tried yet: a package with plugins or libraries,
-      upgrades, removal.
-- [ ] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
+- [x] **Reloading keeps the plugin host**: a `load` to a running host (same `python_interpreter`) compares each package's
+      `.py` files (`package_signature`) and unloads (`plugin_unloaded`, its modules, listeners, `add_on_change`
+      callbacks) the packages gone or changed, then loads the new ones; commands are rebuilt in load order and `on_init`
+      reaches only the new listeners, while view and text listeners of a new package attach to the open views. So a
+      Package Control thread still installing goes on when the first package arrives. The editor keeps the plugins'
+      settings files and watches unless the host started again (`PluginHostGateway::load` answers that). Left alone,
+      as in Sublime: the timers of an unloaded package, kept packages that imported a changed one's modules.
+- [ ] Not tried yet: a package with plugins or libraries, upgrades, removal.
+- [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
       `ignored_packages` (and `in_process_packages` in `Package Control.sublime-settings`, `package_disabler.py`), expecting
-      the editor to unload / load those packages at once; here they apply only after Reload Packages. Needs the
-      `ignored_packages` setting watched (as `add_on_change` is) and a reload of just those packages.
-- [ ] Package Control > Settings (`edit_settings` with `${packages}/Package Control/…`) opens only the user file: the
-      left "Default" view comes from `ResourcesGateway::default_resource`, which knows only Preferences and keymaps; it
-      should read the package's file (`load_resource`, also inside archives). The two views open as tabs (no groups).
-- [ ] `$packages` without braces (Package Control's `open_file` of `Package Control.user-ca-bundle`) is not expanded:
-      `PackagePaths::expand` only knows `${packages}` and `${platform}`. `semi_transient` is ignored.
-- [ ] `window.set_view_index` / `set_sheet_index` are stand-ins (Package Control moves its message view with them).
+      the editor to unload / load those packages at once. `check_ignored_packages` (with `check_external_changes`, every
+      1.5 s) reloads the packages when the setting is not the one they were loaded with; only the plugins of the packages
+      concerned reload (see reloading above).
+- [x] **Package settings**: `edit_settings` (Preferences > Package Settings > <package> > Settings, a package's palette
+      entries) opens the package's own file as the read-only left view (`load_resource`, also inside archives; our
+      `Default` package's are built in) and the `User` copy next to it, as tabs (no groups). A package's keymap no longer
+      shows ours. Preferences > Package Settings is a real submenu packages merge into (`id` `package-settings`); the menu
+      presenter hides submenus left empty and separators at an edge or doubled.
+- [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
+      Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
+- [x] `window.set_view_index` / `set_sheet_index` move the tab (`Editor::move_document`; one group, so only the index
+      counts). Package Control moves its message view with them.
 - [x] **Scopes** from the syntax engine: `SyntaxGateway::line_scopes` parses one line again from the parser state the
       highlighting cache keeps for its start (`SyntaxEngine::line_scopes`); the use cases (`use_cases/src/scopes.rs`)
       turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,
@@ -331,7 +342,7 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [ ] **Completions**: `on_query_completions`, `CompletionItem`, `view.auto_complete` (needs an auto-complete UI first).
 - [ ] **Popups, phantoms, annotations, hover** (`show_popup` with minihtml, `PhantomSet`, `on_hover`).
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
-- [ ] Reload only the plugin that was saved (now every plugin reloads), and `sublime_plugin.reload_plugin`.
+- [ ] `sublime_plugin.reload_plugin`. (Saving a plugin reloads only its package: see reloading above.)
 
 `crates/frameworks/tests/sublime_packages.rs` (`-- --ignored`) loads the packages of the Sublime Text installed here:
 68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load; their
@@ -339,4 +350,6 @@ bindings apply through the `selector` context (above) when they need no other un
 
 Verification for phase C: `package_control_loads_in_a_scratch_profile` in `crates/frameworks/tests/sublime_packages.rs`
 (`-- --ignored`, needs the network) copies the installed Package Control to a temporary profile and installs a color
-scheme. What is left is a plugin package and running its commands.
+scheme, then disables and enables it with Package Control's commands (the color scheme goes and comes back), and
+opens Preferences > Package Settings > Package Control > Settings. What is left is a package with plugins or libraries,
+its commands, an upgrade and a removal (they run third-party code, so the test does not pick one).

@@ -200,6 +200,10 @@ impl Editor {
                 self.activate_document(a.u64(0)?);
                 Ok(Value::Null)
             }
+            "window_set_view_index" => {
+                self.move_document(a.u64(0)?, a.usize(1)?);
+                Ok(Value::Null)
+            }
             "window_show_quick_panel" => self.plugin_show_quick_panel(args, run_command),
             "window_show_input_panel" => self.plugin_show_input_panel(args, run_command),
             "window_folders" => Ok(json!(self

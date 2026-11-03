@@ -300,6 +300,31 @@ fn the_editors_own_setting_changes_reach_add_on_change() {
 }
 
 #[test]
+fn a_reload_keeps_the_host_and_what_its_plugins_watch() {
+    let world = World::new().with_plugins(&[("watch", Window)], &[]);
+    let mut editor = world.editor();
+    let target = json!(["file", "Preferences.sublime-settings"]);
+    world.plugins.then([plugin_call("settings_watch", json!([target])), done()]);
+    run(&mut editor, "watch", &mut Vec::new());
+
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("watch".into(), Window)], events: vec![], errors: vec![] }]);
+    editor.reload_plugins();
+    assert_eq!(world.plugins.stops.get(), 0, "the host goes on (Package Control's threads too)");
+    editor.set_setting("font_size", json!(20));
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(world.plugins.queries.borrow()[0].0, "settings_changed", "the unchanged plugins still watch");
+
+    // A host started again has none of the old callbacks.
+    world.plugins.running.set(false);
+    world.plugins.then([PluginMessage::Loaded { commands: vec![("watch".into(), Window)], events: vec![], errors: vec![] }]);
+    editor.reload_plugins();
+    editor.set_setting("font_size", json!(21));
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(world.plugins.queries.borrow().len(), 1);
+}
+
+#[test]
 fn a_plugins_own_setting_change_is_not_reported_back() {
     let world = World::new().with_plugins(&[("watch", Window)], &[]);
     let mut editor = world.editor();

@@ -10,7 +10,7 @@ msgid "File"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
-#: crates/frameworks/src/app.rs
+#: crates/interface_adapters/src/presenters/editor.rs
 msgid "New File"
 msgstr ""
 
@@ -400,6 +400,10 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Reload Packages"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Package Settings"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -908,6 +912,19 @@ msgstr ""
 msgid "{keys} was pressed. Waiting for second key…"
 msgstr ""
 
+#: crates/interface_adapters/src/presenters/editor.rs
+msgid "Open File"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/editor.rs
+msgid "Open Folder"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/editor.rs
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Command Palette"
+msgstr ""
+
 #: crates/interface_adapters/src/presenters/find_panel.rs
 msgid "Error: {error}"
 msgstr ""
@@ -918,9 +935,24 @@ msgid_plural "{count} matches"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/interface_adapters/src/presenters/quick_panel.rs
-#: crates/frameworks/src/app.rs
-msgid "Command Palette"
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Quit CodeLibre Text"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Services"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Hide CodeLibre Text"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Hide Others"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/menu.rs
+msgid "Show All"
 msgstr ""
 
 #: crates/interface_adapters/src/presenters/quick_panel.rs
@@ -959,14 +991,6 @@ msgstr ""
 
 #: crates/interface_adapters/src/presenters/status_bar.rs
 msgid "Tab Size: {size}"
-msgstr ""
-
-#: crates/frameworks/src/app.rs
-msgid "Open File"
-msgstr ""
-
-#: crates/frameworks/src/app.rs
-msgid "Open Folder"
 msgstr ""
 
 #: crates/frameworks/src/views/dialogs.rs

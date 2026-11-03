@@ -193,11 +193,79 @@ fn the_menu_shows_shortcuts_and_check_marks() {
     let menu = menu::present(&editor);
     assert_eq!(menu.len(), 1, "top-level menus without items are hidden");
     let file = &menu[0].children;
-    assert_eq!(file[0].shortcut.as_deref(), Some("Ctrl+S"));
+    assert_eq!(file[0].shortcut, Some(KeyCombo::parse("ctrl+s").unwrap().display()));
     assert_eq!(file[0].checked, None);
     assert!(file[1].separator);
     assert_eq!(file[2].checked, Some(true));
     assert_eq!(file[3].checked, Some(false));
+}
+
+#[test]
+fn package_settings_show_once_a_package_adds_some() {
+    let item = |caption: &str, command: Option<Command>, checkbox: bool, children: Vec<MenuItem>| MenuItem {
+        caption: caption.into(),
+        id: None,
+        command,
+        checkbox,
+        children,
+    };
+    let preferences = |children| item("Preferences", None, false, vec![item("Settings", Some(Command::new("edit_settings")), false, vec![]), item("-", None, false, vec![]), item("Package Settings", None, false, children)]);
+    let world = World::new().with_menu(preferences(vec![]));
+    let menu = menu::present(&World::editor(&world));
+    let captions: Vec<&str> = menu[0].children.iter().map(|e| e.caption.as_str()).collect();
+    assert_eq!(captions, ["Settings"], "no empty submenu, no separator left at the end");
+
+    let linter = item("Linter", None, false, vec![item("Settings", Some(Command::new("edit_settings")), false, vec![])]);
+    let world = World::new().with_menu(preferences(vec![linter]));
+    let menu = menu::present(&World::editor(&world));
+    let entries = &menu[0].children;
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[2].caption, "Package Settings");
+    assert_eq!(entries[2].children[0].caption, "Linter");
+}
+
+#[test]
+fn on_macos_about_preferences_and_quit_move_to_the_application_menu() {
+    let item = |caption: &str, id: Option<&str>, command: Option<&str>, children: Vec<MenuItem>| MenuItem {
+        caption: caption.into(),
+        id: id.map(Into::into),
+        command: command.map(Command::new),
+        checkbox: false,
+        children,
+    };
+    let separator = || item("-", None, None, vec![]);
+    let world = World::new()
+        .with_menu(item("File", Some("file"), None, vec![item("Save", None, Some("save"), vec![]), separator(), item("Exit", None, Some("exit"), vec![])]))
+        .with_menu(item("Preferences", Some("preferences"), None, vec![item("Settings", None, Some("edit_settings"), vec![])]))
+        .with_menu(item("Help", Some("help"), None, vec![item("About CodeLibre Text", None, Some("show_about_window"), vec![])]))
+        .with_binding(Binding { keys: vec![KeyCombo::parse("super+s").unwrap()], command: Command::new("save"), context: vec![] });
+    let menu = menu::present_for_macos(&World::editor(&world));
+
+    assert_eq!(menu.about.unwrap().command, Some(Command::new("show_about_window")));
+    assert_eq!(menu.preferences.unwrap().children[0].caption, "Settings");
+    let quit = menu.quit.unwrap();
+    assert_eq!((quit.caption.as_str(), quit.command), ("Quit CodeLibre Text", Some(Command::new("exit"))));
+    let captions: Vec<&str> = menu.menus.iter().map(|m| m.caption.as_str()).collect();
+    assert_eq!(captions, ["File"], "Help had only About, Preferences moved");
+    let file: Vec<&str> = menu.menus[0].children.iter().map(|e| e.caption.as_str()).collect();
+    assert_eq!(file, ["Save"], "no separator left where Exit was");
+    assert_eq!(menu.menus[0].children[0].key, KeyCombo::parse("super+s"));
+}
+
+#[test]
+fn the_empty_window_shows_the_keys_of_the_keymap() {
+    let world = World::new()
+        .with_binding(Binding { keys: vec![KeyCombo::parse("super+n").unwrap()], command: Command::new("new_file"), context: vec![] })
+        .with_binding(Binding {
+            keys: vec![KeyCombo::parse("super+k").unwrap(), KeyCombo::parse("super+o").unwrap()],
+            command: Command::new("prompt_open_folder"),
+            context: vec![],
+        });
+    let hints = editor_presenter::present_hints(&World::editor(&world));
+    let n = KeyCombo::parse("super+n").unwrap().display();
+    assert_eq!(hints.len(), 2, "commands without a key are left out: {hints:?}");
+    assert_eq!(hints[0], format!("{n}  New File"));
+    assert!(hints[1].ends_with("  Open Folder") && hints[1].contains(", "), "{}", hints[1]);
 }
 
 #[test]

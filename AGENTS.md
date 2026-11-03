@@ -48,6 +48,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Views draw view models and push `UiEvent`s; they must not mutate state (exception: the text area, see below).
 
 ## Gotchas
+- macOS: the menu is the system's menu bar (`views/native_menu.rs`, `muda`, from `presenters::menu::present_for_macos`:
+  About / Preferences / Quit go to the app menu); elsewhere egui draws it in the window (`menu_bar.rs`). Shortcuts shown
+  there are key equivalents AppKit takes before the window: `app.rs` gives them back to the keymap the next frame.
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
 - Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
@@ -62,7 +65,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
-- Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`.
+- Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`. On macOS shortcuts show as ⇧+⌘+P (`KeyCombo::display`); `app.rs` adds the
+  system's San Francisco (and Apple Symbols) font for ⌘ ⇧ ⌥ ⌃ ⎋ ⌫, which egui's fonts lack or draw thin.
 - `persist_setting` re-serializes the user's `Preferences.sublime-settings` (comments are lost), as Sublime does.
 - Plugin commands and events run synchronously on the UI thread (20 s timeout kills the host); timers and plugin
   threads call the editor between frames (`Editor::poll_plugins`, every frame in `app.rs`). Python code must never write to the
