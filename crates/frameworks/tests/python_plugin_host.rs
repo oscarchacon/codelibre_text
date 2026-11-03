@@ -453,6 +453,29 @@ class FancyCommand(sublime_plugin.TextCommand):
     assert_eq!(editor_status(&editor), "True (0, 4) 0 1 'text.plain ' True", "console:\n{}", editor.state().console);
 }
 
+/// Package Control installs libraries in `Lib/python38`, and in `Lib/python33` for packages of
+/// Python 3.3; plugins import from both, `python38` first.
+#[test]
+fn plugins_import_the_libraries_package_control_installs() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("Lib");
+    for (folder, files) in [("python38", ["shared.py", "lib38.py"]), ("python33", ["shared.py", "lib33.py"])] {
+        fs::create_dir_all(lib.join(folder)).unwrap();
+        for file in files {
+            fs::write(lib.join(folder).join(file), format!("WHERE = '{folder}'\n")).unwrap();
+        }
+    }
+    let plugin = "import lib33, lib38, shared\nassert (lib33.WHERE, lib38.WHERE, shared.WHERE) == \
+                  ('python33', 'python38', 'python38')\n";
+    let Some((_host, loaded)) = host_with(dir.path(), &[("uses_libs.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { errors, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
 /// Package Control sets `post_handshake_auth` before every download, which Apple's
 /// `/usr/bin/python3` (LibreSSL) refuses unless the host lets it.
 #[test]
@@ -1113,4 +1136,93 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
     command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
     assert!(view.input_panel.is_some());
     assert!(!view.focus_editor, "the text would take the keys typed for the panel");
+}
+
+/// A plugin of package `name` that says when it loads and unloads, and counts its runs.
+fn counting_plugin(name: &str, version: u32) -> String {
+    format!(
+        r#"
+import sublime_plugin
+
+RUNS = 0
+
+def plugin_loaded():
+    print("loaded {name} {version}")
+
+def plugin_unloaded():
+    print("unloaded {name}")
+
+class {name}CountCommand(sublime_plugin.ApplicationCommand):
+    def run(self):
+        global RUNS
+        RUNS += 1
+        print("{name} {version} ran %d" % RUNS)
+"#
+    )
+}
+
+/// Loads `names` from `dir/Packages` and returns the commands and what the plugins printed.
+fn load_packages(host: &mut PythonPluginHost, dir: &Path, names: &[&str]) -> (bool, Vec<String>, String) {
+    let started = host
+        .load(&PluginLoad {
+            packages: names
+                .iter()
+                .map(|name| PluginPackage { name: (*name).into(), dirs: vec![dir.join("Packages").join(name)] })
+                .collect(),
+            packages_path: dir.join("Packages"),
+            archives: Vec::new(),
+            shipped_packages: None,
+            interpreter: None,
+        })
+        .unwrap();
+    let mut log = String::new();
+    let PluginMessage::Loaded { commands, errors, .. } = next(host, &mut log) else {
+        panic!("expected Loaded; console:\n{log}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+    (started, commands.into_iter().map(|(name, _)| name).collect(), log)
+}
+
+fn run_and_log(host: &mut PythonPluginHost, command: &str) -> String {
+    let mut log = String::new();
+    host.run(PluginCommandKind::Application, command, &Value::Null, None).unwrap();
+    assert_eq!(next(host, &mut log), PluginMessage::Done { error: None });
+    log
+}
+
+#[test]
+fn reloading_loads_only_the_packages_that_changed() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, version: u32| {
+        let package = dir.path().join("Packages").join(name);
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("plugin.py"), counting_plugin(name, version)).unwrap();
+    };
+    write("Kept", 1);
+    write("Changed", 1);
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    let (started, commands, log) = load_packages(&mut host, dir.path(), &["Kept", "Changed"]);
+    assert!(started);
+    assert_eq!(commands, vec!["changed_count", "kept_count"]);
+    assert_eq!(log, "loaded Kept 1\nloaded Changed 1\n");
+    assert_eq!(run_and_log(&mut host, "kept_count"), "Kept 1 ran 1\n");
+
+    // One package changed, one was added: the host goes on, the unchanged package is not touched.
+    write("Changed", 22);
+    write("Added", 1);
+    let (started, commands, log) = load_packages(&mut host, dir.path(), &["Added", "Changed", "Kept"]);
+    assert!(!started, "the host kept running");
+    assert_eq!(commands, vec!["added_count", "changed_count", "kept_count"]);
+    assert_eq!(log, "unloaded Changed\nloaded Added 1\nloaded Changed 22\n");
+    assert_eq!(run_and_log(&mut host, "kept_count"), "Kept 1 ran 2\n", "its module state is kept");
+    assert_eq!(run_and_log(&mut host, "changed_count"), "Changed 22 ran 1\n");
+
+    // A package left out (removed, or in `ignored_packages`) is unloaded and its commands go.
+    let (_, commands, log) = load_packages(&mut host, dir.path(), &["Changed", "Kept"]);
+    assert_eq!(commands, vec!["changed_count", "kept_count"]);
+    assert_eq!(log, "unloaded Added\n");
+    host.stop();
 }

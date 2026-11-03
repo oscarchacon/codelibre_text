@@ -401,6 +401,32 @@ fn package_control_loads_in_a_scratch_profile() {
         assert!(installed.is_file());
         assert!(found.iter().any(|c| c.caption == "Dracula"));
         assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+
+        // Disable Package / Enable Package only change `ignored_packages`: the packages follow at once.
+        for (command, ignored) in [("disable_package", true), ("enable_package", false)] {
+            command_controller::run(&mut editor, &mut view, &Command::new(command));
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline && editor.plugin_quick_panel().is_none() {
+                command_controller::poll_plugins(&mut editor, &mut view);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let panel = editor.plugin_quick_panel().unwrap_or_else(|| panic!("{command}: no list"));
+            let index = panel.items.iter().position(|i| i.caption == "Dracula Color Scheme").expect("Dracula listed");
+            command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(index));
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                command_controller::poll_plugins(&mut editor, &mut view);
+                editor.check_external_changes();
+                let shown = editor.search(use_cases::search::SearchKind::ColorSchemes, "Dracula").iter().any(|c| c.caption == "Dracula");
+                if shown != ignored {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let shown = editor.search(use_cases::search::SearchKind::ColorSchemes, "Dracula").iter().any(|c| c.caption == "Dracula");
+            println!("{command}: ignored {:?}, Dracula shown: {shown}", editor.global_settings().get("ignored_packages"));
+            assert_eq!(shown, !ignored, "{command}");
+        }
     }
     println!("status: {:?}", editor.state().status.as_ref().map(|s| s.text.clone()));
     println!("load errors: {}", editor.state().load_errors.len());
@@ -409,4 +435,16 @@ fn package_control_loads_in_a_scratch_profile() {
     }
     println!("console:\n{}", editor.state().console);
     assert!(!editor.state().console.contains("Traceback"));
+
+    // Preferences > Package Settings > Package Control: its defaults, read from inside the
+    // archive, open next to the user's file.
+    let menu = interface_adapters::presenters::menu::present(&editor);
+    let package_settings = menu.iter().flat_map(|m| &m.children).find(|e| e.caption == "Package Settings").expect("Package Settings");
+    let ours = package_settings.children.iter().find(|e| e.caption == "Package Control").expect("Package Control's settings");
+    let edit = ours.children.iter().filter_map(|e| e.command.clone()).find(|c| c.name == "edit_settings").expect("edit_settings");
+    println!("settings command: {edit:?}");
+    command_controller::run(&mut editor, &mut view, &edit);
+    let defaults = editor.state().documents.iter().find(|d| d.read_only && d.name().starts_with("Package Control.sublime-settings"));
+    assert!(defaults.expect("the defaults").text.contains("\"channels\""));
+    assert_eq!(editor.active_document().unwrap().name(), "Package Control.sublime-settings");
 }

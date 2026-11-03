@@ -15,7 +15,11 @@ use crate::input;
 use crate::syntax_engine::SharedSyntaxEngine;
 use crate::views::editor_view::{self, EditorText, SelectionSync};
 use crate::views::theme::Chrome;
-use crate::views::{dialogs, find_panel, input_panel, menu_bar, output_panel, quick_panel, side_bar, status_bar, tabs};
+#[cfg(not(target_os = "macos"))]
+use crate::views::menu_bar;
+#[cfg(target_os = "macos")]
+use crate::views::native_menu::{Activation, NativeMenu};
+use crate::views::{dialogs, find_panel, input_panel, output_panel, quick_panel, side_bar, status_bar, tabs};
 
 pub struct App {
     editor: Editor,
@@ -25,6 +29,14 @@ pub struct App {
     /// Events for the text widget, delivered at the start of the next frame (undo, paste…).
     pending_widget_events: Vec<Event>,
     injected_event_count: usize,
+    /// Keys the macOS menu bar took as key equivalents, given back to the keymap next frame.
+    replayed_keys: Vec<Event>,
+    /// macOS: the menu bar of the system, instead of one drawn in the window.
+    #[cfg(target_os = "macos")]
+    native_menu: NativeMenu,
+    /// When plugins were last asked which of their menu commands are enabled, visible or checked.
+    #[cfg(target_os = "macos")]
+    command_states_asked: std::time::Instant,
     window_title: String,
     visuals_for_scheme: String,
 }
@@ -33,6 +45,8 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, editor: Editor, view: ViewState, engine: SharedSyntaxEngine) -> Self {
         // Ctrl+=/- are the editor's font size commands, not egui's zoom.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        #[cfg(target_os = "macos")]
+        add_key_symbols_font(&cc.egui_ctx);
         Self {
             editor,
             view,
@@ -40,6 +54,11 @@ impl App {
             selection_sync: SelectionSync::default(),
             pending_widget_events: Vec::new(),
             injected_event_count: 0,
+            replayed_keys: Vec::new(),
+            #[cfg(target_os = "macos")]
+            native_menu: NativeMenu::new(&cc.egui_ctx),
+            #[cfg(target_os = "macos")]
+            command_states_asked: std::time::Instant::now(),
             window_title: String::new(),
             visuals_for_scheme: String::new(),
         }
@@ -141,6 +160,36 @@ impl App {
         }
     }
 
+    /// macOS: runs what was chosen in the menu bar. Its keys go back to the keymap (next frame, as
+    /// if the window had got them), as egui would have seen them: Cmd+C/X/V as copy / cut / paste.
+    #[cfg(target_os = "macos")]
+    fn handle_native_menu(&mut self, ctx: &egui::Context) {
+        for activation in self.native_menu.activations() {
+            match activation {
+                Activation::Command(command) => ui_controller::handle(&mut self.editor, &mut self.view, UiEvent::RunCommand(command)),
+                Activation::Key(combo) => {
+                    let Some((key, modifiers)) = input::key_event(&combo) else { continue };
+                    let clipboard = modifiers.command && !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
+                    self.replayed_keys.push(match key {
+                        Key::C if clipboard => Event::Copy,
+                        Key::X if clipboard => Event::Cut,
+                        Key::V if clipboard => match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+                            Ok(text) if !text.is_empty() => Event::Paste(text.replace("\r\n", "\n")),
+                            _ => continue,
+                        },
+                        _ => Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers },
+                    });
+                    ctx.request_repaint();
+                }
+            }
+        }
+        // A native menu cannot ask when it opens, as the egui one does (`UiEvent::MenuOpen`).
+        if self.command_states_asked.elapsed() >= Duration::from_secs(1) && ctx.input(|i| i.focused) {
+            self.editor.refresh_plugin_command_states();
+            self.command_states_asked = std::time::Instant::now();
+        }
+    }
+
     /// Closing the window: hot exit saves the session; otherwise unsaved changes are asked about.
     fn handle_close_request(&mut self, ctx: &egui::Context) {
         if !ctx.input(|i| i.viewport().close_requested()) {
@@ -161,10 +210,15 @@ impl App {
         // Views look up their fixed labels in the interface language.
         let translations = self.editor.translations();
 
-        let menu = presenters::menu::present(&self.editor);
-        egui::TopBottomPanel::top("menu_bar")
-            .frame(egui::Frame::new().fill(chrome.panel_bg).inner_margin(egui::Margin::symmetric(6, 3)))
-            .show(ctx, |ui| menu_bar::show(ui, &menu, &mut events));
+        #[cfg(target_os = "macos")]
+        self.native_menu.show(presenters::menu::present_for_macos(&self.editor));
+        #[cfg(not(target_os = "macos"))]
+        {
+            let menu = presenters::menu::present(&self.editor);
+            egui::TopBottomPanel::top("menu_bar")
+                .frame(egui::Frame::new().fill(chrome.panel_bg).inner_margin(egui::Margin::symmetric(6, 3)))
+                .show(ctx, |ui| menu_bar::show(ui, &menu, &mut events));
+        }
 
         if self.view.show_status_bar {
             let status = presenters::status_bar::present(&self.editor);
@@ -221,6 +275,7 @@ impl App {
 
         let tab_list = presenters::tabs::present(&self.editor);
         let editor_model = presenters::editor::present(&mut self.editor, &mut self.view);
+        let hints = presenters::editor::present_hints(&self.editor);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(chrome.editor_bg))
             .show(ctx, |ui| {
@@ -230,13 +285,6 @@ impl App {
                     .show(ui, |ui| tabs::show(ui, chrome, &tab_list, &mut events));
 
                 let Some(model) = editor_model else {
-                    let hints = [
-                        ("Ctrl+N", translations.tr("New File")),
-                        ("Ctrl+O", translations.tr("Open File")),
-                        ("Ctrl+K, Ctrl+O", translations.tr("Open Folder")),
-                        ("Ctrl+Shift+P", translations.tr("Command Palette")),
-                    ];
-                    let hints: Vec<String> = hints.iter().map(|(keys, action)| format!("{keys}  {action}")).collect();
                     ui.centered_and_justified(|ui| {
                         ui.label(RichText::new(hints.join("\n")).color(chrome.fg_dim).size(14.0));
                     });
@@ -274,6 +322,7 @@ impl App {
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        raw_input.events.append(&mut self.replayed_keys);
         self.injected_event_count = self.pending_widget_events.len();
         raw_input.events.append(&mut self.pending_widget_events);
     }
@@ -290,6 +339,8 @@ impl eframe::App for App {
         let text_area = self.editor.active_document().map(|d| editor_view::widget_id(d.id));
         self.view.text_has_focus = text_area.is_some() && ctx.memory(|m| m.focused()) == text_area;
         self.dispatch_keys(ctx);
+        #[cfg(target_os = "macos")]
+        self.handle_native_menu(ctx);
         self.run_queued_commands();
         self.carry_out_view_requests(ctx);
 
@@ -318,4 +369,27 @@ impl eframe::App for App {
         }
         ctx.request_repaint_after(Duration::from_secs(2));
     }
+}
+
+/// macOS writes shortcuts with symbols (⌃⌥⇧⌘⎋⌫…) that egui's fonts partly lack or draw thin: the
+/// system's San Francisco font draws them as its menus do, right after egui's main font, and Apple
+/// Symbols fills in the rest (⇞ ⇟).
+#[cfg(target_os = "macos")]
+fn add_key_symbols_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, path, position) in [
+        ("san_francisco", "/System/Library/Fonts/SFNS.ttf", 1),
+        ("apple_symbols", "/System/Library/Fonts/Apple Symbols.ttf", usize::MAX),
+    ] {
+        let Ok(bytes) = std::fs::read(path) else {
+            tracing::warn!("font {path} not found: some shortcut symbols may not show");
+            continue;
+        };
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            let list = fonts.families.entry(family).or_default();
+            list.insert(position.min(list.len()), name.into());
+        }
+    }
+    ctx.set_fonts(fonts);
 }

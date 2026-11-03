@@ -296,37 +296,71 @@ _view_listeners = {}
 # TextChangeListener classes, and the attached objects per buffer id.
 _text_listener_classes = []
 _text_listeners = {}
+# EventListener objects not told ``on_init`` yet (those of the plugins loaded since).
+_pending_init = []
 
 
-def reset():
-    commands.clear()
-    _instances.clear()
-    del _event_listeners[:]
-    del _view_listener_classes[:]
-    _view_listeners.clear()
-    del _text_listener_classes[:]
-    _text_listeners.clear()
-
-
-def register_module(module):
-    """Registers the command classes defined in (or imported into) a plugin module, and the event
-    listeners it defines."""
+def register_listeners(module):
+    """Registers the event listeners a plugin module defines. Views and buffers that already
+    have listeners get those of the new classes too (a package loaded while the editor runs)."""
     for value in list(vars(module).values()):
-        if not isinstance(value, type):
+        if not isinstance(value, type) or value.__module__ != module.__name__:
             continue
-        defined_here = value.__module__ == module.__name__
-        if issubclass(value, EventListener) and value is not EventListener and defined_here:
-            _event_listeners.append(value())
-        elif issubclass(value, ViewEventListener) and value is not ViewEventListener and defined_here:
+        if issubclass(value, EventListener) and value is not EventListener:
+            listener = value()
+            _event_listeners.append(listener)
+            _pending_init.append(listener)
+        elif issubclass(value, ViewEventListener) and value is not ViewEventListener:
             _view_listener_classes.append(value)
-        elif issubclass(value, TextChangeListener) and value is not TextChangeListener and defined_here:
+            for view_id, listeners in _view_listeners.items():
+                view = sublime.View(view_id)
+                if value.is_applicable(view.settings()):
+                    listeners.append(value(view))
+        elif issubclass(value, TextChangeListener) and value is not TextChangeListener:
             _text_listener_classes.append(value)
-        if value in _BASES or not issubclass(value, Command):
-            continue
-        for base, kind in KINDS:
-            if issubclass(value, base):
-                commands[command_name(value.__name__)] = (kind, value)
-                break
+            for buffer_id in list(_text_listeners):
+                buffer = sublime.View(buffer_id).buffer()
+                if value.is_applicable(buffer):
+                    value().attach(buffer)
+
+
+def set_commands(modules):
+    """The commands are those defined in (or imported into) the plugin modules, in load order: a
+    later one replaces a command of the same name. Objects of classes that are gone are dropped."""
+    commands.clear()
+    for module in modules:
+        for value in list(vars(module).values()):
+            if not isinstance(value, type) or value in _BASES or not issubclass(value, Command):
+                continue
+            for base, kind in KINDS:
+                if issubclass(value, base):
+                    commands[command_name(value.__name__)] = (kind, value)
+                    break
+    for key, instance in list(_instances.items()):
+        if commands.get(key[0], (None, None))[1] is not type(instance):
+            del _instances[key]
+
+
+def unregister_package(name):
+    """Forgets the listeners and ``add_on_change`` callbacks of a package's modules, before the
+    package is loaded again or removed."""
+
+    def theirs(value):
+        module = getattr(value, "__module__", None) or ""
+        return module == name or module.startswith(name + ".")
+
+    _event_listeners[:] = [listener for listener in _event_listeners if not theirs(type(listener))]
+    _pending_init[:] = [listener for listener in _pending_init if not theirs(type(listener))]
+    _view_listener_classes[:] = [cls for cls in _view_listener_classes if not theirs(cls)]
+    for listeners in _view_listeners.values():
+        listeners[:] = [listener for listener in listeners if not theirs(type(listener))]
+    _text_listener_classes[:] = [cls for cls in _text_listener_classes if not theirs(cls)]
+    for listeners in _text_listeners.values():
+        listeners[:] = [listener for listener in listeners if not theirs(type(listener))]
+    for callbacks in sublime._on_change.values():
+        for tag, callback in list(callbacks.items()):
+            if theirs(callback):
+                del callbacks[tag]
 
 
 def events():
@@ -381,8 +415,11 @@ def query(name, view_id, window_id, args):
             _call(listener, name, [])
         return None
     if name == "on_init":
+        # Only the listeners loaded since the last one: a reload keeps the others.
         views = [sublime.View(view) for view in args[0]]
-        for listener in _event_listeners:
+        pending = list(_pending_init)
+        del _pending_init[:]
+        for listener in pending:
             _call(listener, name, [views])
         return None
     if name in ("on_window_command", "on_post_window_command"):

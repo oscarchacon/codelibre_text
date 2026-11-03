@@ -35,6 +35,19 @@ fn combo(key: Key, modifiers: Modifiers) -> Option<KeyCombo> {
     })
 }
 
+/// The egui key press a keymap combo stands for (the reverse of [`key_combos`]).
+pub fn key_event(combo: &KeyCombo) -> Option<(Key, Modifiers)> {
+    let key = Key::ALL.iter().copied().find(|k| key_name(*k) == Some(combo.key.as_str()))?;
+    let modifiers = Modifiers {
+        alt: combo.alt,
+        ctrl: combo.ctrl,
+        shift: combo.shift,
+        mac_cmd: combo.super_key && cfg!(target_os = "macos"),
+        command: if cfg!(target_os = "macos") { combo.super_key } else { combo.ctrl },
+    };
+    Some((key, modifiers))
+}
+
 /// Sublime's name for an egui key.
 fn key_name(key: Key) -> Option<&'static str> {
     use Key::*;

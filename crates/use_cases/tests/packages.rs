@@ -8,7 +8,7 @@ use entities::menu::{MenuItem, PaletteCommand};
 use serde_json::json;
 use test_support::{status, World, INSTALLED_PACKAGES};
 use use_cases::gateways::PluginCommandKind::Window;
-use use_cases::gateways::{MessageAnswer, PluginMessage};
+use use_cases::gateways::{expand_variable, MessageAnswer, PluginMessage};
 use use_cases::packages::PACKAGE_CONTROL_URL;
 
 fn save_binding() -> Binding {
@@ -87,6 +87,15 @@ fn open_package_file_expands_the_packages_variable() {
     let mut editor = world.editor();
     editor.open_package_file("${packages}/User/notes.txt", false);
     assert_eq!(editor.active_document().unwrap().text, "hi");
+}
+
+#[test]
+fn the_packages_variable_also_expands_without_braces() {
+    let world = World::new().with_file("/packages/User/Package Control.user-ca-bundle", "certs");
+    let mut editor = world.editor();
+    editor.open_package_file("$packages/User/Package Control.user-ca-bundle", false);
+    assert_eq!(editor.active_document().unwrap().text, "certs");
+    assert_eq!(expand_variable("$packages_x/$packages", "packages", "/p"), "$packages_x//p", "only the whole name");
 }
 
 #[test]
@@ -217,6 +226,22 @@ fn other_files_in_installed_packages_are_not_watched() {
     editor.check_installed_packages();
     editor.check_installed_packages();
     assert_eq!(world.resources.ui_loads.borrow().len(), 1);
+}
+
+#[test]
+fn a_change_of_ignored_packages_reloads_the_packages() {
+    let world = World::new();
+    let mut editor = world.editor();
+    editor.check_ignored_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "nothing changed");
+
+    // Package Control disables a package: it sets and saves the user's preferences.
+    world.resources.preferences.borrow_mut().push(json!({ "ignored_packages": ["Vintage", "Linter"] }));
+    editor.reload_settings();
+    editor.check_ignored_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2);
+    editor.check_ignored_packages();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2, "loaded with it already");
 }
 
 #[test]

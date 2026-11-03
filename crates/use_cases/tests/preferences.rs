@@ -119,6 +119,33 @@ fn edit_settings_keeps_an_existing_user_file() {
 }
 
 #[test]
+fn edit_settings_of_a_package_shows_that_packages_defaults() {
+    let world = World::new().with_resource(
+        "Packages/Package Control/Package Control.sublime-settings",
+        "{\r\n\t\"debug\": false\r\n}\r\n",
+    );
+    let mut editor = world.editor();
+    editor.edit_settings("${packages}/Package Control/Package Control.sublime-settings", "{\n\t$0\n}\n");
+
+    let docs = &editor.state().documents;
+    let defaults = docs.iter().find(|d| d.name() == "Package Control.sublime-settings — Default").unwrap();
+    assert_eq!(defaults.text, "{\n\t\"debug\": false\n}\n");
+    assert!(defaults.read_only);
+    assert_eq!(world.file_text("/packages/User/Package Control.sublime-settings"), "{\n\t\n}\n");
+    assert_eq!(editor.active_document().unwrap().name(), "Package Control.sublime-settings");
+}
+
+#[test]
+fn a_packages_key_bindings_are_not_ours() {
+    let world = World::new().with_resource(&format!("Packages/Linter/Default ({}).sublime-keymap", platform_name()), "[]");
+    let mut editor = world.editor();
+    editor.edit_settings("$packages/Linter/Default ($platform).sublime-keymap", "[\n\t$0\n]\n");
+    let defaults = editor.state().documents.iter().find(|d| d.read_only).unwrap();
+    assert_eq!(defaults.text, "[]");
+    assert!(world.file_text(&format!("/packages/User/Default ({}).sublime-keymap", platform_name())).starts_with('['));
+}
+
+#[test]
 fn edit_key_bindings_uses_the_platform_file_name() {
     let world = World::new();
     let mut editor = world.editor();

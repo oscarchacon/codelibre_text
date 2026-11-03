@@ -1,6 +1,12 @@
-# Tests and clippy on Linux, Windows and macOS: for every push to main or develop and every pull
-# request into main, develop or a release/<version> branch. The release workflow calls it too, so
-# no installer is built from code whose tests fail.
+# Tests and clippy on Linux and Windows: for every push to main or develop and every pull request
+# into main, develop or a release/<version> branch. macOS joins them only when asked, since its
+# runners are slow and scarce:
+# - the commit pushed (or a pull request's last one) has a tag macos-test (or macos-test-<anything>):
+#   git tag -f macos-test && git push --atomic -f origin develop macos-test
+#   The tag itself starts nothing: the push of the branch is the one run, on all three platforms;
+# - running the workflow by hand (Actions > CI > Run workflow) with "macos" checked;
+# - the release workflow calls it with macos: true, so no installer is built from code whose tests
+#   fail on any platform.
 name: CI
 
 on:
@@ -13,18 +19,57 @@ on:
       - main
       - develop
       - "release/**"
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Also on macOS
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      macos:
+        description: Also on macOS
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  # Where the tests run: Linux and Windows, plus macOS when asked (above). Push the branch and the
+  # tag at once (--atomic) so the tag is there when this looks for it.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.os.outputs.os }}
+    steps:
+      - id: os
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MACOS: ${{ inputs.macos }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$MACOS" != true ]; then
+            tagged=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/macos-test" \
+              --jq ".[] | select(.object.sha == \"$COMMIT\") | .ref" | head -n 1)
+            if [ -n "$tagged" ]; then
+              echo "$tagged is on this commit: macOS too"
+              MACOS=true
+            fi
+          fi
+          if [ "$MACOS" = true ]; then
+            echo 'os=["ubuntu-22.04", "windows-latest", "macos-latest"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'os=["ubuntu-22.04", "windows-latest"]' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: plan
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always

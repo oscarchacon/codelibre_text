@@ -1,0 +1,98 @@
+# Takes a release/<version> branch to main: commits its version in Cargo.toml to the branch, then a
+# pull request merges it into main at once (if it cannot be merged, a conflict, it stays open to
+# solve by hand).
+# - The release workflow calls it for final versions (no -alpha, -beta, -rc...) once every
+#   installer is uploaded.
+# - A pre-release goes to main only when asked: push a tag to-main/<version> or main/<version>
+#   (git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha). Main never gets a version
+#   whose builds failed: pushed before the build, the tag only tells the release workflow, which
+#   calls this when every installer is uploaded; pushed after it, this merges at once.
+name: To main
+
+on:
+  push:
+    tags:
+      - "to-main/*"
+      - "main/*"
+  workflow_call:
+    inputs:
+      version:
+        description: The version of the release/<version> branch
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # This secret holds a token that can write contents, pull requests and workflows: by default
+      # github.token cannot create pull requests, nor change workflow files in main.
+      GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - id: version
+        name: Read the version
+        env:
+          INPUT: ${{ inputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${INPUT:-${TAG#*/}}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$version' is not a version: use a tag like to-main/0.1.0-alpha"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          files=0
+          if gh api "repos/$GH_REPO/branches/release/$version" --silent 2> /dev/null; then
+            files=$(gh release view "v$version" --json assets --jq '.assets | length' 2> /dev/null || echo 0)
+          fi
+          if [ "$files" != 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            # A tag pushed before the build: the release workflow sees it and merges when it ends.
+            echo "::notice::release v$version is not built yet: release.yml takes it to main once release/$version builds"
+          else
+            echo "::error::release v$version has no installers"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.ready == 'true'
+        with:
+          ref: release/${{ steps.version.outputs.version }}
+          fetch-depth: 0
+          token: ${{ env.GH_TOKEN }}
+      # [skip ci]: this push must not start the release workflow again.
+      - name: Commit the version
+        if: steps.version.outputs.ready == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          if ! git diff --quiet; then
+            git commit --all --message "chore: release $VERSION [skip ci]"
+            git push origin "HEAD:release/$VERSION"
+          fi
+      - name: Merge the pull request
+        if: steps.version.outputs.ready == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          branch="release/$VERSION"
+          if [ "$(git rev-list --count origin/main..HEAD)" = 0 ]; then
+            echo "main already has this branch"
+            exit 0
+          fi
+          number=$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number')
+          if [ -z "$number" ]; then
+            gh pr create --head "$branch" --base main --title "Release $VERSION" \
+              --body "Installers built and uploaded to the release v$VERSION."
+          fi
+          gh pr merge "$branch" --merge

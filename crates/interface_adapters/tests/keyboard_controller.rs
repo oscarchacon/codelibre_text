@@ -85,7 +85,7 @@ fn chords_show_a_status_message_until_completed() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     assert!(press(&mut editor, &mut view, "ctrl+k"));
-    assert_eq!(status(&editor), "Ctrl+K was pressed. Waiting for second key…");
+    assert_eq!(status(&editor), format!("{} was pressed. Waiting for second key…", KeyCombo::parse("ctrl+k").unwrap().display()));
     assert!(press(&mut editor, &mut view, "ctrl+b"));
     assert!(editor.state().status.is_none());
     assert_eq!(queued(&mut view), vec!["toggle_side_bar"]);

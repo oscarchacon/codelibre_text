@@ -1594,10 +1594,13 @@ class Window:
         return self.get_view_index(sheet.view()) if sheet and sheet.view() else (-1, -1)
 
     def set_view_index(self, view, group, index):
-        pass
+        # One group: only the position among the tabs.
+        if view is not None:
+            sublime_api.window_set_view_index(view.id(), index)
 
     def set_sheet_index(self, sheet, group, index):
-        pass
+        if sheet and sheet.view():
+            self.set_view_index(sheet.view(), group, index)
 
     def move_sheets_to_group(self, sheets, group, insertion_idx=-1, select=True):
         pass
