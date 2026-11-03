@@ -167,7 +167,15 @@ also needs it where it shows installed applications:
 
 ### Release installers
 
-Pushing a branch `release/<version>` (for example `release/0.1.0-alpha`) runs
+A release starts with a tag `open-release/<version>`: `.github/workflows/open-release.yml` creates
+the branch `release/<version>` from the last `release/<version>` branch whose release has the
+installers of every platform, and opens a pull request from `develop` into it:
+
+```bash
+git tag open-release/0.1.1-alpha develop && git push origin open-release/0.1.1-alpha
+```
+
+Merging that pull request (or pushing a branch `release/<version>`) (for example `release/0.1.0-alpha`) runs
 `.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
 setup and portable `.zip` (x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux
 `.deb`, `.rpm` and portable `.tar.xz` (x64 and ARM64). They are uploaded to a draft GitHub Release to review and publish
