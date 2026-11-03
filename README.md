@@ -186,7 +186,8 @@ git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha
 This needs a token that can write contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
 
 The tests run on Linux and Windows for every push and pull request; macOS only before a release, or
-when a tag `macos-test` (or `macos-test-<anything>`) is pushed, which tests that commit on macOS:
+when a tag `macos-test` (or `macos-test-<anything>`) is pushed, which tests that commit on Linux,
+Windows and macOS:
 
 ```bash
 git tag -f macos-test && git push -f origin macos-test
