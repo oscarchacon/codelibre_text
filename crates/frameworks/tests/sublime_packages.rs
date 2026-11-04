@@ -307,6 +307,275 @@ fn install_package_control_downloads_and_loads_it() {
     assert!(!editor.state().console.contains("Traceback"), "{}", editor.state().console);
 }
 
+/// Lets the plugins and the external-change checks run until `done` or `seconds` pass; true if done.
+fn run_until(editor: &mut Editor, view: &mut ViewState, seconds: u64, mut done: impl FnMut(&Editor) -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < deadline {
+        command_controller::poll_plugins(editor, view);
+        editor.check_external_changes();
+        if done(editor) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+/// Runs a Package Control command whose quick panel lists packages and picks `package` in it.
+fn pick_package(editor: &mut Editor, view: &mut ViewState, command: &str, package: &str) {
+    command_controller::run(editor, view, &Command::new(command));
+    run_until(editor, view, 45, |e| e.plugin_quick_panel().is_some());
+    let panel = editor.plugin_quick_panel().unwrap_or_else(|| panic!("{command}: no list\n{}", editor.state().console));
+    let index = panel.items.iter().position(|i| i.caption == package);
+    let index = index.unwrap_or_else(|| panic!("{command}: {package} not in {:?}", panel.items.iter().map(|i| &i.caption).collect::<Vec<_>>()));
+    command_controller::answer_plugin_quick_panel(editor, view, Some(index));
+}
+
+/// The `version` in the `package-metadata.json` of an installed `.sublime-package`.
+fn archive_version(archive: &Path) -> Option<String> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(archive).ok()?).ok()?;
+    let metadata: serde_json::Value = serde_json::from_reader(zip.by_name("package-metadata.json").ok()?).ok()?;
+    metadata["version"].as_str().map(str::to_string)
+}
+
+/// Rewrites `archive` with `version` in its `package-metadata.json`, as if an older release were installed.
+fn set_archive_version(archive: &Path, version: &str) {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(archive).unwrap()).unwrap();
+    let mut files = Vec::new();
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+        if file.name() == "package-metadata.json" {
+            let mut metadata: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            metadata["version"] = serde_json::json!(version);
+            bytes = serde_json::to_vec(&metadata).unwrap();
+        }
+        files.push((file.name().to_string(), file.is_dir(), bytes));
+    }
+    drop(zip);
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(archive).unwrap());
+    for (name, is_dir, bytes) in files {
+        if is_dir {
+            writer.add_directory(name, zip::write::SimpleFileOptions::default()).unwrap();
+        } else {
+            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            std::io::Write::write_all(&mut writer, &bytes).unwrap();
+        }
+    }
+    writer.finish().unwrap();
+}
+
+/// Package Control installs a package with plugins and libraries, its command runs, it is
+/// upgraded and removed. Runs third-party code from the network: `CODELIBRE_TEST_PACKAGE`
+/// (default MarkdownPreview), its command `CODELIBRE_TEST_COMMAND` (default `markdown_preview`)
+/// with the JSON `CODELIBRE_TEST_ARGS` (default `{"target": "sublime"}`: HTML in a new view).
+#[test]
+#[ignore = "installs a package with Package Control and runs its plugins, in a temporary profile"]
+fn package_control_installs_upgrades_and_removes_a_package_with_plugins() {
+    let Some(data) = sublime_data_dir() else {
+        return;
+    };
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    if !source.is_file() || find_interpreter(None).is_err() {
+        eprintln!("skipped: no Package Control or no Python here");
+        return;
+    }
+    let package = std::env::var("CODELIBRE_TEST_PACKAGE").unwrap_or_else(|_| "MarkdownPreview".into());
+    let command = std::env::var("CODELIBRE_TEST_COMMAND").unwrap_or_else(|_| "markdown_preview".into());
+    let args = std::env::var("CODELIBRE_TEST_ARGS").unwrap_or_else(|_| r#"{"target": "sublime"}"#.into());
+    let dir = tempfile::tempdir().unwrap();
+    let archives = dir.path().join("Installed Packages");
+    std::fs::create_dir_all(&archives).unwrap();
+    std::fs::copy(&source, archives.join("Package Control.sublime-package")).unwrap();
+    let notes = dir.path().join("notes.md");
+    std::fs::write(&notes, "# Title\n\nSome *text*.\n").unwrap();
+    let mut editor = scratch_editor(dir.path());
+    editor.start(vec![notes.clone()]);
+    let mut view = ViewState::default();
+    run_until(&mut editor, &mut view, 15, |_| false);
+    let console = |editor: &Editor| editor.state().console.clone();
+    let report = |editor: &Editor| {
+        let lib = dir.path().join("Lib");
+        let listing = |name: &str| std::fs::read_dir(lib.join(name)).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
+        println!("python33: {:?}\npython38: {:?}", listing("python33"), listing("python38"));
+        println!("load errors: {:?}", editor.state().load_errors);
+        println!("status: {:?}", editor.state().status.as_ref().map(|s| s.text.clone()));
+    };
+
+    // Install.
+    pick_package(&mut editor, &mut view, "install_package", &package);
+    let archive = archives.join(format!("{package}.sublime-package"));
+    let unpacked = dir.path().join("Packages").join(&package);
+    let loaded = run_until(&mut editor, &mut view, 120, |e| e.is_plugin_command(&command));
+    report(&editor);
+    println!("archive {}, folder {}, version {:?}", archive.is_file(), unpacked.is_dir(), archive_version(&archive));
+    assert!(loaded, "{command} did not load\nconsole:\n{}", console(&editor));
+    run_until(&mut editor, &mut view, 5, |_| false);
+
+    // Its command runs on the Markdown file (Package Control's message view is the active one).
+    editor.open_file(&notes);
+    let before = editor.state().documents.len();
+    command_controller::run(&mut editor, &mut view, &Command::with_args(&command, serde_json::from_str(&args).unwrap()));
+    let opened = run_until(&mut editor, &mut view, 20, |e| e.state().documents.len() > before);
+    let output = editor.active_document().map(|d| d.text.clone()).unwrap_or_default();
+    println!("documents {before} → {}, active {:?}:\n{}", editor.state().documents.len(), editor.active_document().map(|d| d.name()), output.chars().take(300).collect::<String>());
+    assert!(!console(&editor).contains("Traceback"), "console:\n{}", console(&editor));
+    if package == "MarkdownPreview" {
+        let heading = output.find("<h1").map(|at| &output[at..]).and_then(|h| h.find("</h1>").map(|end| &h[..end])).unwrap_or_default();
+        println!("heading: {heading}");
+        assert!(opened && heading.contains("Title"), "console:\n{}", console(&editor));
+    }
+
+    // Upgrade: the installed one says it is older.
+    if archive.is_file() {
+        let version = archive_version(&archive).unwrap();
+        set_archive_version(&archive, "0.0.1");
+        run_until(&mut editor, &mut view, 5, |_| false);
+        pick_package(&mut editor, &mut view, "upgrade_package", &package);
+        let upgraded = run_until(&mut editor, &mut view, 120, |_| archive_version(&archive).is_some_and(|v| v != "0.0.1"));
+        run_until(&mut editor, &mut view, 5, |_| false);
+        report(&editor);
+        println!("upgraded to {:?} (was {version})", archive_version(&archive));
+        assert!(upgraded, "console:\n{}", console(&editor));
+        assert!(editor.is_plugin_command(&command), "{command} after the upgrade\nconsole:\n{}", console(&editor));
+    }
+
+    // Remove.
+    pick_package(&mut editor, &mut view, "remove_package", &package);
+    let removed = run_until(&mut editor, &mut view, 60, |e| !archive.exists() && !unpacked.exists() && !e.is_plugin_command(&command));
+    run_until(&mut editor, &mut view, 5, |_| false);
+    report(&editor);
+    println!("console:\n{}", console(&editor));
+    assert!(removed, "archive {}, folder {}, command {}", archive.exists(), unpacked.exists(), editor.is_plugin_command(&command));
+    assert!(!console(&editor).contains("Traceback"));
+}
+
+/// Popular packages with plugins, for [`package_control_installs_the_listed_packages_at_start`].
+const POPULAR_PACKAGES: &[&str] = &[
+    "A File Icon", "AdvancedNewFile", "BracketHighlighter", "ColorHelper", "DocBlockr", "Emmet", "FileDiffs", "GitGutter",
+    "LSP", "MarkdownEditing", "Origami", "PackageResourceViewer", "Pretty JSON", "SideBarEnhancements", "SublimeLinter",
+    "Terminus", "Text Pastry", "TrailingSpaces",
+];
+
+/// Package Control installs at start the packages `installed_packages` lists and it does not
+/// find (`satisfy_packages`, as when the settings come from another machine), then they load.
+/// Runs third-party code from the network: the packages are `CODELIBRE_TEST_PACKAGES`
+/// (comma-separated) or [`POPULAR_PACKAGES`]. Fails listing every load error.
+#[test]
+#[ignore = "installs packages with Package Control and runs their plugins, in a temporary profile"]
+fn package_control_installs_the_listed_packages_at_start() {
+    let Some(data) = sublime_data_dir() else {
+        return;
+    };
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    if !source.is_file() || find_interpreter(None).is_err() {
+        eprintln!("skipped: no Package Control or no Python here");
+        return;
+    }
+    let packages: Vec<String> = match std::env::var("CODELIBRE_TEST_PACKAGES") {
+        Ok(list) => list.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect(),
+        Err(_) => POPULAR_PACKAGES.iter().map(|p| p.to_string()).collect(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let archives = dir.path().join("Installed Packages");
+    std::fs::create_dir_all(&archives).unwrap();
+    std::fs::copy(&source, archives.join("Package Control.sublime-package")).unwrap();
+    let user = dir.path().join("Packages").join("User");
+    std::fs::create_dir_all(&user).unwrap();
+    let mut listed = packages.clone();
+    listed.push("Package Control".into());
+    std::fs::write(user.join("Package Control.sublime-settings"), serde_json::json!({ "installed_packages": listed }).to_string()).unwrap();
+    let notes = dir.path().join("notes.md");
+    std::fs::write(&notes, "# Title\n\nSome *text*.\n").unwrap();
+
+    let mut editor = scratch_editor(dir.path());
+    editor.start(vec![notes]);
+    let mut view = ViewState::default();
+    let installed = |package: &str| archives.join(format!("{package}.sublime-package")).is_file() || dir.path().join("Packages").join(package).join("package-metadata.json").is_file();
+    let started = Instant::now();
+    let all = run_until(&mut editor, &mut view, 600, |_| packages.iter().all(|p| installed(p)));
+    // The last ones reload once their folder holds still; Package Control re-enables them.
+    run_until(&mut editor, &mut view, 15, |_| false);
+    println!("installed in {:?}: {all}", started.elapsed());
+    for package in &packages {
+        println!("  {package}: {}", if installed(package) { "installed" } else { "MISSING" });
+    }
+    let console = editor.state().console.clone();
+    println!("console:\n{console}");
+    let errors = editor.state().load_errors.clone();
+    println!("{} load errors", errors.len());
+    for error in &errors {
+        // The package, then the exception's last line.
+        let first = error.lines().next().unwrap_or_default();
+        let last = error.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default();
+        println!("  {first}\n      {last}");
+    }
+    println!("ignored: {:?}", editor.global_settings().get("ignored_packages"));
+    assert!(all, "not every package was installed");
+    // Syntaxes syntect cannot read (Sublime Text 4's `extends`…) are a limit of syntect, not of plugins.
+    let plugin_errors = errors.iter().filter(|e| !e.lines().next().unwrap_or_default().contains(".sublime-syntax")).count();
+    assert_eq!(plugin_errors, 0, "{plugin_errors} plugin load errors");
+}
+
+/// `upgrade_all_packages` when Package Control and another package are out of date: it upgrades
+/// itself alone first (it is disabled meanwhile, so its plugins unload and load again), then the
+/// other one the next time. Runs third-party code from the network.
+#[test]
+#[ignore = "upgrades Package Control and a package with it, in a temporary profile"]
+fn package_control_upgrades_itself_then_the_other_packages() {
+    let Some(data) = sublime_data_dir() else {
+        return;
+    };
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    if !source.is_file() || find_interpreter(None).is_err() {
+        eprintln!("skipped: no Package Control or no Python here");
+        return;
+    }
+    let other = "Text Pastry";
+    let dir = tempfile::tempdir().unwrap();
+    let archives = dir.path().join("Installed Packages");
+    std::fs::create_dir_all(&archives).unwrap();
+    let package_control = archives.join("Package Control.sublime-package");
+    std::fs::copy(&source, &package_control).unwrap();
+    let user = dir.path().join("Packages").join("User");
+    std::fs::create_dir_all(&user).unwrap();
+    let settings = serde_json::json!({ "installed_packages": [other, "Package Control"], "auto_upgrade": false });
+    std::fs::write(user.join("Package Control.sublime-settings"), settings.to_string()).unwrap();
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    let mut view = ViewState::default();
+    let other_archive = archives.join(format!("{other}.sublime-package"));
+    assert!(run_until(&mut editor, &mut view, 120, |_| other_archive.is_file()), "{}", editor.state().console);
+    run_until(&mut editor, &mut view, 10, |_| false);
+
+    set_archive_version(&package_control, "0.0.1");
+    set_archive_version(&other_archive, "0.0.1");
+    run_until(&mut editor, &mut view, 5, |_| false);
+    let upgrade_all = Command::with_args("upgrade_all_packages", serde_json::json!({ "unattended": true }));
+    let old = |archive: &Path| archive_version(archive).as_deref() == Some("0.0.1");
+
+    command_controller::run(&mut editor, &mut view, &upgrade_all);
+    let itself = run_until(&mut editor, &mut view, 120, |e| !old(&package_control) && e.is_plugin_command("install_package"));
+    run_until(&mut editor, &mut view, 10, |_| false);
+    println!("first: Package Control {:?}, {other} {:?}", archive_version(&package_control), archive_version(&other_archive));
+    println!("ignored: {:?}", editor.global_settings().get("ignored_packages"));
+    assert!(itself, "Package Control did not upgrade itself and load again\n{}", editor.state().console);
+    assert!(old(&other_archive), "Package Control upgrades itself alone");
+
+    command_controller::run(&mut editor, &mut view, &upgrade_all);
+    let others = run_until(&mut editor, &mut view, 120, |_| !old(&other_archive));
+    run_until(&mut editor, &mut view, 10, |_| false);
+    println!("second: {other} {:?}", archive_version(&other_archive));
+    println!("console:\n{}", editor.state().console);
+    assert!(others, "{other} was not upgraded");
+    assert!(editor.is_plugin_command("install_package"));
+    assert!(editor.is_plugin_command("text_pastry_insert_text") || editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+    assert!(!editor.state().console.contains("Traceback"));
+}
+
 /// Package Control copied to a temporary profile, with nothing else: nothing of the user's is
 /// read or written. Only loads it and lets its timers run; it installs nothing.
 #[test]

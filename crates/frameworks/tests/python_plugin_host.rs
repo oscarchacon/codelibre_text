@@ -476,6 +476,60 @@ fn plugins_import_the_libraries_package_control_installs() {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
+/// Libraries written for Python 3.8 (Markdown) read entry points by group from a dict, which
+/// Python 3.12 dropped; the host gives it back.
+#[test]
+fn libraries_read_entry_points_by_group_as_in_python_3_8() {
+    let dir = tempfile::tempdir().unwrap();
+    let dist_info = dir.path().join("Lib").join("python38").join("ext-1.0.dist-info");
+    fs::create_dir_all(&dist_info).unwrap();
+    fs::write(dist_info.join("METADATA"), "Metadata-Version: 2.1\nName: ext\nVersion: 1.0\n").unwrap();
+    fs::write(dist_info.join("entry_points.txt"), "[markdown.extensions]\nabbr = ext:Abbr\n").unwrap();
+    let plugin = "from importlib import metadata\n\
+                  found = metadata.entry_points()\n\
+                  assert [e.name for e in found.get('markdown.extensions', ())] == ['abbr'], found\n\
+                  assert found.get('no.such.group', ()) == ()\n\
+                  assert [e.name for e in found['markdown.extensions']] == ['abbr']\n\
+                  assert 'markdown.extensions' in found.keys()\n\
+                  assert [e.name for e in metadata.entry_points(group='markdown.extensions')] == ['abbr']\n";
+    let Some((_host, loaded)) = host_with(dir.path(), &[("reads_entry_points.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { errors, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// Sublime Text 4132's enums (LSP) and our own `Default.paste_from_history` (Terminus).
+#[test]
+fn plugins_find_the_api_enums_and_default_modules() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = "import sublime\n\
+                  from Default.paste_from_history import ClipboardHistory, g_clipboard_history\n\
+                  assert sublime.RegionFlags.DRAW_NO_FILL | sublime.RegionFlags.HIDDEN == sublime.DRAW_NO_FILL | sublime.HIDDEN\n\
+                  assert sublime.PopupFlags.HIDE_ON_MOUSE_MOVE_AWAY == sublime.HIDE_ON_MOUSE_MOVE_AWAY\n\
+                  assert sublime.KindId.COLOR_LIGHT == 18 and sublime.QueryOperator.EQUAL == sublime.OP_EQUAL\n\
+                  history = ClipboardHistory()\n\
+                  for text in ['one', '  two\\nlines', 'one', '']:\n    history.push_text(text)\n\
+                  assert history.get() == [('one', 'one'), ('twolines', '  two\\nlines')], history.get()\n\
+                  assert g_clipboard_history.empty()\n\
+                  import sys\n\
+                  expected = '4203' if sys.version_info >= (3, 14) else '4201' if sys.version_info >= (3, 13) else '4200'\n\
+                  assert sublime.version() == expected and sublime.arch() in ('x64', 'x32', 'arm64')\n\
+                  folder = {'4203': 'python314', '4201': 'python313'}.get(expected, 'python38')\n\
+                  assert [p for p in sys.path if p.endswith(('python314', 'python313', 'python38'))][0].endswith(folder), sys.path\n\
+                  import warnings\n\
+                  assert any(f[0] == 'ignore' and f[2] is DeprecationWarning for f in warnings.filters)\n";
+    let Some((_host, loaded)) = host_with(dir.path(), &[("uses_new_api.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { errors, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
 /// Package Control sets `post_handshake_auth` before every download, which Apple's
 /// `/usr/bin/python3` (LibreSSL) refuses unless the host lets it.
 #[test]

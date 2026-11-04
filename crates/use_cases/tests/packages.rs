@@ -6,7 +6,7 @@ use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo};
 use entities::menu::{MenuItem, PaletteCommand};
 use serde_json::json;
-use test_support::{status, World, INSTALLED_PACKAGES};
+use test_support::{status, World, INSTALLED_PACKAGES, PACKAGES};
 use use_cases::gateways::PluginCommandKind::Window;
 use use_cases::gateways::{expand_variable, MessageAnswer, PluginMessage};
 use use_cases::packages::PACKAGE_CONTROL_URL;
@@ -216,6 +216,39 @@ fn a_new_installed_package_reloads_the_packages_once_the_folder_holds_still() {
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
     editor.check_installed_packages();
     assert_eq!(world.resources.ui_loads.borrow().len(), 2, "loaded already");
+}
+
+/// Package Control unpacks a package with `.no-sublime-package` into `Packages`: installed,
+/// upgraded (it writes `package-metadata.json` last) and removed, each reloads the packages.
+#[test]
+fn a_package_folder_installed_upgraded_or_removed_reloads_the_packages() {
+    let world = World::new();
+    world.disk.put(format!("{PACKAGES}/User/Preferences.sublime-settings"), "{}");
+    let mut editor = world.editor();
+    let loads = || world.resources.ui_loads.borrow().len();
+    let check_twice = |editor: &mut use_cases::Editor| {
+        editor.check_installed_packages();
+        editor.check_installed_packages();
+    };
+
+    world.disk.put(format!("{PACKAGES}/Terminal/plugin.py"), "");
+    world.disk.put(format!("{PACKAGES}/Terminal/package-metadata.json"), "{\"version\": \"1.0\"}");
+    check_twice(&mut editor);
+    assert_eq!(loads(), 2, "installed");
+
+    world.disk.put(format!("{PACKAGES}/Terminal/plugin.py"), "# 2.0");
+    world.disk.put(format!("{PACKAGES}/Terminal/package-metadata.json"), "{\"version\": \"2.0\"}");
+    check_twice(&mut editor);
+    assert_eq!(loads(), 3, "upgraded");
+
+    world.disk.remove_dir(format!("{PACKAGES}/Terminal"));
+    check_twice(&mut editor);
+    assert_eq!(loads(), 4, "removed");
+
+    world.disk.put(format!("{PACKAGES}/User/Preferences.sublime-settings"), "{\"font_size\": 12}");
+    world.disk.put(format!("{PACKAGES}/User/notes.py"), "");
+    check_twice(&mut editor);
+    assert_eq!(loads(), 4, "files of a package are not watched, only its metadata");
 }
 
 #[test]

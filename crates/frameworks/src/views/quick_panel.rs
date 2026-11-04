@@ -126,6 +126,9 @@ fn result_list(
                     ui.painter().rect_filled(rect, 4.0, fill);
                 }
                 let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 4.0))));
+                // Selectable labels sense clicks and, laid out after the row, take them from it:
+                // a click on the text would select it instead of accepting the item.
+                row.style_mut().interaction.selectable_labels = false;
                 // The hint first, from the right, so the caption and detail get what is left and
                 // are cut to one line each: the row has a fixed height.
                 row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

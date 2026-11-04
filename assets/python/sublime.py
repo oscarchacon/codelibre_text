@@ -7,6 +7,7 @@ nothing (popups, phantoms, folding, groups, symbols), so plugins that use it sti
 """
 
 import collections
+import enum
 import heapq
 import html
 import itertools
@@ -123,6 +124,154 @@ OP_NOT_REGEX_MATCH = 3
 OP_REGEX_CONTAINS = 4
 OP_NOT_REGEX_CONTAINS = 5
 
+
+# The same values as enums, as Sublime Text 4132 and later name them (LSP needs them).
+
+
+class HoverZone(enum.IntEnum):
+    TEXT = HOVER_TEXT
+    GUTTER = HOVER_GUTTER
+    MARGIN = HOVER_MARGIN
+
+
+class NewFileFlags(enum.IntFlag):
+    NONE = 0
+    ENCODED_POSITION = ENCODED_POSITION
+    TRANSIENT = TRANSIENT
+    FORCE_GROUP = FORCE_GROUP
+    SEMI_TRANSIENT = SEMI_TRANSIENT
+    ADD_TO_SELECTION = ADD_TO_SELECTION
+    REPLACE_MRU = REPLACE_MRU
+    CLEAR_TO_RIGHT = CLEAR_TO_RIGHT
+    FORCE_CLONE = 256
+
+
+class FindFlags(enum.IntFlag):
+    NONE = 0
+    LITERAL = LITERAL
+    IGNORECASE = IGNORECASE
+    WHOLEWORD = 4
+    REVERSE = 8
+    WRAP = 16
+
+
+class QuickPanelFlags(enum.IntFlag):
+    NONE = 0
+    MONOSPACE_FONT = MONOSPACE_FONT
+    KEEP_OPEN_ON_FOCUS_LOST = KEEP_OPEN_ON_FOCUS_LOST
+    WANT_EVENT = WANT_EVENT
+
+
+class PopupFlags(enum.IntFlag):
+    NONE = 0
+    COOPERATE_WITH_AUTO_COMPLETE = COOPERATE_WITH_AUTO_COMPLETE
+    HIDE_ON_MOUSE_MOVE = HIDE_ON_MOUSE_MOVE
+    HIDE_ON_MOUSE_MOVE_AWAY = HIDE_ON_MOUSE_MOVE_AWAY
+    KEEP_ON_SELECTION_MODIFIED = KEEP_ON_SELECTION_MODIFIED
+    HIDE_ON_CHARACTER_EVENT = HIDE_ON_CHARACTER_EVENT
+
+
+class RegionFlags(enum.IntFlag):
+    NONE = 0
+    DRAW_EMPTY = DRAW_EMPTY
+    HIDE_ON_MINIMAP = HIDE_ON_MINIMAP
+    DRAW_EMPTY_AS_OVERWRITE = DRAW_EMPTY_AS_OVERWRITE
+    PERSISTENT = PERSISTENT
+    DRAW_NO_FILL = DRAW_NO_FILL
+    HIDDEN = HIDDEN
+    DRAW_NO_OUTLINE = DRAW_NO_OUTLINE
+    DRAW_SOLID_UNDERLINE = DRAW_SOLID_UNDERLINE
+    DRAW_STIPPLED_UNDERLINE = DRAW_STIPPLED_UNDERLINE
+    DRAW_SQUIGGLY_UNDERLINE = DRAW_SQUIGGLY_UNDERLINE
+    NO_UNDO = NO_UNDO
+
+
+class QueryOperator(enum.IntEnum):
+    EQUAL = OP_EQUAL
+    NOT_EQUAL = OP_NOT_EQUAL
+    REGEX_MATCH = OP_REGEX_MATCH
+    NOT_REGEX_MATCH = OP_NOT_REGEX_MATCH
+    REGEX_CONTAINS = OP_REGEX_CONTAINS
+    NOT_REGEX_CONTAINS = OP_NOT_REGEX_CONTAINS
+
+
+class PointClassification(enum.IntFlag):
+    NONE = 0
+    WORD_START = CLASS_WORD_START
+    WORD_END = CLASS_WORD_END
+    PUNCTUATION_START = CLASS_PUNCTUATION_START
+    PUNCTUATION_END = CLASS_PUNCTUATION_END
+    SUB_WORD_START = CLASS_SUB_WORD_START
+    SUB_WORD_END = CLASS_SUB_WORD_END
+    LINE_START = CLASS_LINE_START
+    LINE_END = CLASS_LINE_END
+    EMPTY_LINE = CLASS_EMPTY_LINE
+
+
+class AutoCompleteFlags(enum.IntFlag):
+    NONE = 0
+    INHIBIT_WORD_COMPLETIONS = INHIBIT_WORD_COMPLETIONS
+    INHIBIT_EXPLICIT_COMPLETIONS = INHIBIT_EXPLICIT_COMPLETIONS
+    DYNAMIC_COMPLETIONS = DYNAMIC_COMPLETIONS
+    INHIBIT_REORDER = INHIBIT_REORDER
+
+
+class CompletionItemFlags(enum.IntFlag):
+    NONE = 0
+    KEEP_PREFIX = COMPLETION_FLAG_KEEP_PREFIX
+
+
+class DialogResult(enum.IntEnum):
+    CANCEL = DIALOG_CANCEL
+    YES = DIALOG_YES
+    NO = DIALOG_NO
+
+
+class PhantomLayout(enum.IntEnum):
+    INLINE = LAYOUT_INLINE
+    BELOW = LAYOUT_BELOW
+    BLOCK = LAYOUT_BLOCK
+
+
+class KindId(enum.IntEnum):
+    AMBIGUOUS = KIND_ID_AMBIGUOUS
+    KEYWORD = KIND_ID_KEYWORD
+    TYPE = KIND_ID_TYPE
+    FUNCTION = KIND_ID_FUNCTION
+    NAMESPACE = KIND_ID_NAMESPACE
+    NAVIGATION = KIND_ID_NAVIGATION
+    MARKUP = KIND_ID_MARKUP
+    VARIABLE = KIND_ID_VARIABLE
+    SNIPPET = KIND_ID_SNIPPET
+    COLOR_REDISH = KIND_ID_COLOR_REDISH
+    COLOR_ORANGISH = 10
+    COLOR_YELLOWISH = 11
+    COLOR_GREENISH = 12
+    COLOR_CYANISH = 13
+    COLOR_BLUISH = 14
+    COLOR_PURPLISH = 15
+    COLOR_PINKISH = 16
+    COLOR_DARK = 17
+    COLOR_LIGHT = 18
+
+
+class SymbolSource(enum.IntEnum):
+    ANY = SYMBOL_SOURCE_ANY
+    INDEX = SYMBOL_SOURCE_INDEX
+    OPEN_FILES = SYMBOL_SOURCE_OPEN_FILES
+
+
+class SymbolType(enum.IntEnum):
+    ANY = SYMBOL_TYPE_ANY
+    DEFINITION = SYMBOL_TYPE_DEFINITION
+    REFERENCE = SYMBOL_TYPE_REFERENCE
+
+
+class CompletionFormat(enum.IntEnum):
+    TEXT = COMPLETION_FORMAT_TEXT
+    SNIPPET = COMPLETION_FORMAT_SNIPPET
+    COMMAND = COMPLETION_FORMAT_COMMAND
+
 # ----- application -----------------------------------------------------------------------------
 
 # Filled by the plugin host from the editor's ``load`` request.
@@ -132,6 +281,13 @@ _cleared_selections = set()
 
 
 def version():
+    """The Sublime Text build whose plugin host runs the Python we run: Package Control installs
+    the libraries for that Python (compiled ones too) by it, in ``Lib/python314`` from 4203 on,
+    ``Lib/python313`` from 4201 on, else ``Lib/python38``."""
+    if sys.version_info >= (3, 14):
+        return "4203"
+    if sys.version_info >= (3, 13):
+        return "4201"
     return "4200"
 
 
@@ -148,7 +304,13 @@ def platform():
 
 
 def arch():
-    return "x64"
+    """The processor's, as Package Control names the builds of compiled libraries."""
+    import platform as _platform
+
+    machine = _platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return "x64" if sys.maxsize > 2**32 else "x32"
 
 
 def executable_path():
