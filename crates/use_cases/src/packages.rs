@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use crate::editor::Editor;
 use crate::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
 
-/// The `.sublime-package` files of a folder and their dates, sorted.
+/// Installed packages (archives, package folders) and their dates, sorted.
 pub(crate) type FolderStamp = Vec<(PathBuf, Option<SystemTime>)>;
 
 /// Package Control's latest release (4.x). packagecontrol.io's own link still serves 3.4.1, whose
@@ -63,26 +63,34 @@ impl Editor {
         paths.archive_folders.iter().find(|f| !f.sublime && !f.shipped).map(|f| f.archives.clone())
     }
 
+    /// The `.sublime-package` files of our `Installed Packages` with their dates, and the folders of
+    /// our `Packages` with the date of their `package-metadata.json` (Package Control writes it last
+    /// when it installs or upgrades a package it unpacks there, one with `.no-sublime-package`).
     fn installed_packages_stamp(&self) -> FolderStamp {
-        let Some(folder) = self.own_installed_packages() else { return Vec::new() };
         let file_system = &self.gateways.file_system;
-        let mut stamp: FolderStamp = file_system
-            .list_dir(&folder)
+        let archives = self.own_installed_packages().map(|folder| file_system.list_dir(&folder)).unwrap_or_default();
+        let archives = archives
             .into_iter()
             .filter(|entry| !entry.is_dir && entry.path.extension().is_some_and(|e| e == "sublime-package"))
             .map(|entry| {
                 let modified = file_system.modified(&entry.path);
                 (entry.path, modified)
-            })
-            .collect();
+            });
+        let folders = file_system.list_dir(&self.gateways.resources.paths().packages).into_iter().filter(|entry| entry.is_dir).map(|entry| {
+            let modified = file_system.modified(&entry.path.join("package-metadata.json"));
+            (entry.path, modified)
+        });
+        let mut stamp: FolderStamp = archives.chain(folders).collect();
         stamp.sort();
         stamp
     }
 
     /// Reloads the packages when Package Control (or the user) added, upgraded or removed a
-    /// `.sublime-package` in our `Installed Packages`, as Sublime does. It waits until the folder
-    /// held still for one check: Package Control may be installing several. The plugin host keeps
-    /// running (only changed packages reload). Called by [`Editor::check_external_changes`].
+    /// `.sublime-package` in our `Installed Packages` or a package folder in our `Packages`, as
+    /// Sublime does. It waits until the folders held still for one check: Package Control may be
+    /// installing several. The plugin host keeps running (only changed packages reload). Called by
+    /// [`Editor::check_external_changes`]. (Package Control also puts a package in
+    /// `ignored_packages` while it installs it, but for less than a check when the download is fast.)
     pub fn check_installed_packages(&mut self) {
         let stamp = self.installed_packages_stamp();
         if stamp == self.state.installed_packages {

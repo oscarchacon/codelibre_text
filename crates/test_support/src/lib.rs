@@ -83,6 +83,13 @@ impl MemoryDisk {
     pub fn bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
         self.files.borrow().get(path.as_ref()).map(|(b, _)| b.clone())
     }
+
+    /// Deletes a folder and everything in it.
+    pub fn remove_dir(&self, path: impl AsRef<Path>) {
+        let path = path.as_ref();
+        self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
+        self.files.borrow_mut().retain(|file, _| !file.starts_with(path));
+    }
 }
 
 struct FakeFileSystem(Rc<MemoryDisk>);

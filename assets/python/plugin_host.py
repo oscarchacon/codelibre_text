@@ -26,8 +26,14 @@ import json
 import os
 import sys
 import traceback
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Not in the console, as in Sublime: deprecations show only for ``__main__``, which this host is
+# and Sublime's plugins are not; and Python 3.12's invalid escapes in old plugins' strings.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 import codelibre_rpc  # noqa: E402
 
@@ -124,6 +130,49 @@ def allow_post_handshake_auth():
 allow_post_handshake_auth()
 
 
+def restore_entry_points_by_group():
+    """Python 3.12 dropped the dict that ``importlib.metadata.entry_points()`` gave Python 3.8,
+    the plugins' Python (Markdown, a library Package Control installs, asks it
+    ``.get("markdown.extensions", ())``). Without arguments it answers groups again too."""
+    import importlib.metadata as metadata
+
+    if hasattr(metadata.entry_points(), "get"):
+        return
+
+    class EntryPointsByGroup(metadata.EntryPoints):
+        def get(self, group, default=None):
+            found = self.select(group=group)
+            return found if found else default
+
+        def keys(self):
+            return self.groups
+
+        def values(self):
+            return [self.select(group=group) for group in self.groups]
+
+        def items(self):
+            return [(group, self.select(group=group)) for group in self.groups]
+
+        def __getitem__(self, name):
+            try:
+                return super().__getitem__(name)
+            except KeyError:
+                if name in self.groups:
+                    return self.select(group=name)
+                raise
+
+    entry_points = metadata.entry_points
+
+    def entry_points_by_group(**params):
+        found = entry_points(**params)
+        return found if params else EntryPointsByGroup(found)
+
+    metadata.entry_points = entry_points_by_group
+
+
+restore_entry_points_by_group()
+
+
 def visible_path(directory, archives):
     """The path plugins see for a package's folder; registers it when it was unpacked."""
     parent, name = os.path.split(directory)
@@ -207,12 +256,13 @@ def load_package(name, dirs, archives, signature):
 
 
 def add_library_folders():
-    """``Lib/python38`` and ``Lib/python33``, next to this file's folder, where Package Control installs
-    libraries. It puts those of a package with a ``.python-version`` of 3.3 in ``python33`` (it sees
-    Sublime's ``plugin_host-3.3`` next to the executable); we run every package in one Python, so
-    both are on the path, ``python38`` first where a library is in both."""
+    """The ``Lib`` folders, next to this file's folder, where Package Control installs libraries:
+    first the one of the Python we run (``python314`` / ``python313``, see ``sublime.version()``),
+    then ``python38`` and ``python33``, where it put them for an older Python (or before
+    ``disable_plugin_host_3.3``). We run every package in one Python, so all are on the path."""
     lib = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for name in ("python38", "python33"):
+    own = {"4203": "python314", "4201": "python313"}.get(sublime.version())
+    for name in ([own] if own else []) + ["python38", "python33"]:
         folder = os.path.join(lib, name)
         os.makedirs(folder, exist_ok=True)
         if folder not in sys.path:
