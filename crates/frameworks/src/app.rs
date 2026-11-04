@@ -351,7 +351,13 @@ impl eframe::App for App {
             self.visuals_for_scheme = scheme;
         }
 
-        for event in self.draw(ctx, &chrome) {
+        let events = self.draw(ctx, &chrome);
+        // This frame shows the state before its events: draw what they changed (a closed panel, a
+        // new language) now, not at the next input, or the panel seems to need another click.
+        if !events.is_empty() {
+            ctx.request_repaint();
+        }
+        for event in events {
             ui_controller::handle(&mut self.editor, &mut self.view, event);
         }
         // After the text widget's edits, so listeners hear about them this frame.

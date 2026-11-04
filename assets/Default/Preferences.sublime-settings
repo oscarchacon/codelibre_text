@@ -83,6 +83,10 @@
 	// python or the one `uv python find` reports, whichever works first.
 	"python_interpreter": "",
 
+	// Every plugin runs in that one Python, so there is no Python 3.3 host: Package Control then
+	// installs every package's libraries for its newer host (Lib/python38), as in Sublime Text.
+	"disable_plugin_host_3.3": true,
+
 	// Packages that are not loaded at all. Package Control changes this list while it upgrades.
 	"ignored_packages": ["Vintage"],
 

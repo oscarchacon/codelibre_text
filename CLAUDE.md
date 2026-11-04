@@ -13,7 +13,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
 - `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
   gettext `.po` per interface language, parsed by `gateways/po_file.rs`) (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
-- `assets/python/` — the Python plugin host and our own `sublime` / `sublime_plugin` modules (`include_str!` in
+- `assets/python/` — the Python plugin host, our own `sublime` / `sublime_plugin` modules and `Default/` (the modules
+  of Sublime's `Default` packages import; Sublime's is not loaded) (`include_str!` in
   `frameworks/src/gateways/python_plugin_host.rs`). Design, protocol and the **pending phases B and C**: `docs/plugins.md`.
 - `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
   `packaging/linux` (`.desktop` + `install.sh`) and `packaging/macos` (`Info.plist` + `make_app.sh`). `.gitattributes` keeps them LF.

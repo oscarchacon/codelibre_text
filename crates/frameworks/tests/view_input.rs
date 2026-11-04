@@ -1,10 +1,10 @@
 //! Views driven by synthetic input in a real `egui::Context`, without a window.
 
 use codelibre_text::views::theme::Chrome;
-use codelibre_text::views::{input_panel, output_panel};
+use codelibre_text::views::{input_panel, output_panel, quick_panel};
 use egui::{CentralPanel, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::{InputPanelViewModel, OutputPanelViewModel};
+use interface_adapters::view_models::{InputPanelViewModel, OutputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
 
 fn chrome() -> Chrome {
     let color = Color32::from_gray(128);
@@ -88,6 +88,67 @@ fn double_clicking_a_line_of_the_output_panel_opens_it() {
 #[test]
 fn one_click_opens_nothing() {
     assert_eq!(opened_lines(40.0, 1), Vec::<usize>::new());
+}
+
+fn quick_panel_frame(ctx: &Context, detail: &str, events: Vec<Event>) -> Vec<UiEvent> {
+    let panel = QuickPanelViewModel {
+        placeholder: String::new(),
+        keep_open: false,
+        no_matches: String::new(),
+        query: String::new(),
+        selected: 0,
+        items: vec![QuickPanelItemViewModel {
+            caption: "Preferences: Select Interface Language".into(),
+            detail: detail.into(),
+            hint: String::new(),
+            kind: String::new(),
+        }],
+        take_focus: false,
+        monospace: false,
+    };
+    let mut reported = Vec::new();
+    let _ = ctx.run(input(events), |ctx| quick_panel::show(ctx, &chrome(), &panel, &mut reported));
+    reported
+}
+
+/// What one click at each of `points` on the first item reports, the click in frames of its own or,
+/// as a fast click does, moving, pressing and releasing in one frame.
+fn quick_panel_clicks(detail: &str, points: &[Pos2], one_frame: bool) {
+    for &at in points {
+        let ctx = Context::default();
+        // An Area's first frame only measures it: nothing in it can be clicked yet.
+        quick_panel_frame(&ctx, detail, Vec::new());
+        quick_panel_frame(&ctx, detail, Vec::new());
+        let reported = if one_frame {
+            quick_panel_frame(&ctx, detail, vec![Event::PointerMoved(at), button(at, true), button(at, false)])
+        } else {
+            quick_panel_frame(&ctx, detail, vec![Event::PointerMoved(at)]);
+            let mut reported = quick_panel_frame(&ctx, detail, vec![button(at, true)]);
+            reported.extend(quick_panel_frame(&ctx, detail, vec![button(at, false)]));
+            reported
+        };
+        assert!(matches!(reported.as_slice(), [UiEvent::QuickPanelAccepted(0)]), "click at {at:?}: {reported:?}");
+    }
+}
+
+// The panel is 420 wide, centred in 800: its first row starts at x 190, y about 88.
+fn along(y: f32) -> Vec<Pos2> {
+    (220..400).step_by(20).map(|x| Pos2::new(x as f32, y)).collect()
+}
+
+#[test]
+fn one_click_on_the_text_of_a_quick_panel_item_accepts_it() {
+    quick_panel_clicks("", &along(100.0), false);
+    quick_panel_clicks("", &along(100.0), true);
+}
+
+#[test]
+fn one_click_on_the_caption_or_detail_of_a_two_line_item_accepts_it() {
+    let detail = "assets/Default/Localization/messages.pot";
+    for y in [96.0, 104.0, 112.0, 118.0] {
+        quick_panel_clicks(detail, &along(y), false);
+        quick_panel_clicks(detail, &along(y), true);
+    }
 }
 
 #[test]

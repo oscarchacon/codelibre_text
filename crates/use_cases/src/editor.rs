@@ -103,7 +103,7 @@ pub struct EditorState {
     pub(crate) next_id: DocumentId,
     pub(crate) find_cache: Option<FindCache>,
     pub(crate) last_disk_check: Instant,
-    /// Our `Installed Packages` when packages were last loaded, and a change seen since (reloaded
+    /// Our `Installed Packages` and `Packages` when packages were last loaded, and a change seen since (reloaded
     /// once it holds still, see [`Editor::check_installed_packages`]).
     pub(crate) installed_packages: FolderStamp,
     pub(crate) installed_packages_changed: Option<FolderStamp>,

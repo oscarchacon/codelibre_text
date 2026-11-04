@@ -21,6 +21,9 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("sublime_api.py", include_str!("../../../../assets/python/sublime_api.py")),
     ("sublime.py", include_str!("../../../../assets/python/sublime.py")),
     ("sublime_plugin.py", include_str!("../../../../assets/python/sublime_plugin.py")),
+    // Our own `Default` modules that packages import (Sublime's `Default` is not loaded).
+    ("Default/__init__.py", include_str!("../../../../assets/python/Default/__init__.py")),
+    ("Default/paste_from_history.py", include_str!("../../../../assets/python/Default/paste_from_history.py")),
     // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
     ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
     ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),

@@ -49,3 +49,5 @@ winresource = "0.1"
 
 [dev-dependencies]
 tempfile.workspace = true
+# Rewriting an installed package's metadata (tests/sublime_packages.rs, the upgrade)
+zip.workspace = true

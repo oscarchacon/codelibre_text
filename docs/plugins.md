@@ -4,7 +4,9 @@ Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-1
 outside commands, real timers, view events; then quick and input panels; 2026-10-29 dialogs, resources,
 scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks;
 2026-10-30 output panel results, build systems, the input panel's view; 2026-11-02 stand-ins for the rest of the API,
-`imp` shim, `install_package_control`, `Installed Packages` watched, scopes and the `selector` context). The rest of B and phase C below are the pending work, in order.
+`imp` shim, `install_package_control`, `Installed Packages` watched, scopes and the `selector` context; 2026-11-04 a
+package with plugins and libraries installed, upgraded and removed by Package Control; 18 popular packages load,
+libraries for the Python we run, Package Control upgrades itself). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -281,15 +283,24 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
       would take every key) and their plugins are not loaded. A change reloads the packages (Package Control's
       disabling, below).
-- [x] **Libraries**: `Lib/python38` and `Lib/python33`, where Package Control 4 installs libraries, are on `sys.path`
-      (`add_library_folders` in `plugin_host.py`, `python38` first). Package Control puts those of a package whose
-      `.python-version` is 3.3 in `python33`, since it finds Sublime's `plugin_host-3.3` next to `executable_path()`;
-      we run every package in one Python and do not read `.python-version`.
+- [x] **Libraries for the Python we run**: `sublime.version()` is the Sublime build whose plugin host runs that Python
+      (`4203` for 3.14+, `4201` for 3.13, else `4200`), and Package Control installs every library for it, compiled ones
+      too (`pywinpty`, `orjson`), in `Lib/python314` / `Lib/python313` (else `Lib/python38`). `add_library_folders` in
+      `plugin_host.py` puts that folder first on `sys.path`, then `python38` and `python33` (libraries installed before).
+      Our default `"disable_plugin_host_3.3": true` tells Package Control there is no 3.3 host (else it finds Sublime's
+      `plugin_host-3.3` next to `executable_path()`), so it supports one Python only and runs every package on it: 3.3
+      libraries are too old for a current Python (pygments 2.1 does not compile). `.python-version` is not read.
+      `sublime.arch()` is the processor's (`x64`, `x32`, `arm64`): the build of a compiled library depends on it.
+      The version also makes Package Control offer the releases for that build (BracketHighlighter, ColorHelper,
+      MarkdownPreview 3…), written for that Python; plugins that test the version may call API it added.
 - [ ] Libraries, still missing: Package Control 3's `dependencies.json` / dependency packages (`Packages/<dep>/all`, `st3`…).
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
       has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
-      More shims as plugins need them (`asyncore` / `asynchat`, the rest of `distutils`).
+      More shims as plugins need them (`asyncore` / `asynchat`, the rest of `distutils`). Done in `plugin_host.py`:
+      `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did
+      (`restore_entry_points_by_group`; Markdown needs it). Libraries for 3.8 run on 3.14 only while they avoid what
+      later Pythons removed; compiled ones (`cp38` wheels) cannot.
       On macOS that is often Apple's `/usr/bin/python3` (3.9, LibreSSL), whose `SSLContext.post_handshake_auth` cannot be
       set: `plugin_host.py::allow_post_handshake_auth` makes it a no-op, or every Package Control download fails.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
@@ -306,7 +317,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       Errors)". Download failures (curl's message) also go to the console. A reload with load errors says how many
       instead of the counts, so a package Package Control installs and that fails to load is noticed.
 - [x] **`Installed Packages` is watched**: `check_installed_packages` (with `check_external_changes`, every 1.5 s) reloads
-      the packages when a `.sublime-package` there is added, replaced or removed and the folder held still for one check.
+      the packages when a `.sublime-package` there is added, replaced or removed and the folder held still for one check
+      (and the package folders of our `Packages`, below).
 - [x] **Reloading keeps the plugin host**: a `load` to a running host (same `python_interpreter`) compares each package's
       `.py` files (`package_signature`) and unloads (`plugin_unloaded`, its modules, listeners, `add_on_change`
       callbacks) the packages gone or changed, then loads the new ones; commands are rebuilt in load order and `on_init`
@@ -314,7 +326,34 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       Package Control thread still installing goes on when the first package arrives. The editor keeps the plugins'
       settings files and watches unless the host started again (`PluginHostGateway::load` answers that). Left alone,
       as in Sublime: the timers of an unloaded package, kept packages that imported a changed one's modules.
-- [ ] Not tried yet: a package with plugins or libraries, upgrades, removal.
+- [x] **A package with plugins and libraries** (2026-11-04, MarkdownPreview 2.8.2 with Markdown, pygments, pymdown-extensions,
+      PyYAML): installed (the libraries to `Lib/python38`), its `markdown_preview` command makes the HTML in a new view,
+      upgraded (`upgrade_package`) and removed (`remove_package`, which also removes the orphaned libraries); the
+      packages reload by themselves each time. `package_control_installs_upgrades_and_removes_a_package_with_plugins`.
+- [x] **Our `Packages` is watched too**: `check_installed_packages` also compares its folders and the date of each one's
+      `package-metadata.json` (Package Control writes it last), so a package it unpacks there (`.no-sublime-package`)
+      reloads the packages when installed, upgraded or removed. The `ignored_packages` change around an install was
+      not enough: it can last less than one 1.5 s check. Other files there (the `User` settings, a plugin edited by
+      hand) are not watched: saving a `.py` reloads its package already.
+- [x] **Popular packages load** (2026-11-04, `package_control_installs_the_listed_packages_at_start`): Package Control
+      installs at start what `installed_packages` lists (`satisfy_packages`), and A File Icon, AdvancedNewFile,
+      BracketHighlighter, ColorHelper, DocBlockr, Emmet, FileDiffs, GitGutter, LSP, MarkdownEditing, Origami,
+      PackageResourceViewer, Pretty JSON, SideBarEnhancements, SublimeLinter, Terminus, Text Pastry and TrailingSpaces
+      load with no errors (with 11 libraries for 3.14). Loading is not using: most of what they show needs phase C.
+      It needed the API enums (`RegionFlags`, `PopupFlags`, `KindId`… of 4132, LSP), our `Default.paste_from_history`
+      (Terminus) and the libraries for our Python (above).
+- [x] **Package Control upgrades itself** (`package_control_upgrades_itself_then_the_other_packages`): `upgrade_all_packages`
+      upgrades it alone (it is in `ignored_packages` meanwhile, so its plugins unload and load again, while its thread
+      goes on), then the other packages the next time.
+- [ ] Not tried yet with the real Package Control: a `.no-sublime-package` package, `revert_package`,
+      `add_channel` / `add_repository`, a removal deferred to the next start (Windows locked files).
+- [x] **`Default` modules**: Sublime's `Default` is not loaded, so `assets/python/Default/` (written to `Lib/python/Default`)
+      has our own modules packages import: `paste_from_history` (`ClipboardHistory`, `g_clipboard_history`). They are
+      only imported, not loaded as plugins: their listeners would make every copy / paste a command for the hooks.
+      Missing: `Default.exec` (`ExecCommand`, `AsyncProcess`, `ProcessListener`: build plugins subclass them), and the
+      `paste_from_history` command and its listener.
+- [x] **Warnings**: `DeprecationWarning` and `SyntaxWarning` (Python 3.12's invalid escapes in old plugins) are not
+      shown in the console, as in Sublime, where plugins are not `__main__`.
 - [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
       `ignored_packages` (and `in_process_packages` in `Package Control.sublime-settings`, `package_disabler.py`), expecting
       the editor to unload / load those packages at once. `check_ignored_packages` (with `check_external_changes`, every
@@ -353,5 +392,9 @@ bindings apply through the `selector` context (above) when they need no other un
 Verification for phase C: `package_control_loads_in_a_scratch_profile` in `crates/frameworks/tests/sublime_packages.rs`
 (`-- --ignored`, needs the network) copies the installed Package Control to a temporary profile and installs a color
 scheme, then disables and enables it with Package Control's commands (the color scheme goes and comes back), and
-opens Preferences > Package Settings > Package Control > Settings. What is left is a package with plugins or libraries,
-its commands, an upgrade and a removal (they run third-party code, so the test does not pick one).
+opens Preferences > Package Settings > Package Control > Settings. `package_control_installs_upgrades_and_removes_a_package_with_plugins`
+(same file, `-- --ignored`, needs the network, runs third-party code) installs MarkdownPreview, runs its command, upgrades
+and removes it; `CODELIBRE_TEST_PACKAGE`, `CODELIBRE_TEST_COMMAND` and `CODELIBRE_TEST_ARGS` try another package.
+`package_control_installs_the_listed_packages_at_start` installs 18 popular packages (or `CODELIBRE_TEST_PACKAGES`,
+comma-separated) and fails on any plugin load error: the way to find what the next package needs.
+`package_control_upgrades_itself_then_the_other_packages` checks `upgrade_all_packages`.
