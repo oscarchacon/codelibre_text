@@ -8,7 +8,7 @@ scratch views, `add_on_change`, output panels, statuses and regions drawn, `view
 package with plugins and libraries installed, upgraded and removed by Package Control; 18 popular packages load,
 libraries for the Python we run, Package Control upgrades itself; 2026-11-05 Package Control 3's dependencies, a
 removal deferred to the next start, `Default.exec`, `view.style` / `style_for_scope`, popups, phantoms, `on_hover`,
-auto-complete and plugins' completions). The rest of B and phase C below are the pending work, in order.
+auto-complete and plugins' completions, groups and layouts). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -444,7 +444,20 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`on_hover(view, point, hover_zone)`**: the view reports where the mouse rested for 0.5 s (text, gutter or the
       margin after a line, not over a popup), once per place, only when a listener defines it (a query, so
       `ViewEventListener`s hear it too). Missing: annotations (`add_regions`' `annotations`), `on_hover` over phantoms.
-- [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
+- [x] **Groups and layouts** (`use_cases/src/groups.rs`, `entities/src/layout.rs`, drawn by `app.rs::show_group`): each
+      document is in a group (`Document::group`), the tabs of a group are its documents in window order, and a group shows
+      the one used last. `set_layout` (View > Layout, Alt+Shift+1…5/8/9), `focus_group` (Ctrl+1…9),
+      `move_to_group` (Ctrl+Shift+1…9), `focus_neighboring_group` / `move_to_neighboring_group` (Ctrl+K Ctrl+arrows), View >
+      Focus Group / Move File To Group. Fewer groups move their files to the last one; files open in the focused group;
+      the focused group may be empty (no active view, as in Sublime); `next_view` and `select_by_index` stay in the group.
+      Clicking a group's text, tab strip or empty area focuses it. The session keeps the layout and each file's group.
+      API: `num_groups`, `active_group`, `focus_group`, `layout` / `get_layout` / `set_layout`, `views_in_group`,
+      `active_view_in_group`, `get_view_index` / `set_view_index` (group and index), `sheets_in_group`,
+      `active_sheet_in_group`, `move_sheets_to_group`, `Sheet.group()`, `open_file(group=)`.
+- [ ] Groups, still missing: dragging the borders between groups, dragging tabs between them, `new_pane` / `close_pane`
+      and `set_max_columns` (Python in Sublime's `Default`), the side bar's open files by group, `transient` views.
+- [ ] **Several windows and clones** (`new_window`, `clone_file`, `view.clones()`): egui's viewports for windows; a clone
+      needs the view (selection, scroll) apart from the `Document`.
 - [ ] `sublime_plugin.reload_plugin`. (Saving a plugin reloads only its package: see reloading above.)
 
 `crates/frameworks/tests/sublime_packages.rs` (`-- --ignored`) loads the packages of the Sublime Text installed here:

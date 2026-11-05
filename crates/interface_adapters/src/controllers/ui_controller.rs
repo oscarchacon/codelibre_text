@@ -27,6 +27,8 @@ pub enum UiEvent {
     ActivateTab(usize),
     CloseTab(usize),
     NewTab,
+    /// A group of the layout was clicked (its text, its tab strip or its empty area).
+    FocusGroup(usize),
 
     ToggleFolder(PathBuf),
     OpenFile(PathBuf),
@@ -110,6 +112,12 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::NewTab => editor.new_file(),
+        UiEvent::FocusGroup(group) => {
+            if group != editor.active_group() {
+                editor.focus_group(group);
+            }
+            view.focus_editor = true;
+        }
 
         UiEvent::ToggleFolder(folder) => {
             if !view.expanded_folders.remove(&folder) {

@@ -165,8 +165,8 @@ fn closed_views_and_unknown_functions() {
     assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
     assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_set_layout", json!([1, {}])),
-        Err("sublime_api.window_set_layout is not implemented yet".into())
+        call(&world, &mut editor, "window_new_html_sheet", json!([1, {}])),
+        Err("sublime_api.window_new_html_sheet is not implemented yet".into())
     );
     assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
     assert_eq!(
@@ -191,10 +191,10 @@ fn the_window_and_its_views() {
     call(&world, &mut editor, "window_focus_view", json!([opened])).unwrap();
     assert_eq!(json!(view_id(&editor)), opened);
     // Package Control moves its messages to the first tab; the active tab stays active.
-    call(&world, &mut editor, "window_set_view_index", json!([new, 0])).unwrap();
+    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 0])).unwrap();
     assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([new, opened])));
     assert_eq!(json!(view_id(&editor)), opened);
-    call(&world, &mut editor, "window_set_view_index", json!([new, 99])).unwrap();
+    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 99])).unwrap();
     assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([opened, new])));
     assert_eq!(call(&world, &mut editor, "window_folders", json!([])), Ok(json!(["/p"])));
     assert_ne!(json!(first), new);

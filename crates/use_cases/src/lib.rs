@@ -10,6 +10,7 @@
 //! | Module | Use cases |
 //! |---|---|
 //! | [`documents`] | new, open, switch, close, reopen, revert, syntax, line endings |
+//! | [`groups`] | the window's layout, focusing a group, moving views between groups |
 //! | [`saving`] | save, save as, save all |
 //! | [`editing`] | text commands, go to line, paste |
 //! | [`completions`] | auto-complete: the list, its sources (plugins, completions files, snippets, words), Tab completion |
@@ -36,6 +37,7 @@ pub mod editing;
 pub mod editor;
 pub mod find_replace;
 pub mod gateways;
+pub mod groups;
 pub mod help;
 pub mod localization;
 pub mod output_panels;

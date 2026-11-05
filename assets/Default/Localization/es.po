@@ -1073,3 +1073,54 @@ msgstr "Ayuda: Abrir registro de errores"
 
 msgid "No errors have been logged"
 msgstr "No se ha registrado ningún error"
+
+msgid "Layout"
+msgstr "Diseño"
+
+msgid "Single"
+msgstr "Uno solo"
+
+msgid "Columns: 2"
+msgstr "Columnas: 2"
+
+msgid "Columns: 3"
+msgstr "Columnas: 3"
+
+msgid "Columns: 4"
+msgstr "Columnas: 4"
+
+msgid "Rows: 2"
+msgstr "Filas: 2"
+
+msgid "Rows: 3"
+msgstr "Filas: 3"
+
+msgid "Grid: 4"
+msgstr "Cuadrícula: 4"
+
+msgid "Focus Group"
+msgstr "Enfocar grupo"
+
+msgid "Next"
+msgstr "Siguiente"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Group 1"
+msgstr "Grupo 1"
+
+msgid "Group 2"
+msgstr "Grupo 2"
+
+msgid "Group 3"
+msgstr "Grupo 3"
+
+msgid "Group 4"
+msgstr "Grupo 4"
+
+msgid "Move File To Group"
+msgstr "Mover archivo al grupo"
+
+msgid "set_layout needs cols, rows and cells"
+msgstr "set_layout necesita cols, rows y cells"

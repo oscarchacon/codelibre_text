@@ -1073,3 +1073,54 @@ msgstr "Hilfe: Fehlerprotokoll öffnen"
 
 msgid "No errors have been logged"
 msgstr "Es wurden keine Fehler protokolliert"
+
+msgid "Layout"
+msgstr "Layout"
+
+msgid "Single"
+msgstr "Einzeln"
+
+msgid "Columns: 2"
+msgstr "Spalten: 2"
+
+msgid "Columns: 3"
+msgstr "Spalten: 3"
+
+msgid "Columns: 4"
+msgstr "Spalten: 4"
+
+msgid "Rows: 2"
+msgstr "Zeilen: 2"
+
+msgid "Rows: 3"
+msgstr "Zeilen: 3"
+
+msgid "Grid: 4"
+msgstr "Raster: 4"
+
+msgid "Focus Group"
+msgstr "Gruppe fokussieren"
+
+msgid "Next"
+msgstr "Nächste"
+
+msgid "Previous"
+msgstr "Vorherige"
+
+msgid "Group 1"
+msgstr "Gruppe 1"
+
+msgid "Group 2"
+msgstr "Gruppe 2"
+
+msgid "Group 3"
+msgstr "Gruppe 3"
+
+msgid "Group 4"
+msgstr "Gruppe 4"
+
+msgid "Move File To Group"
+msgstr "Datei in Gruppe verschieben"
+
+msgid "set_layout needs cols, rows and cells"
+msgstr "set_layout braucht cols, rows und cells"

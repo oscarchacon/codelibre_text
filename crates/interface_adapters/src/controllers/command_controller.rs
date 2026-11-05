@@ -6,6 +6,7 @@
 
 use entities::command::Command;
 use entities::document::LineEnding;
+use entities::layout::Layout;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
 use use_cases::completions::AutoCompleteOptions;
@@ -139,7 +140,7 @@ const WINDOW_COMMANDS: &[&str] = &[
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
     "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
     "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
-    "prev_result",
+    "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
@@ -375,7 +376,35 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "prev_view" => editor.cycle_documents(false),
         "next_view_in_stack" => editor.cycle_recent_documents(true),
         "prev_view_in_stack" => editor.cycle_recent_documents(false),
-        "select_by_index" => editor.activate(command.usize_arg("index", 0)),
+        "select_by_index" => editor.activate_in_group(command.usize_arg("index", 0)),
+
+        // ----- groups --------------------------------------------------------------------------
+        "set_layout" => match Layout::from_json(&command.args) {
+            Some(layout) => {
+                editor.set_layout(layout);
+                view.focus_editor = true;
+            }
+            None => {
+                let message = editor.tr("set_layout needs cols, rows and cells").to_string();
+                editor.notify(message);
+            }
+        },
+        "focus_group" => {
+            editor.focus_group(command.usize_arg("group", 0));
+            view.focus_editor = true;
+        }
+        "move_to_group" => {
+            editor.move_active_to_group(command.usize_arg("group", 0));
+            view.focus_editor = true;
+        }
+        "focus_neighboring_group" => {
+            editor.focus_neighboring_group(command.bool_arg("forward", true));
+            view.focus_editor = true;
+        }
+        "move_to_neighboring_group" => {
+            editor.move_active_to_neighboring_group(command.bool_arg("forward", true));
+            view.focus_editor = true;
+        }
         "set_file_type" => editor.set_syntax(command.str_arg("syntax")),
         "set_line_ending" => {
             let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };

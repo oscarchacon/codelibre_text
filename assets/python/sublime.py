@@ -3,7 +3,7 @@
 Written from the public API reference (https://www.sublimetext.com/docs/api_reference.html).
 Regions, selections, views, the window, settings, commands and timers.
 What is not implemented yet is listed in ``docs/plugins.md``; most of it has a stand-in that does
-nothing (popups, phantoms, folding, groups, symbols), so plugins that use it still load.
+nothing (folding, symbols, several windows), so plugins that use it still load.
 """
 
 import collections
@@ -1472,7 +1472,7 @@ class Sheet:
         return self.view().file_name()
 
     def group(self):
-        return 0
+        return self.view().window().get_view_index(self.view())[0]
 
     def is_semi_transient(self):
         return False
@@ -1689,20 +1689,25 @@ class Window:
         return [View(view_id) for view_id in sublime_api.window_views()]
 
     def num_groups(self):
-        return 1
+        return sublime_api.window_num_groups()
 
     def active_group(self):
-        return 0
+        return sublime_api.window_active_group()
+
+    def focus_group(self, group):
+        sublime_api.window_focus_group(group)
 
     def active_view_in_group(self, group):
-        return self.active_view()
+        view_id = sublime_api.window_active_view_in_group(group)
+        return View(view_id) if view_id else None
 
     def views_in_group(self, group):
-        return self.views()
+        return [View(view_id) for view_id in sublime_api.window_views_in_group(group)]
 
     def get_view_index(self, view):
-        ids = sublime_api.window_views()
-        return (0, ids.index(view.id())) if view.id() in ids else (-1, -1)
+        if view is None:
+            return (-1, -1)
+        return tuple(sublime_api.window_get_view_index(view.id()))
 
     def focus_view(self, view):
         sublime_api.window_focus_view(view.id())
@@ -1719,6 +1724,8 @@ class Window:
             fname, row, col = match.group(1), match.group(2), match.group(3)
         else:
             row = col = None
+        if 0 <= group < self.num_groups():
+            self.focus_group(group)
         view_id = sublime_api.window_open_file(fname)
         if not view_id:
             return None
@@ -1806,38 +1813,37 @@ class Window:
     def set_project_data(self, data):
         pass
 
-    # One group, no sidebar of its own, no symbol index: stand-ins so plugins that ask still run.
     def layout(self):
-        return {"cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]]}
+        return sublime_api.window_get_layout()
 
     def get_layout(self):
         return self.layout()
 
     def set_layout(self, layout):
-        pass
-
-    def focus_group(self, group):
-        pass
+        """``{"cols": [...], "rows": [...], "cells": [[x1, y1, x2, y2], ...]}``, one cell per group."""
+        sublime_api.window_set_layout(layout)
 
     def active_sheet(self):
         view = self.active_view()
         return view.sheet() if view else None
 
     def active_sheet_in_group(self, group):
-        return self.active_sheet()
+        view = self.active_view_in_group(group)
+        return view.sheet() if view else None
 
     def sheets(self):
         return [view.sheet() for view in self.views()]
 
     def sheets_in_group(self, group):
-        return self.sheets()
+        return [view.sheet() for view in self.views_in_group(group)]
 
     def selected_sheets(self):
         sheet = self.active_sheet()
         return [sheet] if sheet else []
 
     def selected_sheets_in_group(self, group):
-        return self.selected_sheets()
+        sheet = self.active_sheet_in_group(group)
+        return [sheet] if sheet else []
 
     def transient_sheet_in_group(self, group):
         return None
@@ -1857,16 +1863,19 @@ class Window:
         return self.get_view_index(sheet.view()) if sheet and sheet.view() else (-1, -1)
 
     def set_view_index(self, view, group, index):
-        # One group: only the position among the tabs.
-        if view is not None:
-            sublime_api.window_set_view_index(view.id(), index)
+        if view is not None and 0 <= group < self.num_groups():
+            sublime_api.window_set_view_index(view.id(), group, index if index >= 0 else 1 << 31)
 
     def set_sheet_index(self, sheet, group, index):
         if sheet and sheet.view():
             self.set_view_index(sheet.view(), group, index)
 
     def move_sheets_to_group(self, sheets, group, insertion_idx=-1, select=True):
-        pass
+        views = [sheet.view() for sheet in sheets if sheet and sheet.view()]
+        for offset, view in enumerate(views):
+            self.set_view_index(view, group, insertion_idx + offset if insertion_idx >= 0 else -1)
+        if select and views:
+            self.focus_view(views[0])
 
     def new_html_sheet(self, name, contents, flags=0, group=-1):
         return None

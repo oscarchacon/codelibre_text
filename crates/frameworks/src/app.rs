@@ -8,6 +8,7 @@ use interface_adapters::controllers::keyboard_controller::{self, KeyHandling};
 use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::presenters;
+use interface_adapters::view_models::GroupViewModel;
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
 use use_cases::Editor;
 
@@ -273,35 +274,28 @@ impl App {
                 .show(ctx, |ui| side_bar::show(ui, chrome, &translations, &side, &mut events));
         }
 
-        let tab_list = presenters::tabs::present(&self.editor);
-        let editor_model = presenters::editor::present(&mut self.editor, &mut self.view);
+        let groups = presenters::groups::present(&mut self.editor, &mut self.view);
         let hints = presenters::editor::present_hints(&self.editor);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(chrome.editor_bg))
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(chrome.panel_bg)
-                    .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 0 })
-                    .show(ui, |ui| tabs::show(ui, chrome, &tab_list, &mut events));
-
-                let Some(model) = editor_model else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(RichText::new(hints.join("\n")).color(chrome.fg_dim).size(14.0));
-                    });
-                    return;
-                };
-                let read_only_copy;
-                let text = match self.editor.text_for_editing(model.document) {
-                    Some(text) => EditorText::Editable(text),
-                    None => {
-                        read_only_copy = self.editor.active_document().map(|d| d.text.clone()).unwrap_or_default();
-                        EditorText::ReadOnly(&read_only_copy)
+                let area = ui.available_rect_before_wrap();
+                let at = |x: f32, y: f32| egui::pos2(area.left() + x * area.width(), area.top() + y * area.height());
+                for group in &groups {
+                    let [left, top, right, bottom] = group.rect;
+                    let rect = egui::Rect::from_min_max(at(left, top), at(right, bottom));
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(("group", group.group)));
+                    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    show_group(&mut child, &mut self.editor, &self.engine, &mut self.selection_sync, chrome, group, &hints, &mut events);
+                    // A line between groups.
+                    let stroke = egui::Stroke::new(1.0_f32, chrome.border);
+                    if right < 1.0 {
+                        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], stroke);
                     }
-                };
-                egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    editor_view::show(ui, &model, text, &self.engine, &mut self.selection_sync, &mut events);
-                });
+                    if bottom < 1.0 {
+                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+                    }
+                }
             });
 
         if let Some(panel) = presenters::quick_panel::present(&self.editor, &mut self.view) {
@@ -337,7 +331,17 @@ impl eframe::App for App {
         self.handle_close_request(ctx);
 
         let text_area = self.editor.active_document().map(|d| editor_view::widget_id(d.id));
-        self.view.text_has_focus = text_area.is_some() && ctx.memory(|m| m.focused()) == text_area;
+        let focused = ctx.memory(|m| m.focused());
+        self.view.text_has_focus = text_area.is_some() && focused == text_area;
+        // The focus went to another group (a key, a plugin): its text takes the keyboard from the
+        // text of the group that had it.
+        if focused.is_some() && !self.view.text_has_focus {
+            let shown: Vec<usize> = (0..self.editor.group_count()).filter_map(|g| self.editor.active_index_in_group(g)).collect();
+            let documents = &self.editor.state().documents;
+            if shown.into_iter().any(|i| Some(editor_view::widget_id(documents[i].id)) == focused) {
+                self.view.focus_editor = true;
+            }
+        }
         self.dispatch_keys(ctx);
         #[cfg(target_os = "macos")]
         self.handle_native_menu(ctx);
@@ -375,6 +379,49 @@ impl eframe::App for App {
         }
         ctx.request_repaint_after(Duration::from_secs(2));
     }
+}
+
+/// One group of the layout: its tab bar and its document (or, when it has none, the hints).
+#[allow(clippy::too_many_arguments)]
+fn show_group(
+    ui: &mut egui::Ui,
+    editor: &mut Editor,
+    engine: &SharedSyntaxEngine,
+    selection_sync: &mut SelectionSync,
+    chrome: &Chrome,
+    group: &GroupViewModel,
+    hints: &[String],
+    events: &mut Vec<UiEvent>,
+) {
+    egui::Frame::new()
+        .fill(chrome.panel_bg)
+        .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 0 })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            tabs::show(ui, chrome, group.group, group.active, &group.tabs, events);
+        });
+
+    let Some(model) = &group.editor else {
+        let rest = ui.available_rect_before_wrap();
+        if ui.interact(rest, ui.id().with("empty_group"), egui::Sense::CLICK).clicked() {
+            events.push(UiEvent::FocusGroup(group.group));
+        }
+        ui.centered_and_justified(|ui| {
+            ui.label(RichText::new(hints.join("\n")).color(chrome.fg_dim).size(14.0));
+        });
+        return;
+    };
+    let read_only_copy;
+    let text = if editor.text_for_editing(model.document).is_some() {
+        EditorText::Editable(editor.text_for_editing(model.document).expect("checked above"))
+    } else {
+        read_only_copy = editor.state().documents.iter().find(|d| d.id == model.document).map(|d| d.text.clone()).unwrap_or_default();
+        EditorText::ReadOnly(&read_only_copy)
+    };
+    egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
+        ui.set_min_size(ui.available_size());
+        editor_view::show(ui, model, text, engine, selection_sync, events);
+    });
 }
 
 /// macOS writes shortcuts with symbols (⌃⌥⇧⌘⎋⌫…) that egui's fonts partly lack or draw thin: the

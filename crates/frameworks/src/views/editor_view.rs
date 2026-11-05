@@ -62,8 +62,9 @@ pub fn show(
         .map(|r| engine.scope_color(&model.color_scheme, &r.scope).unwrap_or(colors.foreground))
         .collect();
 
-    // Like Sublime, the text has the keyboard focus unless a panel, overlay or dialog took it.
-    if model.take_focus || ctx.memory(|m| m.focused().is_none()) {
+    // Like Sublime, the text of the focused group has the keyboard focus unless a panel, overlay
+    // or dialog took it.
+    if model.active && (model.take_focus || ctx.memory(|m| m.focused().is_none())) {
         ctx.memory_mut(|m| m.request_focus(id));
     }
 
@@ -170,6 +171,10 @@ pub fn show(
                     .layouter(&mut layouter)
                     .show(ui);
 
+                // A click in another group's text gives that group the focus.
+                if !model.active && (output.response.clicked() || output.response.gained_focus()) {
+                    events.push(UiEvent::FocusGroup(model.group));
+                }
                 let text = output.galley.text();
                 let selection = output
                     .cursor_range

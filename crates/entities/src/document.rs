@@ -77,6 +77,8 @@ pub struct Document {
     pub syntax: String,
     /// When the file was last read or written; used to notice changes made by other programs.
     pub modified_at: Option<SystemTime>,
+    /// The group of the window (a pane of the layout) whose tabs it is in.
+    pub group: usize,
     /// The primary selection: the one the text widget shows and edits.
     selection: Selection,
     /// More selections added by `find_under_expand` (Ctrl+D), `select_lines`, `find_all_under`…
@@ -168,6 +170,7 @@ impl Document {
             encoding: Encoding::Utf8,
             syntax: "Plain Text".into(),
             modified_at: None,
+            group: 0,
             selection: Selection::caret(0),
             extra_selections: Vec::new(),
             selection_revision: 1,

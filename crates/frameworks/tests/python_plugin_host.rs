@@ -1498,3 +1498,36 @@ fn reloading_loads_only_the_packages_that_changed() {
     assert_eq!(log, "unloaded Added\n");
     host.stop();
 }
+
+#[test]
+fn plugins_split_the_window_and_move_views_between_groups() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class SplitCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        w = self.window
+        first = w.active_view()
+        second = w.new_file()
+        w.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
+        w.set_view_index(second, 1, 0)
+        print("groups", w.num_groups(), w.active_group(), w.get_view_index(second), second.sheet().group())
+        print("in group 0", [v.id() for v in w.views_in_group(0)] == [first.id()])
+        w.focus_group(0)
+        print("active", w.active_view_in_group(0).id() == first.id(), w.active_group())
+        w.move_sheets_to_group([first.sheet()], 1)
+        print("empty", w.views_in_group(0), w.active_view_in_group(0), w.get_layout()["cells"])
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    command_controller::run(&mut editor, &mut ViewState::default(), &Command::new("split"));
+    let console = &editor.state().console;
+    assert!(console.contains("groups 2 1 (1, 0) 1"), "{console}");
+    assert!(console.contains("in group 0 True"), "{console}");
+    assert!(console.contains("active True 0"), "{console}");
+    assert!(console.contains("empty [] None [[0, 0, 1, 1], [1, 0, 2, 1]]"), "{console}");
+    assert_eq!(editor.active_group(), 1, "the moved view took the focus along");
+}

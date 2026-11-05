@@ -35,7 +35,7 @@ cannot be told apart by the string scan and are listed under native.
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |
 | Navigation history | `jump_back`, `jump_forward`, `_jump`, `add_jump_record` | native / py |
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
-| Split layouts | `set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`, `new_pane`, `close_pane`, `clone_file` | native / py |
+| Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |

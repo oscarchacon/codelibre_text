@@ -277,6 +277,70 @@ msgid "Enter Full Screen"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Layout"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Single"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Rows: 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Rows: 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Grid: 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Next"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 1"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Move File To Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Font"
 msgstr ""
 
@@ -894,6 +958,10 @@ msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
 msgid "Overlay not supported: {name}"
+msgstr ""
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "set_layout needs cols, rows and cells"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs

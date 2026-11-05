@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use entities::document::Document;
+use entities::layout::Layout;
 use entities::selection::Selection;
 
 use crate::editor::{Editor, PendingClose};
@@ -15,6 +16,9 @@ pub struct Session {
     pub active: usize,
     /// UI layout flags owned by the outer circles (e.g. `side_bar`), stored as-is.
     pub layout: Vec<(String, bool)>,
+    /// The groups of the window (`None`: one group).
+    pub groups: Option<Layout>,
+    pub active_group: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +28,7 @@ pub struct SessionDocument {
     pub unsaved_text: Option<String>,
     pub syntax: String,
     pub selection: Selection,
+    pub group: usize,
 }
 
 impl Editor {
@@ -55,10 +60,13 @@ impl Editor {
                     unsaved_text: d.is_dirty().then(|| d.text.clone()),
                     syntax: d.syntax.clone(),
                     selection: d.selection(),
+                    group: d.group,
                 })
                 .collect(),
             active: self.state.active,
             layout,
+            groups: (self.group_count() > 1).then(|| self.state.layout.clone()),
+            active_group: self.state.active_group,
         };
         if let Err(e) = self.gateways.sessions.save(&session) {
             self.notify(self.tr_args("Could not save the session: {error}", &[("error", &e)]));
@@ -78,6 +86,9 @@ impl Editor {
             if self.gateways.file_system.is_dir(&folder) {
                 self.add_folder(folder);
             }
+        }
+        if let Some(layout) = session.groups {
+            self.set_layout(layout);
         }
         let mut loaded = Vec::new();
         for saved in session.documents {
@@ -101,10 +112,13 @@ impl Editor {
             }
             doc.syntax = self.gateways.syntaxes.resolve(&saved.syntax);
             doc.set_selection(saved.selection);
+            doc.group = saved.group.min(self.group_count() - 1);
             self.state.documents.push(doc);
         }
-        if !self.state.documents.is_empty() {
-            self.activate(session.active.min(self.state.documents.len() - 1));
+        if session.active < self.state.documents.len() {
+            self.activate(session.active);
+        } else {
+            self.focus_group(session.active_group);
         }
         loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
     }

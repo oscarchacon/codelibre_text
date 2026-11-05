@@ -12,6 +12,7 @@ pub mod completion;
 pub mod document;
 pub mod find;
 pub mod keymap;
+pub mod layout;
 pub mod localization;
 pub mod menu;
 pub mod minihtml;

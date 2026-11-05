@@ -37,13 +37,21 @@ pub fn present_hints(editor: &Editor) -> Vec<String> {
 
 /// The active document as the text area should show it.
 pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewModel> {
-    let find_matches = if view.find_panel.visible { editor.find_matches() } else { Vec::new() };
-    let settings = editor.view_settings();
+    let index = editor.state().active;
+    present_document(editor, view, index)
+}
+
+/// The document at `index` as the text area of its group should show it.
+pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize) -> Option<EditorViewModel> {
+    let active = index == editor.state().active;
+    let find_matches = if view.find_panel.visible && active { editor.find_matches() } else { Vec::new() };
     let color_scheme = editor.color_scheme_name();
-    let doc = editor.active_document()?;
+    let doc = editor.state().documents.get(index)?;
+    let settings = editor.settings_of(doc.id);
 
     // The text takes the keyboard focus unless a panel or dialog has it.
-    let take_focus = std::mem::take(&mut view.focus_editor)
+    let take_focus = active
+        && std::mem::take(&mut view.focus_editor)
         && view.quick_panel.is_none()
         && !view.find_panel.focus_requested
         && editor.state().pending_close.is_none();
@@ -65,6 +73,8 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
     phantoms.sort_by_key(|p| (p.point, p.id));
     Some(EditorViewModel {
         document: doc.id,
+        group: doc.group,
+        active,
         read_only: doc.read_only,
         syntax: doc.syntax.clone(),
         color_scheme,

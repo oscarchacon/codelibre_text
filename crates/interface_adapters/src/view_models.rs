@@ -10,6 +10,8 @@ use entities::minihtml;
 use entities::selection::Selection;
 
 pub struct TabViewModel {
+    /// The document's index in the window (for `UiEvent::ActivateTab` / `CloseTab`).
+    pub index: usize,
     pub title: String,
     pub tooltip: String,
     pub dirty: bool,
@@ -148,8 +150,23 @@ pub struct FindPanelViewModel {
     pub focus_requested: bool,
 }
 
+/// One pane of the window's layout: its tabs and the document it shows.
+pub struct GroupViewModel {
+    pub group: usize,
+    /// Where it is, as fractions of the editor area: `[left, top, right, bottom]`.
+    pub rect: [f32; 4],
+    /// It has the focus.
+    pub active: bool,
+    pub tabs: Vec<TabViewModel>,
+    pub editor: Option<EditorViewModel>,
+}
+
 pub struct EditorViewModel {
     pub document: DocumentId,
+    pub group: usize,
+    /// The document of the focused group: it takes the keyboard focus. Clicking another group's
+    /// text gives that group the focus.
+    pub active: bool,
     pub read_only: bool,
     pub syntax: String,
     pub color_scheme: String,

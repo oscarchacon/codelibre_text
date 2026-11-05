@@ -99,6 +99,7 @@ fn session_document(path: Option<&str>, unsaved: Option<&str>, selection: Select
         unsaved_text: unsaved.map(String::from),
         syntax: "Python".into(),
         selection,
+        group: 0,
     }
 }
 
@@ -114,6 +115,7 @@ fn startup_restores_the_previous_session() {
         ],
         active: 3,
         layout: layout(),
+        ..Default::default()
     });
     let editor = world.editor();
     let state = editor.state();
@@ -160,12 +162,14 @@ fn listeners_hear_on_load_for_the_files_of_the_session() {
         unsaved_text: unsaved.map(String::from),
         syntax: "Plain Text".into(),
         selection: Selection::caret(0),
+        group: 0,
     };
     let session = Session {
         folders: vec![],
         documents: vec![document(Some("/p/a.txt".into()), None), document(None, Some("x"))],
         active: 0,
         layout: vec![],
+        ..Default::default()
     };
     let world = World::new().with_file("/p/a.txt", "a").with_session(session).with_plugins(&[], &["on_load"]);
     world.plugins.then([PluginMessage::Done { error: None }]);

@@ -9,6 +9,7 @@ use entities::build::expand_variables;
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
+use entities::layout::Layout;
 use entities::selection::Selection;
 use entities::selector::score_selector;
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
@@ -201,8 +202,29 @@ impl Editor {
                 Ok(Value::Null)
             }
             "window_set_view_index" => {
-                self.move_document(a.u64(0)?, a.usize(1)?);
+                self.set_view_index(a.u64(0)?, a.usize(1)?, a.usize(2)?);
                 Ok(Value::Null)
+            }
+            "window_get_view_index" => Ok(json!(self.view_index(a.u64(0)?).map_or((-1, -1), |(g, i)| (g as i64, i as i64)))),
+            "window_num_groups" => Ok(json!(self.group_count())),
+            "window_active_group" => Ok(json!(self.active_group())),
+            "window_focus_group" => {
+                self.focus_group(a.usize(0)?);
+                Ok(Value::Null)
+            }
+            "window_get_layout" => Ok(self.layout().to_json()),
+            "window_set_layout" => {
+                let layout = Layout::from_json(a.value(0)).ok_or("not a layout: it needs cols, rows and cells")?;
+                self.set_layout(layout);
+                Ok(Value::Null)
+            }
+            "window_views_in_group" => {
+                let ids: Vec<_> = self.group_indexes(a.usize(0)?).into_iter().map(|i| self.state.documents[i].id).collect();
+                Ok(json!(ids))
+            }
+            "window_active_view_in_group" => {
+                let index = self.active_index_in_group(a.usize(0)?);
+                Ok(index.map_or(Value::Null, |i| json!(self.state.documents[i].id)))
             }
             "window_show_quick_panel" => self.plugin_show_quick_panel(args, run_command),
             "window_show_input_panel" => self.plugin_show_input_panel(args, run_command),

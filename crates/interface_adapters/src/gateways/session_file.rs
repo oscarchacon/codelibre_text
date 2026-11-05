@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use entities::layout::Layout;
 use entities::selection::Selection;
 use serde::{Deserialize, Serialize};
 use use_cases::gateways::SessionGateway;
@@ -42,6 +43,11 @@ struct SessionFile {
     active: usize,
     #[serde(default)]
     layout: Vec<(String, bool)>,
+    /// Sublime's `set_layout` value, when the window has several groups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    groups: Option<serde_json::Value>,
+    #[serde(default)]
+    active_group: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,6 +56,8 @@ struct SessionFileDocument {
     unsaved_text: Option<String>,
     syntax: String,
     selection: (usize, usize),
+    #[serde(default)]
+    group: usize,
 }
 
 impl From<&Session> for SessionFile {
@@ -64,10 +72,13 @@ impl From<&Session> for SessionFile {
                     unsaved_text: d.unsaved_text.clone(),
                     syntax: d.syntax.clone(),
                     selection: (d.selection.anchor, d.selection.head),
+                    group: d.group,
                 })
                 .collect(),
             active: session.active,
             layout: session.layout.clone(),
+            groups: session.groups.as_ref().map(Layout::to_json),
+            active_group: session.active_group,
         }
     }
 }
@@ -84,10 +95,13 @@ impl From<SessionFile> for Session {
                     unsaved_text: d.unsaved_text,
                     syntax: d.syntax,
                     selection: Selection::new(d.selection.0, d.selection.1),
+                    group: d.group,
                 })
                 .collect(),
             active: file.active,
             layout: file.layout,
+            groups: file.groups.as_ref().and_then(Layout::from_json),
+            active_group: file.active_group,
         }
     }
 }

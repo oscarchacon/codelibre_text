@@ -7,6 +7,7 @@ use std::time::Instant;
 use entities::document::{Document, DocumentId, LineEnding};
 use entities::find::FindOptions;
 use entities::keymap::Keymap;
+use entities::layout::Layout;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
@@ -69,8 +70,13 @@ pub enum CloseChoice {
 /// the use case methods.
 pub struct EditorState {
     pub documents: Vec<Document>,
-    /// Index of the active document in `documents`.
+    /// Index of the active document in `documents` (out of range when the focused group is
+    /// empty). It is in `active_group`.
     pub active: usize,
+    /// How the window is split into groups (see [`crate::groups`]).
+    pub layout: Layout,
+    /// The group with the focus.
+    pub active_group: usize,
     pub folders: Vec<PathBuf>,
     pub settings: SettingsLayers,
     pub keymap: Keymap,
@@ -130,6 +136,8 @@ impl Editor {
             state: EditorState {
                 documents: Vec::new(),
                 active: 0,
+                layout: Layout::default(),
+                active_group: 0,
                 folders: Vec::new(),
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
@@ -240,7 +248,7 @@ impl Editor {
 
     /// Settings of one document (or output panel): its syntax-specific settings plus what plugins
     /// set on its view.
-    pub(crate) fn settings_of(&self, id: DocumentId) -> Settings {
+    pub fn settings_of(&self, id: DocumentId) -> Settings {
         let Some(doc) = self.any_document(id) else {
             return self.global_settings();
         };
