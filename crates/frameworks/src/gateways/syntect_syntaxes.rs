@@ -45,4 +45,12 @@ impl SyntaxGateway for SyntectSyntaxes {
     fn forget(&self, document: DocumentId) {
         self.0.borrow_mut().forget(document);
     }
+
+    fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        self.0.borrow().scheme_style(scheme)
+    }
+
+    fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, serde_json::Value> {
+        self.0.borrow().scope_style(scheme, scope)
+    }
 }

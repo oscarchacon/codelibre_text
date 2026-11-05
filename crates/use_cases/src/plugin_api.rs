@@ -243,6 +243,62 @@ impl Editor {
             "window_panels" => Ok(json!(self.output_panel_names())),
             "score_selector" => Ok(json!(score_selector(a.str(0)?, a.str(1)?))),
             "view_scope_name" => Ok(json!(self.scope_name(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?)),
+            "view_show_popup" => {
+                let location = a.value(3).as_i64().unwrap_or(-1);
+                let size = |i: usize| a.value(i).as_f64().unwrap_or(0.0) as f32;
+                let callback = a.value(6).as_u64();
+                self.show_plugin_popup(a.u64(0)?, a.str(1)?, a.u64(2).unwrap_or(0), location, size(4), size(5), callback)?;
+                Ok(Value::Null)
+            }
+            "view_update_popup" => {
+                self.update_plugin_popup(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
+            "view_is_auto_complete_visible" => {
+                Ok(json!(self.auto_complete().is_some_and(|list| list.view == a.u64(0).unwrap_or(0))))
+            }
+            "view_extract_completions" => {
+                let point = a.value(2).as_i64().and_then(|p| usize::try_from(p).ok());
+                Ok(json!(self.extract_completions(a.u64(0)?, a.str(1)?, point)))
+            }
+            "completion_list_set" => {
+                self.fill_completion_list(a.u64(0)?, a.value(1), a.u64(2).unwrap_or(0));
+                Ok(Value::Null)
+            }
+            "view_is_popup_visible" =>Ok(json!(self.plugin_popup_visible(a.u64(0)?))),
+            "view_hide_popup" => {
+                if self.plugin_popup_visible(a.u64(0)?) {
+                    self.hide_plugin_popup();
+                }
+                Ok(Value::Null)
+            }
+            "view_add_phantom" => {
+                let id = self.add_plugin_phantom(a.u64(0)?, a.str(1)?, (a.usize(2)?, a.usize(3)?), a.str(4)?, a.u64(5).unwrap_or(1), a.value(6).as_u64())?;
+                Ok(json!(id))
+            }
+            "view_erase_phantoms" => {
+                self.erase_plugin_phantoms(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
+            "view_erase_phantom_by_id" => {
+                self.erase_plugin_phantom(a.u64(0)?, a.u64(1)?);
+                Ok(Value::Null)
+            }
+            "view_query_phantom" => Ok(self.query_plugin_phantom(a.u64(0)?, a.u64(1)?)),
+            "view_query_phantoms" => {
+                let view = a.u64(0)?;
+                let ids: Vec<u64> = a.value(1).as_array().map(|ids| ids.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                let found = ids.iter().filter_map(|&id| self.query_plugin_phantom(view, id).as_array().and_then(|r| r.first().cloned()));
+                Ok(json!(found.collect::<Vec<_>>()))
+            }
+            "view_style" => Ok(Value::Object(self.gateways.syntaxes.scheme_style(&self.color_scheme_name()))),
+            "view_style_for_scope" => {
+                let mut style = self.gateways.syntaxes.scope_style(&self.color_scheme_name(), a.str(1)?);
+                for (key, value) in [("source_line", json!(0)), ("source_column", json!(0)), ("source_file", json!(""))] {
+                    style.entry(key).or_insert(value);
+                }
+                Ok(Value::Object(style))
+            }
             "view_extract_scope" => {
                 let (start, end) = self.extract_scope(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?;
                 Ok(json!([start, end]))

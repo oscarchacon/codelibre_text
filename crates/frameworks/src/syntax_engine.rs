@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use egui::text::{LayoutJob, LayoutSection, TextFormat};
 use egui::{Color32, FontId, Stroke};
+use serde_json::{Map, Value};
 use entities::document::DocumentId;
 use entities::symbol::Symbol;
 use interface_adapters::gateways::color_scheme_file::{self, ColorSchemeDefinition, Rgba};
@@ -186,6 +187,65 @@ impl SyntaxEngine {
         let color = from_scheme.map(to_color32).or_else(|| region_color(first));
         self.scope_colors.insert(key, color);
         color
+    }
+
+    /// A color scheme's global colors, as plugins see them (`view.style()`).
+    pub fn scheme_style(&self, scheme: &str) -> Map<String, Value> {
+        let settings = &find_scheme(&self.schemes, scheme).settings;
+        let foreground = settings.foreground.unwrap_or(Color { r: 0xf8, g: 0xf8, b: 0xf2, a: 0xff });
+        let background = settings.background.unwrap_or(Color { r: 0x27, g: 0x28, b: 0x22, a: 0xff });
+        let colors = [
+            ("foreground", Some(foreground)),
+            ("background", Some(background)),
+            ("caret", settings.caret.or(Some(foreground))),
+            ("line_highlight", settings.line_highlight),
+            ("misspelling", settings.misspelling),
+            ("minimap_border", settings.minimap_border),
+            ("accent", settings.accent),
+            ("highlight", settings.highlight),
+            ("find_highlight", settings.find_highlight),
+            ("find_highlight_foreground", settings.find_highlight_foreground),
+            ("gutter", settings.gutter),
+            ("gutter_foreground", settings.gutter_foreground),
+            ("selection", settings.selection),
+            ("selection_foreground", settings.selection_foreground),
+            ("selection_border", settings.selection_border),
+            ("inactive_selection", settings.inactive_selection),
+            ("inactive_selection_foreground", settings.inactive_selection_foreground),
+            ("guide", settings.guide),
+            ("active_guide", settings.active_guide),
+            ("stack_guide", settings.stack_guide),
+            ("shadow", settings.shadow),
+            ("brackets_foreground", settings.brackets_foreground),
+            ("brackets_background", settings.brackets_background),
+            ("bracket_contents_foreground", settings.bracket_contents_foreground),
+            ("tags_foreground", settings.tags_foreground),
+        ];
+        colors.into_iter().filter_map(|(name, color)| Some((name.to_string(), Value::String(hex(color?))))).collect()
+    }
+
+    /// What a color scheme gives a stack of scopes (`view.style_for_scope()`).
+    pub fn scope_style(&self, scheme: &str, scope: &str) -> Map<String, Value> {
+        let theme = find_scheme(&self.schemes, scheme);
+        let modifier = ScopeStack::from_str(scope)
+            .map(|stack| Highlighter::new(theme).style_mod_for_stack(stack.as_slice()))
+            .unwrap_or_default();
+        let foreground = modifier
+            .foreground
+            .or(theme.settings.foreground)
+            .unwrap_or(Color { r: 0xf8, g: 0xf8, b: 0xf2, a: 0xff });
+        let mut style = Map::new();
+        style.insert("foreground".into(), Value::String(hex(foreground)));
+        if let Some(background) = modifier.background {
+            style.insert("background".into(), Value::String(hex(background)));
+        }
+        let font_style = modifier.font_style.unwrap_or_else(FontStyle::empty);
+        for (name, flag) in [("bold", FontStyle::BOLD), ("italic", FontStyle::ITALIC), ("underline", FontStyle::UNDERLINE)] {
+            if font_style.contains(flag) {
+                style.insert(name.into(), Value::Bool(true));
+            }
+        }
+        style
     }
 
     pub fn symbols(&mut self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol> {
@@ -411,6 +471,15 @@ fn highlight_line(
         .map(|(style, _, range)| (range, style))
         .collect();
     (spans, (!symbol.is_empty()).then_some(symbol))
+}
+
+/// `#rrggbb`, or `#rrggbbaa` when not opaque, as Sublime gives colors to plugins.
+fn hex(c: Color) -> String {
+    if c.a == 0xff {
+        format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+    } else {
+        format!("#{:02x}{:02x}{:02x}{:02x}", c.r, c.g, c.b, c.a)
+    }
 }
 
 pub fn to_color32(c: Color) -> Color32 {

@@ -9,6 +9,7 @@ pub mod editor_view;
 pub mod find_panel;
 pub mod input_panel;
 pub mod menu_bar;
+pub mod minihtml_view;
 #[cfg(target_os = "macos")]
 pub mod native_menu;
 pub mod output_panel;

@@ -102,7 +102,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata) — the rest
-  of B (what each item lists as still missing) and C (completions, popups / phantoms, several windows; most
+  of B (what each item lists as still missing) and C (several windows, the rest of completions, popups / phantoms; most
   of that API has do-nothing stand-ins in `sublime.py`) are checklists with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
@@ -110,5 +110,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin phase B and C
-(`docs/plugins.md`), split groups, minimap, folding, auto-complete, find in files.
+(`docs/plugins.md`), split groups, minimap, folding, snippet fields after the first, find in files.
 Highlighting is skipped above 4 MB.

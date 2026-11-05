@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::keymap::KeyCombo;
+use entities::minihtml;
 use entities::selection::Selection;
 
 pub struct TabViewModel {
@@ -174,6 +175,59 @@ pub struct EditorViewModel {
     /// changes with each request.
     pub show: Option<(usize, bool, u64)>,
     pub take_focus: bool,
+    /// A plugin's popup on this view.
+    pub popup: Option<PopupViewModel>,
+    /// Plugins' phantoms, by position.
+    pub phantoms: Vec<PhantomViewModel>,
+    /// Some plugin listens to `on_hover`: the view reports where the mouse rests.
+    pub report_hover: bool,
+    pub auto_complete: Option<AutoCompleteViewModel>,
+}
+
+/// The auto-complete list, under the typed word.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutoCompleteViewModel {
+    /// The char where the typed word starts: the list opens below it.
+    pub location: usize,
+    /// The first rows (a long list is cut: typing narrows it).
+    pub items: Vec<CompletionViewModel>,
+    pub selected: usize,
+    /// The selected completion's `details` (minihtml), shown under the list.
+    pub details: Vec<minihtml::Line>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompletionViewModel {
+    pub trigger: String,
+    /// Chars of `trigger` the typed text matched (drawn highlighted).
+    pub matched: Vec<usize>,
+    pub annotation: String,
+    /// The badge's letter (empty: no badge) and the kind's name.
+    pub kind_letter: String,
+    pub kind_name: String,
+    /// Sublime's `KindId`, which picks the badge's color.
+    pub kind_id: u8,
+}
+
+/// A plugin's popup (`view.show_popup`), its minihtml read into lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopupViewModel {
+    /// The char it points at: it opens below it.
+    pub location: usize,
+    pub lines: Vec<minihtml::Line>,
+    /// In pixels.
+    pub max_width: f32,
+    pub max_height: f32,
+    /// It goes when the mouse moves away from it (`HIDE_ON_MOUSE_MOVE*`).
+    pub hide_on_mouse_move_away: bool,
+}
+
+/// A plugin's phantom (`view.add_phantom`): drawn after the end of the line of `point`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhantomViewModel {
+    pub id: u64,
+    pub point: usize,
+    pub lines: Vec<minihtml::Line>,
 }
 
 /// How a plugin's region set is drawn (from Sublime's `DRAW_*` flags).

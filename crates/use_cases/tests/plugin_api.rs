@@ -59,6 +59,22 @@ fn scopes() {
 }
 
 #[test]
+fn styles_come_from_the_color_scheme_in_use() {
+    let world = plugin_world().with_preferences(json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}));
+    let mut editor = editor_with(&world, "x");
+    let v = view_id(&editor);
+    assert_eq!(
+        call(&world, &mut editor, "view_style", json!([v])),
+        Ok(json!({"foreground": "#ffffff", "background": "#000000", "scheme": "Mariana"}))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_style_for_scope", json!([v, "source.python string.quoted"])),
+        Ok(json!({"foreground": "#ff0000", "bold": true, "scheme": "Mariana", "scope": "source.python string.quoted",
+                  "source_line": 0, "source_column": 0, "source_file": ""}))
+    );
+}
+
+#[test]
 fn lines_and_words() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "one two\nthree\nfour");

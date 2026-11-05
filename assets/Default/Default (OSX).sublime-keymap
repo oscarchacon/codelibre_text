@@ -92,4 +92,9 @@
 	{ "keys": ["super+k", "super+u"], "command": "upper_case" },
 	{ "keys": ["super+k", "super+l"], "command": "lower_case" },
 	{ "keys": ["ctrl+t"], "command": "transpose" },
+
+	{ "keys": ["ctrl+space"], "command": "auto_complete" },
+	{ "keys": ["escape"], "command": "hide_auto_complete", "context": [{ "key": "auto_complete_visible", "operator": "equal", "operand": true }] },
+	{ "keys": ["enter"], "command": "commit_completion", "context": [{ "key": "auto_complete_visible", "operator": "equal", "operand": true }, { "key": "setting.auto_complete_commit_on_tab", "operator": "equal", "operand": false }] },
+	{ "keys": ["tab"], "command": "commit_completion", "context": [{ "key": "auto_complete_visible", "operator": "equal", "operand": true }] },
 ]

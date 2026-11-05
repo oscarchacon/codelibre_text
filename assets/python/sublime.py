@@ -1198,15 +1198,18 @@ class View:
         return None
 
     def style(self):
-        return {"foreground": "#000000", "background": "#ffffff", "caret": "#000000",
-                "selection": "#c0d8f0", "line_highlight": "#f0f0f0"}
+        """The color scheme's global colors (``foreground``, ``background``, ``caret``…), each
+        ``#rrggbb`` or ``#rrggbbaa``."""
+        return sublime_api.view_style(self.view_id)
 
     def style_for_scope(self, scope):
-        style = self.style()
-        return {"foreground": style["foreground"], "source_line": 0, "source_column": 0, "source_file": ""}
+        """What the color scheme gives ``scope`` (scopes separated by spaces): ``foreground``,
+        ``background`` when a rule sets one, ``bold`` / ``italic`` / ``underline`` when set. The
+        ``source_*`` keys (which rule it was) are always empty."""
+        return sublime_api.view_style_for_scope(self.view_id, scope)
 
-    # Symbols need scopes; folding, popups, phantoms and auto-complete are not implemented. These
-    # stand-ins let plugins that use them load and run (nothing shows).
+    # Symbols and folding are not implemented. These stand-ins let plugins that use them load and
+    # run (nothing shows).
     def symbol_regions(self):
         return []
 
@@ -1239,44 +1242,62 @@ class View:
 
     def show_popup(self, content, flags=0, location=-1, max_width=320, max_height=240, on_navigate=None,
                    on_hide=None):
-        pass
+        """Shows minihtml ``content`` in a popup at ``location`` (the caret when -1), replacing
+        any popup. ``on_navigate(href)`` hears its links, ``on_hide()`` when it goes."""
+        callback = None
+        if on_navigate is not None or on_hide is not None:
+            callback = _register_callbacks(("hide",), navigate=on_navigate, hide=on_hide)
+        sublime_api.view_show_popup(self.view_id, content, int(flags), int(location), max_width, max_height, callback)
 
     def update_popup(self, content):
-        pass
+        sublime_api.view_update_popup(self.view_id, content)
 
     def is_popup_visible(self):
-        return False
+        return sublime_api.view_is_popup_visible(self.view_id)
 
     def hide_popup(self):
-        pass
+        sublime_api.view_hide_popup(self.view_id)
 
     def show_popup_menu(self, items, on_select, flags=0):
         """A menu at the caret: shown as a quick panel."""
         self.window().show_quick_panel(items, on_select, flags)
 
     def add_phantom(self, key, region, content, layout, on_navigate=None):
-        return next(_phantom_ids)
+        """Shows minihtml ``content`` at ``region`` (drawn after the end of its line); its id."""
+        callback = _register_callbacks((), navigate=on_navigate) if on_navigate is not None else None
+        pid = sublime_api.view_add_phantom(self.view_id, key, region.a, region.b, content, int(layout), callback)
+        _phantoms.setdefault((self.view_id, key), set()).add(pid)
+        if callback is not None:
+            _phantom_callbacks[pid] = callback
+        return pid
 
     def erase_phantoms(self, key):
-        pass
+        sublime_api.view_erase_phantoms(self.view_id, key)
+        for pid in _phantoms.pop((self.view_id, key), ()):
+            _callbacks.pop(_phantom_callbacks.pop(pid, None), None)
 
     def erase_phantom_by_id(self, pid):
-        pass
+        sublime_api.view_erase_phantom_by_id(self.view_id, pid)
+        _callbacks.pop(_phantom_callbacks.pop(pid, None), None)
+        for pids in _phantoms.values():
+            pids.discard(pid)
 
     def query_phantom(self, pid):
-        return []
+        """``[Region]`` where the phantom is now (edits move it), or ``[]`` if it is gone."""
+        return [Region(a, b) for a, b in sublime_api.view_query_phantom(self.view_id, pid)]
 
     def query_phantoms(self, pids):
-        return []
+        return [Region(a, b) for a, b in sublime_api.view_query_phantoms(self.view_id, list(pids))]
 
     def is_auto_complete_visible(self):
-        return False
+        return sublime_api.view_is_auto_complete_visible(self.view_id)
 
     def preserve_auto_complete_on_focus_lost(self):
         pass
 
     def extract_completions(self, prefix, tp=-1):
-        return []
+        """The words of the view that start with ``prefix``, nearest to ``tp`` (the caret) first."""
+        return sublime_api.view_extract_completions(self.view_id, prefix, int(tp))
 
     def fold(self, x):
         return False
@@ -1479,11 +1500,14 @@ class ImageSheet(Sheet):
     pass
 
 
-_phantom_ids = itertools.count(1)
+# Phantom ids by (view id, key), and the callback id of each phantom with ``on_navigate``.
+_phantoms = {}
+_phantom_callbacks = {}
 
 
 class Phantom:
-    """HTML shown in the text. Phantoms are not drawn yet."""
+    """minihtml shown in the text, after the end of ``region``'s line (``layout`` is
+    ``LAYOUT_INLINE``, ``LAYOUT_BELOW`` or ``LAYOUT_BLOCK``; all are drawn there for now)."""
 
     def __init__(self, region, content, layout, on_navigate=None):
         self.region = region
@@ -1508,12 +1532,32 @@ class PhantomSet:
 
     def __del__(self):
         for phantom in self.phantoms:
-            self.view.erase_phantom_by_id(phantom.id)
+            try:
+                self.view.erase_phantom_by_id(phantom.id)
+            except Exception:
+                pass
 
     def update(self, phantoms):
-        for phantom in phantoms:
-            phantom.id = self.view.add_phantom(self.key, phantom.region, phantom.content, phantom.layout,
-                                               phantom.on_navigate)
+        """Shows ``phantoms`` instead of the current ones: a phantom equal to one shown (where
+        edits moved it, same content and layout) keeps it; the others are added or erased."""
+        for old in self.phantoms:
+            where = self.view.query_phantom(old.id) if old.id is not None else []
+            if where:
+                old.region = where[0]
+            else:
+                old.id = None
+        kept = set()
+        for new in phantoms:
+            same = next((old for old in self.phantoms
+                         if old.id is not None and old.id not in kept and old == new), None)
+            if same is not None:
+                new.id = same.id
+                kept.add(same.id)
+            else:
+                new.id = self.view.add_phantom(self.key, new.region, new.content, new.layout, new.on_navigate)
+        for old in self.phantoms:
+            if old.id is not None and old.id not in kept:
+                self.view.erase_phantom_by_id(old.id)
         self.phantoms = list(phantoms)
 
 
@@ -1526,7 +1570,7 @@ class Html:
 
 
 class CompletionItem:
-    """A completion a plugin offers. There is no auto-complete list yet, so none is shown."""
+    """A completion a plugin offers (``on_query_completions``), shown in the auto-complete list."""
 
     def __init__(self, trigger, annotation="", completion="", completion_format=COMPLETION_FORMAT_TEXT,
                  kind=KIND_AMBIGUOUS, details="", flags=0):
@@ -1551,13 +1595,61 @@ class CompletionItem:
 
 
 class CompletionList:
+    """Completions an ``on_query_completions`` returns before it has them: the list shows them
+    once ``set_completions`` is called (from any thread)."""
+
+    _lock = threading.Lock()
+    _next_id = 0
+
     def __init__(self, completions=None, flags=0):
         self.completions = completions
         self.flags = flags
+        self._id = None
+
+    def _wait(self):
+        """The editor waits for this list: its id, or None when the completions are already here."""
+        with CompletionList._lock:
+            if self.completions is not None:
+                return None
+            CompletionList._next_id += 1
+            self._id = CompletionList._next_id
+            return self._id
 
     def set_completions(self, completions, flags=0):
-        self.completions = completions
-        self.flags = flags
+        with CompletionList._lock:
+            self.completions = completions
+            self.flags = flags
+            list_id, self._id = self._id, None
+        if list_id is not None:
+            sublime_api.completion_list_set(list_id, _completions_json(completions), int(flags))
+
+
+def _kind_json(kind):
+    if isinstance(kind, (list, tuple)) and len(kind) >= 3:
+        return [int(kind[0]), str(kind[1]), str(kind[2])]
+    return [KIND_ID_AMBIGUOUS, "", ""]
+
+
+def _completions_json(completions):
+    """A plugin's completions as the editor reads them: strings and ``[trigger, contents]`` as
+    they are, ``CompletionItem``s as objects."""
+    found = []
+    for item in completions or ():
+        if isinstance(item, CompletionItem):
+            found.append({
+                "trigger": str(item.trigger),
+                "annotation": str(item.annotation or ""),
+                "contents": str(item.completion or item.trigger),
+                "format": int(item.completion_format),
+                "kind": _kind_json(item.kind),
+                "details": str(item.details or ""),
+                "flags": int(item.flags or 0),
+            })
+        elif isinstance(item, str):
+            found.append(item)
+        elif isinstance(item, (list, tuple)) and item:
+            found.append([str(part) for part in item[:2]])
+    return found
 
 
 
@@ -1655,6 +1747,15 @@ class Window:
     def find_output_panel(self, name):
         view_id = sublime_api.window_find_output_panel(self.window_id, name)
         return View(view_id) if view_id else None
+
+    def create_io_panel(self, name, on_input, unlisted=False):
+        """An output panel and the view to type its process's input in: ``(output, input)``.
+        Input panels of output panels are not implemented, so ``input`` is ``None`` (``on_input``
+        is never called)."""
+        return self.create_output_panel(name, unlisted), None
+
+    def find_io_panel(self, name):
+        return self.find_output_panel(name), None
 
     def destroy_output_panel(self, name):
         sublime_api.window_destroy_output_panel(self.window_id, name)

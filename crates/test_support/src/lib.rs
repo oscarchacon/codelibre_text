@@ -432,6 +432,22 @@ impl SyntaxGateway for FakeSyntaxes {
         vec!["Daylight".into(), "Monokai".into(), "Solarized (dark)".into()]
     }
 
+    /// White on black, and the scheme asked for under `scheme`.
+    fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        let style = serde_json::json!({ "foreground": "#ffffff", "background": "#000000", "scheme": scheme });
+        style.as_object().cloned().unwrap_or_default()
+    }
+
+    /// Strings are red and bold; the rest white. The scheme and scopes asked for under `scheme` / `scope`.
+    fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, serde_json::Value> {
+        let style = if scope.split_whitespace().any(|s| s.starts_with("string")) {
+            serde_json::json!({ "foreground": "#ff0000", "bold": true, "scheme": scheme, "scope": scope })
+        } else {
+            serde_json::json!({ "foreground": "#ffffff", "scheme": scheme, "scope": scope })
+        };
+        style.as_object().cloned().unwrap_or_default()
+    }
+
     fn symbols(&self, _document: DocumentId, _text: &str, _syntax: &str) -> Vec<Symbol> {
         self.0.symbols.borrow().clone()
     }

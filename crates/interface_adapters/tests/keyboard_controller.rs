@@ -279,3 +279,33 @@ fn a_listener_can_stop_a_widget_edit_by_replacing_it() {
     assert!(view.take_requests().is_empty());
     assert!(editor.active_document().unwrap().text.contains("mine"));
 }
+
+#[test]
+fn the_auto_complete_list_takes_the_arrows_and_its_bindings_apply_while_it_shows() {
+    let visible = || vec![json!({ "key": "auto_complete_visible", "operator": "equal", "operand": true })];
+    let world = World::new()
+        .with_file("/p/a.txt", "apple apricot\n")
+        .with_binding(bind(&["enter"], Command::new("commit_completion"), visible()))
+        .with_binding(bind(&["escape"], Command::new("hide_auto_complete"), visible()));
+    let mut editor = world.editor_opening(&["/p/a.txt"]);
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    assert!(!press(&mut editor, &mut view, "down"), "no list: the caret moves");
+    assert!(!press(&mut editor, &mut view, "enter"));
+
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(14));
+    editor.insert_at_selections("ap");
+    run(&mut editor, &mut view, &Command::new("auto_complete"));
+    let triggers = |editor: &Editor| editor.auto_complete().unwrap().shown.iter().map(|s| s.completion.trigger.clone()).collect::<Vec<_>>();
+    assert_eq!(triggers(&editor).len(), 2);
+    assert!(press(&mut editor, &mut view, "down"));
+    assert_eq!(editor.auto_complete().unwrap().selected, 1);
+    let chosen = triggers(&editor)[1].clone();
+    assert!(press(&mut editor, &mut view, "enter"));
+    assert_eq!(queued(&mut view), vec!["commit_completion"]);
+    run(&mut editor, &mut view, &Command::new("commit_completion"));
+    assert!(editor.active_document().unwrap().text.ends_with(&format!("
+{chosen}")));
+    assert!(!editor.auto_complete_visible());
+}

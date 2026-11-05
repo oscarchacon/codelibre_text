@@ -12,7 +12,10 @@ use entities::menu::{MenuItem, PaletteCommand};
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
 
+use entities::completion::CompletionSet;
+
 use crate::builds::{BuildOption, BuildState};
+use crate::completions::AutoComplete;
 use crate::find_replace::FindCache;
 use crate::gateways::{
     ClipboardGateway, DialogGateway, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
@@ -95,6 +98,10 @@ pub struct EditorState {
     /// The output panels plugins created (not tabs).
     pub(crate) output_panels: OutputPanels,
     pub(crate) builds: BuildState,
+    /// The auto-complete list (see `completions`).
+    pub(crate) auto_complete: Option<AutoComplete>,
+    /// The packages' completions files and snippets, read the first time they are needed.
+    pub(crate) completion_sets: Option<Vec<CompletionSet>>,
     /// What the build picker lists (read when it opens: `search` cannot load resources).
     pub(crate) build_options: Vec<BuildOption>,
     /// Most recently used first (for Ctrl+Tab).
@@ -142,6 +149,8 @@ impl Editor {
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),
                 builds: BuildState::default(),
+                auto_complete: None,
+                completion_sets: None,
                 build_options: Vec::new(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),

@@ -22,6 +22,7 @@ use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use interface_adapters::view_state::ViewState;
 use serde_json::{json, Value};
 use use_cases::gateways::{PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, PluginPackage};
+use use_cases::plugin_popups::HoverZone;
 use use_cases::{Editor, Gateways};
 
 /// A host with the plugins of `files` (name, contents) loaded from a package called `MyPkg`.
@@ -39,6 +40,7 @@ fn host_with(dir: &Path, files: &[(&str, &str)]) -> Option<(PythonPluginHost, Pl
     let mut host = PythonPluginHost::new(dir.join("Lib").join("python"));
     host.load(&PluginLoad {
         packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
         packages_path: dir.join("Packages"),
         archives: Vec::new(),
         shipped_packages: None,
@@ -245,6 +247,7 @@ print(deep.VALUE)
     let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
     host.load(&PluginLoad {
         packages: vec![PluginPackage { name: "Zipped".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
         packages_path: dir.path().join("Packages"),
         archives: vec![(unpacked, archives.clone())],
         shipped_packages: None,
@@ -263,6 +266,83 @@ print(deep.VALUE)
     assert_eq!(lines[2], root.join("lib").join("deep").join("__init__.py").display().to_string());
     assert_eq!(lines[3], "inner");
     assert!(dir.path().join("Lib").join("Packages").is_dir(), "next to the executable plugins are told about");
+    host.stop();
+}
+
+/// Package Control prefixes paths with `\\?\` on Windows, after which `/` is no separator.
+#[test]
+fn plugins_get_paths_with_the_platforms_separators() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("Packages").join("MyPkg");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(package.join("plugin.py"), "import sublime\nprint(sublime.packages_path())\nprint(sublime.installed_packages_path())\n").unwrap();
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    let slashed = std::path::PathBuf::from(dir.path().join("Packages").display().to_string().replace('\\', "/"));
+    host.load(&PluginLoad {
+        packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
+        packages_path: slashed,
+        archives: Vec::new(),
+        shipped_packages: None,
+        interpreter: None,
+    })
+    .unwrap();
+    let mut log = String::new();
+    assert!(matches!(next(&mut host, &mut log), PluginMessage::Loaded { .. }));
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines[0], dir.path().join("Packages").display().to_string());
+    assert_eq!(lines[1], dir.path().join("Installed Packages").display().to_string());
+    host.stop();
+}
+
+#[test]
+fn plugins_import_package_control_3_dependencies_from_the_variant_for_this_python() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let packages = dir.path().join("Packages");
+    let write = |path: &str, contents: &str| {
+        let path = packages.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    };
+    write("oldlib/dependency-metadata.json", "{}");
+    write("oldlib/all/oldlib.py", "WHERE = 'all'\n");
+    write("oldlib/st3/oldlib.py", "WHERE = 'st3'\n");
+    write("oldlib/st3_windows_x64/oldlib.py", "WHERE = 'compiled for 3.3'\n");
+    write("pure/.sublime-dependency", "");
+    write("pure/all/pure/__init__.py", "WHERE = 'all'\n");
+    write("Uses/plugin.py", "import oldlib, pure\nprint(oldlib.WHERE, pure.WHERE)\n");
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    let mut load = |dependencies: Vec<std::path::PathBuf>| {
+        host.load(&PluginLoad {
+            packages: vec![PluginPackage { name: "Uses".into(), dirs: vec![packages.join("Uses")] }],
+            dependencies,
+            packages_path: packages.clone(),
+            archives: Vec::new(),
+            shipped_packages: None,
+            interpreter: None,
+        })
+        .unwrap();
+        let mut log = String::new();
+        let PluginMessage::Loaded { errors, .. } = next(&mut host, &mut log) else {
+            panic!("expected Loaded; console:\n{log}");
+        };
+        (errors, log)
+    };
+    let (errors, log) = load(vec![packages.join("oldlib"), packages.join("pure")]);
+    assert_eq!(errors, Vec::<String>::new());
+    assert_eq!(log.trim(), "st3 all");
+
+    // Gone from the next load: off the path (the plugin changed, so it runs again).
+    write("Uses/plugin.py", "import os, sys\nprint(sorted(os.path.basename(os.path.dirname(p)) for p in sys.path if os.sep + 'Packages' + os.sep in p))\n");
+    let (errors, log) = load(vec![packages.join("oldlib")]);
+    assert_eq!(errors, Vec::<String>::new());
+    assert_eq!(log.trim(), "['oldlib']");
     host.stop();
 }
 
@@ -385,6 +465,143 @@ class FakeBuildCommand(sublime_plugin.WindowCommand):
     assert_eq!(editor_status(&editor), "built output.exec 24", "console:\n{}", editor.state().console);
     assert_eq!(editor.shown_output_panel().unwrap().document.text, "compiling\na.rs:3: error\n");
     assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
+}
+
+/// Build plugins subclass `Default.exec.ExecCommand`; the editor's own `exec` stays.
+#[test]
+fn a_subclass_of_default_exec_runs_a_process_into_the_exec_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+from Default.exec import ExecCommand, AsyncProcess, ProcessListener
+
+class MyBuildCommand(ExecCommand):
+    def on_finished(self, proc):
+        super().on_finished(proc)
+        print("exit", proc.exit_code(), sorted(self.errs_by_file))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    assert!(editor.plugin_command_kind("exec").is_none(), "Default's ExecCommand is not a command");
+    let mut view = ViewState::default();
+    let args = json!({
+        "shell_cmd": "echo a.py:3: oops",
+        "file_regex": "^(.+):(\\d+): ",
+        "working_dir": dir.path().display().to_string(),
+    });
+    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", args));
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !editor.state().console.contains("exit ") && Instant::now() < deadline {
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let console = editor.state().console.clone();
+    assert!(console.contains("Running echo a.py:3: oops"), "{console}");
+    assert!(console.contains("exit 0 ['a.py']"), "{console}");
+    let text = editor.shown_output_panel().unwrap().document.text.clone();
+    assert!(text.starts_with("a.py:3: oops\n[Finished in "), "{text:?}");
+    assert_eq!(editor_status(&editor), "Build finished with 1 errors");
+}
+
+#[test]
+fn hover_popups_and_phantom_sets_work_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Hover(sublime_plugin.EventListener):
+    def on_hover(self, view, point, zone):
+        view.show_popup('<a href="go">go %d %d</a>' % (point, zone), location=point,
+                        on_navigate=lambda href: print("navigate", href), on_hide=lambda: print("hidden"))
+
+class PhantomsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        global SET
+        SET = sublime.PhantomSet(self.view, "p")
+        SET.update([sublime.Phantom(sublime.Region(0, 1), "<b>a</b>", sublime.LAYOUT_BELOW, lambda h: print("phantom", h)),
+                    sublime.Phantom(sublime.Region(2, 3), "b", sublime.LAYOUT_INLINE)])
+        print("ids", [p.id for p in SET.phantoms])
+
+class PhantomsAgainCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        SET.update([sublime.Phantom(sublime.Region(0, 1), "<b>a</b>", sublime.LAYOUT_BELOW)])
+        print("ids again", [p.id for p in SET.phantoms], self.view.query_phantoms([p.id for p in SET.phantoms]))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    editor.insert_at_selections("hello");
+    let v = editor.active_document().unwrap().id;
+    assert!(editor.plugins_hear_hover());
+
+    editor.plugin_hover(v, 2, HoverZone::Text);
+    let popup = editor.plugin_popup().unwrap_or_else(|| panic!("no popup; console:\n{}", editor.state().console));
+    assert_eq!((popup.location, popup.content.as_str()), (2, r#"<a href="go">go 2 1</a>"#));
+    command_controller::navigate_plugin_popup(&mut editor, &mut view, "go");
+    editor.hide_plugin_popup();
+    command_controller::poll_plugins(&mut editor, &mut view);
+    let console = editor.state().console.clone();
+    assert!(console.contains("navigate go") && console.contains("hidden"), "{console}");
+
+    command_controller::run(&mut editor, &mut view, &Command::new("phantoms"));
+    let ids: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    assert_eq!(ids.len(), 2, "console:\n{}", editor.state().console);
+    command_controller::navigate_plugin_phantom(&mut editor, &mut view, ids[0], "fix");
+    command_controller::run(&mut editor, &mut view, &Command::new("phantoms_again"));
+    let console = editor.state().console.clone();
+    assert!(console.contains("phantom fix"), "{console}");
+    assert!(console.contains(&format!("ids again [{}] [Region(0, 1)]", ids[0])), "the equal phantom keeps its id\n{console}");
+    let left: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    assert_eq!(left, vec![ids[0]]);
+}
+
+#[test]
+fn plugins_completions_reach_the_auto_complete_list_also_later() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Now(sublime_plugin.EventListener):
+    def on_query_completions(self, view, prefix, locations):
+        print("asked", prefix, locations, view.is_auto_complete_visible())
+        item = sublime.CompletionItem("zeta_fn", "fn", "zeta_fn($1)", sublime.COMPLETION_FORMAT_SNIPPET,
+                                      sublime.KIND_FUNCTION, "<b>details</b>")
+        return ([item, ["zeta_pair\tpair", "PAIR"], "zeta_str"], sublime.INHIBIT_WORD_COMPLETIONS)
+
+class Later(sublime_plugin.ViewEventListener):
+    def on_query_completions(self, prefix, locations):
+        completions = sublime.CompletionList()
+        sublime.set_timeout_async(lambda: completions.set_completions(["zeta_later"]), 50)
+        return completions
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    editor.insert_at_selections("zeta_word ze");
+    command_controller::run(&mut editor, &mut view, &Command::new("auto_complete"));
+    let triggers = |editor: &Editor| editor.auto_complete().map(|l| l.shown.iter().map(|s| s.completion.trigger.clone()).collect::<Vec<_>>());
+    let now = triggers(&editor).unwrap_or_else(|| panic!("no list; console:\n{}", editor.state().console));
+    assert_eq!(now.len(), 3, "no words (INHIBIT_WORD_COMPLETIONS): {now:?}");
+    assert!(editor.state().console.contains("asked ze [12] False"), "{}", editor.state().console);
+    let item = &editor.auto_complete().unwrap().shown.iter().find(|s| s.completion.trigger == "zeta_fn").unwrap().completion;
+    assert_eq!((item.annotation.as_str(), item.kind.letter.as_str(), item.details.as_str()), ("fn", "f", "<b>details</b>"));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !triggers(&editor).unwrap_or_default().contains(&"zeta_later".to_string()) {
+        assert!(Instant::now() < deadline, "set_completions never arrived; console:\n{}", editor.state().console);
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pair = triggers(&editor).unwrap().iter().position(|t| t == "zeta_pair").unwrap();
+    editor.commit_completion(Some(pair));
+    assert_eq!(editor.active_document().unwrap().text, "zeta_word PAIR");
 }
 
 #[test]
@@ -1223,6 +1440,7 @@ fn load_packages(host: &mut PythonPluginHost, dir: &Path, names: &[&str]) -> (bo
                 .iter()
                 .map(|name| PluginPackage { name: (*name).into(), dirs: vec![dir.join("Packages").join(name)] })
                 .collect(),
+            dependencies: Vec::new(),
             packages_path: dir.join("Packages"),
             archives: Vec::new(),
             shipped_packages: None,

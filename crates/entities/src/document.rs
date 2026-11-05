@@ -89,6 +89,8 @@ pub struct Document {
     change_count: u64,
     /// Regions plugins mark (`view.add_regions`), in the order they were added.
     region_sets: Vec<RegionSet>,
+    /// HTML plugins show in the text (`view.add_phantom`), in the order they were added.
+    phantoms: Vec<Phantom>,
     /// Where a plugin asked the view to scroll (`view.show`), and how many times it asked.
     show_request: Option<ShowRequest>,
     show_revision: u64,
@@ -128,6 +130,22 @@ pub struct RegionSet {
     pub flags: u64,
 }
 
+/// HTML a plugin shows in the text (`view.add_phantom`): an inline note, a block below a line…
+/// Its region moves with the text, like a [`RegionSet`]'s.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Phantom {
+    /// Given by the editor; plugins erase and query it by this.
+    pub id: u64,
+    /// Phantoms with the same key are erased together (`erase_phantoms`).
+    pub key: String,
+    /// `(a, b)` char positions.
+    pub region: (usize, usize),
+    /// minihtml (see [`crate::minihtml`]).
+    pub content: String,
+    /// Sublime's `LAYOUT_INLINE` (1), `LAYOUT_BELOW` (2) or `LAYOUT_BLOCK` (4).
+    pub layout: u64,
+}
+
 /// A plugin's `view.show(point)` / `view.show_at_center(point)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShowRequest {
@@ -155,6 +173,7 @@ impl Document {
             selection_revision: 1,
             change_count: 0,
             region_sets: Vec::new(),
+            phantoms: Vec::new(),
             show_request: None,
             show_revision: 0,
             tracked_text: None,
@@ -333,13 +352,12 @@ impl Document {
         }
         before.replace_range(start..end, inserted);
         let inserted = inserted.chars().count();
-        for set in &mut self.region_sets {
-            for region in &mut set.regions {
-                *region = (
-                    moved_position(region.0, start_char, end_char, inserted),
-                    moved_position(region.1, start_char, end_char, inserted),
-                );
-            }
+        let regions = self.region_sets.iter_mut().flat_map(|s| s.regions.iter_mut());
+        for region in regions.chain(self.phantoms.iter_mut().map(|p| &mut p.region)) {
+            *region = (
+                moved_position(region.0, start_char, end_char, inserted),
+                moved_position(region.1, start_char, end_char, inserted),
+            );
         }
     }
 
@@ -474,13 +492,44 @@ impl Document {
 
     pub fn erase_regions(&mut self, key: &str) {
         self.region_sets.retain(|s| s.key != key);
-        if self.region_sets.is_empty() && self.change_log.is_none() {
-            self.tracked_text = None;
-        }
+        self.stop_tracking_if_unused();
     }
 
     pub fn region_sets(&self) -> &[RegionSet] {
         &self.region_sets
+    }
+
+    /// Nothing needs the copy of the text any more.
+    fn stop_tracking_if_unused(&mut self) {
+        if self.region_sets.is_empty() && self.phantoms.is_empty() && self.change_log.is_none() {
+            self.tracked_text = None;
+        }
+    }
+
+    /// Adds a phantom (its `id` given by the caller).
+    pub fn add_phantom(&mut self, phantom: Phantom) {
+        self.tracked_text.get_or_insert_with(|| self.text.clone());
+        self.phantoms.push(phantom);
+    }
+
+    /// Erases the phantoms with that key.
+    pub fn erase_phantoms(&mut self, key: &str) {
+        self.phantoms.retain(|p| p.key != key);
+        self.stop_tracking_if_unused();
+    }
+
+    pub fn erase_phantom(&mut self, id: u64) {
+        self.phantoms.retain(|p| p.id != id);
+        self.stop_tracking_if_unused();
+    }
+
+    /// The phantoms, their regions kept within the text.
+    pub fn phantoms(&self) -> Vec<Phantom> {
+        let len = self.char_count();
+        self.phantoms
+            .iter()
+            .map(|p| Phantom { region: (p.region.0.min(len), p.region.1.min(len)), ..p.clone() })
+            .collect()
     }
 
     /// The view reports which chars are on screen.

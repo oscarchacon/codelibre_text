@@ -271,7 +271,7 @@ VIEW_EVENTS = (
 # answer nothing, every listener hears them.
 QUERY_EVENTS = (
     "on_query_context", "on_text_command", "on_window_command", "on_post_text_command", "on_post_window_command",
-    "on_init", "on_exit",
+    "on_init", "on_exit", "on_hover", "on_query_completions",
 )
 # What the editor asks about commands, and the ``Command`` methods that make it worth asking.
 COMMAND_QUERIES = {
@@ -326,11 +326,15 @@ def register_listeners(module):
 
 def set_commands(modules):
     """The commands are those defined in (or imported into) the plugin modules, in load order: a
-    later one replaces a command of the same name. Objects of classes that are gone are dropped."""
+    later one replaces a command of the same name. Objects of classes that are gone are dropped.
+    Classes of our ``Default`` modules (``Default.exec.ExecCommand``, imported by build plugins to
+    subclass it) are not commands: the editor's own ``exec`` stays."""
     commands.clear()
     for module in modules:
         for value in list(vars(module).values()):
             if not isinstance(value, type) or value in _BASES or not issubclass(value, Command):
+                continue
+            if (value.__module__ or "").startswith("Default."):
                 continue
             for base, kind in KINDS:
                 if issubclass(value, base):
@@ -422,6 +426,8 @@ def query(name, view_id, window_id, args):
         for listener in pending:
             _call(listener, name, [views])
         return None
+    if name == "on_query_completions":
+        return query_completions(sublime.View(view_id), args[0], args[1])
     if name in ("on_window_command", "on_post_window_command"):
         window = sublime.Window(window_id)
         calls = [(listener, [window] + args) for listener in _event_listeners]
@@ -439,6 +445,34 @@ def query(name, view_id, window_id, args):
         for listener, call_args in calls:
             _call_async(listener, name + "_async", call_args)
     return None
+
+
+def query_completions(view, prefix, locations):
+    """``on_query_completions`` of every listener, merged: ``{"items", "flags", "pending"}``, where
+    ``pending`` are the ``CompletionList``s still to be filled (``set_completions`` sends them). A
+    listener answers a list, a ``(list, flags)`` tuple or a ``CompletionList``."""
+    calls = [(listener, [view, prefix, locations]) for listener in _event_listeners]
+    calls += [(listener, [prefix, locations]) for listener in _listeners_of(view, create=bool(_view_listener_classes))]
+    items, flags, pending = [], 0, []
+    for listener, call_args in calls:
+        result = _call(listener, "on_query_completions", call_args)
+        if result is None:
+            continue
+        if isinstance(result, sublime.CompletionList):
+            list_id = result._wait()
+            if list_id is not None:
+                pending.append(list_id)
+                continue
+            completions, result_flags = result.completions, result.flags
+        elif isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], int) and not isinstance(result[1], bool):
+            completions, result_flags = result
+        else:
+            completions, result_flags = result, 0
+        items += sublime._completions_json(completions)
+        flags |= int(result_flags or 0)
+    if not items and not pending and not flags:
+        return None
+    return {"items": items, "flags": flags, "pending": pending}
 
 
 def _call_async(listener, name, args):

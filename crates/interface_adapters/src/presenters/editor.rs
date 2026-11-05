@@ -1,9 +1,11 @@
 use entities::command::Command;
-use entities::document::RegionSet;
+use entities::document::{DocumentId, RegionSet};
+use entities::minihtml;
 use serde_json::{json, Value};
+use use_cases::plugin_popups::{HIDE_ON_MOUSE_MOVE, HIDE_ON_MOUSE_MOVE_AWAY};
 use use_cases::Editor;
 
-use crate::view_models::{EditorViewModel, RegionViewModel, Underline};
+use crate::view_models::{AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PhantomViewModel, PopupViewModel, RegionViewModel, Underline};
 use crate::view_state::ViewState;
 
 // Sublime's `add_regions` flags (`sublime.DRAW_EMPTY`, …).
@@ -47,6 +49,20 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
         && editor.state().pending_close.is_none();
 
     let len = doc.char_count();
+    let popup = editor.plugin_popup().filter(|p| p.view == doc.id).map(|p| PopupViewModel {
+        location: p.location.min(len),
+        lines: minihtml::parse(&p.content),
+        max_width: p.max_width,
+        max_height: p.max_height,
+        hide_on_mouse_move_away: p.flags & (HIDE_ON_MOUSE_MOVE | HIDE_ON_MOUSE_MOVE_AWAY) != 0,
+    });
+    let mut phantoms: Vec<PhantomViewModel> = doc
+        .phantoms()
+        .iter()
+        .map(|p| PhantomViewModel { id: p.id, point: p.region.0.max(p.region.1), lines: minihtml::parse(&p.content) })
+        .filter(|p| !p.lines.is_empty())
+        .collect();
+    phantoms.sort_by_key(|p| (p.point, p.id));
     Some(EditorViewModel {
         document: doc.id,
         read_only: doc.read_only,
@@ -67,7 +83,37 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
         regions: doc.region_sets().iter().filter_map(|set| present_regions(set, len)).collect(),
         show: doc.show_request().map(|r| (r.point.min(len), r.center, doc.show_revision())),
         take_focus,
+        popup,
+        phantoms,
+        report_hover: editor.plugins_hear_hover(),
+        auto_complete: present_auto_complete(editor, doc.id, len),
     })
+}
+
+/// At most this many rows of the auto-complete list are shown.
+const MAX_COMPLETIONS: usize = 200;
+
+fn present_auto_complete(editor: &Editor, document: DocumentId, len: usize) -> Option<AutoCompleteViewModel> {
+    let list = editor.auto_complete().filter(|l| l.view == document)?;
+    let items = list
+        .shown
+        .iter()
+        .take(MAX_COMPLETIONS)
+        .map(|shown| {
+            let c = &shown.completion;
+            CompletionViewModel {
+                trigger: c.trigger.clone(),
+                matched: shown.matched.clone(),
+                annotation: c.annotation.clone(),
+                kind_letter: c.kind.letter.chars().take(1).collect(),
+                kind_name: c.kind.name.clone(),
+                kind_id: c.kind.id,
+            }
+        })
+        .collect();
+    let selected = list.selected.min(MAX_COMPLETIONS - 1);
+    let details = list.shown.get(selected).map(|s| minihtml::parse(&s.completion.details)).unwrap_or_default();
+    Some(AutoCompleteViewModel { location: list.start.min(len), items, selected, details })
 }
 
 /// A region set as drawn: Sublime fills and outlines regions unless the flags say otherwise

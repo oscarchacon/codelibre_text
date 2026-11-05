@@ -252,6 +252,13 @@ pub trait SyntaxGateway {
     fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan>;
     /// The document was closed; cached data about it can go.
     fn forget(&self, document: DocumentId);
+    /// A color scheme's global colors (`foreground`, `background`, `caret`, `selection`…), as
+    /// `"#rrggbb"` (or `"#rrggbbaa"` when not opaque): Sublime's `view.style()`.
+    fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, Value>;
+    /// What a color scheme gives the scopes `scope` (several, space-separated, innermost last):
+    /// `foreground` (the scheme's if no rule sets it), `background` when a rule sets it, and
+    /// `bold` / `italic` / `underline` when true: Sublime's `view.style_for_scope()`.
+    fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, Value>;
 }
 
 /// Hot-exit storage.
@@ -271,6 +278,9 @@ pub struct PluginPackage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginLoad {
     pub packages: Vec<PluginPackage>,
+    /// Package Control 3's dependencies (`Packages/<dep>` with `dependency-metadata.json`, never
+    /// migrated to libraries): the host puts the variant for its Python (`all`, `st3`…) on `sys.path`.
+    pub dependencies: Vec<PathBuf>,
     /// `sublime.packages_path()`.
     pub packages_path: PathBuf,
     /// Where packages are unpacked and the folder of their archives: plugins there see the paths

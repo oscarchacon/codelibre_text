@@ -6,7 +6,9 @@ scratch views, `add_on_change`, output panels, statuses and regions drawn, `view
 2026-10-30 output panel results, build systems, the input panel's view; 2026-11-02 stand-ins for the rest of the API,
 `imp` shim, `install_package_control`, `Installed Packages` watched, scopes and the `selector` context; 2026-11-04 a
 package with plugins and libraries installed, upgraded and removed by Package Control; 18 popular packages load,
-libraries for the Python we run, Package Control upgrades itself). The rest of B and phase C below are the pending work, in order.
+libraries for the Python we run, Package Control upgrades itself; 2026-11-05 Package Control 3's dependencies, a
+removal deferred to the next start, `Default.exec`, `view.style` / `style_for_scope`, popups, phantoms, `on_hover`,
+auto-complete and plugins' completions). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -33,6 +35,7 @@ command_controller ──run "foo"──▶ use_cases::plugins ──PluginHostG
 | `poll_plugins` every frame, after the UI events (`command_controller::poll_plugins`) | `crates/frameworks/src/app.rs` | Frameworks |
 | The `sublime_api` functions the editor answers | `crates/use_cases/src/plugin_api.rs` | Use Cases |
 | Quick / input panels plugins open, and the answers to their callbacks | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
+| Popups and phantoms (minihtml), their links, `on_hover` | `crates/use_cases/src/plugin_popups.rs`, `entities/src/minihtml.rs`, `presenters/editor.rs`, `frameworks/src/views/{editor_view,minihtml_view}.rs` | all |
 | Showing them (`show_plugin_panels`), answers from the views (`SearchKind::PluginItems`, `UiEvent::InputPanel*`) | `crates/interface_adapters/src/controllers/{command,ui}_controller.rs` | Interface Adapters |
 | The input panel view | `crates/frameworks/src/views/input_panel.rs` | Frameworks |
 | Output panels (documents that are not tabs, `any_document`), the `append` command, results (`next_result`) | `crates/use_cases/src/output_panels.rs` | Use Cases |
@@ -57,7 +60,7 @@ behaviour is fine. Their `sublime_api` function names are a good guide for namin
 ### Protocol
 
 ```
-editor → host  {"op":"load","packages":[{"name":"MyPkg","dirs":["…"]}],"paths":{"packages":…,"installed_packages":…,"cache":…,"executable":…}}
+editor → host  {"op":"load","packages":[{"name":"MyPkg","dirs":["…"]}],"dependencies":["…"],"paths":{"packages":…,"installed_packages":…,"cache":…,"executable":…}}
 host → editor  {"op":"loaded","commands":[["hello","text"],…],"events":["on_modified","on_load_async",…],"errors":["traceback",…]}
 editor → host  {"op":"run","kind":"text|window|application","name":"hello","args":{…},"view":7,"window":1}
 editor → host  {"op":"event","name":"on_pre_save","view":7}
@@ -129,10 +132,9 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
 - Stand-ins (so plugins do not crash, but nothing visible happens yet), for what phase C will implement:
-  `style_for_scope`, `meta_info`, symbols, popups
-  (`show_popup_menu` is a quick panel), phantoms (`Phantom`, `PhantomSet`), `CompletionItem` / `CompletionList`,
+  `meta_info`, symbols, `show_popup_menu` (a quick panel), `CompletionItem` / `CompletionList`,
   folding, the view's geometry (`text_to_layout`…, a fixed 8×16 font), groups / layouts / sheets (`Sheet`), the symbol
-  index, `list_syntaxes` / `find_syntax_*`. (Scopes were stand-ins too; phase C made them real.)
+  index, `list_syntaxes` / `find_syntax_*`. (Scopes, styles, popups and phantoms were stand-ins too; phase C made them real.)
   (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
 ## Phase B — events, panels, async (in progress)
@@ -152,8 +154,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       keeps a copy of the text and compares it after each edit (the widget edits in place), once a frame the
       changes go in an `on_text_changed` query. Several carets count as one change from the first to the last.
       The columns of `HistoricPosition` are chars, also in `col_utf8` / `col_utf16`.
-- [ ] Events still missing: `on_clone`, `on_new_window` and `applies_to_primary_view_only` wait for clones and several windows (phase C),
-      `on_hover` for popups (phase C).
+- [ ] Events still missing: `on_clone`, `on_new_window` and `applies_to_primary_view_only` wait for clones and several windows
+      (phase C). (`on_hover` is done, with popups: phase C.)
 - [x] Built-in commands that edit text (`EDITING_COMMANDS` in `command_controller.rs`) run at once inside an event or
       query, on the view that asked (`Editor::set_event_command_runner`, set by `compose()`), through the hooks, so a
       formatter's `view.run_command(...)` in `on_pre_save` reaches the file.
@@ -216,7 +218,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       read by threads that wake the window; a new build replaces the running one; `cancel_build` kills the whole tree. A
       plugin's own `exec` command wins. Ignored: `encoding` (UTF-8, lossy), `syntax`, `word_wrap`.
 - [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), the Tools >
-      Build System list (`$build_systems`), `from Default.exec import ExecCommand`, and the builds inside Sublime's zipped
+      Build System list (`$build_systems`), and the builds inside Sublime's zipped
       packages (`Python`, `C++`…), which need `.sublime-package` (phase C). There is no Ctrl+Break: egui has no such key.
 - [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
       built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
@@ -293,7 +295,21 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `sublime.arch()` is the processor's (`x64`, `x32`, `arm64`): the build of a compiled library depends on it.
       The version also makes Package Control offer the releases for that build (BracketHighlighter, ColorHelper,
       MarkdownPreview 3…), written for that Python; plugins that test the version may call API it added.
-- [ ] Libraries, still missing: Package Control 3's `dependencies.json` / dependency packages (`Packages/<dep>/all`, `st3`…).
+- [x] **`dependencies.json`** needs nothing of ours: Package Control 4 reads it itself (`get_libraries`) and installs those
+      names as libraries, like a package's `libraries`.
+- [x] **Package Control 3's dependencies** left in a profile it never migrated (`Packages/<dep>` with
+      `dependency-metadata.json` or `.sublime-dependency`; Sublime's own profile, which we only read): `plugin_packages`
+      sends them apart (`PluginLoad::dependencies`), never as plugins, and skips `0_package_control_loader`;
+      `set_dependency_folders` in `plugin_host.py` puts one folder of each on `sys.path`, after the libraries, picked as
+      Package Control 4 does when it migrates one: `st4_py<ours>_<platform>_<arch>`, `st4_py<ours>_<platform>`,
+      `st4_py38`, `st4`, `st3`, `all` (`st3_<platform>*` are compiled for 3.3: left out).
+- [x] **Package Control 4 migrates them** in our own profile (`bootstrap._migrate_dependencies`, when
+      `0_package_control_loader.sublime-package` is in our `Installed Packages`): each to a library in `Lib/python314`
+      (with its `dist-info`), then deletes the dependency's folder and the loader and says so in a message; plugins import
+      the library in the same session (`package_control_migrates_package_control_3_dependencies`, no network; also tried
+      in the window). The paths plugins get have the platform's separators (`plugin_host.py::load`, and
+      `CODELIBRE_TEXT_DATA` in `app_directories.rs`): Package Control prefixes them with `\\?\`, after which `/` is no
+      separator, and with `C:/…` it could not list `Installed Packages`.
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
       has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).
 - [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
@@ -345,13 +361,19 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **Package Control upgrades itself** (`package_control_upgrades_itself_then_the_other_packages`): `upgrade_all_packages`
       upgrades it alone (it is in `ignored_packages` meanwhile, so its plugins unload and load again, while its thread
       goes on), then the other packages the next time.
+- [x] **A removal deferred to the next start** (Windows locked files, `package_control_removes_a_locked_package_at_the_next_start`,
+      no network): a file nobody may delete or move makes Package Control leave `package-control.cleanup` in the package's
+      folder ("scheduled clean up on next restart"); the next start deletes the folder and enables what it had disabled.
 - [ ] Not tried yet with the real Package Control: a `.no-sublime-package` package, `revert_package`,
-      `add_channel` / `add_repository`, a removal deferred to the next start (Windows locked files).
+      `add_channel` / `add_repository`.
 - [x] **`Default` modules**: Sublime's `Default` is not loaded, so `assets/python/Default/` (written to `Lib/python/Default`)
-      has our own modules packages import: `paste_from_history` (`ClipboardHistory`, `g_clipboard_history`). They are
-      only imported, not loaded as plugins: their listeners would make every copy / paste a command for the hooks.
-      Missing: `Default.exec` (`ExecCommand`, `AsyncProcess`, `ProcessListener`: build plugins subclass them), and the
-      `paste_from_history` command and its listener.
+      has our own modules packages import: `paste_from_history` (`ClipboardHistory`, `g_clipboard_history`) and `exec`
+      (`ExecCommand`, `AsyncProcess`, `ProcessListener`: build plugins subclass them; the process runs in the plugin host,
+      its output goes to the `exec` output panel with its `result_*` settings, `kill`, `interactive` without an input view,
+      errors kept in `errs_by_file` but not drawn inline). They are only imported, not loaded as plugins: their listeners
+      would make every copy / paste a command for the hooks, and `set_commands` skips classes of `Default.*` (the
+      editor's own `exec` stays; a plugin's subclass is a command under its own name). `window.create_io_panel` /
+      `find_io_panel` answer `(output panel, None)`. Missing: the `paste_from_history` command and its listener.
 - [x] **Warnings**: `DeprecationWarning` and `SyntaxWarning` (Python 3.12's invalid escapes in old plugins) are not
       shown in the console, as in Sublime, where plugins are not `__main__`.
 - [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
@@ -377,11 +399,51 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] The **`selector` key binding context** (`keyboard_controller.rs`): it matches when the scope at some caret does.
       Language keymaps now apply when their other contexts are known (`insert_snippet` expands `$SELECTION` and puts the
       caret on the first field: `text_commands::insert_snippet`); those with `preceding_text` / `following_text` still do not.
-- [ ] Scopes, still missing: `style_for_scope` and `view.style` (the color scheme's colors), `meta_info`
-      (`.tmPreferences`), `symbol_regions` / `indexed_symbols`, `context_backtrace`, Sublime's exact `extract_scope` and
-      score values, `match_all` in contexts; `find_by_selector` and `extract_scope` parse the whole file every call.
-- [ ] **Completions**: `on_query_completions`, `CompletionItem`, `view.auto_complete` (needs an auto-complete UI first).
-- [ ] **Popups, phantoms, annotations, hover** (`show_popup` with minihtml, `PhantomSet`, `on_hover`).
+- [x] **`view.style()` / `style_for_scope()`** from the color scheme in use (`SyntaxGateway::scheme_style` /
+      `scope_style`, `SyntaxEngine`: syntect's `style_mod_for_stack` on the whole scope stack): globals and a scope's
+      `foreground`, `background` (when a rule sets one), `bold` / `italic` / `underline`, as `#rrggbb` or `#rrggbbaa`.
+      The `source_*` keys are empty; the global `color_scheme`, not a view's own.
+- [ ] Scopes, still missing: `meta_info` (`.tmPreferences`), `symbol_regions` / `indexed_symbols`, `context_backtrace`,
+      Sublime's exact `extract_scope` and score values, `match_all` in contexts; `find_by_selector` and `extract_scope`
+      parse the whole file every call.
+- [x] **Completions** (`use_cases/src/completions.rs`, `entities/src/completion.rs`, drawn by `editor_view.rs`): the
+      auto-complete list opens while typing a word where `auto_complete_selector` matches (or a character of
+      `auto_complete_triggers` where its selector does; `auto_complete`, `auto_complete_size_limit`), or with the
+      `auto_complete` command (Ctrl+Space; `api_completions_only`, `snippets_only`, `commit_single`). It filters itself
+      fuzzily as the word grows (the first typed char must start a word of the trigger; the matched chars are drawn),
+      Up / Down / Page Up / Page Down move in it (`keyboard_controller`), Enter (unless `auto_complete_commit_on_tab`)
+      and Tab commit (`commit_completion`, the `auto_complete_visible` context), Esc (`hide_auto_complete`) or a caret
+      outside the word close it. Sources, in that order: `on_query_completions` of every listener, merged by
+      `sublime_plugin.query_completions` (lists, `(list, flags)`, `CompletionItem`s with kind badge, annotation and
+      minihtml details, `CompletionList`s filled later from any thread by `set_completions` → `completion_list_set`);
+      the packages' `.sublime-completions` and snippets with a `tabTrigger` whose scope matches; the file's words,
+      nearest first. `INHIBIT_WORD_COMPLETIONS`, `INHIBIT_EXPLICIT_COMPLETIONS`, `DYNAMIC_COMPLETIONS` (asked again as
+      the word grows), `INHIBIT_REORDER`; formats text, snippet (`insert_snippet`: the first field selected) and
+      command (the command runs); `KEEP_PREFIX`. Tab after a trigger typed in full inserts it (`tab_completion`,
+      `insert_best_completion`). `view.is_auto_complete_visible()`, `view.extract_completions()`.
+- [ ] Completions, still missing: the snippet fields after the first (Tab to the next one), several carets (only the
+      primary one is completed), `auto_complete_delay`, `auto_complete_use_history`, `auto_complete_cycle`,
+      `replace_completion_with_next_completion`, the words of the other open views, `rhs_empty` triggers.
+- [x] **Popups** (`use_cases/src/plugin_popups.rs`): `show_popup` (location, `max_width` / `max_height`, `on_navigate`,
+      `on_hide`), `update_popup`, `is_popup_visible`, `hide_popup`. One popup, drawn by `editor_view.rs` in an egui `Area`
+      below its char (above when there is no room), scrolling past `max_height`. It goes when the view's caret moves
+      (unless `KEEP_ON_SELECTION_MODIFIED`), another view becomes active, with Esc (`keyboard_controller::key_pressed`,
+      before the keymap), when the mouse leaves it (`HIDE_ON_MOUSE_MOVE*`) or another popup replaces it; `on_hide` runs at
+      the next `poll_plugins` (`PluginState::pending_callbacks`).
+- [x] **minihtml** (`entities/src/minihtml.rs`, drawn by `views/minihtml_view.rs`): `b`/`strong`, `i`/`em`, `u`, `code` /
+      `tt` / `pre`, headings, `a href`, `br` and blocks (`p`, `div`, `li` with a bullet…), `color` / `background-color` /
+      `font-weight` / `font-style` in `style`, `<font color>`; colors `#rgb[a]`, `#rrggbb[aa]`, `rgb[a]()`, names,
+      `var(--foreground|background|<color>ish|accent)` and Sublime's `color(…)` (adjustments ignored); `<style>` /
+      `<script>` skipped, entities decoded. Missing: CSS rules from `<style>` (classes), padding / margins / borders,
+      images, `font-size`, tables as tables.
+- [x] **Phantoms**: `add_phantom` / `erase_phantoms` / `erase_phantom_by_id` / `query_phantom(s)`, `PhantomSet.update`
+      (an equal phantom where edits moved it keeps its id, as in Sublime); kept in the `Document` (`Phantom`), moved by
+      its edits like regions; links call `on_navigate`. Missing: every layout is drawn after the end of the line of the
+      region's end, over the text: `LAYOUT_BLOCK` / `LAYOUT_BELOW` make no room under the line, `LAYOUT_INLINE` does not
+      push the text aside.
+- [x] **`on_hover(view, point, hover_zone)`**: the view reports where the mouse rested for 0.5 s (text, gutter or the
+      margin after a line, not over a popup), once per place, only when a listener defines it (a query, so
+      `ViewEventListener`s hear it too). Missing: annotations (`add_regions`' `annotations`), `on_hover` over phantoms.
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).
 - [ ] `sublime_plugin.reload_plugin`. (Saving a plugin reloads only its package: see reloading above.)
 
@@ -398,3 +460,5 @@ and removes it; `CODELIBRE_TEST_PACKAGE`, `CODELIBRE_TEST_COMMAND` and `CODELIBR
 `package_control_installs_the_listed_packages_at_start` installs 18 popular packages (or `CODELIBRE_TEST_PACKAGES`,
 comma-separated) and fails on any plugin load error: the way to find what the next package needs.
 `package_control_upgrades_itself_then_the_other_packages` checks `upgrade_all_packages`.
+`package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,
+`package_control_removes_a_locked_package_at_the_next_start` (Windows, no network) a removal deferred to the next start.

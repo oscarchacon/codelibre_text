@@ -12,6 +12,7 @@
 //! | [`documents`] | new, open, switch, close, reopen, revert, syntax, line endings |
 //! | [`saving`] | save, save as, save all |
 //! | [`editing`] | text commands, go to line, paste |
+//! | [`completions`] | auto-complete: the list, its sources (plugins, completions files, snippets, words), Tab completion |
 //! | [`find_replace`] | find next/previous, find under caret, replace |
 //! | [`preferences`] | settings, font size, color scheme, edit settings files |
 //! | [`packages`] | load / reload Sublime resources |
@@ -20,6 +21,7 @@
 //! | [`plugins`] | load and run Python plugins, the console |
 //! | [`plugin_api`] | the `sublime_api` functions plugins call |
 //! | [`plugin_panels`] | the quick and input panels plugins open |
+//! | [`plugin_popups`] | popups and phantoms plugins show (minihtml), their links, `on_hover` |
 //! | [`plugin_hooks`] | key presses (`on_query_context`) and commands (`on_text_command`, …) plugins take part in |
 //! | [`output_panels`] | output panels (build and plugin output at the bottom), the `append` command, `next_result` |
 //! | [`builds`] | build systems: `build`, `exec`, `cancel_build` |
@@ -28,6 +30,7 @@
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
 
 pub mod builds;
+pub mod completions;
 pub mod documents;
 pub mod editing;
 pub mod editor;
@@ -41,6 +44,7 @@ pub mod plugin_api;
 pub mod plugin_commands;
 pub mod plugin_hooks;
 pub mod plugin_panels;
+pub mod plugin_popups;
 pub mod plugins;
 pub mod preferences;
 pub mod project;

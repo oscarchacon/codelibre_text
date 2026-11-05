@@ -43,6 +43,23 @@ fn packages_with_python_files_are_loaded_user_last() {
 }
 
 #[test]
+fn package_control_3_dependencies_are_sent_apart_and_its_loader_is_not_loaded() {
+    let world = World::new()
+        .with_file(&format!("{PACKAGES}/Uses/plugin.py"), "")
+        .with_file(&format!("{PACKAGES}/pygments/dependency-metadata.json"), "{}")
+        .with_file(&format!("{PACKAGES}/pygments/setup.py"), "")
+        .with_file(&format!("{PACKAGES}/markupsafe/.sublime-dependency"), "")
+        .with_file(&format!("{PACKAGES}/0_package_control_loader/00-pygments.py"), "");
+    world.plugins.then([PluginMessage::Loaded { commands: vec![], events: vec![], errors: vec![] }]);
+    world.editor();
+    let loads = world.plugins.loads.borrow();
+    let names: Vec<&str> = loads[0].packages.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Uses"]);
+    let dependencies: Vec<String> = loads[0].dependencies.iter().map(|d| d.to_string_lossy().replace('\\', "/")).collect();
+    assert_eq!(dependencies, [format!("{PACKAGES}/markupsafe"), format!("{PACKAGES}/pygments")]);
+}
+
+#[test]
 fn the_python_plugins_setting_turns_plugins_off_and_python_interpreter_is_passed_on() {
     let world = World::new()
         .with_plugin_commands(&[("hello", Text)])

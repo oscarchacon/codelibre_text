@@ -24,6 +24,7 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     // Our own `Default` modules that packages import (Sublime's `Default` is not loaded).
     ("Default/__init__.py", include_str!("../../../../assets/python/Default/__init__.py")),
     ("Default/paste_from_history.py", include_str!("../../../../assets/python/Default/paste_from_history.py")),
+    ("Default/exec.py", include_str!("../../../../assets/python/Default/exec.py")),
     // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
     ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
     ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
@@ -184,6 +185,7 @@ impl PluginHostGateway for PythonPluginHost {
                 "name": p.name,
                 "dirs": p.dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
+            "dependencies": request.dependencies.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(),
             "archives": request.archives.iter().map(|(unpacked, archives)| {
                 json!([unpacked.display().to_string(), archives.display().to_string()])
             }).collect::<Vec<_>>(),

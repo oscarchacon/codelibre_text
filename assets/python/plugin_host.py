@@ -3,7 +3,7 @@
 The editor starts it as ``python -I -u plugin_host.py`` and talks to it over stdin/stdout, one
 JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
 
-    editor -> host   {"op": "load", "packages": [{"name": ..., "dirs": [...]}], "paths": {...}}
+    editor -> host   {"op": "load", "packages": [{"name": ..., "dirs": [...]}], "dependencies": [...], "paths": {...}}
     host -> editor   {"op": "loaded", "commands": [[name, kind], ...], "events": [...], "errors": [...]}
     editor -> host   {"op": "run", "kind": ..., "name": ..., "args": {...}, "view": id, "window": id}
     editor -> host   {"op": "event", "name": "on_modified", "view": id}
@@ -273,13 +273,46 @@ def add_library_folders():
         sys.path.append(shims)
 
 
+def dependency_folder(dependency):
+    """The folder of a Package Control 3 dependency to import from, picked as Package Control 4
+    picks it when it migrates one to a library: compiled builds only for the Python we run, then
+    pure Python ones. ``st3_<platform>`` builds are compiled for Python 3.3 and left out."""
+    py = "%d%d" % sys.version_info[:2]
+    platform, arch = sublime.platform(), sublime.arch()
+    for name in ("st4_py%s_%s_%s" % (py, platform, arch), "st4_py%s_%s" % (py, platform), "st4_py38", "st4", "st3", "all"):
+        folder = os.path.join(dependency, name)
+        if os.path.isdir(folder):
+            return folder
+    return None
+
+
+# The dependency folders ``set_dependency_folders`` put on ``sys.path``.
+_dependency_folders = []
+
+
+def set_dependency_folders(dependencies):
+    """Package Control 3's dependencies (``Packages/<dep>/all``…, a profile it never migrated)
+    go on ``sys.path`` after the libraries, which are newer, as its ``0_package_control_loader``
+    did; those of a previous load that are gone come off."""
+    for folder in _dependency_folders:
+        if folder in sys.path:
+            sys.path.remove(folder)
+    _dependency_folders[:] = [f for f in map(dependency_folder, dependencies) if f]
+    shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
+    at = sys.path.index(shims) if shims in sys.path else len(sys.path)
+    sys.path[at:at] = _dependency_folders
+
+
 def load(message):
     """Loads the packages listed, which may be a second time: the packages that are gone or whose
     files changed are unloaded, the new ones loaded, and the others keep running (with their
     threads: Package Control may be installing more packages). ``errors`` are those of every
     loaded package."""
-    sublime._paths.update(message.get("paths") or {})
+    # With the platform's separators, as Sublime gives them: Package Control prefixes them with
+    # ``\\?\`` on Windows, after which ``/`` is not a separator.
+    sublime._paths.update({key: os.path.normpath(path) if path else path for key, path in (message.get("paths") or {}).items()})
     add_library_folders()
+    set_dependency_folders(message.get("dependencies") or [])
     wanted = [(package["name"], package["dirs"]) for package in message.get("packages", [])]
     signatures = {name: package_signature(dirs) for name, dirs in wanted}
     for name in reversed(list(_packages)):

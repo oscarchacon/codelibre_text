@@ -31,6 +31,7 @@ impl Editor {
         self.state.keymap = resources.keymap;
         self.state.main_menu = resources.main_menu;
         self.state.palette = resources.palette;
+        self.state.completion_sets = None;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
         self.load_translations(&mut errors);
         self.record_errors(&errors);

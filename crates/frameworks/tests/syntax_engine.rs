@@ -142,6 +142,31 @@ fn package_color_schemes_are_loaded_in_both_formats() {
     assert_eq!(mine.settings.background.map(to_color32), Some(egui::Color32::from_rgb(1, 2, 3)));
 }
 
+#[test]
+fn styles_for_plugins_come_from_the_scheme_rules() {
+    let (dir, mut engine) = engine();
+    let scheme = r##"{
+        "name": "Mine",
+        "globals": { "foreground": "#F0F0F0", "background": "#010203", "selection": "#11223380" },
+        "rules": [
+            { "scope": "string", "foreground": "#AA0000", "font_style": "bold italic" },
+            { "scope": "string.quoted.double", "background": "#002200" }
+        ]
+    }"##;
+    write(&dir, "User/Mine.sublime-color-scheme", scheme);
+    engine.reload(false, &mut Vec::new());
+    let style = engine.scheme_style("Mine");
+    assert_eq!(style["foreground"], "#f0f0f0");
+    assert_eq!(style["background"], "#010203");
+    assert_eq!(style["selection"], "#11223380", "not opaque: with its alpha");
+    assert_eq!(style["caret"], "#f0f0f0", "no caret: the foreground");
+
+    let string = engine.scope_style("Mine", "source.python string.quoted.double.python");
+    assert_eq!(serde_json::Value::Object(string), serde_json::json!({"foreground": "#aa0000", "background": "#002200", "bold": true, "italic": true}));
+    let plain = engine.scope_style("Mine", "source.python");
+    assert_eq!(serde_json::Value::Object(plain), serde_json::json!({"foreground": "#f0f0f0"}));
+}
+
 // ----- highlighting --------------------------------------------------------------------------------
 
 #[test]

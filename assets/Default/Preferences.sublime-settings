@@ -47,6 +47,20 @@
 	// Trim on save only the lines changed since the file was last saved.
 	"trim_only_modified_white_space": true,
 
+	// Show the auto-complete list while typing a word where "auto_complete_selector" matches,
+	// or a character of "auto_complete_triggers" (Ctrl+Space shows it anywhere). It offers the
+	// plugins' completions, the packages' .sublime-completions and snippets, and the file's words.
+	"auto_complete": true,
+	"auto_complete_selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+	"auto_complete_triggers": [{ "selector": "text.html, text.xml", "characters": "<" }],
+	// Files larger than this (in bytes) do not show it while typing.
+	"auto_complete_size_limit": 4194304,
+	// Tab commits the selected completion; also Enter unless this is true.
+	"auto_complete_commit_on_tab": false,
+
+	// Tab after a snippet's or a completion's trigger (typed in full) inserts it.
+	"tab_completion": true,
+
 	// Copy and cut with nothing selected take the whole line; pasting that line
 	// puts it above the caret's line.
 	"copy_with_empty_selection": true,

@@ -7,8 +7,10 @@ use use_cases::gateways::{ArchiveFolder, PackagePaths};
 
 pub fn package_paths() -> PackagePaths {
     // A scratch profile for trying things out: nothing of the user's is read or written.
+    // Its parts are joined again with the platform's separator: `C:/x` becomes `C:\x`, as Sublime
+    // gives paths to plugins (Package Control prefixes them with `\\?\`, which takes no `/`).
     if let Some(data) = std::env::var_os("CODELIBRE_TEXT_DATA") {
-        let packages = PathBuf::from(data).join("Packages");
+        let packages = Path::new(&data).components().collect::<PathBuf>().join("Packages");
         let archive_folders = archive_folders(&packages, None).into_iter().filter(|f| !f.sublime).collect();
         return PackagePaths { packages, sublime_packages: None, archive_folders };
     }

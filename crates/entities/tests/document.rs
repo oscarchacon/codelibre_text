@@ -362,6 +362,26 @@ fn region_set(key: &str, regions: &[(usize, usize)]) -> RegionSet {
 }
 
 #[test]
+fn phantoms_move_with_the_text_and_are_erased_by_key_or_id() {
+    let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
+    let phantom = |id: u64, key: &str, region: (usize, usize)| Phantom { id, key: key.into(), region, content: "<b>x</b>".into(), layout: 2 };
+    doc.add_phantom(phantom(1, "lint", (4, 7)));
+    doc.add_phantom(phantom(2, "lint", (8, 13)));
+    doc.add_phantom(phantom(3, "other", (0, 0)));
+    doc.replace_range(0, 0, ">> ");
+    let regions: Vec<_> = doc.phantoms().iter().map(|p| p.region).collect();
+    assert_eq!(regions, vec![(7, 10), (11, 16), (3, 3)], "an insertion at a caret-like region goes before it");
+    // The widget edits the text in place.
+    doc.text.insert(0, '#');
+    doc.note_text_changed();
+    assert_eq!(doc.phantoms()[0].region, (8, 11));
+    doc.erase_phantom(1);
+    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![2, 3]);
+    doc.erase_phantoms("lint");
+    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![3]);
+}
+
+#[test]
 fn plugin_regions_move_with_the_text() {
     let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
     doc.add_regions(region_set("lint", &[(4, 7), (8, 13)]));

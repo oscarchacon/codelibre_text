@@ -18,9 +18,11 @@ use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::{EditorViewModel, RegionViewModel, Underline};
+use interface_adapters::view_models::{AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PopupViewModel, RegionViewModel, Underline};
+use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
+use crate::views::minihtml_view::{show_lines, HtmlColors};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
 const POINTS_TO_PIXELS: f32 = 4.0 / 3.0;
@@ -83,10 +85,17 @@ pub fn show(
     // and moving the carets go to the use cases too.
     let has_focus = ctx.memory(|m| m.has_focus(id));
     let mut key_events = Vec::new();
+    // What the widget is about to type (it may open the auto-complete list).
+    let mut typed = String::new();
     if has_focus && matches!(text, EditorText::Editable(_)) {
         ui.input_mut(|i| {
             if !model.extra_selections.is_empty() {
                 key_events.extend(take_multi_selection_keys(i));
+            }
+            for event in &i.events {
+                if let Event::Text(text) = event {
+                    typed.push_str(text);
+                }
             }
             if i.consume_key(Modifiers::NONE, Key::Tab) {
                 key_events.push(UiEvent::TabPressed);
@@ -175,6 +184,9 @@ pub fn show(
                 if selection != model.selection || output.response.changed() {
                     events.push(UiEvent::SelectionChanged(model.document, selection));
                 }
+                if output.response.changed() && !typed.is_empty() {
+                    events.push(UiEvent::TextTyped(model.document, std::mem::take(&mut typed)));
+                }
 
                 let galley = &output.galley;
                 let origin = output.galley_pos;
@@ -218,6 +230,23 @@ pub fn show(
 
                 paint_gutter(ui, model, text, galley, origin, viewport, gutter_width, char_width, row_height, &font, &colors, selection);
                 paint_region_icons(ui, model, &region_colors, galley, origin, viewport, gutter_width, char_width, row_height);
+
+                let html_colors = HtmlColors {
+                    foreground: colors.foreground,
+                    background: colors.background,
+                    link: colors.caret,
+                };
+                let html_size = font.size * 0.9;
+                show_phantoms(ui, model, galley, origin, viewport, char_width, html_size, &html_colors, &colors, events);
+                if let Some(popup) = &model.popup {
+                    show_popup(ui, model.document, popup, galley, origin, viewport, html_size, &html_colors, &colors, events);
+                }
+                if let Some(list) = &model.auto_complete {
+                    show_auto_complete(ui, model.document, list, galley, origin, viewport, &font, row_height, &html_colors, &colors, events);
+                }
+                if model.report_hover {
+                    report_hover(ui, model.document, galley, origin, viewport, gutter_width, events);
+                }
 
                 if reveal {
                     ui.scroll_to_rect(caret.expand2(egui::vec2(char_width * 4.0, row_height * 4.0)), None);
@@ -478,6 +507,299 @@ fn paint_gutter(
             line += 1;
         }
     }
+}
+
+/// How long the mouse rests before `on_hover`, in seconds (Sublime's is about this).
+const HOVER_DELAY: f32 = 0.5;
+
+/// Plugins' phantoms on screen, after the end of the row of their point (several on one row side
+/// by side). They are drawn over the text, which makes no room for them yet.
+#[allow(clippy::too_many_arguments)]
+fn show_phantoms(
+    ui: &egui::Ui,
+    model: &EditorViewModel,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    char_width: f32,
+    font_size: f32,
+    html_colors: &HtmlColors,
+    colors: &Colors,
+    events: &mut Vec<UiEvent>,
+) {
+    let visible = visible_chars(galley, origin, viewport);
+    let mut next_x: HashMap<usize, f32> = HashMap::new();
+    for phantom in model.phantoms.iter().filter(|p| p.point >= visible.start && p.point <= visible.end) {
+        let at = galley.pos_from_ccursor(CCursor::new(phantom.point));
+        let Some((row_index, row)) = galley.rows.iter().enumerate().find(|(_, r)| (r.rect.top() - at.top()).abs() < 0.5) else {
+            continue;
+        };
+        let x = *next_x.entry(row_index).or_insert(origin.x + row.rect.right() + char_width * 2.0);
+        let position = egui::pos2(x, origin.y + row.rect.top());
+        let response = egui::Area::new(Id::new(("plugin_phantom", model.document, phantom.id)))
+            .order(egui::Order::Middle)
+            .fixed_pos(position)
+            .constrain(false)
+            .show(ui.ctx(), |ui| {
+                ui.set_clip_rect(viewport);
+                egui::Frame::new()
+                    .fill(blend(colors.background, colors.foreground, 0.08))
+                    .corner_radius(3.0)
+                    .inner_margin(egui::Margin::symmetric(4, 0))
+                    .show(ui, |ui| {
+                        ui.set_max_width((viewport.right() - x - 8.0).max(char_width * 20.0));
+                        show_lines(ui, &phantom.lines, html_colors, font_size)
+                    })
+                    .inner
+            });
+        if let Some(href) = response.inner {
+            events.push(UiEvent::PhantomLinkClicked { phantom: phantom.id, href });
+        }
+        next_x.insert(row_index, x + response.response.rect.width() + char_width);
+    }
+}
+
+/// A plugin's popup, below the char it points at (above it when there is no room).
+#[allow(clippy::too_many_arguments)]
+fn show_popup(
+    ui: &egui::Ui,
+    document: DocumentId,
+    popup: &PopupViewModel,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    font_size: f32,
+    html_colors: &HtmlColors,
+    colors: &Colors,
+    events: &mut Vec<UiEvent>,
+) {
+    let at = galley.pos_from_ccursor(CCursor::new(popup.location)).translate(origin.to_vec2());
+    if !viewport.intersects(at) {
+        return;
+    }
+    let ctx = ui.ctx();
+    let id = Id::new(("plugin_popup", document));
+    // Its size last frame decides whether it fits below.
+    let last_height = ctx.memory(|m| m.area_rect(id)).map_or(0.0, |r| r.height());
+    let below = at.bottom() + 2.0 + last_height <= viewport.bottom() || at.top() - last_height - 2.0 < viewport.top();
+    let (position, pivot) = if below {
+        (egui::pos2(at.left(), at.bottom() + 2.0), Align2::LEFT_TOP)
+    } else {
+        (egui::pos2(at.left(), at.top() - 2.0), Align2::LEFT_BOTTOM)
+    };
+    let response = egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(position)
+        .pivot(pivot)
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style())
+                .fill(blend(colors.background, colors.foreground, 0.06))
+                .stroke(Stroke::new(1.0_f32, colors.guide))
+                .show(ui, |ui| {
+                    ui.set_max_width(popup.max_width);
+                    egui::ScrollArea::vertical()
+                        .max_height(popup.max_height)
+                        .auto_shrink([true, true])
+                        .show(ui, |ui| show_lines(ui, &popup.lines, html_colors, font_size))
+                        .inner
+                })
+                .inner
+        });
+    if let Some(href) = response.inner {
+        events.push(UiEvent::PopupLinkClicked(href));
+    }
+    if popup.hide_on_mouse_move_away {
+        let keep = response.response.rect.union(at).expand(24.0);
+        if ctx.pointer_hover_pos().is_some_and(|p| !keep.contains(p)) {
+            events.push(UiEvent::PopupDismissed);
+        }
+    }
+}
+
+/// Rows of the auto-complete list shown at once (it scrolls past them).
+const AUTO_COMPLETE_ROWS: usize = 12;
+
+/// The auto-complete list, below the typed word (above it when there is no room): a kind badge,
+/// the trigger with the typed chars highlighted, the annotation at the right; the selected
+/// completion's details under it. A click commits a row.
+#[allow(clippy::too_many_arguments)]
+fn show_auto_complete(
+    ui: &egui::Ui,
+    document: DocumentId,
+    list: &AutoCompleteViewModel,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    font: &FontId,
+    row_height: f32,
+    html_colors: &HtmlColors,
+    colors: &Colors,
+    events: &mut Vec<UiEvent>,
+) {
+    let at = galley.pos_from_ccursor(CCursor::new(list.location)).translate(origin.to_vec2());
+    if !viewport.intersects(at) {
+        return;
+    }
+    let ctx = ui.ctx();
+    let id = Id::new(("auto_complete", document));
+    let char_width = ui.fonts(|f| f.glyph_width(font, '0'));
+    let longest = list.items.iter().map(|i| i.trigger.chars().count() + i.annotation.chars().count() + 6).max().unwrap_or(10);
+    let width = (longest as f32 * char_width).clamp(char_width * 24.0, char_width * 70.0);
+    let row = row_height + 2.0;
+    let list_height = row * list.items.len().min(AUTO_COMPLETE_ROWS) as f32;
+    let last_height = ctx.memory(|m| m.area_rect(id)).map_or(list_height, |r| r.height());
+    let below = at.bottom() + 2.0 + last_height <= viewport.bottom() || at.top() - last_height - 2.0 < viewport.top();
+    let (position, pivot) = if below {
+        (egui::pos2(at.left(), at.bottom() + 2.0), Align2::LEFT_TOP)
+    } else {
+        (egui::pos2(at.left(), at.top() - 2.0), Align2::LEFT_BOTTOM)
+    };
+    let background = blend(colors.background, colors.foreground, 0.06);
+    let accent = if colors.background.r() as u16 + colors.background.g() as u16 + colors.background.b() as u16 > 384 {
+        Color32::from_rgb(0, 102, 204)
+    } else {
+        Color32::from_rgb(102, 217, 239)
+    };
+    // Scroll to the selected row only when it changes, so the wheel still scrolls the list.
+    let scrolled_key = Id::new(("auto_complete_scrolled", document));
+    let scroll_to_selected = ctx.data(|d| d.get_temp::<usize>(scrolled_key)) != Some(list.selected);
+    ctx.data_mut(|d| d.insert_temp(scrolled_key, list.selected));
+
+    let mut clicked = None;
+    egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(position)
+        .pivot(pivot)
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style())
+                .fill(background)
+                .stroke(Stroke::new(1.0_f32, colors.guide))
+                .inner_margin(egui::Margin::same(2))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    // Without a minimum, an area's scroll area keeps to egui's 64 px.
+                    let scroll = egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height);
+                    scroll.auto_shrink([false, true]).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::ZERO;
+                        for (index, item) in list.items.iter().enumerate() {
+                            let (rect, response) = ui.allocate_exact_size(egui::vec2(width, row), egui::Sense::CLICK);
+                            if index == list.selected {
+                                ui.painter().rect_filled(rect, 2.0, colors.selection);
+                                if scroll_to_selected {
+                                    ui.scroll_to_rect(rect, None);
+                                }
+                            } else if response.hovered() {
+                                ui.painter().rect_filled(rect, 2.0, blend(background, colors.foreground, 0.06));
+                            }
+                            if response.clicked() {
+                                clicked = Some(index);
+                            }
+                            paint_completion_row(ui, rect, item, font, char_width, colors, accent);
+                        }
+                    });
+                    if !list.details.is_empty() {
+                        ui.separator();
+                        show_lines(ui, &list.details, html_colors, font.size * 0.9);
+                    }
+                });
+        });
+    if let Some(index) = clicked {
+        events.push(UiEvent::CompletionClicked(index));
+    }
+}
+
+fn paint_completion_row(ui: &egui::Ui, rect: Rect, item: &CompletionViewModel, font: &FontId, char_width: f32, colors: &Colors, accent: Color32) {
+    let painter = ui.painter().with_clip_rect(rect);
+    let badge = Rect::from_min_size(rect.left_top() + egui::vec2(3.0, 2.0), egui::vec2(char_width * 1.6, rect.height() - 4.0));
+    if !item.kind_letter.is_empty() {
+        painter.rect_filled(badge, 3.0, kind_color(item.kind_id).gamma_multiply(0.85));
+        painter.text(badge.center(), Align2::CENTER_CENTER, &item.kind_letter, font.clone(), Color32::BLACK);
+    }
+    let mut job = egui::text::LayoutJob::default();
+    for (index, c) in item.trigger.chars().enumerate() {
+        let matched = item.matched.contains(&index);
+        let format = egui::TextFormat {
+            font_id: font.clone(),
+            color: if matched { accent } else { colors.foreground },
+            underline: if matched { Stroke::new(1.0_f32, accent) } else { Stroke::NONE },
+            ..Default::default()
+        };
+        job.append(c.encode_utf8(&mut [0; 4]), 0.0, format);
+    }
+    let trigger = ui.fonts(|f| f.layout_job(job));
+    let text_left = badge.right() + char_width * 0.8;
+    painter.galley(egui::pos2(text_left, rect.center().y - trigger.size().y / 2.0), trigger.clone(), colors.foreground);
+    if !item.annotation.is_empty() {
+        let left = text_left + trigger.size().x + char_width * 2.0;
+        let annotation = ui.fonts(|f| f.layout_no_wrap(item.annotation.clone(), font.clone(), colors.gutter_foreground));
+        let x = (rect.right() - annotation.size().x - char_width).max(left);
+        painter.galley(egui::pos2(x, rect.center().y - annotation.size().y / 2.0), annotation, colors.gutter_foreground);
+    }
+}
+
+/// The badge color of Sublime's `KindId`s (and its `KIND_ID_COLOR_*`).
+fn kind_color(kind: u8) -> Color32 {
+    match kind {
+        1 | 16 => Color32::from_rgb(249, 38, 114),  // keyword: pinkish
+        2 | 15 => Color32::from_rgb(174, 129, 255), // type: purplish
+        3 | 10 => Color32::from_rgb(253, 151, 31),  // function: orangish
+        4 | 14 => Color32::from_rgb(102, 153, 255), // namespace: bluish
+        5 | 11 => Color32::from_rgb(230, 219, 116), // navigation: yellowish
+        6 | 9 => Color32::from_rgb(240, 90, 80),    // markup: redish
+        7 | 13 => Color32::from_rgb(102, 217, 239), // variable: cyanish
+        8 | 12 => Color32::from_rgb(166, 226, 46),  // snippet: greenish
+        _ => Color32::from_gray(170),
+    }
+}
+
+/// When the mouse has rested over the text, the gutter or after a line for [`HOVER_DELAY`], says
+/// where once (`on_hover`); nothing over a popup or panel on top.
+fn report_hover(
+    ui: &egui::Ui,
+    document: DocumentId,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    gutter_width: f32,
+    events: &mut Vec<UiEvent>,
+) {
+    let ctx = ui.ctx();
+    let key = Id::new(("hover_reported", document));
+    let Some(pointer) = ctx.pointer_hover_pos().filter(|p| viewport.contains(*p)) else {
+        ctx.data_mut(|d| d.remove::<(usize, u8)>(key));
+        return;
+    };
+    if ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
+        return;
+    }
+    let still = ctx.input(|i| i.pointer.time_since_last_movement());
+    if still < HOVER_DELAY {
+        ctx.data_mut(|d| d.remove::<(usize, u8)>(key));
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(HOVER_DELAY - still + 0.02));
+        return;
+    }
+    let point = galley.cursor_from_pos(pointer - origin).ccursor.index;
+    let row = galley.rows.iter().find(|r| pointer.y >= origin.y + r.rect.top() && pointer.y < origin.y + r.rect.bottom());
+    let zone = if pointer.x < viewport.left() + gutter_width {
+        HoverZone::Gutter
+    } else if row.is_some_and(|r| pointer.x > origin.x + r.rect.right()) {
+        HoverZone::Margin
+    } else {
+        HoverZone::Text
+    };
+    let reported = (point, zone as u8);
+    if ctx.data(|d| d.get_temp::<(usize, u8)>(key)) != Some(reported) {
+        ctx.data_mut(|d| d.insert_temp(key, reported));
+        events.push(UiEvent::Hover { document, point, zone });
+    }
+}
+
+/// `a` moved towards `b` by `amount` (0 to 1).
+fn blend(a: Color32, b: Color32, amount: f32) -> Color32 {
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * amount).round() as u8;
+    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }
 
 /// Editor colors from the color scheme's globals, with sensible fallbacks.

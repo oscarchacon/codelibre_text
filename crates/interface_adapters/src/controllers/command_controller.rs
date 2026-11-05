@@ -8,6 +8,7 @@ use entities::command::Command;
 use entities::document::LineEnding;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
+use use_cases::completions::AutoCompleteOptions;
 use use_cases::editing::{Expansion, TextCommand};
 use use_cases::gateways::PluginCommandKind;
 use use_cases::plugin_hooks::CommandTarget;
@@ -85,6 +86,18 @@ fn show_build_picker(editor: &mut Editor, view: &mut ViewState) {
 pub fn answer_plugin_quick_panel(editor: &mut Editor, view: &mut ViewState, item: Option<usize>) {
     editor.answer_plugin_quick_panel(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
     view.focus_editor = true;
+    show_plugin_panels(editor, view);
+}
+
+/// A link clicked in a plugin's popup: its `on_navigate`.
+pub fn navigate_plugin_popup(editor: &mut Editor, view: &mut ViewState, href: &str) {
+    editor.navigate_plugin_popup(href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
+/// A link clicked in a plugin's phantom: its `on_navigate`.
+pub fn navigate_plugin_phantom(editor: &mut Editor, view: &mut ViewState, phantom: u64, href: &str) {
+    editor.navigate_plugin_phantom(phantom, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
     show_plugin_panels(editor, view);
 }
 
@@ -325,6 +338,24 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "replace_next" => editor.replace_next(),
         "replace_all" => editor.replace_all(),
 
+        // ----- auto-complete -------------------------------------------------------------------
+        "auto_complete" => editor.show_auto_complete(AutoCompleteOptions {
+            api_only: command.bool_arg("api_completions_only", false),
+            snippets_only: command.bool_arg("snippets_only", false),
+            commit_single: command.bool_arg("commit_single", false),
+        }),
+        "hide_auto_complete" => editor.hide_auto_complete(),
+        "commit_completion" => editor.commit_completion(None),
+        "insert_best_completion" => {
+            if !editor.insert_best_completion(command.bool_arg("exact", false)) {
+                match command.str_arg("default") {
+                    "\t" => insert_tab(editor),
+                    "" => {}
+                    other => editor.run_text_command(TextCommand::Insert(other.to_string())),
+                }
+            }
+        }
+
         // ----- view ----------------------------------------------------------------------------
         "toggle_side_bar" => view.show_side_bar = !view.show_side_bar,
         "toggle_status_bar" => view.show_status_bar = !view.show_status_bar,
@@ -456,6 +487,15 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     run_editing_command(editor, &rewritten);
     editor.plugin_command_ran(&rewritten, CommandTarget::View);
     true
+}
+
+/// What Tab does in the text: a tab (or spaces, or indentation) at every selection.
+pub fn insert_tab(editor: &mut Editor) {
+    if editor.active_document().is_some_and(|d| !d.extra_selections().is_empty()) {
+        editor.insert_at_selections("\t");
+    } else {
+        editor.run_text_command(TextCommand::InsertTab);
+    }
 }
 
 /// Closes the quick panel and gives the focus back to the text.

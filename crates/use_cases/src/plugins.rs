@@ -8,6 +8,7 @@
 //! `docs/plugins.md`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 use entities::command::Command;
 use entities::document::DocumentId;
@@ -25,6 +26,8 @@ const MAX_DEPTH: usize = 16;
 /// At most this many messages are answered per frame, so a busy plugin thread cannot freeze the window.
 const MAX_IDLE_MESSAGES: usize = 1000;
 const CONSOLE_NAME: &str = "Console";
+/// Package Control 3's package that put its dependencies on `sys.path` (see `plugin_packages`).
+const DEPENDENCY_LOADER: &str = "0_package_control_loader";
 
 /// Runs another command (built-in or plugin) when a plugin calls `run_command`. The command
 /// controller passes itself in: built-in commands live in an outer circle.
@@ -70,6 +73,14 @@ pub struct PluginState {
     change_counts: HashMap<DocumentId, u64>,
     selections: Option<(DocumentId, Vec<Selection>)>,
     depth: usize,
+    /// The popup a plugin shows (`view.show_popup`), see `plugin_popups`.
+    pub(crate) popup: Option<crate::plugin_popups::PluginPopup>,
+    /// The `on_navigate` callback of each phantom that has one, by phantom id.
+    pub(crate) phantom_callbacks: HashMap<u64, u64>,
+    pub(crate) next_phantom_id: u64,
+    /// Callbacks to run at the next [`Editor::poll_plugins`] (a popup's `on_hide` when it was
+    /// hidden in the middle of a plugin's call): (callback id, name, arguments).
+    pub(crate) pending_callbacks: Vec<(u64, String, Value)>,
 }
 
 impl PluginState {
@@ -90,10 +101,10 @@ impl Editor {
         let old_errors = std::mem::take(&mut self.state.plugins.errors);
         self.state.load_errors.retain(|e| !old_errors.contains(e));
         let settings = self.global_settings();
-        let packages = if settings.bool("python_plugins", true) {
+        let (packages, dependencies) = if settings.bool("python_plugins", true) {
             self.plugin_packages()
         } else {
-            Vec::new()
+            Default::default()
         };
         if packages.is_empty() {
             self.gateways.plugins.stop();
@@ -102,6 +113,7 @@ impl Editor {
         }
         let request = PluginLoad {
             packages,
+            dependencies,
             packages_path: self.gateways.resources.paths().packages.clone(),
             archives: self.gateways.resources.paths().archive_folders.iter().map(|f| (f.unpacked.clone(), f.archives.clone())).collect(),
             shipped_packages: self.gateways.resources.paths().archive_folders.iter().find(|f| f.shipped).map(|f| f.archives.clone()),
@@ -218,6 +230,11 @@ impl Editor {
         }
         for command in std::mem::take(&mut self.state.plugins.queued_commands) {
             run_command(self, &command);
+        }
+        self.hide_popup_if_moved_away();
+        self.update_auto_complete();
+        for (callback, name, args) in std::mem::take(&mut self.state.plugins.pending_callbacks) {
+            self.plugin_callback(callback, &name, args, run_command);
         }
         self.notice_text_changes();
         self.notice_changes();
@@ -428,23 +445,35 @@ impl Editor {
     /// Packages with `.py` files at their top level, in Sublime's order (`User` last), each with
     /// its folders in load order. Sublime's own `Default` package is skipped (it is written for
     /// Sublime's native core), and so are the `ignored_packages`.
-    fn plugin_packages(&self) -> Vec<PluginPackage> {
+    ///
+    /// Also Package Control 3's dependencies, one folder each (a later root's wins): they are
+    /// libraries, not plugins. Its `0_package_control_loader` package, which put them on
+    /// `sys.path`, is not loaded: the host does that.
+    fn plugin_packages(&self) -> (Vec<PluginPackage>, Vec<PathBuf>) {
         let settings = self.global_settings();
         let ignored = settings.get("ignored_packages").and_then(Value::as_array).cloned().unwrap_or_default();
         let paths = self.gateways.resources.paths();
         let own = paths.packages.clone();
         let fs = &self.gateways.file_system;
         let mut packages: Vec<PluginPackage> = Vec::new();
+        let mut dependencies: Vec<(String, PathBuf)> = Vec::new();
         for root in paths.roots(settings.bool("import_sublime_packages", true)) {
             for entry in fs.list_dir(&root).into_iter().filter(|e| e.is_dir) {
                 let name = entry.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if (root != own && name == "Default") || ignored.iter().any(|i| i.as_str() == Some(&name)) {
+                if (root != own && name == "Default")
+                    || name == DEPENDENCY_LOADER
+                    || ignored.iter().any(|i| i.as_str() == Some(&name))
+                {
                     continue;
                 }
-                let has_plugins = fs
-                    .list_dir(&entry.path)
-                    .iter()
-                    .any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
+                let files = fs.list_dir(&entry.path);
+                let has_file = |file_name: &str| files.iter().any(|f| !f.is_dir && f.path.file_name().is_some_and(|n| n == file_name));
+                if has_file("dependency-metadata.json") || has_file(".sublime-dependency") {
+                    dependencies.retain(|(n, _)| *n != name);
+                    dependencies.push((name, entry.path));
+                    continue;
+                }
+                let has_plugins = files.iter().any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
                 if !has_plugins {
                     continue;
                 }
@@ -462,7 +491,8 @@ impl Editor {
             };
             (rank, p.name.to_lowercase())
         });
-        packages
+        dependencies.sort_by_key(|(name, _)| name.to_lowercase());
+        (packages, dependencies.into_iter().map(|(_, path)| path).collect())
     }
 
     /// The host died or stopped answering: say so, and stop sending it events.

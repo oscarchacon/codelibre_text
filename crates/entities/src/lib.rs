@@ -8,11 +8,13 @@
 
 pub mod build;
 pub mod command;
+pub mod completion;
 pub mod document;
 pub mod find;
 pub mod keymap;
 pub mod localization;
 pub mod menu;
+pub mod minihtml;
 pub mod selection;
 pub mod selector;
 pub mod settings;

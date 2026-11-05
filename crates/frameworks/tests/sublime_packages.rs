@@ -576,6 +576,169 @@ fn package_control_upgrades_itself_then_the_other_packages() {
     assert!(!editor.state().console.contains("Traceback"));
 }
 
+/// Writes a profile in `dir` as Package Control 3 left it: its `0_package_control_loader` in
+/// `Installed Packages` and the dependency `oldlib` in `Packages/oldlib/all`, plus a package
+/// `Uses` whose command prints where it imported `oldlib` from. Package Control comes from `source`.
+fn write_package_control_3_profile(dir: &Path, source: &Path) {
+    use std::io::Write;
+    let archives = dir.join("Installed Packages");
+    std::fs::create_dir_all(&archives).unwrap();
+    std::fs::copy(source, archives.join("Package Control.sublime-package")).unwrap();
+    let mut loader = zip::ZipWriter::new(std::fs::File::create(archives.join("0_package_control_loader.sublime-package")).unwrap());
+    for (name, contents) in [
+        ("dependency-metadata.json", r#"{"version": "1.0.0", "description": "Package Control loader"}"#),
+        ("00-package_control.py", ""),
+        ("50-oldlib.py", "from package_control import sys_path\nsys_path.add_dependency('oldlib')\n"),
+    ] {
+        loader.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        loader.write_all(contents.as_bytes()).unwrap();
+    }
+    loader.finish().unwrap();
+    let packages = dir.join("Packages");
+    let write = |path: &str, contents: &str| {
+        let path = packages.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    };
+    write(
+        "oldlib/dependency-metadata.json",
+        r#"{"version": "1.2.0", "description": "An old-style dependency", "url": "https://example.com/oldlib"}"#,
+    );
+    write("oldlib/all/oldlib.py", "VALUE = 'old'\n");
+    write(
+        "Uses/plugin.py",
+        "import sublime_plugin\n\nclass WhereIsOldlibCommand(sublime_plugin.ApplicationCommand):\n    def run(self):\n        import oldlib\n        print('oldlib from', oldlib.__file__)\n",
+    );
+    write("User/Package Control.sublime-settings", r#"{"installed_packages": ["Package Control"], "auto_upgrade": false}"#);
+}
+
+/// The files named `name` under `dir`, at any depth.
+fn find_files(dir: &Path, name: &str) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(find_files(&path, name));
+        } else if path.file_name().is_some_and(|n| n == name) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// A profile Package Control 3 left: Package Control 4 moves its dependency to a library in
+/// `Lib`, deletes the dependency's folder and the loader, and plugins import the library. No network.
+#[test]
+#[ignore = "runs the Package Control installed in Sublime Text, in a temporary profile"]
+fn package_control_migrates_package_control_3_dependencies() {
+    let Some(data) = sublime_data_dir() else {
+        return;
+    };
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    if !source.is_file() || find_interpreter(None).is_err() {
+        eprintln!("skipped: no Package Control or no Python here");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write_package_control_3_profile(dir.path(), &source);
+    let loader = dir.path().join("Installed Packages").join("0_package_control_loader.sublime-package");
+    let old = dir.path().join("Packages").join("oldlib");
+
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    let mut view = ViewState::default();
+    // Before the migration the plugin imports it from the dependency's folder.
+    command_controller::run(&mut editor, &mut view, &Command::new("where_is_oldlib"));
+    let before = editor.state().console.clone();
+    assert!(before.contains(&format!("oldlib from {}", old.join("all").join("oldlib.py").display())), "{before}");
+
+    let migrated = run_until(&mut editor, &mut view, 60, |_| !loader.exists() && !old.exists());
+    run_until(&mut editor, &mut view, 5, |_| false);
+    let console = editor.state().console.clone();
+    println!("console:\n{console}");
+    assert!(migrated, "loader {}, oldlib {}", loader.exists(), old.exists());
+    let libraries = find_files(&dir.path().join("Lib"), "oldlib.py");
+    assert_eq!(libraries.len(), 1, "{libraries:?}");
+    assert!(libraries[0].parent().unwrap().join("oldlib-1.2.0.dist-info").is_dir(), "{libraries:?}");
+    assert!(!console.contains("Error trying to migrate"), "{console}");
+    assert!(!console.contains("Traceback"), "{console}");
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+
+    // A new plugin host imports the library (the old one keeps the module it imported).
+    drop(editor);
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    command_controller::run(&mut editor, &mut view, &Command::new("where_is_oldlib"));
+    let after = editor.state().console.clone();
+    assert!(after.contains(&format!("oldlib from {}", libraries[0].display())), "{after}");
+}
+
+/// Removing a package with a file nobody can delete or move (another program has it open, as
+/// Windows locks files in use): Package Control leaves `package-control.cleanup` in its folder and
+/// deletes the folder at the next start, once the file is free. No network.
+#[cfg(windows)]
+#[test]
+#[ignore = "runs the Package Control installed in Sublime Text, in a temporary profile"]
+fn package_control_removes_a_locked_package_at_the_next_start() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let Some(data) = sublime_data_dir() else {
+        return;
+    };
+    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    if !source.is_file() || find_interpreter(None).is_err() {
+        eprintln!("skipped: no Package Control or no Python here");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let archives = dir.path().join("Installed Packages");
+    std::fs::create_dir_all(&archives).unwrap();
+    std::fs::copy(&source, archives.join("Package Control.sublime-package")).unwrap();
+    let packages = dir.path().join("Packages");
+    let fake = packages.join("Fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    std::fs::create_dir_all(packages.join("User")).unwrap();
+    std::fs::write(fake.join("package-metadata.json"), r#"{"name": "Fake", "version": "1.0.0", "description": "A package to remove", "platforms": ["*"], "sublime_text": "*"}"#).unwrap();
+    std::fs::write(fake.join("fake.py"), "import sublime_plugin\n\nclass FakeHelloCommand(sublime_plugin.WindowCommand):\n    def run(self):\n        print('hello')\n").unwrap();
+    std::fs::write(fake.join("data.bin"), b"in use").unwrap();
+    let settings = serde_json::json!({ "installed_packages": ["Fake", "Package Control"], "auto_upgrade": false });
+    std::fs::write(packages.join("User").join("Package Control.sublime-settings"), settings.to_string()).unwrap();
+
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    let mut view = ViewState::default();
+    assert!(run_until(&mut editor, &mut view, 30, |e| e.is_plugin_command("remove_package") && e.is_plugin_command("fake_hello")));
+    run_until(&mut editor, &mut view, 5, |_| false);
+
+    // While this handle is open others may read it (Package Control backs it up) but not delete
+    // or move it (FILE_SHARE_READ only).
+    let lock = std::fs::OpenOptions::new().read(true).share_mode(1).open(fake.join("data.bin")).unwrap();
+    pick_package(&mut editor, &mut view, "remove_package", "Fake");
+    let cleanup = fake.join("package-control.cleanup");
+    let deferred = run_until(&mut editor, &mut view, 60, |e| cleanup.is_file() && !e.is_plugin_command("fake_hello"));
+    run_until(&mut editor, &mut view, 5, |_| false);
+    let console = editor.state().console.clone();
+    println!("first start:\n{console}");
+    assert!(deferred, "cleanup file {}, fake_hello {}", cleanup.is_file(), editor.is_plugin_command("fake_hello"));
+    assert!(console.contains("scheduled clean up on next restart"), "{console}");
+    assert!(!console.contains("Traceback"), "{console}");
+    drop(editor);
+    drop(lock);
+
+    let mut editor = scratch_editor(dir.path());
+    editor.start(Vec::new());
+    let removed = run_until(&mut editor, &mut view, 30, |_| !fake.exists());
+    run_until(&mut editor, &mut view, 5, |_| false);
+    let console = editor.state().console.clone();
+    println!("second start:\n{console}");
+    assert!(removed, "{console}");
+    assert!(!console.contains("Traceback"), "{console}");
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+    let pc_settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(packages.join("User").join("Package Control.sublime-settings")).unwrap()).unwrap();
+    assert_eq!(pc_settings["installed_packages"], serde_json::json!(["Package Control"]));
+}
+
 /// Package Control copied to a temporary profile, with nothing else: nothing of the user's is
 /// read or written. Only loads it and lets its timers run; it installs nothing.
 #[test]

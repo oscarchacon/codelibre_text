@@ -14,8 +14,11 @@ use crate::view_state::ViewState;
 const WIDGET_COMMANDS: &[&str] = &[
     "undo", "redo", "redo_or_repeat", "soft_undo", "soft_redo", "copy", "cut", "paste",
     "select_all", "move", "move_to", "left_delete", "right_delete", "delete_word",
-    "insert", "insert_best_completion", "commit_completion",
+    "insert",
 ];
+
+/// Keys that move in the auto-complete list while it shows, and by how many rows.
+const AUTO_COMPLETE_KEYS: &[(&str, isize)] = &[("up", -1), ("down", 1), ("pageup", -8), ("pagedown", 8)];
 
 /// Widget commands with a key event that also run as commands (see [`ViewRequest::WidgetEdit`]):
 /// listeners of text commands hear about them. (Copy, cut and paste have no key event: see
@@ -33,7 +36,21 @@ pub enum KeyHandling {
 
 /// `alternatives`: equivalent readings of the key (logical and physical), see `Keymap::press`.
 pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[KeyCombo]) -> KeyHandling {
+    // Esc closes a plugin's popup first, as in Sublime.
+    if editor.plugin_popup().is_some() && KeyCombo::parse("escape").is_some_and(|escape| alternatives.contains(&escape)) {
+        editor.hide_plugin_popup();
+        return KeyHandling::Consumed;
+    }
+    // The auto-complete list takes the arrow keys while it shows (Enter, Tab and Esc are bindings).
+    if editor.auto_complete_visible() && view.text_has_focus {
+        let moved = AUTO_COMPLETE_KEYS.iter().find(|(name, _)| KeyCombo::parse(name).is_some_and(|combo| alternatives.contains(&combo)));
+        if let Some(&(_, rows)) = moved {
+            editor.move_auto_complete_selection(rows);
+            return KeyHandling::Consumed;
+        }
+    }
     let context = ViewKeyContext {
+        auto_complete_visible: editor.auto_complete_visible(),
         overlay_visible: view.quick_panel.is_some(),
         panel_visible: view.find_panel.visible || view.input_panel.is_some() || editor.shown_output_panel().is_some(),
         // Output panels are not focused: the caret stays in the text.
@@ -102,6 +119,7 @@ fn takes_over_from_widget(editor: &mut Editor, view: &ViewState, command: &str) 
 
 /// Answers keymap `context` conditions from the current screen state.
 struct ViewKeyContext {
+    auto_complete_visible: bool,
     overlay_visible: bool,
     panel_visible: bool,
     panel_has_focus: bool,
@@ -133,9 +151,8 @@ impl KeyContext for ViewKeyContext {
             "panel_has_focus" => Value::Bool(self.panel_has_focus),
             "selection_empty" => Value::Bool(self.selection_empty),
             "num_selections" => Value::from(self.num_selections),
-            "auto_complete_visible" | "has_next_field" | "has_prev_field" | "is_recording" | "popup_visible" => {
-                Value::Bool(false)
-            }
+            "auto_complete_visible" => Value::Bool(self.auto_complete_visible),
+            "has_next_field" | "has_prev_field" | "is_recording" | "popup_visible" => Value::Bool(false),
             k if k.starts_with("setting.") => self.settings.get(&k["setting.".len()..]).cloned().unwrap_or_default(),
             _ => return None,
         };
