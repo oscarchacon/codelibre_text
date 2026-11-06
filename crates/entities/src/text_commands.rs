@@ -1072,6 +1072,23 @@ pub fn delete_at_selections(text: &mut String, selections: &[Selection], forward
     replace_char_ranges(text, &ranges, "")
 }
 
+/// `delete_word` at every selection: removes the selected text, or from the caret to the next
+/// (or previous) word boundary — the blanks before the caret go too when deleting backwards.
+pub fn delete_word_at_selections(text: &mut String, selections: &[Selection], forward: bool) -> Vec<Selection> {
+    let ranges: Vec<(usize, usize)> = selections
+        .iter()
+        .map(|s| {
+            if s.is_empty() {
+                let at = word_boundary(text, s.head, forward, !forward);
+                (s.head.min(at), s.head.max(at))
+            } else {
+                (s.start(), s.end())
+            }
+        })
+        .collect();
+    replace_char_ranges(text, &ranges, "")
+}
+
 /// Replaces sorted char ranges with `insert`; a range overlapping the previous one is cut to fit.
 fn replace_char_ranges(text: &mut String, ranges: &[(usize, usize)], insert: &str) -> Vec<Selection> {
     let inserted = insert.chars().count();

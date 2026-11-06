@@ -155,7 +155,7 @@ const EDITING_COMMANDS: &[&str] = &[
     "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
     "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
     "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert", "insert_snippet", "goto_line",
-    "move", "move_to", "left_delete", "right_delete",
+    "move", "move_to", "left_delete", "right_delete", "delete_word",
 ];
 
 /// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
@@ -166,6 +166,12 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         Some(target) => editor.plugin_rewrite_command(command, target),
         None => command.clone(),
     };
+    run_rewritten(editor, view, command);
+}
+
+/// Runs a command the hooks already answered for: a listener's replacement, or what the text
+/// widget is about to do on its own. It is not asked about again.
+fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
     run_command(editor, view, &command);
     view.last_command = Some(command.name.clone());
@@ -178,6 +184,46 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     } else {
         editor.plugin_command_ran(&command, target);
     }
+}
+
+/// Asks `on_text_command` about what the text widget is about to do by itself — typing,
+/// deleting or moving the caret — and takes the input when a listener exists. `command` is the
+/// command the hooks hear; `replay` is the input the widget gets when nobody replaces it (so
+/// undo, IME and the completion list still work). Returns whether the input was taken.
+///
+/// With several selections the widget only knows the primary one, so the use case does the whole
+/// edit instead of replaying it.
+pub fn hooked_widget_input(editor: &mut Editor, view: &mut ViewState, command: Command, replay: WidgetEdit) -> bool {
+    if !editor.plugins_hear_text_commands() {
+        return false;
+    }
+    let rewritten = editor.plugin_rewrite_command(&command, CommandTarget::View);
+    let several = editor.active_document().is_some_and(|doc| !doc.extra_selections().is_empty());
+    if several {
+        run_rewritten(editor, view, rewritten);
+    } else if rewritten.name == "insert" && command.name == "insert" {
+        // Typing, Enter or Tab: the widget types the listener's characters, if it changed them.
+        // Unchanged, the key itself goes back, so auto-indent and tab expansion still apply.
+        let characters = rewritten.str_arg("characters");
+        let replay = if characters == command.str_arg("characters") {
+            replay
+        } else {
+            WidgetEdit::Insert(characters.to_string())
+        };
+        view.request(ViewRequest::WidgetEdit(replay));
+        view.widget_edits_in_progress.push(WidgetEditInProgress {
+            command: rewritten,
+            target: CommandTarget::View,
+            applied_next_frame: true,
+        });
+    } else if rewritten.same_as(&command) {
+        // What the widget was going to do: give it back the same input, one frame later.
+        view.request(ViewRequest::WidgetEdit(replay));
+        view.widget_edits_in_progress.push(WidgetEditInProgress { command, target: CommandTarget::View, applied_next_frame: true });
+    } else {
+        run_rewritten(editor, view, rewritten);
+    }
+    true
 }
 
 /// Which hooks hear about a command: plugin commands by their kind (application commands have
@@ -521,7 +567,7 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
         "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
         "insert_snippet" => editor.run_text_command(TextCommand::InsertSnippet(command.str_arg("contents").to_string())),
         "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
-        "move" | "move_to" | "left_delete" | "right_delete" => editor.run_view_command_on_active(command),
+        "move" | "move_to" | "left_delete" | "right_delete" | "delete_word" => editor.run_view_command_on_active(command),
         other => unreachable!("{other} is not in EDITING_COMMANDS"),
     }
 }

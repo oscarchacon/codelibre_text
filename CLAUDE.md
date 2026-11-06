@@ -61,7 +61,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
 - Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
-  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
+  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
+  next bullet). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
   (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
@@ -79,7 +80,12 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   threads call the editor between frames (`Editor::poll_plugins`, every frame in `app.rs`). Python code must never write to the
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Every `command_controller::run` asks the plugins' `on_text_command` / `on_window_command` (when some listener has them)
-  and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); those listeners also turn undo / redo / select all / clipboard keys into commands; with the fake host, script one `PluginMessage::Answer` per query.
+  and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); with the fake host, script
+  one `PluginMessage::Answer` per query. With the text focused those listeners also take undo / redo / select all /
+  clipboard keys, typing (`Event::Text`) and the widget's own keys (`app.rs::widget_key_input`: Backspace/Delete,
+  Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
+  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
+  IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)

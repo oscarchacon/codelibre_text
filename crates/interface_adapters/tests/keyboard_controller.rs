@@ -303,7 +303,8 @@ fn widget_keys_become_commands_when_plugins_listen_to_text_commands() {
     let (_world, mut editor, mut view) = hooked_editor(&["on_text_command"]);
     assert!(press(&mut editor, &mut view, "ctrl+z"), "the widget must not undo as well");
     assert_eq!(queued(&mut view), ["undo"]);
-    assert!(!press(&mut editor, &mut view, "ctrl+left"), "moving the caret stays the widget's");
+    assert!(press(&mut editor, &mut view, "ctrl+left"), "the listener hears the caret motion");
+    assert_eq!(queued(&mut view), ["move"]);
 }
 
 #[test]

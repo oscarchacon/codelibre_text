@@ -55,7 +55,7 @@ pub enum Expansion {
 }
 
 /// Built-in commands that work on any view, also the panels', which are not the active document.
-pub(crate) const VIEW_COMMANDS: &[&str] = &["move", "move_to", "left_delete", "right_delete", "select_all", "insert"];
+pub(crate) const VIEW_COMMANDS: &[&str] = &["move", "move_to", "left_delete", "right_delete", "delete_word", "select_all", "insert"];
 
 impl Editor {
     /// [`VIEW_COMMANDS`] on the active view; `move` and `move_to` work on every selection. The
@@ -73,15 +73,27 @@ impl Editor {
         let name = command.name.as_str();
         let extend = command.bool_arg("extend", false);
         let target = command.str_arg(if name == "move" { "by" } else { "to" }).to_string();
+        let settings = self.settings_of(id);
         let doc = self.any_document_mut(id).ok_or("the view is closed")?;
         match name {
             "select_all" => doc.set_selection(Selection::new(0, doc.char_count())),
             "insert" => {
-                let selection = doc.selection();
-                doc.replace_range(selection.start(), selection.end(), command.str_arg("characters"));
+                // Typing goes into every selection; Tab follows the indentation settings.
+                let characters = command.str_arg("characters");
+                let insert = if characters == "\t" && settings.bool("translate_tabs_to_spaces", false) {
+                    " ".repeat(settings.usize("tab_size", 4).max(1))
+                } else {
+                    characters.to_string()
+                };
+                doc.edit_all(|text, selections| tc::replace_selections(text, selections, &insert));
             }
             "left_delete" | "right_delete" => {
                 doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, name == "right_delete"));
+            }
+            "delete_word" => {
+                // Ctrl+Backspace / Ctrl+Delete: `forward` deletes the word after the caret.
+                let forward = command.bool_arg("forward", false);
+                doc.edit_all(|text, selections| tc::delete_word_at_selections(text, selections, forward));
             }
             _ => {
                 let (start, end) = doc.visible_range();
@@ -125,6 +137,11 @@ impl Editor {
     pub fn run_text_command(&mut self, command: TextCommand) {
         if let TextCommand::InsertSnippet(contents) = &command {
             self.insert_snippet(contents);
+            return;
+        }
+        // Typing edits every selection, as the text widget does while there are several.
+        if let TextCommand::Insert(characters) = &command {
+            self.insert_at_selections(characters);
             return;
         }
         let settings = self.view_settings();

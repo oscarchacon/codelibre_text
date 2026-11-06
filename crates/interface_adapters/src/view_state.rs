@@ -58,6 +58,27 @@ pub enum WidgetEdit {
     Copy,
     Cut,
     Paste(String),
+    /// Characters typed, replayed so the widget keeps its undo history and IME.
+    Insert(String),
+    /// A key the widget handles itself (deleting, moving the caret), replayed after the hooks.
+    Key { key: WidgetKey, shift: bool },
+}
+
+/// A key of [`WidgetEdit::Key`]; the framework maps it to the widget's own key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetKey {
+    Backspace,
+    Delete,
+    Enter,
+    Tab,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
 }
 
 /// Requests from the controllers to the window / widgets, carried out by the framework layer.

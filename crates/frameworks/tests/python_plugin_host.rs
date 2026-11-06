@@ -1610,3 +1610,46 @@ class SplitCommand(sublime_plugin.WindowCommand):
     assert!(console.contains("empty [] None [[0, 0, 1, 1], [1, 0, 2, 1]]"), "{console}");
     assert_eq!(editor.active_group(), 1, "the moved view took the focus along");
 }
+
+/// Typing is a command for the plugins: `on_text_command` sees `insert`, may replace the
+/// characters, and `on_post_text_command` is told once the widget typed them.
+#[test]
+fn a_plugin_hears_typing_and_may_replace_the_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class PairCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        self.view.insert(edit, self.view.sel()[0].b, "()")
+
+class TypingListener(sublime_plugin.EventListener):
+    def on_text_command(self, view, command_name, args):
+        if command_name == "insert" and args.get("characters") == "(":
+            return ("pair", None)
+        return None
+
+    def on_post_text_command(self, view, command_name, args):
+        sublime.status_message("after " + command_name)
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+
+    // The listener replaces the typed character with a command of its own.
+    let typed = Command::with_args("insert", json!({ "characters": "(" }));
+    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, interface_adapters::view_state::WidgetEdit::Insert("(".into())));
+    assert_eq!(editor.active_document().unwrap().text, "()");
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after pair");
+
+    // Nobody replaces this one: the widget types it, and the listener hears the end afterwards.
+    let typed = Command::with_args("insert", json!({ "characters": "x" }));
+    let replay = interface_adapters::view_state::WidgetEdit::Insert("x".into());
+    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, replay.clone()));
+    assert_eq!(view.take_requests(), [interface_adapters::view_state::ViewRequest::WidgetEdit(replay)]);
+    command_controller::poll_plugins(&mut editor, &mut view);
+    command_controller::poll_plugins(&mut editor, &mut view);
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after insert");
+}

@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::selection::Selection;
-use interface_adapters::controllers::command_controller::{close_quick_panel, poll_plugins, run, run_during_event};
+use interface_adapters::controllers::command_controller::{close_quick_panel, hooked_widget_input, poll_plugins, run, run_during_event};
 use interface_adapters::gateways::{builtin_resources, sublime_json};
-use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
+use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::{json, Value};
 use test_support::{active_text, open, plugin_call, status, World};
 use use_cases::editing::TextCommand;
@@ -414,6 +414,8 @@ fn text_commands_by_sublime_name() {
         (cmd("title_case"), "ab cd", Selection::new(0, 5), "Ab Cd"),
         (cmd("swap_case"), "aB", caret(0), "Ab"),
         (cmd("transpose"), "ab", caret(1), "ba"),
+        (cmd("delete_word"), "one two", caret(7), "one "),
+        (cmd_with("delete_word", json!({ "forward": true })), "one two", caret(4), "one "),
         (cmd("expand_tabs"), "\tx", caret(0), "    x"),
         (cmd("unexpand_tabs"), "    x", caret(0), "\tx"),
         (cmd("trim_trailing_white_space"), "a  ", caret(0), "a"),
@@ -1045,4 +1047,87 @@ fn the_default_keymaps_bind_what_the_hooks_must_hear() {
         assert_eq!(bound(&format!("{primary}+y")), Some("redo_or_repeat"));
         assert_eq!(bound(&format!("{primary}+a")), Some("select_all"));
     }
+}
+
+#[test]
+fn typing_asks_the_listener_and_replays_it_to_the_widget() {
+    let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let typed = Command::with_args("insert", json!({ "characters": "a" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("a".into())));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("a".into()))]);
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries[0].0, "on_text_command");
+    assert_eq!(queries[0].2, json!(["insert", { "characters": "a" }]));
+    drop(queries);
+
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(world.plugins.queries.borrow().len(), 1, "the widget has not typed it yet");
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    poll_plugins(&mut editor, &mut view);
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries[1].0, "on_post_text_command");
+    assert_eq!(queries[1].2, json!(["insert", { "characters": "a" }]));
+}
+
+#[test]
+fn a_listener_replaces_the_typed_characters_the_widget_receives() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "()" }]))]);
+    let typed = Command::with_args("insert", json!({ "characters": "(" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("(".into())));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("()".into()))]);
+}
+
+#[test]
+fn typing_with_several_selections_edits_all_of_them() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "abc\nabc", Selection::caret(1));
+    editor.add_carets_on_next_line(true);
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    let typed = Command::with_args("insert", json!({ "characters": "x" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("x".into())));
+    assert_eq!(active_text(&editor), "axbc\naxbc");
+    assert!(view.take_requests().is_empty(), "the use case did it, not the widget");
+}
+
+#[test]
+fn deleting_and_moving_replay_the_widget_key_when_nobody_replaces_them() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let backspace = WidgetEdit::Key { key: WidgetKey::Backspace, shift: false };
+    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("left_delete"), backspace.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(backspace)]);
+    let right = WidgetEdit::Key { key: WidgetKey::Right, shift: true };
+    let command = Command::with_args("move", json!({ "by": "characters", "forward": true, "extend": true }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, right.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(right)]);
+}
+
+#[test]
+fn enter_and_tab_replay_their_key_so_indentation_still_applies() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\n" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, enter.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(enter)]);
+    let tab = WidgetEdit::Key { key: WidgetKey::Tab, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\t" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, tab.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(tab)]);
+    let unindent = WidgetEdit::Key { key: WidgetKey::Tab, shift: true };
+    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("unindent"), unindent.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(unindent)]);
+
+    // A listener that changes them gets its characters typed instead.
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "  " }]))]);
+    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\n" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, enter));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("  ".into()))]);
 }

@@ -410,6 +410,16 @@ fn delete_at_selections_removes_selected_text_or_one_char() {
 }
 
 #[test]
+fn delete_word_at_selections_removes_to_word_boundaries() {
+    let mut text = "one two three".to_string();
+    let carets = delete_word_at_selections(&mut text, &[caret(7), caret(13)], false);
+    assert_eq!((text.as_str(), carets), ("one  ", vec![caret(4), caret(5)]));
+    let mut text = "one two three".to_string();
+    let carets = delete_word_at_selections(&mut text, &[caret(4)], true);
+    assert_eq!((text.as_str(), carets), ("one three", vec![caret(4)]));
+}
+
+#[test]
 fn deleting_at_adjacent_carets_does_not_remove_a_char_twice() {
     let mut text = "abc".to_string();
     let carets = delete_at_selections(&mut text, &[caret(0), caret(1)], true);

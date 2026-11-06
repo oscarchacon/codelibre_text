@@ -14,19 +14,12 @@ use crate::view_state::ViewState;
 /// Bindings to them let the key through instead of running the command.
 const WIDGET_COMMANDS: &[&str] = &[
     "undo", "redo", "redo_or_repeat", "soft_undo", "soft_redo", "copy", "cut", "paste",
-    "select_all", "move", "move_to", "left_delete", "right_delete", "delete_word",
+    "select_all", "move", "move_to", "left_delete", "right_delete",
     "insert",
 ];
 
 /// Keys that move in the auto-complete list while it shows, and by how many rows.
 const AUTO_COMPLETE_KEYS: &[(&str, isize)] = &[("up", -1), ("down", 1), ("pageup", -8), ("pagedown", 8)];
-
-/// Widget commands with a key event that also run as commands (see [`ViewRequest::WidgetEdit`]):
-/// listeners of text commands hear about them. (Copy, cut and paste have no key event: see
-/// `clipboard_shortcut`. Typing, deleting and moving the caret stay the widget's alone.)
-///
-/// [`ViewRequest::WidgetEdit`]: crate::view_state::ViewRequest::WidgetEdit
-const HOOKED_WIDGET_COMMANDS: &[&str] = &["undo", "redo", "redo_or_repeat", "soft_undo", "soft_redo", "select_all"];
 
 /// Whether the text widget does a [`WIDGET_COMMANDS`] binding's command when it gets the key:
 /// it moves by characters, lines, words and pages and to the ends of lines and of the text, not
@@ -85,12 +78,10 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
     let handling = match editor.press_key(alternatives, &context) {
         KeyResult::Unbound => KeyHandling::PassThrough,
         KeyResult::WaitingForChord => KeyHandling::Consumed,
-        KeyResult::Command(command) if hooked && HOOKED_WIDGET_COMMANDS.contains(&command.name.as_str()) => {
-            view.queue_command(command);
-            KeyHandling::Consumed
-        }
+        // Listeners hear every widget command as a command (and may replace it): leaving these
+        // keys to the widget would hide undo, deleting, caret movement and the clipboard from them.
         // (Whole-line copy/paste is decided once, on the clipboard event: see `clipboard_shortcut`.)
-        KeyResult::Command(command) if WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) => KeyHandling::PassThrough,
+        KeyResult::Command(command) if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) => KeyHandling::PassThrough,
         KeyResult::Command(command) => {
             view.queue_command(command);
             KeyHandling::Consumed

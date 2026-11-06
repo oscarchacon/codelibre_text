@@ -180,8 +180,17 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       redo, select all, copy, cut and paste run as commands (`hooks_widget_edits` in `keyboard_controller.rs`), so a
       listener can replace them; `on_post_text_command` waits for the frame in which the widget did the edit
       (`ViewState::widget_edits_in_progress`). Without listeners the keys go straight to the widget, as always.
-- [ ] Hooks, still missing: typing, deleting and caret movement (`insert`, `left_delete`, `move`…) stay the widget's and
-      are not seen. (`match_all` reaches `on_query_context` from the binding; `on_post_*_async` run on the async thread.)
+- [x] Hooks around typing, deleting and caret movement: with the text focused and a listener of text commands, the keys
+      the widget would take itself become commands — `insert` for typed characters, Enter and Tab; `left_delete` /
+      `right_delete` for Backspace / Delete; `move` / `move_to` for the arrows, Home / End and Page Up / Page Down
+      (`widget_key_input` in `app.rs`, `hooked_widget_input` in `command_controller.rs`). A listener may replace them
+      (`insert` with other characters, or any other command, which runs at once). When it does not, the key or the
+      characters go back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, applied before it draws), so undo, IME
+      and the completion list stay the widget's; `on_post_text_command` fires after that frame. With several selections the
+      widget only knows the primary one, so the use cases do the edit instead (as without listeners). Without listeners
+      nothing changes: every key goes straight to the widget.
+- [ ] Hooks, still missing: a `left_delete` / `move` the user binds in a keymap runs as a command (the use case, not the
+      widget), so it is outside the widget's undo; `on_post_*_async` run on the async thread.
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `; the minihtml of details and annotations is shown as text,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -234,7 +243,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       the Build System menu. There is no Ctrl+Break: egui has no such key.
 - [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
       built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
-      `select_all`, `insert`) and `append` in a panel (the command controller only knows tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
+      `delete_word`, `select_all`, `insert`) and `append` in a panel (the command controller only knows tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,

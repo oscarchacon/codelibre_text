@@ -15,7 +15,8 @@ use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::presenters;
 use interface_adapters::view_models::GroupViewModel;
-use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
+use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
+use serde_json::json;
 use use_cases::windows::WindowId;
 use use_cases::Editor;
 
@@ -43,6 +44,63 @@ struct WindowUi {
     title: String,
     /// Its first frame asks the system for the focus.
     shown: bool,
+}
+
+/// What the text widget does with a key no binding took, as the command the hooks hear about
+/// and the input to replay when no listener replaces it. Only the keys the widget sees itself:
+/// modifiers with Ctrl/Alt/Cmd are bindings' business.
+fn widget_key_input(key: Key, modifiers: Modifiers) -> Option<(entities::command::Command, WidgetEdit)> {
+    if modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd {
+        return None;
+    }
+    let shift = modifiers.shift;
+    let move_by = |by: &str, forward: bool| {
+        entities::command::Command::with_args("move", json!({ "by": by, "forward": forward, "extend": shift }))
+    };
+    let move_to = |to: &str| entities::command::Command::with_args("move_to", json!({ "to": to, "extend": shift }));
+    let (command, widget_key) = match key {
+        Key::Backspace => (entities::command::Command::new("left_delete"), WidgetKey::Backspace),
+        Key::Delete => (entities::command::Command::new("right_delete"), WidgetKey::Delete),
+        Key::Enter => (entities::command::Command::with_args("insert", json!({ "characters": "\n" })), WidgetKey::Enter),
+        // Shift+Tab unindents (the view turns the key into that event); Tab inserts.
+        Key::Tab if shift => (entities::command::Command::new("unindent"), WidgetKey::Tab),
+        Key::Tab => (entities::command::Command::with_args("insert", json!({ "characters": "\t" })), WidgetKey::Tab),
+        Key::ArrowLeft => (move_by("characters", false), WidgetKey::Left),
+        Key::ArrowRight => (move_by("characters", true), WidgetKey::Right),
+        Key::ArrowUp => (move_by("lines", false), WidgetKey::Up),
+        Key::ArrowDown => (move_by("lines", true), WidgetKey::Down),
+        Key::Home => (move_to("bol"), WidgetKey::Home),
+        Key::End => (move_to("eol"), WidgetKey::End),
+        Key::PageUp => (move_by("pages", false), WidgetKey::PageUp),
+        Key::PageDown => (move_by("pages", true), WidgetKey::PageDown),
+        _ => return None,
+    };
+    Some((command, WidgetEdit::Key { key: widget_key, shift }))
+}
+
+/// The widget input for a [`WidgetEdit::Key`], as egui gives it.
+fn widget_key_event(key: WidgetKey, shift: bool) -> Event {
+    let key = match key {
+        WidgetKey::Backspace => Key::Backspace,
+        WidgetKey::Delete => Key::Delete,
+        WidgetKey::Enter => Key::Enter,
+        WidgetKey::Tab => Key::Tab,
+        WidgetKey::Left => Key::ArrowLeft,
+        WidgetKey::Right => Key::ArrowRight,
+        WidgetKey::Up => Key::ArrowUp,
+        WidgetKey::Down => Key::ArrowDown,
+        WidgetKey::Home => Key::Home,
+        WidgetKey::End => Key::End,
+        WidgetKey::PageUp => Key::PageUp,
+        WidgetKey::PageDown => Key::PageDown,
+    };
+    Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers { shift, ..Default::default() },
+    }
 }
 
 pub struct App {
@@ -96,8 +154,16 @@ impl App {
             match event {
                 Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
                     let combos = input::key_combos(*key, *physical_key, *modifiers);
-                    if let KeyHandling::Consumed = keyboard_controller::key_pressed(&mut self.editor, view, &combos) {
+                    let handling = keyboard_controller::key_pressed(&mut self.editor, view, &combos);
+                    if let KeyHandling::Consumed = handling {
                         consumed.push(index);
+                    } else if view.text_has_focus {
+                        // No binding took it: the widget would do it, so the hooks hear about it.
+                        if let Some((command, replay)) = widget_key_input(*key, *modifiers) {
+                            if command_controller::hooked_widget_input(&mut self.editor, view, command, replay) {
+                                consumed.push(index);
+                            }
+                        }
                     }
                     last_combos = combos;
                 }
@@ -107,10 +173,25 @@ impl App {
                 // its key event already had that name.
                 Event::Text(text) => {
                     let typed = input::typed_combo(text).filter(|combo| !last_combos.contains(combo));
+                    let mut bound = false;
                     if let Some(combo) = typed {
                         if let KeyHandling::Consumed = keyboard_controller::key_pressed(&mut self.editor, view, &[combo]) {
                             consumed.push(index);
+                            bound = true;
                         }
+                    }
+                    // Typing is a command for the hooks; the widget types it next frame (undo, IME
+                    // and the auto-complete list stay the widget's).
+                    if !bound
+                        && view.text_has_focus
+                        && command_controller::hooked_widget_input(
+                            &mut self.editor,
+                            view,
+                            entities::command::Command::with_args("insert", json!({ "characters": text })),
+                            WidgetEdit::Insert(text.clone()),
+                        )
+                    {
+                        consumed.push(index);
                     }
                 }
                 // egui turns Ctrl+C/X/V into these events, without a key event.
@@ -177,6 +258,8 @@ impl App {
                         WidgetEdit::Copy => Event::Copy,
                         WidgetEdit::Cut => Event::Cut,
                         WidgetEdit::Paste(text) => Event::Paste(text),
+                        WidgetEdit::Insert(text) => Event::Text(text),
+                        WidgetEdit::Key { key, shift } => widget_key_event(key, shift),
                     });
                     window.view.focus_editor = true;
                     // The widget gets it in the next frame, which must come even with no input.
