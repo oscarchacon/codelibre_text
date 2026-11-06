@@ -65,7 +65,8 @@ pub struct BuildOption {
 }
 
 impl Editor {
-    /// Every `.sublime-build` in the packages. Problems go to the console.
+    /// Every `.sublime-build` in the packages, and the project's own build systems. Problems go to
+    /// the console.
     fn build_systems(&mut self) -> Vec<BuildSystem> {
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
         let mut systems = Vec::new();
@@ -75,16 +76,23 @@ impl Editor {
                 Err(e) => self.state.console.push_str(&format!("{resource}: {e}\n")),
             }
         }
+        if let Some(project) = &self.state.project {
+            systems.extend(project.build_systems(platform_name()));
+        }
         systems
     }
 
     /// Whether a build applies to the active file: by the file's scope, its name, or a `keyfiles`
-    /// entry in its folder, one above it, or an open folder.
+    /// entry in its folder, one above it, or an open folder. A build that asks for none of those
+    /// applies to every file, as in Sublime.
     fn build_applies(&self, build: &BuildSystem) -> bool {
         let Some(doc) = self.active_document() else {
             return false;
         };
         if selector_matches(&build.selector, &self.gateways.syntaxes.base_scope(&doc.syntax)) {
+            return true;
+        }
+        if build.selector.trim().is_empty() && build.file_patterns.is_empty() && build.keyfiles.is_empty() {
             return true;
         }
         let name = doc.path.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned());
@@ -160,18 +168,40 @@ impl Editor {
         self.state.build_options = options;
     }
 
+    /// Reads the build systems Tools > Build System lists, by name (at every package load).
+    pub(crate) fn refresh_menu_build_systems(&mut self) {
+        let mut options: Vec<BuildOption> = self
+            .build_systems()
+            .into_iter()
+            .map(|build| BuildOption { caption: build.name, resource: build.resource, variant: None })
+            .collect();
+        options.sort_by_key(|o| o.caption.to_lowercase());
+        self.state.menu_build_systems = options;
+    }
+
+    /// The build systems of Tools > Build System (`$build_systems` in a menu).
+    pub fn menu_build_systems(&self) -> &[BuildOption] {
+        &self.state.menu_build_systems
+    }
+
+    /// The build system set with `set_build_system` (`None`: chosen by the file, "Automatic").
+    pub fn build_system_set(&self) -> Option<&str> {
+        self.state.builds.choice.as_ref().filter(|c| c.always).map(|c| c.resource.as_str())
+    }
+
     /// The command that stops the last build (`exec` with `kill` unless the build says otherwise).
     pub fn cancel_build_command(&self) -> Command {
         self.state.builds.cancel.clone().unwrap_or_else(|| Command::with_args("exec", json!({ "kill": true })))
     }
 
-    /// `$file`, `$folder` and the other variables of a build.
+    /// `$file`, `$folder`, `$project*` and the other variables of a build.
     pub fn build_variables(&self) -> HashMap<String, String> {
         let text = |value: &str| value.to_string();
         let mut variables = HashMap::from([
             (text("packages"), self.gateways.resources.paths().packages.display().to_string()),
             (text("platform"), text(platform_name())),
         ]);
+        variables.extend(self.project_variables());
         if let Some(folder) = self.state.folders.first() {
             variables.insert(text("folder"), folder.display().to_string());
         }
@@ -229,7 +259,7 @@ impl Editor {
 
     /// Empties the `exec` panel and sets it up for this build's results.
     fn open_exec_panel(&mut self, file_regex: &str, line_regex: &str, base_dir: &str) {
-        let id = self.create_output_panel(EXEC_PANEL);
+        let id = self.create_output_panel(EXEC_PANEL, false);
         self.state.plugins.view_settings.insert(
             id,
             Map::from_iter([

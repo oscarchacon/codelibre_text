@@ -178,3 +178,33 @@ fn split_selection_into_lines_keeps_the_caret_line_as_primary() {
     editor.split_selection_into_lines();
     assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 2), "a backwards selection keeps the first line");
 }
+
+#[test]
+fn insert_command_types_at_every_selection() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "abc\nabc", 1);
+    editor.add_carets_on_next_line(true);
+    editor.run_text_command(TextCommand::Insert("x".into()));
+    assert_eq!(active_text(&editor), "axbc\naxbc");
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(7));
+}
+
+#[test]
+fn delete_word_removes_to_the_word_boundary_at_every_selection() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "one two  three", 7);
+    editor.run_view_command_on_active(&entities::command::Command::new("delete_word"));
+    assert_eq!(active_text(&editor), "one   three");
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+
+    let mut editor = editor_with(&world, "one two three", 4);
+    let forward = entities::command::Command::with_args("delete_word", json!({ "forward": true }));
+    editor.run_view_command_on_active(&forward);
+    assert_eq!(active_text(&editor), "one three");
+
+    // A selection goes whole, spaces and all.
+    let mut editor = editor_with(&world, "one two three", 4);
+    editor.sync_selection_from_view(editor.active_document().unwrap().id, Selection::new(4, 8));
+    editor.run_view_command_on_active(&entities::command::Command::new("delete_word"));
+    assert_eq!(active_text(&editor), "one three");
+}

@@ -201,6 +201,39 @@ fn the_menu_shows_shortcuts_and_check_marks() {
 }
 
 #[test]
+fn the_build_system_menu_lists_the_build_systems_and_checks_the_one_set() {
+    let item = |caption: &str, command: Option<Command>, checkbox: bool, children: Vec<MenuItem>| MenuItem {
+        caption: caption.into(),
+        id: None,
+        command,
+        checkbox,
+        children,
+    };
+    let automatic = Command::with_args("set_build_system", json!({ "file": "" }));
+    let world = World::new()
+        .with_resource("Packages/U/Zig.sublime-build", r#"{ "cmd": ["zig"] }"#)
+        .with_resource("Packages/U/Make.sublime-build", r#"{ "cmd": ["make"] }"#)
+        .with_menu(item(
+            "Tools",
+            None,
+            false,
+            vec![item("Build System", None, false, vec![item("Automatic", Some(automatic), true, vec![]), item("-", None, false, vec![]), item("", Some(Command::new("$build_systems")), false, vec![])])],
+        ));
+    let mut editor = world.editor();
+    editor.load_packages();
+    let systems = |editor: &Editor| menu::present(editor)[0].children[0].children.iter().map(|e| (e.caption.clone(), e.checked)).collect::<Vec<_>>();
+    assert_eq!(
+        systems(&editor),
+        [("Automatic".into(), Some(true)), ("-".into(), None), ("Make".into(), Some(false)), ("Zig".into(), Some(false))]
+    );
+    editor.set_build_system("Packages/U/Zig.sublime-build", "");
+    assert_eq!(systems(&editor)[0].1, Some(false));
+    assert_eq!(systems(&editor)[3], ("Zig".into(), Some(true)));
+    let entry = &menu::present(&editor)[0].children[0].children[3];
+    assert_eq!(entry.command.as_ref().unwrap().str_arg("file"), "Packages/U/Zig.sublime-build");
+}
+
+#[test]
 fn package_settings_show_once_a_package_adds_some() {
     let item = |caption: &str, command: Option<Command>, checkbox: bool, children: Vec<MenuItem>| MenuItem {
         caption: caption.into(),
@@ -537,6 +570,57 @@ fn plugin_regions_and_statuses_are_presented() {
     assert_eq!(model.show, Some((8, false, 1)));
     assert_eq!(status_bar::present(&editor).plugin_statuses, vec!["1 warning".to_string()]);
 }
+
+#[test]
+fn region_annotations_are_presented_and_their_links_reach_the_plugin() {
+    use interface_adapters::controllers::command_controller;
+    let world = World::new().with_plugin_commands(&[("lint", use_cases::gateways::PluginCommandKind::Text)]);
+    let mut editor = editor_with_text(&world, "one\ntwo three", Selection::caret(0));
+    let v = editor.active_document().unwrap().id;
+    world.plugins.then([
+        test_support::plugin_call(
+            "view_add_regions",
+            json!([v, "lint", [[8, 13], [0, 3]], "invalid", "", 0, ["<a href='fix'>fix</a> it", "first"], "#ff0000", 9]),
+        ),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&Command::new("lint"), &mut |_, _| {});
+    let model = editor_presenter::present(&mut editor, &mut ViewState::default()).unwrap();
+    let lint = &model.regions[0];
+    let points: Vec<usize> = lint.annotations.iter().map(|a| a.point).collect();
+    assert_eq!(points, [0, 8], "by position, each with its own region's annotation");
+    assert_eq!(lint.annotations[1].lines[0][0].link.as_deref(), Some("fix"));
+    assert_eq!((lint.key.as_str(), lint.annotation_color.as_str()), ("lint", "#ff0000"));
+
+    world.plugins.then([use_cases::gateways::PluginMessage::Done { error: None }]);
+    command_controller::navigate_plugin_annotation(&mut editor, &mut ViewState::default(), v, "lint", "fix");
+    assert_eq!(world.plugins.callbacks.borrow().last().cloned(), Some((9, "navigate".to_string(), json!(["fix"]))));
+}
+
+#[test]
+fn phantoms_say_their_layout_and_bring_their_images() {
+    use interface_adapters::view_models::PhantomLayout;
+    let world = World::new()
+        .with_plugin_commands(&[("show", use_cases::gateways::PluginCommandKind::Text)])
+        .with_resource("Packages/P/dot.png", vec![0x89, b'P', b'N', b'G']);
+    let mut editor = editor_with_text(&world, "one\ntwo", Selection::caret(0));
+    let v = editor.active_document().unwrap().id;
+    world.plugins.then([
+        test_support::plugin_call("view_add_phantom", json!([v, "k", 1, 2, "<b>inline</b>", 0, null])),
+        test_support::plugin_call("view_add_phantom", json!([v, "k", 0, 3, "<img src=\"res://Packages/P/dot.png\">", 1, null])),
+        test_support::plugin_call("view_add_phantom", json!([v, "k", 4, 4, "<div style='padding: 2px'>block</div>", 2, null])),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&Command::new("show"), &mut |_, _| {});
+    let model = editor_presenter::present(&mut editor, &mut ViewState::default()).unwrap();
+    let layouts: Vec<(usize, PhantomLayout)> = model.phantoms.iter().map(|p| (p.point, p.layout)).collect();
+    assert_eq!(layouts, [(1, PhantomLayout::Inline), (3, PhantomLayout::Below), (4, PhantomLayout::Block)], "an inline one at its start, the others at their end");
+    let below = &model.phantoms[1];
+    assert_eq!(below.html.images, vec![("res://Packages/P/dot.png".to_string(), std::rc::Rc::new(vec![0x89, b'P', b'N', b'G']))]);
+    let Some(entities::minihtml::Content::Block(block)) = model.phantoms[2].html.block.content.first() else { panic!("a block") };
+    assert_eq!(block.style.padding.left, 2.0);
+}
+
 #[test]
 fn plugin_commands_decide_how_they_show_in_the_menu() {
     let item = |caption: &str, command: &str, checkbox: bool| MenuItem {

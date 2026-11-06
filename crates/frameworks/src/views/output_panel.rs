@@ -22,7 +22,8 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &OutputPanelViewModel, events: 
             }
         });
     });
-    egui::ScrollArea::vertical()
+    let scroll = if panel.word_wrap { egui::ScrollArea::vertical() } else { egui::ScrollArea::both() };
+    scroll
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
@@ -41,7 +42,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &OutputPanelViewModel, events: 
 fn lay_out(ui: &Ui, chrome: &Chrome, panel: &OutputPanelViewModel) -> Arc<Galley> {
     let plain = TextFormat::simple(FontId::monospace(panel.font_size), chrome.fg);
     let mut job = LayoutJob::default();
-    job.wrap.max_width = ui.available_width();
+    job.wrap.max_width = if panel.word_wrap { ui.available_width() } else { f32::INFINITY };
     match panel.current_line.and_then(|line| line_range(&panel.text, line)) {
         Some((start, end)) => {
             let current = TextFormat { background: chrome.hover_bg, ..plain.clone() };

@@ -43,6 +43,23 @@ fn packages_with_python_files_are_loaded_user_last() {
 }
 
 #[test]
+fn package_control_3_dependencies_are_sent_apart_and_its_loader_is_not_loaded() {
+    let world = World::new()
+        .with_file(&format!("{PACKAGES}/Uses/plugin.py"), "")
+        .with_file(&format!("{PACKAGES}/pygments/dependency-metadata.json"), "{}")
+        .with_file(&format!("{PACKAGES}/pygments/setup.py"), "")
+        .with_file(&format!("{PACKAGES}/markupsafe/.sublime-dependency"), "")
+        .with_file(&format!("{PACKAGES}/0_package_control_loader/00-pygments.py"), "");
+    world.plugins.then([PluginMessage::Loaded { commands: vec![], events: vec![], errors: vec![] }]);
+    world.editor();
+    let loads = world.plugins.loads.borrow();
+    let names: Vec<&str> = loads[0].packages.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Uses"]);
+    let dependencies: Vec<String> = loads[0].dependencies.iter().map(|d| d.to_string_lossy().replace('\\', "/")).collect();
+    assert_eq!(dependencies, [format!("{PACKAGES}/markupsafe"), format!("{PACKAGES}/pygments")]);
+}
+
+#[test]
 fn the_python_plugins_setting_turns_plugins_off_and_python_interpreter_is_passed_on() {
     let world = World::new()
         .with_plugin_commands(&[("hello", Text)])
@@ -188,19 +205,20 @@ fn events_go_only_to_the_host_when_a_listener_wants_them() {
     assert!(world.plugins.events.borrow().is_empty());
 
     let world = World::new().with_plugins(&[], &["on_new", "on_activated_async"]).with_file("/a.txt", "a");
-    // The untitled view the editor starts with is new, and active.
-    world.plugins.then([done(), done()]);
+    // The untitled view the editor starts with existed before the plugins loaded: as in Sublime,
+    // they hear it is active (and get it in `on_init`), not that it is new.
+    world.plugins.then([done()]);
     let mut editor = world.editor();
     let first = editor.active_document().unwrap().id;
-    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_new".to_string(), first), ("on_activated".to_string(), first)]);
+    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_activated".to_string(), first)]);
 
     world.plugins.then([done(), done(), done()]);
     editor.new_file();
     let id = editor.active_document().unwrap().id;
-    assert_eq!(world.plugins.events.borrow()[2..], [("on_new".to_string(), id), ("on_activated".to_string(), id)]);
+    assert_eq!(world.plugins.events.borrow()[1..], [("on_new".to_string(), id), ("on_activated".to_string(), id)]);
     // Opening a file: on_activated (wanted through its async variant); on_load is not wanted.
     open(&mut editor, "/a.txt");
-    assert_eq!(world.plugins.event_names(), ["on_new", "on_activated", "on_new", "on_activated", "on_activated"]);
+    assert_eq!(world.plugins.event_names(), ["on_activated", "on_new", "on_activated", "on_activated"]);
 }
 
 #[test]
@@ -270,7 +288,6 @@ fn edits_and_caret_moves_become_on_modified_and_on_selection_modified() {
 #[test]
 fn built_in_commands_run_by_listeners_wait_for_the_next_poll() {
     let world = World::new().with_plugins(&[], &["on_new"]);
-    world.plugins.then([done()]);
     let mut editor = world.editor();
     world.plugins.then([plugin_call("run_command", json!(["window", 1, "upper_case", null])), done()]);
     editor.new_file();

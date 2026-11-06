@@ -4,6 +4,7 @@
 pub mod dialogs;
 pub mod editor;
 pub mod find_panel;
+pub mod groups;
 pub mod menu;
 pub mod output_panel;
 pub mod quick_panel;

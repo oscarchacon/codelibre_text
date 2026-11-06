@@ -358,7 +358,45 @@ fn the_change_count_grows_with_text_changes_only() {
 }
 
 fn region_set(key: &str, regions: &[(usize, usize)]) -> RegionSet {
-    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0 }
+    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0, ..RegionSet::default() }
+}
+
+#[test]
+fn phantoms_move_with_the_text_and_are_erased_by_key_or_id() {
+    let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
+    let phantom = |id: u64, key: &str, region: (usize, usize)| Phantom { id, key: key.into(), region, content: "<b>x</b>".into(), layout: 2 };
+    doc.add_phantom(phantom(1, "lint", (4, 7)));
+    doc.add_phantom(phantom(2, "lint", (8, 13)));
+    doc.add_phantom(phantom(3, "other", (0, 0)));
+    doc.replace_range(0, 0, ">> ");
+    let regions: Vec<_> = doc.phantoms().iter().map(|p| p.region).collect();
+    assert_eq!(regions, vec![(7, 10), (11, 16), (3, 3)], "an insertion at a caret-like region goes before it");
+    // The widget edits the text in place.
+    doc.text.insert(0, '#');
+    doc.note_text_changed();
+    assert_eq!(doc.phantoms()[0].region, (8, 11));
+    doc.erase_phantom(1);
+    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![2, 3]);
+    doc.erase_phantoms("lint");
+    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![3]);
+}
+
+#[test]
+fn only_persistent_regions_go_to_the_session() {
+    let mut doc = from_bytes(b"abcdef");
+    doc.add_regions(region_set("kept", &[(1, 3)]));
+    let mut persistent = region_set("lint", &[(4, 5)]);
+    persistent.flags = PERSISTENT;
+    doc.add_regions(persistent);
+    let saved = doc.persistent_regions();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].key, "lint");
+
+    let mut restored = Document::new_untitled(2, LineEnding::Unix);
+    // The session puts the text back first, as the regions are kept within it.
+    restored.replace_range(0, 0, "abcdef");
+    restored.restore_regions(saved);
+    assert_eq!(restored.regions("lint"), vec![(4, 5)]);
 }
 
 #[test]
@@ -400,7 +438,7 @@ fn show_requests_are_counted_and_clamped() {
 fn regions_follow_edits_the_widget_makes_in_place() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "héllo world".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0 };
+    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
     doc.add_regions(set);
     doc.text = "XXhéllo world".into();
     doc.note_text_changed();
@@ -414,7 +452,7 @@ fn regions_follow_edits_the_widget_makes_in_place() {
 fn text_typed_right_before_a_region_stays_out_of_it() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "hello".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0 };
+    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
     doc.add_regions(set);
     // The caret is at 0: the "h" went in front, even though the texts read the same either way.
     doc.text = "hhello".into();

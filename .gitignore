@@ -23,3 +23,7 @@ logs/
 *.bak
 *.tmp
 *.orig
+
+# Python bytecode (the plugin host tests run the modules in assets/python)
+__pycache__/
+*.pyc

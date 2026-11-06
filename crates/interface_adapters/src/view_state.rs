@@ -58,6 +58,27 @@ pub enum WidgetEdit {
     Copy,
     Cut,
     Paste(String),
+    /// Characters typed, replayed so the widget keeps its undo history and IME.
+    Insert(String),
+    /// A key the widget handles itself (deleting, moving the caret), replayed after the hooks.
+    Key { key: WidgetKey, shift: bool },
+}
+
+/// A key of [`WidgetEdit::Key`]; the framework maps it to the widget's own key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetKey {
+    Backspace,
+    Delete,
+    Enter,
+    Tab,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
 }
 
 /// Requests from the controllers to the window / widgets, carried out by the framework layer.
@@ -65,7 +86,10 @@ pub enum WidgetEdit {
 pub enum ViewRequest {
     WidgetEdit(WidgetEdit),
     SetFullscreen(bool),
+    /// Close this window (the application, when it is the last one).
     CloseWindow,
+    /// Quit the application (every window).
+    Exit,
 }
 
 pub struct ViewState {
@@ -92,6 +116,8 @@ pub struct ViewState {
     pub(crate) requests: Vec<ViewRequest>,
     /// Commands done by the text widget whose `on_post_*_command` waits for the widget.
     pub(crate) widget_edits_in_progress: Vec<WidgetEditInProgress>,
+    /// The last command run (the `last_command` key binding context).
+    pub(crate) last_command: Option<String>,
 }
 
 /// A widget edit reaches the widget in the next frame's input, after the frame that asked for it.
@@ -121,6 +147,7 @@ impl Default for ViewState {
             commands: VecDeque::new(),
             requests: Vec::new(),
             widget_edits_in_progress: Vec::new(),
+            last_command: None,
         }
     }
 }

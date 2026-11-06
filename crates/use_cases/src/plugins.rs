@@ -8,6 +8,7 @@
 //! `docs/plugins.md`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 use entities::command::Command;
 use entities::document::DocumentId;
@@ -25,6 +26,8 @@ const MAX_DEPTH: usize = 16;
 /// At most this many messages are answered per frame, so a busy plugin thread cannot freeze the window.
 const MAX_IDLE_MESSAGES: usize = 1000;
 const CONSOLE_NAME: &str = "Console";
+/// Package Control 3's package that put its dependencies on `sys.path` (see `plugin_packages`).
+const DEPENDENCY_LOADER: &str = "0_package_control_loader";
 
 /// Runs another command (built-in or plugin) when a plugin calls `run_command`. The command
 /// controller passes itself in: built-in commands live in an outer circle.
@@ -49,6 +52,8 @@ pub struct PluginState {
     pub(crate) view_settings: HashMap<DocumentId, Map<String, Value>>,
     /// Status bar texts plugins set on a view (`view.set_status(key, text)`), sorted by key.
     pub(crate) view_statuses: HashMap<DocumentId, BTreeMap<String, String>>,
+    /// Views a plugin put in overwrite mode (`view.set_overwrite_status`).
+    pub(crate) overwrite_views: HashSet<DocumentId>,
     pub(crate) settings_files: HashMap<String, SettingsFile>,
     pub(crate) window_settings: Map<String, Value>,
     /// The settings objects with `add_on_change` callbacks, and the values they last heard about.
@@ -60,8 +65,9 @@ pub struct PluginState {
     /// The events some listener wants (`on_modified`, `on_load_async`…); others are not sent.
     events: HashSet<String>,
     /// Built-in commands that event listeners ran and could not run at once; the next
-    /// [`Editor::poll_plugins`] runs them.
-    queued_commands: Vec<Command>,
+    /// [`Editor::poll_plugins`] runs them, each on the view that was active when it was asked for
+    /// (a `view.run_command` makes its view the active one while it runs).
+    queued_commands: Vec<(Command, Option<DocumentId>)>,
     event_command_runner: Option<EventCommandRunner>,
     /// The view the listeners last heard `on_activated` for.
     active_view: Option<DocumentId>,
@@ -70,6 +76,16 @@ pub struct PluginState {
     change_counts: HashMap<DocumentId, u64>,
     selections: Option<(DocumentId, Vec<Selection>)>,
     depth: usize,
+    /// The popup a plugin shows (`view.show_popup`), see `plugin_popups`.
+    pub(crate) popup: Option<crate::plugin_popups::PluginPopup>,
+    /// The `on_navigate` callback of each phantom that has one, by phantom id.
+    pub(crate) phantom_callbacks: HashMap<u64, u64>,
+    /// The callbacks (`on_navigate`, `on_close`) of region sets with annotations, by view and key.
+    pub(crate) region_callbacks: HashMap<(DocumentId, String), u64>,
+    pub(crate) next_phantom_id: u64,
+    /// Callbacks to run at the next [`Editor::poll_plugins`] (a popup's `on_hide` when it was
+    /// hidden in the middle of a plugin's call): (callback id, name, arguments).
+    pub(crate) pending_callbacks: Vec<(u64, String, Value)>,
 }
 
 impl PluginState {
@@ -90,10 +106,10 @@ impl Editor {
         let old_errors = std::mem::take(&mut self.state.plugins.errors);
         self.state.load_errors.retain(|e| !old_errors.contains(e));
         let settings = self.global_settings();
-        let packages = if settings.bool("python_plugins", true) {
+        let (packages, dependencies) = if settings.bool("python_plugins", true) {
             self.plugin_packages()
         } else {
-            Vec::new()
+            Default::default()
         };
         if packages.is_empty() {
             self.gateways.plugins.stop();
@@ -102,6 +118,7 @@ impl Editor {
         }
         let request = PluginLoad {
             packages,
+            dependencies,
             packages_path: self.gateways.resources.paths().packages.clone(),
             archives: self.gateways.resources.paths().archive_folders.iter().map(|f| (f.unpacked.clone(), f.archives.clone())).collect(),
             shipped_packages: self.gateways.resources.paths().archive_folders.iter().find(|f| f.shipped).map(|f| f.archives.clone()),
@@ -127,10 +144,18 @@ impl Editor {
             Ok(_) => {}
             Err(e) => self.plugin_load_error(format!("Python plugins: {e}")),
         }
-        // At startup the views come later: `Editor::start` tells the listeners about them.
+        // The views that exist (at startup, those of the session and the command line).
         if !self.state.documents.is_empty() {
             self.plugin_init();
         }
+    }
+
+    /// `sublime_plugin.reload_plugin` (or `unload_module` / `load_module`) changed the plugins'
+    /// commands and events while the host ran: these are the ones there are now.
+    pub(crate) fn set_plugin_commands(&mut self, commands: Vec<(String, PluginCommandKind)>, events: Vec<String>) {
+        self.state.plugins.commands = commands.into_iter().collect();
+        self.state.plugins.events = events.into_iter().collect();
+        self.state.plugins.command_states.clear();
     }
 
     /// The settings files plugins opened and those they watch belong to a host that is gone.
@@ -143,9 +168,29 @@ impl Editor {
         self.state.plugins.event_command_runner = Some(runner);
     }
 
-    /// A built-in command for the next [`poll_plugins`](Self::poll_plugins).
+    /// A built-in command for the next [`poll_plugins`](Self::poll_plugins), which runs it on the
+    /// view active now (during a `view.run_command`, that view), if it is still open.
     pub fn queue_plugin_command(&mut self, command: Command) {
-        self.state.plugins.queued_commands.push(command);
+        let view = self.active_document().map(|d| d.id);
+        self.state.plugins.queued_commands.push((command, view));
+    }
+
+    /// Runs a queued command with `view` active; the view active before comes back afterwards,
+    /// unless the command changed it (it opened or closed a view…).
+    fn run_queued_command(&mut self, command: &Command, view: Option<DocumentId>, run_command: &mut CommandRunner) {
+        let target = view.and_then(|id| self.index_of(id));
+        let Some(index) = target.filter(|&i| i != self.state.active) else {
+            run_command(self, command);
+            return;
+        };
+        let (previous, target) = (self.active_document().map(|d| d.id), self.state.documents[index].id);
+        self.state.active = index;
+        run_command(self, command);
+        if self.active_document().is_some_and(|d| d.id == target) {
+            if let Some(index) = previous.and_then(|id| self.index_of(id)) {
+                self.state.active = index;
+            }
+        }
     }
 
     /// Runs a plugin command on the active view (text commands) or the window.
@@ -198,6 +243,8 @@ impl Editor {
     /// runs the built-in commands event listeners asked for, and tells the listeners what the
     /// user changed since the last frame (`on_modified`, `on_selection_modified`).
     pub fn poll_plugins(&mut self, run_command: &mut CommandRunner) {
+        // What the text widget edited this frame reaches the other views of its buffer.
+        self.sync_clones();
         for _ in 0..MAX_IDLE_MESSAGES {
             match self.gateways.plugins.try_receive() {
                 Ok(Some(PluginMessage::Call { function, args })) => {
@@ -216,8 +263,13 @@ impl Editor {
                 }
             }
         }
-        for command in std::mem::take(&mut self.state.plugins.queued_commands) {
-            run_command(self, &command);
+        for (command, view) in std::mem::take(&mut self.state.plugins.queued_commands) {
+            self.run_queued_command(&command, view, run_command);
+        }
+        self.hide_popup_if_moved_away();
+        self.update_auto_complete();
+        for (callback, name, args) in std::mem::take(&mut self.state.plugins.pending_callbacks) {
+            self.plugin_callback(callback, &name, args, run_command);
         }
         self.notice_text_changes();
         self.notice_changes();
@@ -261,6 +313,22 @@ impl Editor {
             Ok(_) => {}
             Err(e) => self.report_plugin_error(name, &e),
         }
+    }
+
+    /// At startup the views open before the plugins load (so `plugin_loaded` finds them, as in
+    /// Sublime): once loaded, `on_load` for each view of a file on disk (the session's, the command
+    /// line's), then `on_activated` for the active one, as Sublime's `on_api_ready` does.
+    pub(crate) fn plugin_startup_events(&mut self) {
+        let loaded: Vec<DocumentId> = self
+            .state
+            .documents
+            .iter()
+            .filter(|d| d.path.as_deref().is_some_and(|p| self.gateways.file_system.exists(p)))
+            .map(|d| d.id)
+            .collect();
+        loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
+        self.state.plugins.active_view = None;
+        self.plugin_activation_events();
     }
 
     /// `on_deactivated` / `on_activated` when the active document is not the one the listeners
@@ -386,6 +454,20 @@ impl Editor {
         }
     }
 
+    /// `view.set_overwrite_status(True)`: the status bar shows OVR for that view.
+    pub fn set_overwrite_status(&mut self, id: DocumentId, enabled: bool) {
+        if enabled {
+            self.state.plugins.overwrite_views.insert(id);
+        } else {
+            self.state.plugins.overwrite_views.remove(&id);
+        }
+    }
+
+    /// `view.is_overwrite_status_enabled()`.
+    pub fn overwrite_status(&self, id: DocumentId) -> bool {
+        self.state.plugins.overwrite_views.contains(&id)
+    }
+
     /// Counts one more plugin request in progress; false (and a console line) when they nest too deeply.
     pub(crate) fn enter_plugin(&mut self, name: &str) -> bool {
         if self.state.plugins.depth >= MAX_DEPTH {
@@ -428,23 +510,35 @@ impl Editor {
     /// Packages with `.py` files at their top level, in Sublime's order (`User` last), each with
     /// its folders in load order. Sublime's own `Default` package is skipped (it is written for
     /// Sublime's native core), and so are the `ignored_packages`.
-    fn plugin_packages(&self) -> Vec<PluginPackage> {
+    ///
+    /// Also Package Control 3's dependencies, one folder each (a later root's wins): they are
+    /// libraries, not plugins. Its `0_package_control_loader` package, which put them on
+    /// `sys.path`, is not loaded: the host does that.
+    fn plugin_packages(&self) -> (Vec<PluginPackage>, Vec<PathBuf>) {
         let settings = self.global_settings();
         let ignored = settings.get("ignored_packages").and_then(Value::as_array).cloned().unwrap_or_default();
         let paths = self.gateways.resources.paths();
         let own = paths.packages.clone();
         let fs = &self.gateways.file_system;
         let mut packages: Vec<PluginPackage> = Vec::new();
+        let mut dependencies: Vec<(String, PathBuf)> = Vec::new();
         for root in paths.roots(settings.bool("import_sublime_packages", true)) {
             for entry in fs.list_dir(&root).into_iter().filter(|e| e.is_dir) {
                 let name = entry.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if (root != own && name == "Default") || ignored.iter().any(|i| i.as_str() == Some(&name)) {
+                if (root != own && name == "Default")
+                    || name == DEPENDENCY_LOADER
+                    || ignored.iter().any(|i| i.as_str() == Some(&name))
+                {
                     continue;
                 }
-                let has_plugins = fs
-                    .list_dir(&entry.path)
-                    .iter()
-                    .any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
+                let files = fs.list_dir(&entry.path);
+                let has_file = |file_name: &str| files.iter().any(|f| !f.is_dir && f.path.file_name().is_some_and(|n| n == file_name));
+                if has_file("dependency-metadata.json") || has_file(".sublime-dependency") {
+                    dependencies.retain(|(n, _)| *n != name);
+                    dependencies.push((name, entry.path));
+                    continue;
+                }
+                let has_plugins = files.iter().any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
                 if !has_plugins {
                     continue;
                 }
@@ -462,7 +556,8 @@ impl Editor {
             };
             (rank, p.name.to_lowercase())
         });
-        packages
+        dependencies.sort_by_key(|(name, _)| name.to_lowercase());
+        (packages, dependencies.into_iter().map(|(_, path)| path).collect())
     }
 
     /// The host died or stopped answering: say so, and stop sending it events.

@@ -47,6 +47,26 @@
 	// Trim on save only the lines changed since the file was last saved.
 	"trim_only_modified_white_space": true,
 
+	// Show the auto-complete list while typing a word where "auto_complete_selector" matches,
+	// or a character of "auto_complete_triggers" (Ctrl+Space shows it anywhere). It offers the
+	// plugins' completions, the packages' .sublime-completions and snippets, and the file's words.
+	"auto_complete": true,
+	"auto_complete_selector": "meta.tag, source - comment - string.quoted.double.block - string.quoted.single.block - string.unquoted.heredoc",
+	"auto_complete_triggers": [{ "selector": "text.html, text.xml", "characters": "<" }],
+	// Files larger than this (in bytes) do not show it while typing.
+	"auto_complete_size_limit": 4194304,
+	// Tab commits the selected completion; also Enter unless this is true.
+	"auto_complete_commit_on_tab": false,
+	// Milliseconds typing must stop before the list shows.
+	"auto_complete_delay": 50,
+	// The completions chosen before come first.
+	"auto_complete_use_history": false,
+	// Up at the top of the list goes to its end, and Down at its end to the top.
+	"auto_complete_cycle": false,
+
+	// Tab after a snippet's or a completion's trigger (typed in full) inserts it.
+	"tab_completion": true,
+
 	// Copy and cut with nothing selected take the whole line; pasting that line
 	// puts it above the caret's line.
 	"copy_with_empty_selection": true,
@@ -76,15 +96,16 @@
 	"import_sublime_packages": true,
 
 	// Run the Python plugins (.py files) of the packages, like Sublime Text.
-	// They need Python 3 installed; see View > Show Console for their output.
+	// They run in the Python 3.13 that comes with the editor; see View > Show Console for their output.
 	"python_plugins": true,
 
-	// Path of the Python 3 interpreter for plugins. Empty: use py -3, python3,
+	// Path of the Python 3 interpreter for plugins. Empty: the Python 3.13 that comes with the
+	// editor (what Sublime's plugin host runs); without it, py -3.13, python3.13, py -3, python3,
 	// python or the one `uv python find` reports, whichever works first.
 	"python_interpreter": "",
 
 	// Every plugin runs in that one Python, so there is no Python 3.3 host: Package Control then
-	// installs every package's libraries for its newer host (Lib/python38), as in Sublime Text.
+	// installs every package's libraries for that Python (Lib/python313), as in Sublime Text.
 	"disable_plugin_host_3.3": true,
 
 	// Packages that are not loaded at all. Package Control changes this list while it upgrades.

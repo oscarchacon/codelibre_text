@@ -5,7 +5,7 @@ use std::path::Path;
 
 use entities::selection::Selection;
 use test_support::World;
-use use_cases::scopes::ScopedRange;
+use use_cases::scopes::{ScopedRange, SymbolSource, SymbolType};
 use use_cases::Editor;
 
 const CODE: &str = "x = \"hi\"\ny = 1\nz = \"a\"";
@@ -80,4 +80,25 @@ fn caret_scopes_has_one_scope_per_selection() {
     editor.sync_selection_from_view(id(&editor), Selection::new(2, 3));
     editor.select_all_occurrences();
     assert_eq!(editor.caret_scopes(), vec!["source.python "; 3]);
+}
+
+#[test]
+fn symbol_locations_find_a_symbol_in_the_open_files() {
+    let world = World::new().with_meta_preference("text.plain", serde_json::json!({ "showInSymbolList": true }));
+    world.disk.put("/p/a.txt", "first line\nsecond line\n");
+    let mut editor = world.editor();
+    editor.add_folder(std::path::PathBuf::from("/p"));
+    editor.open_file(Path::new("/p/a.txt"));
+
+    let found = editor.symbol_locations("second line", SymbolSource::OpenFiles, SymbolType::Definition);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].row, found[0].column), (1, 0));
+    assert_eq!(found[0].display_name, "a.txt");
+    assert_eq!(found[0].syntax, "Plain Text");
+    assert_eq!(found[0].path.as_deref(), Some(Path::new("/p/a.txt")));
+    assert!(!found[0].reference);
+
+    // The Index answers the same here: no file is indexed on disk.
+    assert_eq!(editor.symbol_locations("second line", SymbolSource::Index, SymbolType::Definition), found);
+    assert!(editor.symbol_locations("nowhere", SymbolSource::OpenFiles, SymbolType::Any).is_empty());
 }

@@ -5,7 +5,7 @@ Native desktop text editor compatible with Sublime Text resources, written with 
 edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architecture.md` first.
 
 ## Workspace = the four circles (dependencies point inwards only)
-- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `selector`, `Keymap`, `Settings`, `Menu`).
+- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `project`, `selector`, `Keymap`, `Settings`, `Menu`).
 - `crates/use_cases` — `Editor` + use case modules + gateway traits (`gateways.rs`).
 - `crates/interface_adapters` — controllers, presenters, view models, `ViewState`, Sublime file-format gateways.
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
@@ -18,6 +18,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
   `frameworks/src/gateways/python_plugin_host.rs`). Design, protocol and the **pending phases B and C**: `docs/plugins.md`.
 - `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
   `packaging/linux` (`.desktop` + `install.sh`) and `packaging/macos` (`Info.plist` + `make_app.sh`). `.gitattributes` keeps them LF.
+- `packaging/python/fetch_python.sh` — the Python 3.13 (python-build-standalone, SHA-256 pinned) every installer bundles (offline) for the
+  plugins; `find_interpreter` / `bundled_interpreter` (`python_plugin_host.rs`) look for it next to the executable.
 
 Never add an outer-circle dependency to an inner crate's `Cargo.toml`; use a gateway trait instead.
 Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, View Models, Gateways.
@@ -36,7 +38,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).
-  `frameworks/tests/python_plugin_host.rs` runs a real Python 3 (skipped with a message when none is found).
+  `frameworks/tests/python_plugin_host.rs` runs a real Python 3 (skipped with a message when none is found): the 3.13 the
+  installers bring once `sh packaging/python/fetch_python.sh target/debug/python` put it there (CI does), else the installed one.
 - `Cargo.lock` is gitignored. Dependencies build at `opt-level = 2` in dev (syntect is slow unoptimized).
 - Only positional `files` and `--fullscreen` are used from `crates/frameworks/src/cli.rs`.
 
@@ -61,7 +64,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
 - Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
-  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
+  them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
+  next bullet). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
   (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
@@ -79,7 +83,12 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   threads call the editor between frames (`Editor::poll_plugins`, every frame in `app.rs`). Python code must never write to the
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Every `command_controller::run` asks the plugins' `on_text_command` / `on_window_command` (when some listener has them)
-  and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); those listeners also turn undo / redo / select all / clipboard keys into commands; with the fake host, script one `PluginMessage::Answer` per query.
+  and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); with the fake host, script
+  one `PluginMessage::Answer` per query. With the text focused those listeners also take undo / redo / select all /
+  clipboard keys, typing (`Event::Text`) and the widget's own keys (`app.rs::widget_key_input`: Backspace/Delete,
+  Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
+  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
+  IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
@@ -94,21 +103,22 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `Editor::record_errors` (log + `session_errors`, which Help > Report an Issue puts in the bug form, home folder as `~`).
 - `CODELIBRE_TEXT_DATA=<folder>` uses that folder instead of all of the above, to try things without touching the
   real profile (setting `APPDATA` does not work: Windows answers the known folder).
-- Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python` (`shims/`: `imp`,
-  `distutils.version`, last on `sys.path` for Pythons that dropped them).
+- Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python` (`compat.py`: the
+  standard library names newer Pythons dropped, applied before the plugins; `shims/`: `imp`, `asyncore`, `asynchat`,
+  `distutils.*`, `pipes`, `cgi`, `imghdr`, `uu`, last on `sys.path` for Pythons that dropped them; and `certifi`,
+  which Sublime ships for every host and `lsp_utils` imports undeclared).
 - A `.sublime-package` added to or removed from our `Installed Packages` reloads the packages
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
-  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata) — the rest
-  of B (what each item lists as still missing) and C (completions, popups / phantoms, several windows; most
-  of that API has do-nothing stand-ins in `sublime.py`) are checklists with the files to touch.
+  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows, completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done, and the scopes are down to exact values and whole-file scans. The items still unticked there are what remains, with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin phase B and C
-(`docs/plugins.md`), split groups, minimap, folding, auto-complete, find in files.
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
+phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`,
+region icon files, a Python 3.3 host), minimap, folding, find in files.
 Highlighting is skipped above 4 MB.

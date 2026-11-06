@@ -36,6 +36,31 @@ fn font() -> FontId {
 // ----- scopes --------------------------------------------------------------------------------------
 
 #[test]
+fn a_package_syntax_names_its_contexts_in_backtraces() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir,
+        "Toy/Toy.sublime-syntax",
+        "%YAML 1.2\n---\nname: Toy\nfile_extensions: [toy]\nscope: source.toy\ncontexts:\n  main:\n    - match: '\"'\n      push: string\n  string:\n    - meta_scope: string.quoted.toy\n    - match: '\"'\n      pop: true\n",
+    );
+    let mut engine = engine_in(&dir);
+    engine.reload(false, &mut Vec::new());
+    let text = "a \"b c\" d\n";
+    let names = |column: usize, engine: &mut SyntaxEngine| -> Vec<String> {
+        engine.context_backtrace(1, text, "Toy", 0, column).into_iter().map(|f| format!("{} {}", f.source_file, f.context_name)).collect()
+    };
+    assert_eq!(names(1, &mut engine), ["Packages/Toy/Toy.sublime-syntax main"]);
+    assert_eq!(names(4, &mut engine), ["Packages/Toy/Toy.sublime-syntax main", "Packages/Toy/Toy.sublime-syntax string"]);
+    let infos = engine.syntax_infos();
+    let toy = infos.iter().find(|s| s.name == "Toy").unwrap();
+    assert_eq!((toy.path.as_str(), toy.scope.as_str()), ("Packages/Toy/Toy.sublime-syntax", "source.toy"));
+    // Every line's scopes at once, from the cache.
+    let all = engine.document_scopes(1, text, "Toy");
+    assert_eq!(all.len(), 1);
+    assert!(all[0].iter().any(|s| s.scope == "source.toy string.quoted.toy"), "{all:?}");
+}
+
+#[test]
 fn line_scopes_cover_the_line_with_the_parser_scopes() {
     let (_dir, mut engine) = engine();
     let text = "x = 1\ns = \"hi\"\n";
@@ -140,6 +165,31 @@ fn package_color_schemes_are_loaded_in_both_formats() {
     assert!(errors[0].contains("Broken"));
     let mine = engine.scheme("Mine");
     assert_eq!(mine.settings.background.map(to_color32), Some(egui::Color32::from_rgb(1, 2, 3)));
+}
+
+#[test]
+fn styles_for_plugins_come_from_the_scheme_rules() {
+    let (dir, mut engine) = engine();
+    let scheme = r##"{
+        "name": "Mine",
+        "globals": { "foreground": "#F0F0F0", "background": "#010203", "selection": "#11223380" },
+        "rules": [
+            { "scope": "string", "foreground": "#AA0000", "font_style": "bold italic" },
+            { "scope": "string.quoted.double", "background": "#002200" }
+        ]
+    }"##;
+    write(&dir, "User/Mine.sublime-color-scheme", scheme);
+    engine.reload(false, &mut Vec::new());
+    let style = engine.scheme_style("Mine");
+    assert_eq!(style["foreground"], "#f0f0f0");
+    assert_eq!(style["background"], "#010203");
+    assert_eq!(style["selection"], "#11223380", "not opaque: with its alpha");
+    assert_eq!(style["caret"], "#f0f0f0", "no caret: the foreground");
+
+    let string = engine.scope_style("Mine", "source.python string.quoted.double.python");
+    assert_eq!(serde_json::Value::Object(string), serde_json::json!({"foreground": "#aa0000", "background": "#002200", "bold": true, "italic": true}));
+    let plain = engine.scope_style("Mine", "source.python");
+    assert_eq!(serde_json::Value::Object(plain), serde_json::json!({"foreground": "#f0f0f0"}));
 }
 
 // ----- highlighting --------------------------------------------------------------------------------

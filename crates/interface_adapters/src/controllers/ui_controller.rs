@@ -10,6 +10,7 @@ use entities::selection::Selection;
 use entities::text_commands::CaretMotion;
 use use_cases::editing::TextCommand;
 use use_cases::editor::CloseChoice;
+use use_cases::plugin_popups::HoverZone;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
@@ -26,9 +27,21 @@ pub enum UiEvent {
     ActivateTab(usize),
     CloseTab(usize),
     NewTab,
+    /// A group of the layout was clicked (its text, its tab strip or its empty area).
+    FocusGroup(usize),
+    /// The line between two columns (`vertical`) or rows was dragged: boundary `index` is now at
+    /// `fraction` of the window.
+    LayoutBoundaryDragged { vertical: bool, index: usize, fraction: f64 },
+    /// A tab (the document at `tab` in the window) was dropped on `group`, at `index` among its tabs.
+    TabDropped { tab: usize, group: usize, index: usize },
+
+    /// A double click on a preview's tab: it stays open as a tab of its own.
+    KeepTab(usize),
 
     ToggleFolder(PathBuf),
     OpenFile(PathBuf),
+    /// A file clicked once in the side bar: a preview (a double click opens it for good).
+    PreviewFile(PathBuf),
     RemoveFolder(PathBuf),
 
     QuickPanelQueryChanged(String),
@@ -43,6 +56,16 @@ pub enum UiEvent {
 
     /// A line of the output panel was double-clicked (counting from the start of its text).
     OutputPanelLineOpened(usize),
+
+    /// A link in a plugin's popup or phantom was clicked (its `href`).
+    PopupLinkClicked(String),
+    PhantomLinkClicked { phantom: u64, href: String },
+    /// A link in an annotation of the region set `key` was clicked.
+    AnnotationLinkClicked { document: DocumentId, key: String, href: String },
+    /// Esc, or the mouse moved away from a popup that asked for it.
+    PopupDismissed,
+    /// The mouse rests over a view (for `on_hover`).
+    Hover { document: DocumentId, point: usize, zone: HoverZone },
 
     FindOptionsChanged(FindOptions),
     ReplacementChanged(String),
@@ -60,6 +83,11 @@ pub enum UiEvent {
     TextEdited(DocumentId),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
+    /// The text widget typed these characters (after `TextEdited` and `SelectionChanged`): they
+    /// may open the auto-complete list.
+    TextTyped(DocumentId, String),
+    /// A completion of the auto-complete list was clicked (its row).
+    CompletionClicked(usize),
     /// Every frame: the chars on screen.
     VisibleRange(DocumentId, usize, usize),
     /// Keys the editor handles with Sublime's indentation rules instead of the widget's.
@@ -96,6 +124,19 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::NewTab => editor.new_file(),
+        UiEvent::FocusGroup(group) => {
+            if group != editor.active_group() {
+                editor.focus_group(group);
+            }
+            view.focus_editor = true;
+        }
+        UiEvent::LayoutBoundaryDragged { vertical, index, fraction } => editor.move_layout_boundary(vertical, index, fraction),
+        UiEvent::TabDropped { tab, group, index } => {
+            if let Some(id) = editor.state().documents.get(tab).map(|d| d.id) {
+                editor.drop_view_in_group(id, group, index);
+                view.focus_editor = true;
+            }
+        }
 
         UiEvent::ToggleFolder(folder) => {
             if !view.expanded_folders.remove(&folder) {
@@ -103,8 +144,22 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::OpenFile(path) => {
-            editor.open_file(&path);
+            if editor.open_file(&path) {
+                if let Some(id) = editor.active_document().map(|d| d.id) {
+                    editor.keep_document(id);
+                }
+            }
             view.focus_editor = true;
+        }
+        UiEvent::PreviewFile(path) => {
+            editor.preview_file(&path);
+            view.focus_editor = true;
+        }
+        UiEvent::KeepTab(index) => {
+            if let Some(id) = editor.state().documents.get(index).map(|d| d.id) {
+                editor.keep_document(id);
+                editor.activate(index);
+            }
         }
         UiEvent::RemoveFolder(folder) => editor.remove_folder(&folder),
 
@@ -165,6 +220,12 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
 
+        UiEvent::PopupLinkClicked(href) => command_controller::navigate_plugin_popup(editor, view, &href),
+        UiEvent::PhantomLinkClicked { phantom, href } => command_controller::navigate_plugin_phantom(editor, view, phantom, &href),
+        UiEvent::AnnotationLinkClicked { document, key, href } => command_controller::navigate_plugin_annotation(editor, view, document, &key, &href),
+        UiEvent::PopupDismissed => editor.hide_plugin_popup(),
+        UiEvent::Hover { document, point, zone } => editor.plugin_hover(document, point, zone),
+
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
         UiEvent::FindNext => view.queue_command(Command::new("find_next")),
@@ -192,7 +253,16 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
         UiEvent::SelectionChanged(document, selection) => editor.sync_selection_from_view(document, selection),
         UiEvent::VisibleRange(document, start, end) => editor.sync_visible_range(document, start, end),
-        UiEvent::TabPressed => editor.run_text_command(TextCommand::InsertTab),
+        UiEvent::TextTyped(document, text) => editor.typed_in_view(document, &text),
+        UiEvent::CompletionClicked(index) => {
+            editor.commit_completion(Some(index));
+            view.focus_editor = true;
+        }
+        UiEvent::TabPressed => {
+            if !editor.tab_completion() {
+                editor.run_text_command(TextCommand::InsertTab);
+            }
+        }
         UiEvent::ShiftTabPressed => editor.run_text_command(TextCommand::Unindent),
         UiEvent::EnterPressed => editor.run_text_command(TextCommand::NewlineAutoIndent),
         UiEvent::TypedAtSelections(text) => editor.insert_at_selections(&text),
@@ -202,7 +272,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::CloseDialogAnswered(choice) => {
             if editor.resolve_pending_close(choice) {
                 view.exit_confirmed = true;
-                view.request(ViewRequest::CloseWindow);
+                view.request(ViewRequest::Exit);
             }
         }
         UiEvent::AboutClosed => view.show_about = false,

@@ -154,8 +154,10 @@ Supported since 2026-10-26: `expand_selection {to: smart | line_prev | line_with
 
 Still ignored:
 - `expand_selection {to: scope | tag}` — needs scopes from the syntax engine.
-- `move` / `move_to` / `left_delete` / `right_delete` / `delete_word` are left to the text widget, so `by: subwords/wordends/stops`,
-  `move_to: hardbol/hardeol`, `delete_to_tab_stop`, `move_to_limit_on_up_down` and `sub_word_separators` do not apply.
+- `move` / `move_to` key bindings go to the text widget for what it does itself; `by: subwords / subword_ends / stops / pages`
+  and `move_to: brackets` run as commands (2026-11-06). `delete_word {forward}` deletes to the next word boundary at every
+  caret (2026-11-06). Still ignored: `delete_word {sub_words}`, `delete_to_tab_stop`,
+  `move_to_limit_on_up_down`, `separators` and `sub_word_separators`.
 - `next_view` / `prev_view {extend, update_stack}` — selecting several tabs is not supported.
 - `open_file {semi_transient, add_to_selection, force_group…}` — no transient tabs, groups or tab multi-selection.
 - `line_strict` behaves like `line_without_eol` (its exact difference in Sublime is not known).

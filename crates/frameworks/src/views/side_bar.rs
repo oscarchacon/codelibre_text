@@ -16,17 +16,28 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBa
 
         if !side_bar.open_files.is_empty() {
             section_header(ui, chrome, text.tr("OPEN FILES"));
-            for (index, file) in side_bar.open_files.iter().enumerate() {
-                let response = row(ui, chrome, 0, None, &file.name, file.active);
+            let mut last_group = None;
+            for file in &side_bar.open_files {
+                // With several groups, the files of each one under its name, as in Sublime.
+                if side_bar.groups > 1 && last_group != Some(file.group) {
+                    ui.horizontal(|ui| {
+                        ui.add_space(14.0);
+                        let title = text.tr_args("GROUP {number}", &[("number", &(file.group + 1))]);
+                        ui.label(RichText::new(title).size(9.5).color(chrome.fg_dim));
+                    });
+                    last_group = Some(file.group);
+                }
+                let depth = if side_bar.groups > 1 { 1 } else { 0 };
+                let response = row(ui, chrome, depth, None, &file.name, file.active);
                 if file.dirty {
-                    let center = egui::pos2(response.rect.left() + 16.0, response.rect.center().y);
+                    let center = egui::pos2(response.rect.left() + 16.0 + depth as f32 * 14.0, response.rect.center().y);
                     ui.painter().circle_filled(center, 3.0, chrome.fg_dim);
                 }
                 if response.clicked() {
-                    events.push(UiEvent::ActivateTab(index));
+                    events.push(UiEvent::ActivateTab(file.index));
                 }
                 if response.middle_clicked() {
-                    events.push(UiEvent::CloseTab(index));
+                    events.push(UiEvent::CloseTab(file.index));
                 }
             }
             ui.add_space(8.0);
@@ -40,10 +51,15 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBa
                     TreeRowKind::File => None,
                 };
                 let response = row(ui, chrome, entry.depth, folder, &entry.name, entry.active);
-                if response.clicked() {
+                // A file: one click previews it, two open it, as in Sublime.
+                if response.double_clicked() {
+                    if let TreeRowKind::File = entry.kind {
+                        events.push(UiEvent::OpenFile(entry.path.clone()));
+                    }
+                } else if response.clicked() {
                     events.push(match entry.kind {
                         TreeRowKind::Folder { .. } => UiEvent::ToggleFolder(entry.path.clone()),
-                        TreeRowKind::File => UiEvent::OpenFile(entry.path.clone()),
+                        TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
                     });
                 }
                 if let TreeRowKind::Folder { is_root: true, .. } = entry.kind {

@@ -273,7 +273,7 @@ fn answering_the_exit_question_closes_the_window() {
     editor.request_exit(view.layout());
     handle(&mut editor, &mut view, UiEvent::CloseDialogAnswered(CloseChoice::DontSave));
     assert!(view.exit_confirmed);
-    assert_eq!(view.take_requests(), vec![ViewRequest::CloseWindow]);
+    assert_eq!(view.take_requests(), vec![ViewRequest::Exit]);
 }
 
 #[test]

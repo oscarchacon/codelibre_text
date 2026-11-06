@@ -43,6 +43,50 @@ fn reading_the_text() {
 }
 
 #[test]
+fn meta_info_symbols_backtraces_and_classes() {
+    let world = plugin_world()
+        .with_file("/p/a.py", "x = \"  one\"\ny = \"two\"")
+        .with_meta_preference("source.python", json!({ "shellVariables": [{ "name": "TM_COMMENT_START", "value": "# " }] }))
+        .with_meta_preference("string.quoted", json!({ "showInSymbolList": 1, "symbolTransformation": "s/\"//g;s/^\\s+//" }));
+    let mut editor = world.editor_opening(&["/p/a.py"]);
+    let v = view_id(&editor);
+    assert_eq!(
+        call(&world, &mut editor, "view_meta_info", json!([v, "shellVariables", 0])),
+        Ok(json!([{ "name": "TM_COMMENT_START", "value": "# " }]))
+    );
+    assert_eq!(call(&world, &mut editor, "view_meta_info", json!([v, "nothing", 0])), Ok(Value::Null));
+    assert_eq!(
+        call(&world, &mut editor, "view_symbol_regions", json!([v, "symbols"])),
+        Ok(json!([
+            ["one", [4, 11], "Python", [0, "", ""]],
+            ["two", [16, 21], "Python", [0, "", ""]],
+        ]))
+    );
+    assert_eq!(call(&world, &mut editor, "view_symbol_regions", json!([v, "references"])), Ok(json!([])), "no reference list");
+    assert_eq!(
+        call(&world, &mut editor, "view_context_backtrace", json!([v, 6])),
+        Ok(json!([["main", "Packages/Python/Python.sublime-syntax"], ["string", "Packages/Python/Python.sublime-syntax"]]))
+    );
+    // `CLASS_WORD_START | CLASS_SUB_WORD_START | CLASS_LINE_START` at 0.
+    assert_eq!(call(&world, &mut editor, "view_classify", json!([v, 0])), Ok(json!(1 | 16 | 64)));
+    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 0, true, 1, ""])), Ok(json!(7)), "the next word start: one");
+    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 11, false, 64, ""])), Ok(json!(0)));
+    let syntaxes = call(&world, &mut editor, "list_syntaxes", json!([])).unwrap();
+    assert!(syntaxes.as_array().unwrap().contains(&json!(["Packages/Python/Python.sublime-syntax", "Python", false, "source.python", ["py"]])), "{syntaxes}");
+    assert_eq!(call(&world, &mut editor, "find_syntax_for_file", json!(["b.py", ""])), Ok(json!("Python")));
+}
+
+#[test]
+fn plugins_add_to_the_clipboard_history() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    assert_eq!(call(&world, &mut editor, "clipboard_history_push", json!(["from Terminus"])), Ok(Value::Null));
+    assert_eq!(call(&world, &mut editor, "clipboard_history", json!([])), Ok(json!(["from Terminus"])));
+    call(&world, &mut editor, "clipboard_history_clear", json!([])).unwrap();
+    assert!(editor.clipboard_history().is_empty());
+}
+
+#[test]
 fn scopes() {
     let world = plugin_world().with_file("/p/a.py", "s = \"x\"");
     let mut editor = world.editor_opening(&["/p/a.py"]);
@@ -56,6 +100,22 @@ fn scopes() {
         Ok(json!([[[3, 4], "source.python "], [[4, 5], string]]))
     );
     assert_eq!(call(&world, &mut editor, "score_selector", json!([string, "comment"])), Ok(json!(0)));
+}
+
+#[test]
+fn styles_come_from_the_color_scheme_in_use() {
+    let world = plugin_world().with_preferences(json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}));
+    let mut editor = editor_with(&world, "x");
+    let v = view_id(&editor);
+    assert_eq!(
+        call(&world, &mut editor, "view_style", json!([v])),
+        Ok(json!({"foreground": "#ffffff", "background": "#000000", "scheme": "Mariana"}))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_style_for_scope", json!([v, "source.python string.quoted"])),
+        Ok(json!({"foreground": "#ff0000", "bold": true, "scheme": "Mariana", "scope": "source.python string.quoted",
+                  "source_line": 0, "source_column": 0, "source_file": ""}))
+    );
 }
 
 #[test]
@@ -149,8 +209,8 @@ fn closed_views_and_unknown_functions() {
     assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
     assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_set_layout", json!([1, {}])),
-        Err("sublime_api.window_set_layout is not implemented yet".into())
+        call(&world, &mut editor, "window_not_a_real_function", json!([1, {}])),
+        Err("sublime_api.window_not_a_real_function is not implemented yet".into())
     );
     assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
     assert_eq!(
@@ -175,10 +235,10 @@ fn the_window_and_its_views() {
     call(&world, &mut editor, "window_focus_view", json!([opened])).unwrap();
     assert_eq!(json!(view_id(&editor)), opened);
     // Package Control moves its messages to the first tab; the active tab stays active.
-    call(&world, &mut editor, "window_set_view_index", json!([new, 0])).unwrap();
+    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 0])).unwrap();
     assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([new, opened])));
     assert_eq!(json!(view_id(&editor)), opened);
-    call(&world, &mut editor, "window_set_view_index", json!([new, 99])).unwrap();
+    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 99])).unwrap();
     assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([opened, new])));
     assert_eq!(call(&world, &mut editor, "window_folders", json!([])), Ok(json!(["/p"])));
     assert_ne!(json!(first), new);
@@ -344,6 +404,21 @@ fn view_settings_layer_on_top_of_the_syntax_settings() {
 }
 
 #[test]
+fn a_view_s_syntax_setting_is_its_syntax_resource() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let target = json!(["view", view_id(&editor)]);
+    let plain = json!([true, "Packages/Text/Plain text.tmLanguage"]);
+    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(plain), "never None (Pretty JSON)");
+    call(&world, &mut editor, "settings_set", json!([target, "syntax", "Packages/Python/Python.sublime-syntax"])).unwrap();
+    assert_eq!(editor.active_document().unwrap().syntax, "Python", "setting it assigns the syntax");
+    let python = json!([true, "Packages/Python/Python.sublime-syntax"]);
+    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(python));
+    let all = call(&world, &mut editor, "settings_all", json!([target])).unwrap();
+    assert_eq!(all["syntax"], json!("Packages/Python/Python.sublime-syntax"));
+}
+
+#[test]
 fn plugin_settings_files_are_loaded_changed_and_saved_to_user() {
     let world = plugin_world();
     world
@@ -420,6 +495,58 @@ fn built_in_commands_that_work_in_panels() {
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bye");
     let refused = call(&world, &mut editor, "run_command", json!(["view", id, "sort_lines", null]));
     assert!(refused.unwrap_err().starts_with("sort_lines cannot run in a panel"));
+}
+
+#[test]
+fn a_view_exports_html() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "x = \"hi\"\n");
+    let id = view_id(&editor);
+    let html = call(&world, &mut editor, "view_export_to_html", json!([id, null, false, false, true, true])).unwrap();
+    let html = html.as_str().unwrap();
+    assert!(html.starts_with("<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">x = </span>"), "{html}");
+    assert!(html.contains("<span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span>"), "{html}");
+    // A region: only it is exported, and the enclosing div adds the colors.
+    let region = call(&world, &mut editor, "view_export_to_html", json!([id, [[4, 8]], false, true, false, false]));
+    assert_eq!(
+        region,
+        Ok(json!(
+            "<div style=\"color: #ffffff; background-color: #000000;\">\
+             <pre style=\"margin: 0;\"><span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span></pre></div>"
+        ))
+    );
+}
+
+#[test]
+fn an_io_panel_keeps_its_field_and_calls_on_input() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, 7])).unwrap();
+    let output = ids[0].as_u64().unwrap();
+    let input = ids[1].as_u64().unwrap();
+    assert_eq!(call(&world, &mut editor, "window_find_io_panel", json!([1, "exec"])), Ok(json!([output, input])));
+
+    // Enter: `on_input` hears the text, the field empties and stays open.
+    call(&world, &mut editor, "view_insert", json!([input, 0, "hello"])).unwrap();
+    editor.finish_plugin_input_panel(true, &mut |_, _| {});
+    assert_eq!(world.plugins.callbacks.borrow().as_slice(), [(7, "input".to_string(), json!(["hello"]))]);
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "");
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(true)));
+
+    // Esc closes it without a call.
+    editor.finish_plugin_input_panel(false, &mut |_, _| {});
+    assert!(editor.plugin_input_panel().is_none());
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(false)));
+}
+
+#[test]
+fn an_io_panel_without_a_callback_has_no_input_field() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, null])).unwrap();
+    assert!(ids[0].is_number());
+    assert_eq!(ids[1], Value::Null);
+    assert!(editor.plugin_input_panel().is_none());
 }
 
 #[test]

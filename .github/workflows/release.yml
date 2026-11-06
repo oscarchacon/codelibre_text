@@ -96,6 +96,9 @@ jobs:
           key: release-linux-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
+      # Python for the plugins, inside the packages (in /usr/lib/codelibre-text/python).
+      - name: Download Python
+        run: sh packaging/python/fetch_python.sh target/release/python
       - name: Install nfpm
         run: |
           curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_${{ matrix.nfpm_arch }}.tar.gz" \
@@ -118,6 +121,7 @@ jobs:
           name="codelibre-text-$VERSION-linux-${{ matrix.arch }}"
           mkdir -p "$RUNNER_TEMP/$name"
           cp target/release/codelibre_text LICENSE assets/icons/codelibre_text.png packaging/linux/codelibre_text.desktop "$RUNNER_TEMP/$name/"
+          cp -R target/release/python "$RUNNER_TEMP/$name/python"
           tar -C "$RUNNER_TEMP" -cJf "dist/$name.tar.xz" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -156,6 +160,10 @@ jobs:
           key: release-windows-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
+      # Python for the plugins (native x64 or ARM64), next to the .exe: inside the installer, so
+      # it installs offline.
+      - name: Download Python
+        run: sh packaging/python/fetch_python.sh "target/$CARGO_BUILD_TARGET/release/python" "$CARGO_BUILD_TARGET"
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
       - name: Create the installer
@@ -168,6 +176,7 @@ jobs:
           name="codelibre-text-$VERSION-windows-$ARCH"
           mkdir -p "$RUNNER_TEMP/$name"
           cp "target/$CARGO_BUILD_TARGET/release/codelibre_text.exe" "$RUNNER_TEMP/$name/"
+          cp -R "target/$CARGO_BUILD_TARGET/release/python" "$RUNNER_TEMP/$name/python"
           cp LICENSE "$RUNNER_TEMP/$name/LICENSE.txt"
           (cd "$RUNNER_TEMP" && 7z a -tzip "$name.zip" "$name")
           mv "$RUNNER_TEMP/$name.zip" dist/

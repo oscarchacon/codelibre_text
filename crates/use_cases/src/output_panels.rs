@@ -17,6 +17,8 @@ use crate::editor::Editor;
 pub struct OutputPanel {
     pub name: String,
     pub document: Document,
+    /// `create_output_panel(..., unlisted=True)`: not listed by `window.panels()`.
+    pub unlisted: bool,
     /// The line of the result `next_result` went to last.
     pub current_result: Option<usize>,
     /// Changes every time a result is visited, for the view to scroll to it.
@@ -32,21 +34,30 @@ pub struct OutputPanels {
     results: Option<String>,
 }
 
+impl OutputPanels {
+    /// Whether the view `id` is one of these panels'.
+    pub(crate) fn has_view(&self, id: DocumentId) -> bool {
+        self.panels.iter().any(|p| p.document.id == id)
+    }
+}
+
 impl Editor {
     /// Creates the panel `name`, or empties it if it exists (as Sublime does), and returns its view id.
-    pub(crate) fn create_output_panel(&mut self, name: &str) -> DocumentId {
+    pub(crate) fn create_output_panel(&mut self, name: &str, unlisted: bool) -> DocumentId {
         if let Some(id) = self.find_output_panel(name) {
             let doc = self.any_document_mut(id).expect("found above");
             let read_only = std::mem::replace(&mut doc.read_only, false);
             doc.replace_range(0, doc.char_count(), "");
             doc.read_only = read_only;
-            self.panel_mut(name).expect("found above").current_result = None;
+            let panel = self.panel_mut(name).expect("found above");
+            panel.current_result = None;
+            panel.unlisted = unlisted;
             return id;
         }
         let id = self.next_document_id();
         let mut document = Document::new_untitled(id, LineEnding::Unix);
         document.scratch = true;
-        self.state.output_panels.panels.push(OutputPanel { name: name.to_string(), document, current_result: None, result_revision: 0 });
+        self.state.output_panels.panels.push(OutputPanel { name: name.to_string(), document, unlisted, current_result: None, result_revision: 0 });
         id
     }
 
@@ -62,6 +73,9 @@ impl Editor {
         if let Some(id) = self.find_output_panel(name) {
             self.state.plugins.view_settings.remove(&id);
         }
+        if let Some(id) = self.state.plugin_panels.close_io_panel(name) {
+            self.state.plugins.view_settings.remove(&id);
+        }
         self.state.output_panels.panels.retain(|p| p.name != name);
         if self.state.output_panels.shown.as_deref() == Some(name) {
             self.state.output_panels.shown = None;
@@ -71,9 +85,9 @@ impl Editor {
         }
     }
 
-    /// Names of every panel, as `window.panels()` lists them (`output.<name>`).
+    /// Names of every listed panel, as `window.panels()` lists them (`output.<name>`).
     pub(crate) fn output_panel_names(&self) -> Vec<String> {
-        self.state.output_panels.panels.iter().map(|p| format!("output.{}", p.name)).collect()
+        self.state.output_panels.panels.iter().filter(|p| !p.unlisted).map(|p| format!("output.{}", p.name)).collect()
     }
 
     /// `show_panel {"panel": "output.<name>"}`. False when there is no such panel.

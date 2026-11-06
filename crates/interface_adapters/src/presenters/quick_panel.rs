@@ -20,6 +20,7 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewMo
             SearchKind::ColorSchemes => editor.tr("Select Color Scheme"),
             SearchKind::Languages => editor.tr("Select Language"),
             SearchKind::BuildSystems => editor.tr("Select Build System"),
+            SearchKind::ClipboardHistory => editor.tr("Paste from History"),
             SearchKind::PluginItems => editor.plugin_quick_panel().map_or("", |p| p.placeholder.as_str()),
         }
         .to_string(),
