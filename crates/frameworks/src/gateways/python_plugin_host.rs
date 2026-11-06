@@ -18,6 +18,7 @@ use use_cases::gateways::{PluginCommandKind, PluginHostGateway, PluginLoad, Plug
 const SUPPORT_FILES: &[(&str, &str)] = &[
     ("plugin_host.py", include_str!("../../../../assets/python/plugin_host.py")),
     ("codelibre_rpc.py", include_str!("../../../../assets/python/codelibre_rpc.py")),
+    ("compat.py", include_str!("../../../../assets/python/compat.py")),
     ("sublime_api.py", include_str!("../../../../assets/python/sublime_api.py")),
     ("sublime.py", include_str!("../../../../assets/python/sublime.py")),
     ("sublime_plugin.py", include_str!("../../../../assets/python/sublime_plugin.py")),
@@ -37,6 +38,10 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("shims/distutils/sysconfig.py", include_str!("../../../../assets/python/shims/distutils/sysconfig.py")),
     ("shims/asyncore.py", include_str!("../../../../assets/python/shims/asyncore.py")),
     ("shims/asynchat.py", include_str!("../../../../assets/python/shims/asynchat.py")),
+    ("shims/pipes.py", include_str!("../../../../assets/python/shims/pipes.py")),
+    ("shims/cgi.py", include_str!("../../../../assets/python/shims/cgi.py")),
+    ("shims/imghdr.py", include_str!("../../../../assets/python/shims/imghdr.py")),
+    ("shims/uu.py", include_str!("../../../../assets/python/shims/uu.py")),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).
@@ -324,7 +329,12 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
 }
 
 /// A Python 3 interpreter, as a program and its first arguments: the `python_interpreter`
-/// setting, else the first of `py -3`, `python3`, `python` and `uv python find` that works.
+/// setting, else the first of `py -3.8`, `python3.8`, `py -3`, `python3`, `python` and
+/// `uv python find` that works.
+///
+/// Sublime's plugin hosts are Python 3.8 (or 3.3), and Package Control installs the libraries
+/// built for the host's Python: an installed Python 3.8 is used when there is one, even if a
+/// newer `python3` comes first in `PATH`.
 pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
     if let Some(path) = setting {
         let python = vec![path.to_string()];
@@ -334,7 +344,7 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
             Err(format!("\"python_interpreter\": {path} is not a Python 3 interpreter"))
         };
     }
-    let candidates = [vec!["py", "-3"], vec!["python3"], vec!["python"]];
+    let candidates = [vec!["py", "-3.8"], vec!["python3.8"], vec!["py", "-3"], vec!["python3"], vec!["python"]];
     for candidate in candidates {
         let python: Vec<String> = candidate.into_iter().map(String::from).collect();
         if is_python3(&python) {

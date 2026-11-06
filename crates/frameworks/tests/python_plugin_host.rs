@@ -502,6 +502,86 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     assert_eq!(editor.clipboard_history(), ["copied in Terminus"]);
 }
 
+/// The modules newer Pythons removed entirely (`cgi`, `imghdr`, `pipes`, `uu`) and the names
+/// they dropped (the `collections` ABCs, `inspect.getargspec`, `ssl.wrap_socket`…) are there for
+/// plugins and the libraries Package Control installs (`compat.py` and `shims/`).
+#[test]
+fn removed_modules_and_standard_library_names_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import io
+
+import sublime
+import sublime_plugin
+
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        import cgi
+        import collections
+        import collections.abc
+        import configparser
+        import imghdr
+        import inspect
+        import pkgutil
+        import pipes
+        import ssl
+        import threading
+        import time
+        import typing
+        import unittest
+        import uu
+
+        assert issubclass(dict, collections.Mapping)
+        spec = inspect.getargspec(lambda a, b=1: None)
+        assert spec.args == ["a", "b"] and spec.defaults == (1,), spec
+        assert inspect.formatargspec(["a", "b"], defaults=(1,)) == "(a, b=1)"
+        assert hasattr(unittest.TestCase, "assertEquals")
+        unittest.TestCase("assertEquals").assertEquals(1, 1)
+        assert issubclass(configparser.SafeConfigParser, configparser.ConfigParser)
+        assert hasattr(configparser.ConfigParser, "readfp")
+
+        assert callable(ssl.wrap_socket) and callable(ssl.match_hostname)
+        cert = {"subjectAltName": (("DNS", "*.example.com"),)}
+        ssl.match_hostname(cert, "a.example.com")
+        try:
+            ssl.match_hostname(cert, "a.b.example.com")
+            raise AssertionError("a wildcard matched two labels")
+        except ssl.CertificateError:
+            pass
+
+        assert hasattr(typing, "ByteString")
+        assert callable(threading.currentThread) and callable(threading.Thread.isAlive)
+        assert time.clock() >= 0
+        assert pkgutil.ImpImporter is not None and pkgutil.get_loader("json") is not None
+        import importlib.metadata
+        assert hasattr(importlib.metadata.entry_points(), "get")
+
+        assert cgi.escape("<a>") == "&lt;a&gt;"
+        assert cgi.parse_header('text/html; charset="utf-8"') == ("text/html", {"charset": "utf-8"})
+        assert cgi.parse_qs("a=1&a=2") == {"a": ["1", "2"]}
+        assert imghdr.what(None, b"\x89PNG\r\n\x1a\n" + b"\0" * 24) == "png"
+        assert imghdr.what(None, b"GIF89a" + b"\0" * 26) == "gif"
+        assert pipes.quote("a b") == "'a b'"
+
+        data = b"hello uu\n" * 20
+        encoded = io.BytesIO()
+        uu.encode(io.BytesIO(data), encoded, name="x.txt", mode=0o644)
+        encoded.seek(0)
+        decoded = io.BytesIO()
+        uu.decode(encoded, decoded, quiet=True)
+        assert decoded.getvalue() == data
+        sublime.status_message("shims ok")
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "shims ok", "console:\n{}", editor.state().console);
+}
+
 #[test]
 fn a_build_like_command_writes_to_an_output_panel_from_a_thread() {
     let dir = tempfile::tempdir().unwrap();

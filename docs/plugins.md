@@ -15,7 +15,9 @@ checked against the code (clones, windows, completions, phantoms, groups and `re
 exact score values and whole-file scans); the rest of B and phase C below are the pending work, in order. Also on
 2026-11-06: projects (`project_data`, `$project*`, project builds), `create_io_panel` with its `on_input` field,
 `window.symbol_locations` and the `lookup_*` functions, `PERSISTENT` regions in the session, `set_overwrite_status`,
-`new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`.
+`new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`; `compat.py` (the
+standard library names newer Pythons dropped) with four more shims (`pipes`, `cgi`, `imghdr`, `uu`), and an installed
+Python 3.8 preferred for the host.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -114,7 +116,8 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   `Preferences.sublime-settings` changes apply at once (session overrides) and are written on `save_settings`.
 - Plugins load from every package folder with top-level `.py` files (ours and, with `import_sublime_packages`,
   Sublime's, except its `Default`), each package imported as a Python package so relative imports work.
-- Settings: `python_plugins` (default true), `python_interpreter` (default: `py -3`, `python3`, `python`, `uv python find`).
+- Settings: `python_plugins` (default true), `python_interpreter` (default: `py -3.8`, `python3.8`, `py -3`,
+  `python3`, `python`, `uv python find`).
 - Output and tracebacks go to the console (`Ctrl+\``, View > Show Console); load errors also go to Help > Package Load Errors.
   Load errors, plugin command failures, a dead host and Package Control install failures are also written, with
   their UTC time, to the error log (`data\Local\Errors.log`, Help > Error Log; `Editor::record_errors`), and
@@ -358,16 +361,21 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `CODELIBRE_TEXT_DATA` in `app_directories.rs`): Package Control prefixes them with `\\?\`, after which `/` is no
       separator, and with `C:/…` it could not list `Installed Packages`.
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
-      has them uses its own): `imp` (gone in 3.12), `asyncore` / `asynchat` and `distutils` (`version`, `util`,
-      `dir_util`, `file_util`, `spawn`, `sysconfig`).
-- [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14
-      here), not a bundled 3.8 / 3.3. `sublime.version()` reports the build whose plugin host runs that Python (4203 for
-      3.14+, 4201 for 3.13, else 4200). More shims as plugins need them. Done in `plugin_host.py`:
-      `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did
-      (`restore_entry_points_by_group`; Markdown needs it). Libraries for 3.8 run on 3.14 only while they avoid what
-      later Pythons removed; compiled ones (`cp38` wheels) cannot.
+      has them uses its own): `imp` (gone in 3.12), `asyncore` / `asynchat`, `distutils` (`version`, `util`,
+      `dir_util`, `file_util`, `spawn`, `sysconfig`), and `pipes`, `cgi`, `imghdr` and `uu` (3.13).
+- [x] **Removed names**: `assets/python/compat.py`, applied before any plugin is imported: the `collections` ABCs (3.10),
+      `inspect.getargspec` / `formatargspec` (3.11), `unittest`'s CamelCase methods, `configparser.SafeConfigParser` /
+      `readfp` and `ssl.wrap_socket` / `match_hostname` (3.12), `cgi.escape` / `unescape` / `parse_qs` (3.8), `time.clock`
+      (3.8), `typing.ByteString` / `io` / `re` (3.13 / 3.14), `threading`'s old names (3.9) and `pkgutil.ImpImporter` /
+      `find_loader` / `get_loader` (3.12); `asyncio.get_event_loop()` makes a loop again as in 3.8 (3.14).
+      `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did, and takes
+      `group=` on 3.9: Markdown needs both.
+- [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run the Python 3 installed, preferring a
+      3.8 when there is one (`find_interpreter`), not a bundled 3.8 / 3.3. `sublime.version()` reports the build whose
+      plugin host runs that Python (4203 for 3.14+, 4201 for 3.13, else 4200). Libraries for 3.8 run on 3.14 only while
+      they avoid what later Pythons removed; compiled ones (`cp38` wheels) cannot.
       On macOS that is often Apple's `/usr/bin/python3` (3.9, LibreSSL), whose `SSLContext.post_handshake_auth` cannot be
-      set: `plugin_host.py::allow_post_handshake_auth` makes it a no-op, or every Package Control download fails.
+      set: `compat.py::allow_post_handshake_auth` makes it a no-op, or every Package Control download fails.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
       It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,

@@ -83,7 +83,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | `Main.sublime-menu` | Yes, merged by `id` |
 | `.sublime-commands` | Yes |
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, `open_url`, …) |
-| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, statuses and regions work; Package Control installs from Tools > Install Package Control… (needs `curl`) and the packages it installs load by themselves — see [docs/plugins.md](docs/plugins.md) |
+| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, build systems, projects, completions, popups, phantoms, regions, statuses, split layouts and windows work; Package Control installs from Tools > Install Package Control… (needs `curl`) and manages the whole package lifecycle — see [docs/plugins.md](docs/plugins.md) |
 | Build systems (`.sublime-build`) | `build`, `exec`, variants, `cancel_build`, results (`next_result`) |
 | `.sublime-package` archives | Yes: unpacked to a cache and read like folders; loose files override them. Of the packages Sublime ships, syntaxes are left out (syntect has its own) |
 
@@ -208,19 +208,19 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 
 - [ ] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
 - [ ] Find panel toggles and Find in Files
-- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`, dialogs, `find_resources` / `load_resource`, scratch views, output panels, `set_status`, `add_regions`
-- [ ] Python plugins phase B rest: output panel results, build systems
-- [x] Python plugins phase C: installing Package Control from the editor
-- [ ] Package Control, the whole package lifecycle (details in [docs/plugins.md](docs/plugins.md), phase C):
-  - [ ] Follow `ignored_packages` changes without Reload Packages (Disable / Enable Package, and the disabling around Upgrade / Remove)
-  - [ ] Load only the packages that changed, without restarting the plugin host (now a reload stops Package Control's threads mid-install)
-  - [ ] Verify installing a package with plugins and libraries, Upgrade, Remove and Satisfy Libraries end to end
-  - [ ] Package settings opened by Package Control > Settings show their defaults (`edit_settings` only knows Preferences and keymaps)
-  - [ ] `$packages` (without braces) in command arguments, used by Package Control's own `open_file` entries
-  - [ ] Package Control 3 dependencies (`dependencies.json`) for old packages, and more shims for Pythons newer than 3.8
-- [ ] Split layouts (groups)
-- [ ] Minimap, code folding, auto-complete, bookmarks
-- [ ] Build systems
+- [x] Python plugins phase A: the plugin host and its API
+- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`, `TextChangeListener`), real `set_timeout` / `set_timeout_async`, quick / input panels, dialogs, resources, output panels and build systems, projects, command input handlers, command metadata, completions, popups, phantoms, regions and annotations, statuses, split layouts (groups), clones and windows
+- [ ] Python plugins phase B rest (details in [docs/plugins.md](docs/plugins.md)):
+  - [ ] `save` / `close`, `select_all`, the widget's undo / clipboard and the panel / build commands at once inside an event (they wait for the next frame)
+  - [ ] A `left_delete` / `move` bound in a keymap inside the widget's undo
+  - [ ] Build variants in the Build System menu
+  - [ ] Output panel syntax highlighting and selections, more built-in commands, the console as a panel
+  - [ ] Input handlers inside the palette (breadcrumb, Backspace to the previous handler, `want_event`, HTML previews)
+  - [ ] Region icon files, `on_hover` over annotations
+- [x] Python plugins phase C: installing Package Control from the editor, and the whole package lifecycle: `ignored_packages` followed without Reload Packages, reloads that load only the changed packages, packages with plugins and libraries installed / upgraded / removed, package settings with their defaults (`edit_settings`), `$packages` without braces, Package Control 3 dependencies and their migration, local channels and repositories
+- [x] Python plugins compatibility: a Python 3.8 is preferred when installed, and `compat.py` / `shims/` restore the modules and names newer Pythons removed (`collections` ABCs, `inspect.getargspec`, `ssl.wrap_socket`, `entry_points`, `cgi`, `imghdr`, `pipes`, `uu`…)
+- [ ] Python plugins phase C rest: a bundled Python 3.8 / 3.3 host, Sublime's exact scope values, `find_by_selector` / `extract_scope` without whole-file scans
+- [ ] Minimap, code folding, bookmarks
 - [ ] Faster layout for very large files (highlighting is currently skipped above 4 MB)
 
 The full list of Sublime Text commands and settings still missing is in

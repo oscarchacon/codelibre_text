@@ -30,6 +30,12 @@ import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# The shims from the start, last so a standard library that still has a module wins: ``compat``
+# uses them too, for the modules a newer Python dropped entirely.
+_shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
+if _shims not in sys.path:
+    sys.path.append(_shims)
+
 # Not in the console, as in Sublime: deprecations show only for ``__main__``, which this host is
 # and Sublime's plugins are not; and Python 3.12's invalid escapes in old plugins' strings.
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -38,6 +44,12 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 import codelibre_rpc  # noqa: E402
 
 codelibre_rpc.setup()
+
+# Before any plugin: what newer Pythons removed from the standard library, and what the libraries
+# Package Control installs expect (Sublime's plugin hosts are Python 3.8).
+import compat  # noqa: E402
+
+compat.apply()
 
 import sublime  # noqa: E402
 import sublime_api  # noqa: E402
@@ -112,66 +124,6 @@ class ArchiveFinder:
 
 
 sys.meta_path.insert(0, ArchiveFinder)
-
-
-def allow_post_handshake_auth():
-    """Apple's ``/usr/bin/python3`` is built with LibreSSL: its ``SSLContext`` has
-    ``post_handshake_auth`` but refuses to set it, and Package Control sets it before every
-    download. Contexts made from then on ignore it (it only matters with client certificates)."""
-    import ssl
-
-    try:
-        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).post_handshake_auth = True
-    except AttributeError:
-        ssl.SSLContext.post_handshake_auth = property(lambda self: False, lambda self, value: None)
-    except Exception:
-        pass
-
-
-allow_post_handshake_auth()
-
-
-def restore_entry_points_by_group():
-    """Python 3.12 dropped the dict that ``importlib.metadata.entry_points()`` gave Python 3.8,
-    the plugins' Python (Markdown, a library Package Control installs, asks it
-    ``.get("markdown.extensions", ())``). Without arguments it answers groups again too."""
-    import importlib.metadata as metadata
-
-    if hasattr(metadata.entry_points(), "get"):
-        return
-
-    class EntryPointsByGroup(metadata.EntryPoints):
-        def get(self, group, default=None):
-            found = self.select(group=group)
-            return found if found else default
-
-        def keys(self):
-            return self.groups
-
-        def values(self):
-            return [self.select(group=group) for group in self.groups]
-
-        def items(self):
-            return [(group, self.select(group=group)) for group in self.groups]
-
-        def __getitem__(self, name):
-            try:
-                return super().__getitem__(name)
-            except KeyError:
-                if name in self.groups:
-                    return self.select(group=name)
-                raise
-
-    entry_points = metadata.entry_points
-
-    def entry_points_by_group(**params):
-        found = entry_points(**params)
-        return found if params else EntryPointsByGroup(found)
-
-    metadata.entry_points = entry_points_by_group
-
-
-restore_entry_points_by_group()
 
 
 def visible_path(directory, archives):
@@ -270,8 +222,9 @@ def add_library_folders():
             sys.path.append(folder)
     # Last, so the standard library wins where it still has them (``imp``, ``distutils``).
     shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
-    if shims not in sys.path:
-        sys.path.append(shims)
+    if shims in sys.path:
+        sys.path.remove(shims)
+    sys.path.append(shims)
 
 
 def dependency_folder(dependency):
