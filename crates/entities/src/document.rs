@@ -79,6 +79,12 @@ pub struct Document {
     pub modified_at: Option<SystemTime>,
     /// The group of the window (a pane of the layout) whose tabs it is in.
     pub group: usize,
+    /// A preview (Sublime's transient view: a file clicked once in the side bar, `TRANSIENT`):
+    /// the next preview in its group takes its place, until it is edited or kept.
+    pub transient: bool,
+    /// The buffer it shows: its own id, or that of the view it is a clone of (`clone_file`),
+    /// whose text it shares (see [`Document::follow_buffer`]).
+    pub buffer: DocumentId,
     /// The primary selection: the one the text widget shows and edits.
     selection: Selection,
     /// More selections added by `find_under_expand` (Ctrl+D), `select_lines`, `find_all_under`…
@@ -103,6 +109,17 @@ pub struct Document {
     change_log: Option<Vec<TextChange>>,
     /// The chars on screen, as the view last reported them.
     visible_range: Option<(usize, usize)>,
+    /// The fields of the snippet last inserted, while Tab / Shift+Tab visit them.
+    snippet: Option<SnippetFields>,
+}
+
+/// A snippet's fields (see `text_commands::insert_snippet_fields`): each field's regions, in
+/// visiting order (the last is where the caret ends), and the field the selection is in. They
+/// move with the text, and a field grows with what is typed at its end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnippetFields {
+    pub fields: Vec<Vec<(usize, usize)>>,
+    pub current: usize,
 }
 
 /// One edit of the text, with positions as they were before it.
@@ -119,7 +136,7 @@ pub struct TextChange {
 
 /// A named set of regions a plugin marks (a linter's errors, a search's matches…). The regions
 /// move with the text.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RegionSet {
     pub key: String,
     /// `(a, b)` char positions, like a selection's anchor and head.
@@ -130,6 +147,11 @@ pub struct RegionSet {
     pub icon: String,
     /// Sublime's drawing flags (`sublime.DRAW_NO_FILL`, `DRAW_SQUIGGLY_UNDERLINE`, `HIDDEN`…).
     pub flags: u64,
+    /// minihtml shown at the right of each region's line (`annotations`), one per region (a
+    /// missing one: none), in the order the regions were given.
+    pub annotations: Vec<String>,
+    /// The annotations' color (`annotation_color`, `#rrggbb` or a CSS color); empty: the scope's.
+    pub annotation_color: String,
 }
 
 /// HTML a plugin shows in the text (`view.add_phantom`): an inline note, a block below a line…
@@ -144,7 +166,7 @@ pub struct Phantom {
     pub region: (usize, usize),
     /// minihtml (see [`crate::minihtml`]).
     pub content: String,
-    /// Sublime's `LAYOUT_INLINE` (1), `LAYOUT_BELOW` (2) or `LAYOUT_BLOCK` (4).
+    /// Sublime's `LAYOUT_INLINE` (0), `LAYOUT_BELOW` (1) or `LAYOUT_BLOCK` (2).
     pub layout: u64,
 }
 
@@ -171,6 +193,8 @@ impl Document {
             syntax: "Plain Text".into(),
             modified_at: None,
             group: 0,
+            transient: false,
+            buffer: id,
             selection: Selection::caret(0),
             extra_selections: Vec::new(),
             selection_revision: 1,
@@ -182,6 +206,7 @@ impl Document {
             tracked_text: None,
             change_log: None,
             visible_range: None,
+            snippet: None,
         }
     }
 
@@ -237,6 +262,65 @@ impl Document {
                 text.into_bytes()
             }
         }
+    }
+
+    /// Another view of the same buffer (`clone_file`): the text, file and selection, not what
+    /// belongs to a view (regions, phantoms, a snippet's fields, the scroll).
+    pub fn clone_view(&self, id: DocumentId) -> Document {
+        let mut view = Document::new_untitled(id, self.line_ending);
+        view.buffer = self.buffer;
+        view.path = self.path.clone();
+        view.scratch_name = self.scratch_name.clone();
+        view.scratch = self.scratch;
+        view.read_only = self.read_only;
+        view.text = self.text.clone();
+        view.saved_text = self.saved_text.clone();
+        view.saved_line_ending = self.saved_line_ending;
+        view.encoding = self.encoding;
+        view.syntax = self.syntax.clone();
+        view.modified_at = self.modified_at;
+        view.group = self.group;
+        view.change_count = self.change_count;
+        view.set_selections(self.selection, self.extra_selections.clone());
+        view
+    }
+
+    /// Takes the buffer of a view of it that was edited or saved (`source`): its text (the
+    /// selections and regions move over the change as over an edit), file, saved text and
+    /// settings. Its own change count goes up by one change.
+    pub fn follow_buffer(&mut self, source: &Document) {
+        if self.text != source.text {
+            let before = std::mem::replace(&mut self.text, source.text.clone());
+            let prefix = common_prefix(&before, &self.text);
+            let suffix = common_suffix(&before[prefix..], &self.text[prefix..]);
+            let end_byte = before.len() - suffix;
+            let inserted_text = self.text[prefix..self.text.len() - suffix].to_string();
+            let (start, end) = (before[..prefix].chars().count(), before[..end_byte].chars().count());
+            let inserted = inserted_text.chars().count();
+            let map = |p: usize| moved_position(p, start, end, inserted);
+            let moved = |s: &Selection| Selection::new(map(s.anchor), map(s.head));
+            let primary = moved(&self.selection);
+            let extra: Vec<Selection> = self.extra_selections.iter().map(moved).collect();
+            if self.tracked_text.is_some() {
+                // The regions of this view move over the change.
+                self.tracked_text = Some(before);
+                self.record_change(prefix, end_byte, &inserted_text);
+            }
+            self.change_count += 1;
+            self.selection = primary.clamped(self.char_count());
+            self.extra_selections = extra;
+            self.selection_revision += 1;
+        }
+        self.path = source.path.clone();
+        self.saved_text = source.saved_text.clone();
+        self.saved_line_ending = source.saved_line_ending;
+        self.line_ending = source.line_ending;
+        self.encoding = source.encoding;
+        self.modified_at = source.modified_at;
+        self.syntax = source.syntax.clone();
+        self.read_only = source.read_only;
+        self.scratch = source.scratch;
+        self.scratch_name = source.scratch_name.clone();
     }
 
     /// Records that the current text is what is on disk at `path`.
@@ -317,6 +401,8 @@ impl Document {
     /// Records that the text changed outside this type's methods (the text widget edits it in place).
     pub fn note_text_changed(&mut self) {
         self.change_count += 1;
+        // An edited preview stays.
+        self.transient = false;
         let Some(before) = &self.tracked_text else {
             return;
         };
@@ -362,6 +448,78 @@ impl Document {
                 moved_position(region.1, start_char, end_char, inserted),
             );
         }
+        // The field being visited takes in what is typed at its start or end (typing over its
+        // selected default); the others move like regions.
+        if let Some(snippet) = &mut self.snippet {
+            let current = snippet.current;
+            for (index, field) in snippet.fields.iter_mut().enumerate() {
+                for (a, b) in field.iter_mut() {
+                    let (low, high) = ((*a).min(*b), (*a).max(*b));
+                    let (low, high) = if index == current && low <= end_char && high >= start_char {
+                        let low = if low <= start_char { low } else { start_char + inserted };
+                        let high = if high <= end_char { start_char + inserted } else { moved_position(high, start_char, end_char, inserted) };
+                        (low, high)
+                    } else {
+                        (moved_position(low, start_char, end_char, inserted), moved_position(high, start_char, end_char, inserted))
+                    };
+                    (*a, *b) = (low, high.max(low));
+                }
+            }
+        }
+    }
+
+    /// Starts visiting a snippet's fields: the first one is selected (with its mirrors, as more
+    /// selections). With one field (just where the caret ends), there is nothing to visit.
+    pub fn start_snippet(&mut self, fields: Vec<Vec<(usize, usize)>>) {
+        let Some(first) = fields.first().cloned() else { return };
+        self.select_field(&first);
+        if fields.len() > 1 {
+            self.tracked_text.get_or_insert_with(|| self.text.clone());
+            self.snippet = Some(SnippetFields { fields, current: 0 });
+        }
+    }
+
+    fn select_field(&mut self, field: &[(usize, usize)]) {
+        let mut regions = field.iter().map(|&(a, b)| Selection::new(a, b));
+        if let Some(primary) = regions.next() {
+            self.set_selections(primary, regions.collect::<Vec<_>>());
+        }
+    }
+
+    /// The snippet's fields while the selection is still in the field being visited.
+    pub fn snippet(&self) -> Option<&SnippetFields> {
+        let snippet = self.snippet.as_ref()?;
+        let (start, end) = (self.selection.start(), self.selection.end());
+        let inside = snippet.fields.get(snippet.current)?.iter().any(|&(a, b)| a.min(b) <= start && end <= a.max(b));
+        inside.then_some(snippet)
+    }
+
+    /// Whether Tab (`forward`) or Shift+Tab has a field to go to.
+    pub fn has_snippet_field(&self, forward: bool) -> bool {
+        self.snippet().is_some_and(|s| if forward { s.current + 1 < s.fields.len() } else { s.current > 0 })
+    }
+
+    /// `next_field` / `prev_field`: selects the next (or previous) field. Reaching the last one,
+    /// where the caret ends, finishes the snippet. False when there is no such field.
+    pub fn move_to_snippet_field(&mut self, forward: bool) -> bool {
+        if !self.has_snippet_field(forward) {
+            self.clear_snippet();
+            return false;
+        }
+        let Some(snippet) = &mut self.snippet else { return false };
+        snippet.current = if forward { snippet.current + 1 } else { snippet.current - 1 };
+        let (field, last) = (snippet.fields[snippet.current].clone(), snippet.current + 1 == snippet.fields.len());
+        self.select_field(&field);
+        if last {
+            self.clear_snippet();
+        }
+        true
+    }
+
+    /// `clear_fields`: stops visiting the snippet's fields.
+    pub fn clear_snippet(&mut self) {
+        self.snippet = None;
+        self.stop_tracking_if_unused();
     }
 
     /// From now on [`take_text_changes`](Self::take_text_changes) has every edit of the text.
@@ -466,6 +624,7 @@ impl Document {
         let (start_byte, end_byte) = (char_to_byte(&self.text, start), char_to_byte(&self.text, end));
         self.text.replace_range(start_byte..end_byte, insert);
         self.change_count += 1;
+        self.transient = false;
         // The exact change, not a comparison, which cannot tell which of two equal chars went.
         self.record_change(start_byte, end_byte, insert);
         let inserted = insert.chars().count();
@@ -504,7 +663,7 @@ impl Document {
 
     /// Nothing needs the copy of the text any more.
     fn stop_tracking_if_unused(&mut self) {
-        if self.region_sets.is_empty() && self.phantoms.is_empty() && self.change_log.is_none() {
+        if self.region_sets.is_empty() && self.phantoms.is_empty() && self.change_log.is_none() && self.snippet.is_none() {
             self.tracked_text = None;
         }
     }

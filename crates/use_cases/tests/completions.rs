@@ -79,16 +79,103 @@ fn committing_replaces_the_typed_word() {
 }
 
 #[test]
-fn the_selection_moves_and_wraps_around() {
+fn the_selection_moves_and_wraps_around_with_auto_complete_cycle() {
     let world = World::new().with_file("/p/a.py", "ab1 ab2 ab3\n");
     let mut editor = typed(&world, "/p/a.py", "\nab");
     assert_eq!(triggers(&editor).len(), 3);
+    editor.move_auto_complete_selection(-1);
+    assert_eq!(editor.auto_complete().unwrap().selected, 0, "without auto_complete_cycle, Up stops at the top");
+
+    let world = World::new().with_file("/p/a.py", "ab1 ab2 ab3\n").with_preferences(json!({ "auto_complete_cycle": true }));
+    let mut editor = typed(&world, "/p/a.py", "\nab");
     editor.move_auto_complete_selection(-1);
     assert_eq!(editor.auto_complete().unwrap().selected, 2);
     editor.move_auto_complete_selection(1);
     assert_eq!(editor.auto_complete().unwrap().selected, 0);
     editor.move_auto_complete_selection(8);
     assert_eq!(editor.auto_complete().unwrap().selected, 2, "a page stops at the end");
+}
+
+#[test]
+fn a_snippet_completion_visits_its_fields_with_tab() {
+    let snippet = "<snippet><content><![CDATA[for ${1:x} in ${2:y}:\n\t$0]]></content><tabTrigger>for</tabTrigger><scope>source.python</scope></snippet>";
+    let world = World::new().with_file("/p/a.py", "").with_resource("Packages/Py/for.sublime-snippet", snippet);
+    let mut editor = typed(&world, "/p/a.py", "fo");
+    let at = triggers(&editor).iter().position(|t| t == "for");
+    editor.commit_completion(at);
+    assert!(editor.has_snippet_field(true) && !editor.has_snippet_field(false));
+    // Typing over the first field, then Tab to the next one.
+    editor.insert_at_selections("item");
+    assert_eq!(active_text(&editor), "for item in y:\n\t");
+    editor.move_to_snippet_field(true);
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(12, 13), "y");
+    assert!(editor.has_snippet_field(false));
+    editor.move_to_snippet_field(false);
+    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(4, 8), "the first field grew with what was typed");
+    editor.move_to_snippet_field(true);
+    editor.move_to_snippet_field(true);
+    assert_eq!(caret(&editor), active_text(&editor).chars().count(), "$0, where the snippet ends");
+    assert!(!editor.has_snippet_field(true) && !editor.has_snippet_field(false), "done");
+}
+
+#[test]
+fn every_caret_gets_the_completion() {
+    let world = World::new().with_file("/p/a.py", "configuration\nconf\nconf");
+    let mut editor = world.editor_opening(&["/p/a.py"]);
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(18));
+    editor.add_carets_on_next_line(true);
+    editor.show_auto_complete(AutoCompleteOptions::default());
+    assert_eq!(triggers(&editor), vec!["configuration"]);
+    editor.commit_completion(None);
+    assert_eq!(active_text(&editor), "configuration\nconfiguration\nconfiguration");
+}
+
+#[test]
+fn the_words_of_other_views_complete_too_and_rhs_empty_triggers_wait_for_the_end_of_the_line() {
+    let world = World::new()
+        .with_file("/p/other.py", "elsewhere\n")
+        .with_file("/p/a.py", "")
+        .with_preferences(json!({ "auto_complete_triggers": [{ "characters": ".", "selector": "source", "rhs_empty": true }] }));
+    let mut editor = world.editor_opening(&["/p/other.py", "/p/a.py"]);
+    type_text(&mut editor, "els");
+    assert_eq!(triggers(&editor), vec!["elsewhere"]);
+    editor.hide_auto_complete();
+
+    type_text(&mut editor, " x)");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(5));
+    type_text(&mut editor, ".");
+    assert!(!editor.auto_complete_visible(), "text after the caret");
+}
+
+#[test]
+fn auto_complete_delay_waits_before_showing_the_list() {
+    let world = World::new().with_file("/p/a.py", "alphabet\n").with_preferences(json!({ "auto_complete_delay": 30 }));
+    let mut editor = typed(&world, "/p/a.py", "al");
+    assert!(!editor.auto_complete_visible() && editor.auto_complete_due().is_some());
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(triggers(&editor), vec!["alphabet"]);
+}
+
+#[test]
+fn history_puts_what_was_chosen_first_and_tab_again_tries_the_next_completion() {
+    let world = World::new().with_file("/p/a.py", "abc abd\n").with_preferences(json!({ "auto_complete_use_history": true }));
+    let mut editor = typed(&world, "/p/a.py", "ab");
+    assert_eq!(triggers(&editor), vec!["abd", "abc"], "the nearest word first");
+    editor.commit_completion(Some(1));
+    type_text(&mut editor, " ab");
+    assert_eq!(triggers(&editor), vec!["abc", "abd"], "abc was chosen before");
+    editor.hide_auto_complete();
+
+    assert!(editor.insert_best_completion(false));
+    assert!(editor.last_command_was_completion());
+    assert!(active_text(&editor).ends_with(" abc"));
+    editor.replace_completion_with_next();
+    assert!(active_text(&editor).ends_with(" abd"), "{}", active_text(&editor));
+    editor.replace_completion_with_next();
+    assert!(active_text(&editor).ends_with(" abc"), "back to the first");
 }
 
 #[test]

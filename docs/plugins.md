@@ -8,7 +8,9 @@ scratch views, `add_on_change`, output panels, statuses and regions drawn, `view
 package with plugins and libraries installed, upgraded and removed by Package Control; 18 popular packages load,
 libraries for the Python we run, Package Control upgrades itself; 2026-11-05 Package Control 3's dependencies, a
 removal deferred to the next start, `Default.exec`, `view.style` / `style_for_scope`, popups, phantoms, `on_hover`,
-auto-complete and plugins' completions, groups and layouts). The rest of B and phase C below are the pending work, in order.
+auto-complete and plugins' completions, groups and layouts; 2026-11-06 local channels / repositories, unpacked
+packages and `revert_package` tried, event commands on the view that asked, `move` by pages / stops / sub-words and
+`move_to brackets`, Tools > Build System, region annotations). The rest of B and phase C below are the pending work, in order.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -159,9 +161,12 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] Built-in commands that edit text (`EDITING_COMMANDS` in `command_controller.rs`) run at once inside an event or
       query, on the view that asked (`Editor::set_event_command_runner`, set by `compose()`), through the hooks, so a
       formatter's `view.run_command(...)` in `on_pre_save` reaches the file.
-- [ ] Built-in commands that need `ViewState` (panels, the widget's undo / clipboard, `save`, `close`…) still wait for the
-      next frame when run from an event, and then on the active view; running them at once means moving their
-      `ViewState` changes out of those arms, or `save` / `close` into the controller.
+- [x] Built-in commands that change only selections, the find string or settings (`EDITOR_COMMANDS` in
+      `command_controller.rs`: `split_selection_into_lines`, `find_all_under`, `set_setting`, `set_file_type`…) also run at once.
+      The others (panels, the widget's undo / clipboard, `save`, `close`…) wait for the next frame, and then run on the view
+      that asked (`queue_plugin_command` keeps it; the active view comes back afterwards).
+- [ ] Still not at once: those that need `ViewState`, and `save` / `close`, which would change the views under the use case
+      that fired the event; moving their `ViewState` changes out of those arms would allow it.
 - [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
       listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
       becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
@@ -202,10 +207,15 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `regex`: no lookaround). `next_result` / `prev_result` (F4, Shift+F4) go through the last panel shown that has them
       and wrap around; double-clicking a result opens it; the one visited is highlighted and scrolled to. Its message
       goes to the status bar. `view.find_all_results()`, `find_all_results_with_text()`.
-- [x] **Motions as commands**: `move` (`by`: `characters`, `lines`, `words`, `word_ends`, `subwords` and `subword_ends`
-      as words; `forward`, `extend`) and `move_to` (`bol`, `eol`, `hardbol`, `hardeol`, `bof`, `eof`, `extend`), every
-      selection, in tabs, panels and events. Key bindings to them still go to the widget. Missing: `by: pages` / `stops`,
-      `to: brackets`, and `bol` / `eol` of wrapped lines (they go to the logical line's).
+- [x] **Motions as commands**: `move` (`by`: `characters`, `lines`, `pages` (the lines the view shows, less one), `words`,
+      `word_ends`, `subwords` / `subword_ends` (camelCase, `snake_case` and punctuation), `stops` with `word_begin`,
+      `word_end`, `punct_begin`, `punct_end`, `sub_word_begin`, `sub_word_end`, `line_begin`, `line_end`, `empty_line`;
+      `forward`, `extend`) and `move_to` (`bol`, `eol`, `hardbol`, `hardeol`, `bof`, `eof`, `brackets`, `extend`), every
+      selection, in tabs, panels and events (`entities::text_commands::{move_by, move_to}`). Key bindings to what the widget
+      does itself (characters, lines, words, pages, line and text ends) go to it; the others run as commands
+      (`keyboard_controller::widget_does`): Ctrl+M (`move_to brackets`), Alt+Left / Alt+Right (sub-words; Ctrl on macOS).
+      Missing: `bol` / `eol` of wrapped lines (they go to the logical line's), `separators` / `sub_word_separators`,
+      `move_to_limit_on_up_down`.
 - [x] **Build systems**: every `*.sublime-build` in the packages, with the platform's overrides and `variants`. `build`
       (Ctrl+B, F7) uses the build set by `set_build_system` or picked before, else the one that applies by `selector` (the
       syntax's base scope), `file_patterns` or `keyfiles` (next to the file or above it, or in an open folder); several
@@ -217,9 +227,11 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       file's folder), `env`, `path`, `file_regex`, `line_regex`, `quiet`, `kill`. One process at a time (`ProcessGateway`),
       read by threads that wake the window; a new build replaces the running one; `cancel_build` kills the whole tree. A
       plugin's own `exec` command wins. Ignored: `encoding` (UTF-8, lossy), `syntax`, `word_wrap`.
-- [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), the Tools >
-      Build System list (`$build_systems`), and the builds inside Sublime's zipped
-      packages (`Python`, `C++`…), which need `.sublime-package` (phase C). There is no Ctrl+Break: egui has no such key.
+- [x] **Tools > Build System**: Automatic, then every build system by name (`{"command": "$build_systems"}` in the menu,
+      expanded by `presenters::menu`, read at each package load: `Editor::menu_build_systems`); each runs
+      `set_build_system`, the one set is checked. Builds inside zipped packages load since `.sublime-package` support.
+- [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), variants in
+      the Build System menu. There is no Ctrl+Break: egui has no such key.
 - [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
       built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
       `select_all`, `insert`) and `append` in a panel (the command controller only knows tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
@@ -254,7 +266,12 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] Regions move with every edit, also the widget's: `add_regions` keeps a copy of the text, compared in
       `Document::note_text_changed`. An edit with several selections is one change from the first caret to the
       last, so regions between the carets collapse.
-- [ ] Regions, still missing: annotations, `on_navigate`, `PERSISTENT`,
+- [x] **Annotations**: `add_regions(annotations=[minihtml…], annotation_color, on_navigate)` — each region's annotation at
+      the right edge of the view on its first line (several on a row stack leftwards), with the region's color (or
+      `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
+      `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
+      lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
+- [ ] Regions, still missing: `PERSISTENT`,
       `DRAW_EMPTY_AS_OVERWRITE`, icon files, the minimap.
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
@@ -364,8 +381,11 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **A removal deferred to the next start** (Windows locked files, `package_control_removes_a_locked_package_at_the_next_start`,
       no network): a file nobody may delete or move makes Package Control leave `package-control.cleanup` in the package's
       folder ("scheduled clean up on next restart"); the next start deletes the folder and enables what it had disabled.
-- [ ] Not tried yet with the real Package Control: a `.no-sublime-package` package, `revert_package`,
-      `add_channel` / `add_repository`.
+- [x] **Local channels and repositories** (2026-11-06, `package_control_installs_from_local_repositories_and_channels`, no
+      network): `add_repository` / `add_channel` with `file:///` URLs are saved in its settings and their packages offered;
+      a package with `.no-sublime-package` is unpacked to `Packages/<name>`, its plugin loads, is upgraded in place and
+      removed; a package named like one Sublime ships (`Diff`) overrides it and `revert_package` removes it. Nothing of
+      ours needed changing.
 - [x] **`Default` modules**: Sublime's `Default` is not loaded, so `assets/python/Default/` (written to `Lib/python/Default`)
       has our own modules packages import: `paste_from_history` (`ClipboardHistory`, `g_clipboard_history`) and `exec`
       (`ExecCommand`, `AsyncProcess`, `ProcessListener`: build plugins subclass them; the process runs in the plugin host,
@@ -473,5 +493,6 @@ and removes it; `CODELIBRE_TEST_PACKAGE`, `CODELIBRE_TEST_COMMAND` and `CODELIBR
 `package_control_installs_the_listed_packages_at_start` installs 18 popular packages (or `CODELIBRE_TEST_PACKAGES`,
 comma-separated) and fails on any plugin load error: the way to find what the next package needs.
 `package_control_upgrades_itself_then_the_other_packages` checks `upgrade_all_packages`.
-`package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,
+`package_control_installs_from_local_repositories_and_channels` (no network) checks `add_repository`, `add_channel`,
+unpacked packages and `revert_package`. `package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,
 `package_control_removes_a_locked_package_at_the_next_start` (Windows, no network) a removal deferred to the next start.

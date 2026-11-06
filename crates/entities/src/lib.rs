@@ -15,6 +15,7 @@ pub mod keymap;
 pub mod layout;
 pub mod localization;
 pub mod menu;
+pub mod meta_info;
 pub mod minihtml;
 pub mod selection;
 pub mod selector;

@@ -32,6 +32,13 @@ pub struct OutputPanels {
     results: Option<String>,
 }
 
+impl OutputPanels {
+    /// Whether the view `id` is one of these panels'.
+    pub(crate) fn has_view(&self, id: DocumentId) -> bool {
+        self.panels.iter().any(|p| p.document.id == id)
+    }
+}
+
 impl Editor {
     /// Creates the panel `name`, or empties it if it exists (as Sublime does), and returns its view id.
     pub(crate) fn create_output_panel(&mut self, name: &str) -> DocumentId {

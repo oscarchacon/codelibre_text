@@ -160,6 +160,27 @@ impl Editor {
         self.state.build_options = options;
     }
 
+    /// Reads the build systems Tools > Build System lists, by name (at every package load).
+    pub(crate) fn refresh_menu_build_systems(&mut self) {
+        let mut options: Vec<BuildOption> = self
+            .build_systems()
+            .into_iter()
+            .map(|build| BuildOption { caption: build.name, resource: build.resource, variant: None })
+            .collect();
+        options.sort_by_key(|o| o.caption.to_lowercase());
+        self.state.menu_build_systems = options;
+    }
+
+    /// The build systems of Tools > Build System (`$build_systems` in a menu).
+    pub fn menu_build_systems(&self) -> &[BuildOption] {
+        &self.state.menu_build_systems
+    }
+
+    /// The build system set with `set_build_system` (`None`: chosen by the file, "Automatic").
+    pub fn build_system_set(&self) -> Option<&str> {
+        self.state.builds.choice.as_ref().filter(|c| c.always).map(|c| c.resource.as_str())
+    }
+
     /// The command that stops the last build (`exec` with `kill` unless the build says otherwise).
     pub fn cancel_build_command(&self) -> Command {
         self.state.builds.cancel.clone().unwrap_or_else(|| Command::with_args("exec", json!({ "kill": true })))

@@ -2,11 +2,17 @@
 //! `extract_scope`, `find_by_selector`…) and the `selector` key binding context. Points are chars.
 
 use entities::document::{Document, DocumentId};
+use entities::meta_info::{meta_value, selectors_where_on, shell_variable, symbol_kind, transform_symbol, SymbolKind};
 use entities::selector::matches_selector;
 use entities::text::char_to_byte;
+use serde_json::Value;
 
 use crate::editor::Editor;
-use crate::gateways::ScopeSpan;
+use crate::gateways::{ContextFrame, ScopeSpan};
+
+/// What a syntax shows in Goto Symbol when no `.tmPreferences` says: its names but those of tags
+/// and labels.
+const DEFAULT_SYMBOL_SELECTOR: &str = "entity.name - entity.name.tag - entity.name.label";
 
 /// A piece of the text with one scope, in chars of the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +20,40 @@ pub struct ScopedRange {
     pub start: usize,
     pub end: usize,
     pub scope: String,
+}
+
+/// One selection, as the key binding contexts see it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CaretContext {
+    /// The scope at its caret (`selector`).
+    pub scope: String,
+    /// Its line before it (`preceding_text`) and after it (`following_text`).
+    pub preceding_text: String,
+    pub following_text: String,
+    /// What it selects (`text`).
+    pub text: String,
+}
+
+/// Which of a syntax's symbol lists (see [`Editor::symbol_regions`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolList {
+    /// Goto Symbol, `view.symbol_regions()`.
+    Symbols,
+    /// Definitions for the index, `view.indexed_symbol_regions()`.
+    Indexed,
+    /// References for the index (`indexed_symbol_regions(SYMBOL_TYPE_REFERENCE)`).
+    References,
+}
+
+/// A symbol of a document: Sublime's `SymbolRegion`. Points are chars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolRegion {
+    pub name: String,
+    pub start: usize,
+    pub end: usize,
+    /// The scope at its start.
+    pub scope: String,
+    pub kind: SymbolKind,
 }
 
 impl Editor {
@@ -37,8 +77,27 @@ impl Editor {
 
     /// The scopes of the selections' carets in the active document (the `selector` context).
     pub fn caret_scopes(&self) -> Vec<String> {
+        self.caret_contexts().into_iter().map(|c| c.scope).collect()
+    }
+
+    /// What the key binding contexts of each selection of the active document look at, in order.
+    pub fn caret_contexts(&self) -> Vec<CaretContext> {
         let Some(doc) = self.active_document() else { return Vec::new() };
-        doc.selections().iter().filter_map(|s| self.scope_name(doc.id, s.head)).collect()
+        let text = &doc.text;
+        doc.selections()
+            .iter()
+            .map(|s| {
+                let (start, end) = (char_to_byte(text, s.start()), char_to_byte(text, s.end()));
+                let line_begin = text[..start].rfind('\n').map_or(0, |at| at + 1);
+                let line_end = text[end..].find('\n').map_or(text.len(), |at| end + at);
+                CaretContext {
+                    scope: self.scope_name(doc.id, s.head).unwrap_or_default(),
+                    preceding_text: text[line_begin..start].to_string(),
+                    following_text: text[end..line_end].to_string(),
+                    text: text[start..end].to_string(),
+                }
+            })
+            .collect()
     }
 
     /// Every piece of the text whose scope `selector` matches, neighbours joined.
@@ -69,18 +128,20 @@ impl Editor {
         Some(if first < last { (tokens[first].start, tokens[last - 1].end) } else { (point, point) })
     }
 
-    /// The pieces of the text between `start` and `end` (chars) and their scopes, in order.
+    /// The pieces of the text between `start` and `end` (chars) and their scopes, in order. The
+    /// scopes of every line come from the highlighting cache at once (nothing is parsed again).
     pub fn scoped_ranges(&self, id: DocumentId, start: usize, end: usize) -> Vec<ScopedRange> {
         let Some(doc) = self.any_document(id) else { return Vec::new() };
         let first_line = doc.text[..char_to_byte(&doc.text, start)].matches('\n').count();
+        let all = self.gateways.syntaxes.document_scopes(doc.id, &doc.text, &doc.syntax);
         let (mut line_char, mut tokens) = (0, Vec::new());
-        for (line, line_text) in doc.text.split_inclusive('\n').enumerate() {
+        for ((line, line_text), spans) in doc.text.split_inclusive('\n').enumerate().zip(all) {
             if line_char >= end {
                 break;
             }
             if line >= first_line {
-                for span in self.line_spans(doc, line) {
-                    let text = &line_text[..span.range.end];
+                for span in spans {
+                    let Some(text) = line_text.get(..span.range.end) else { continue };
                     let a = line_char + line_text[..span.range.start].chars().count();
                     let b = line_char + text.chars().count();
                     if b > start && a < end {
@@ -93,7 +154,87 @@ impl Editor {
         tokens
     }
 
-    fn line_spans(&self, doc: &Document, line: usize) -> Vec<ScopeSpan> {
+    /// `view.meta_info(key, point)`: the `.tmPreferences` setting `key` that applies at `point`.
+    pub fn meta_info(&self, id: DocumentId, key: &str, point: usize) -> Option<Value> {
+        let scope = self.scope_name(id, point)?;
+        meta_value(&self.state.meta_preferences, scope.trim_end(), key).cloned()
+    }
+
+    /// A `shellVariables` value at `point` (`TM_COMMENT_START`…).
+    pub fn shell_variable_at(&self, id: DocumentId, point: usize, name: &str) -> Option<String> {
+        let scope = self.scope_name(id, point)?;
+        shell_variable(&self.state.meta_preferences, scope.trim_end(), name)
+    }
+
+    /// `view.context_backtrace(point)`: the syntax's contexts at `point`, outermost first.
+    pub fn context_backtrace(&self, id: DocumentId, point: usize) -> Vec<ContextFrame> {
+        let Some(doc) = self.any_document(id) else { return Vec::new() };
+        let byte = char_to_byte(&doc.text, point);
+        let line = doc.text[..byte].matches('\n').count();
+        let line_start = doc.text[..byte].rfind('\n').map_or(0, |at| at + 1);
+        self.gateways.syntaxes.context_backtrace(doc.id, &doc.text, &doc.syntax, line, byte - line_start)
+    }
+
+    /// Some package's `.tmPreferences` says what goes in symbol lists.
+    pub fn has_symbol_preferences(&self) -> bool {
+        self.state.meta_preferences.iter().any(|p| p.settings.contains_key("showInSymbolList"))
+    }
+
+    /// The symbols of a document (`view.symbol_regions()`, Goto Symbol): the text of the runs the
+    /// `showInSymbolList` selectors of the `.tmPreferences` match (the definitions), each through
+    /// the `symbolTransformation` that applies there; without such preferences, `entity.name`
+    /// scopes (but tags and labels). `indexed` uses `showInIndexedSymbolList` instead, and
+    /// `references` `showInIndexedReferenceList` (calls…), which have no default.
+    pub fn symbol_regions(&self, id: DocumentId, list: SymbolList) -> Vec<SymbolRegion> {
+        let Some(doc) = self.any_document(id) else { return Vec::new() };
+        let (key, transformation_key) = match list {
+            SymbolList::Symbols => ("showInSymbolList", "symbolTransformation"),
+            SymbolList::Indexed => ("showInIndexedSymbolList", "symbolIndexTransformation"),
+            SymbolList::References => ("showInIndexedReferenceList", "symbolIndexTransformation"),
+        };
+        let preferences = &self.state.meta_preferences;
+        let mut selector = selectors_where_on(preferences, key);
+        if selector.is_empty() && list == SymbolList::Indexed {
+            selector = selectors_where_on(preferences, "showInSymbolList");
+        }
+        if selector.is_empty() && list != SymbolList::References {
+            selector = DEFAULT_SYMBOL_SELECTOR.to_string();
+        }
+        if selector.is_empty() {
+            return Vec::new();
+        }
+        let tokens = self.scoped_ranges(id, 0, usize::MAX);
+        let mut symbols: Vec<SymbolRegion> = Vec::new();
+        let mut run: Option<(usize, usize, String)> = None;
+        let finish = |run: Option<(usize, usize, String)>, symbols: &mut Vec<SymbolRegion>| {
+            let Some((start, end, scope)) = run else { return };
+            let text: String = doc.text[char_to_byte(&doc.text, start)..char_to_byte(&doc.text, end)].to_string();
+            let transformation = meta_value(preferences, &scope, transformation_key)
+                .or_else(|| meta_value(preferences, &scope, "symbolTransformation"))
+                .and_then(Value::as_str);
+            let name = transformation.map_or_else(|| text.trim().to_string(), |t| transform_symbol(&text, t).trim().to_string());
+            if !name.is_empty() {
+                symbols.push(SymbolRegion { name, start, end, kind: symbol_kind(&scope), scope });
+            }
+        };
+        for token in tokens {
+            if !matches_selector(&token.scope, &selector) {
+                finish(run.take(), &mut symbols);
+                continue;
+            }
+            match &mut run {
+                Some((_, end, _)) if *end == token.start => *end = token.end,
+                _ => {
+                    finish(run.take(), &mut symbols);
+                    run = Some((token.start, token.end, token.scope));
+                }
+            }
+        }
+        finish(run, &mut symbols);
+        symbols
+    }
+
+    pub(crate) fn line_spans(&self, doc: &Document, line: usize) -> Vec<ScopeSpan> {
         self.gateways.syntaxes.line_scopes(doc.id, &doc.text, &doc.syntax, line)
     }
 }

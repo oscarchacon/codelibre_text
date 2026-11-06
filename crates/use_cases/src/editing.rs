@@ -84,9 +84,30 @@ impl Editor {
                 doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, name == "right_delete"));
             }
             _ => {
-                let forward = command.bool_arg("forward", true);
+                let (start, end) = doc.visible_range();
+                let shown = doc.text.chars().skip(start).take(end - start).filter(|&c| c == '\n').count();
+                let flag = |key: &str| command.bool_arg(key, false);
+                let how = tc::MoveBy {
+                    by: target.clone(),
+                    forward: command.bool_arg("forward", true),
+                    extend,
+                    stops: tc::Stops {
+                        word_begin: flag("word_begin"),
+                        word_end: flag("word_end"),
+                        punct_begin: flag("punct_begin"),
+                        punct_end: flag("punct_end"),
+                        sub_word_begin: flag("sub_word_begin"),
+                        sub_word_end: flag("sub_word_end"),
+                        line_begin: flag("line_begin"),
+                        line_end: flag("line_end"),
+                        empty_line: flag("empty_line"),
+                    },
+                    // A page leaves one line of the last one in sight, as Page Down does.
+                    page_lines: shown.saturating_sub(1).max(1),
+                    separators: command.args.get("separators").and_then(|v| v.as_str()).map(String::from),
+                };
                 let motion = |text: &str, selection: Selection| match name {
-                    "move" => tc::move_by(text, selection, &target, forward, extend),
+                    "move" => tc::move_by(text, selection, &how),
                     _ => tc::move_to(text, selection, &target, extend),
                 };
                 let primary = motion(&doc.text, doc.selection());
@@ -102,6 +123,10 @@ impl Editor {
 
     /// Runs a text command on the active document with its settings (tab size, spaces…).
     pub fn run_text_command(&mut self, command: TextCommand) {
+        if let TextCommand::InsertSnippet(contents) = &command {
+            self.insert_snippet(contents);
+            return;
+        }
         let settings = self.view_settings();
         let tab_size = settings.usize("tab_size", 4).max(1);
         let spaces = settings.bool("translate_tabs_to_spaces", false);
@@ -143,7 +168,7 @@ impl Editor {
             }
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
             TextCommand::Insert(characters) => Some(tc::replace_selection(text, sel, &characters)),
-            TextCommand::InsertSnippet(contents) => Some(tc::insert_snippet(text, sel, &contents)),
+            TextCommand::InsertSnippet(_) => unreachable!("snippets are inserted above"),
         });
     }
 
@@ -256,6 +281,7 @@ impl Editor {
             self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
             return;
         }
+        self.push_clipboard_history(&line);
         self.state.line_clipboard = Some(line);
         if cut {
             self.run_text_command(TextCommand::DeleteLine);

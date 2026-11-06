@@ -18,11 +18,13 @@ use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::{AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PopupViewModel, RegionViewModel, Underline};
+use interface_adapters::view_models::{
+    AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, Underline,
+};
 use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
-use crate::views::minihtml_view::{show_lines, HtmlColors};
+use crate::views::minihtml_view::{self, show_html, HtmlColors};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
 const POINTS_TO_PIXELS: f32 = 4.0 / 3.0;
@@ -146,9 +148,16 @@ pub fn show(
                 } else {
                     f32::INFINITY
                 };
+                // Phantoms take room in the text: their sizes from the last frame.
+                let phantom_sizes: Vec<Vec2> = model
+                    .phantoms
+                    .iter()
+                    .map(|p| ctx.memory(|m| m.area_rect(phantom_id(model.document, p.id))).map_or(Vec2::ZERO, |r| r.size()))
+                    .collect();
                 let mut layouter = |ui: &egui::Ui, text: &str, _wrap_width: f32| {
                     let mut job = engine.layout_job(model.document, text, &model.syntax, &model.color_scheme, font.clone());
                     job.wrap.max_width = wrap_width;
+                    make_room_for_phantoms(&mut job, text, model, &phantom_sizes, row_height, char_width);
                     ui.fonts(|f| f.layout_job(job))
                 };
                 let min_height = if model.scroll_past_end {
@@ -242,7 +251,8 @@ pub fn show(
                     link: colors.caret,
                 };
                 let html_size = font.size * 0.9;
-                show_phantoms(ui, model, galley, origin, viewport, char_width, html_size, &html_colors, &colors, events);
+                show_phantoms(ui, model, text, galley, origin, viewport, &phantom_sizes, (char_width, row_height), html_size, &html_colors, &colors, events);
+                show_annotations(ui, model, &region_colors, galley, origin, viewport, char_width, html_size, &html_colors, &colors, events);
                 if let Some(popup) = &model.popup {
                     show_popup(ui, model.document, popup, galley, origin, viewport, html_size, &html_colors, &colors, events);
                 }
@@ -250,7 +260,7 @@ pub fn show(
                     show_auto_complete(ui, model.document, list, galley, origin, viewport, &font, row_height, &html_colors, &colors, events);
                 }
                 if model.report_hover {
-                    report_hover(ui, model.document, galley, origin, viewport, gutter_width, events);
+                    report_hover(ui, model.document, &model.phantoms, galley, origin, viewport, gutter_width, events);
                 }
 
                 if reveal {
@@ -517,31 +527,135 @@ fn paint_gutter(
 /// How long the mouse rests before `on_hover`, in seconds (Sublime's is about this).
 const HOVER_DELAY: f32 = 0.5;
 
-/// Plugins' phantoms on screen, after the end of the row of their point (several on one row side
-/// by side). They are drawn over the text, which makes no room for them yet.
+fn phantom_id(document: DocumentId, phantom: u64) -> Id {
+    Id::new(("plugin_phantom", document, phantom))
+}
+
+/// The room phantoms take, as Sublime gives it: an inline one (`LAYOUT_INLINE`) pushes the text
+/// after its point aside (`leading_space` before that char); those below a line (`LAYOUT_BELOW`,
+/// `LAYOUT_BLOCK`) make the line's last row taller (a char of it gets a taller `line_height`, and
+/// the text keeps to the top of rows), the phantoms drawn in the room left under the text.
+fn make_room_for_phantoms(job: &mut egui::text::LayoutJob, text: &str, model: &EditorViewModel, sizes: &[Vec2], row_height: f32, char_width: f32) {
+    let mut below: Vec<(usize, f32)> = Vec::new();
+    let mut inline: Vec<(usize, f32)> = Vec::new();
+    for (phantom, size) in model.phantoms.iter().zip(sizes) {
+        let byte = char_to_byte(text, phantom.point);
+        if *size == Vec2::ZERO {
+            continue;
+        }
+        match phantom.layout {
+            PhantomLayout::Inline if byte < text.len() && !text[byte..].starts_with('\n') => inline.push((byte, size.x + char_width)),
+            PhantomLayout::Inline => {}
+            PhantomLayout::Below | PhantomLayout::Block => {
+                let line_end = text[byte..].find('\n').map_or(text.len(), |at| byte + at);
+                match below.iter_mut().find(|(end, _)| *end == line_end) {
+                    Some((_, height)) => *height += size.y + 2.0,
+                    None => below.push((line_end, size.y + 2.0)),
+                }
+            }
+        }
+    }
+    if inline.is_empty() && below.is_empty() {
+        return;
+    }
+    for (byte, width) in inline {
+        if let Some(section) = isolate(job, byte, false) {
+            job.sections[section].leading_space += width;
+        }
+    }
+    if !below.is_empty() {
+        for section in &mut job.sections {
+            section.format.valign = egui::Align::TOP;
+        }
+    }
+    for (line_end, height) in below {
+        let line_start = text[..line_end].rfind('\n').map_or(0, |at| at + 1);
+        // The line's last char, or for an empty line the `\n` before it (the height of an empty
+        // row is that of the line break that starts it).
+        let target = if line_end > line_start {
+            text[..line_end].char_indices().next_back().map(|(at, _)| at)
+        } else {
+            line_start.checked_sub(1).or((!text.is_empty()).then_some(0))
+        };
+        if let Some(section) = target.and_then(|at| isolate(job, at, true)) {
+            job.sections[section].format.line_height = Some(row_height + height);
+        }
+    }
+}
+
+/// Splits the job's sections so that one starts at `byte` (and, with `one_char`, ends after that
+/// char); its index.
+fn isolate(job: &mut egui::text::LayoutJob, byte: usize, one_char: bool) -> Option<usize> {
+    let split = |job: &mut egui::text::LayoutJob, at: usize| -> Option<usize> {
+        let index = job.sections.iter().position(|s| s.byte_range.start <= at && at < s.byte_range.end)?;
+        if job.sections[index].byte_range.start == at {
+            return Some(index);
+        }
+        let mut second = job.sections[index].clone();
+        second.byte_range.start = at;
+        second.leading_space = 0.0;
+        job.sections[index].byte_range.end = at;
+        job.sections.insert(index + 1, second);
+        Some(index + 1)
+    };
+    let index = split(job, byte)?;
+    if one_char {
+        let next = job.text[byte..].chars().next().map_or(byte, |c| byte + c.len_utf8());
+        if next < job.text.len() {
+            split(job, next);
+        }
+    }
+    Some(index)
+}
+
+/// Plugins' phantoms on screen, in the room `make_room_for_phantoms` made: inline ones before
+/// the char of their point (or after the line's end), the others under their line, one below
+/// the other (`LAYOUT_BELOW` from their point's column, `LAYOUT_BLOCK` from the left edge). Their
+/// sizes this frame make the room of the next one.
 #[allow(clippy::too_many_arguments)]
 fn show_phantoms(
     ui: &egui::Ui,
     model: &EditorViewModel,
+    text: &str,
     galley: &egui::Galley,
     origin: egui::Pos2,
     viewport: Rect,
-    char_width: f32,
+    sizes: &[Vec2],
+    (char_width, row_height): (f32, f32),
     font_size: f32,
     html_colors: &HtmlColors,
     colors: &Colors,
     events: &mut Vec<UiEvent>,
 ) {
     let visible = visible_chars(galley, origin, viewport);
-    let mut next_x: HashMap<usize, f32> = HashMap::new();
-    for phantom in model.phantoms.iter().filter(|p| p.point >= visible.start && p.point <= visible.end) {
-        let at = galley.pos_from_ccursor(CCursor::new(phantom.point));
-        let Some((row_index, row)) = galley.rows.iter().enumerate().find(|(_, r)| (r.rect.top() - at.top()).abs() < 0.5) else {
+    // How far down the room under each line is used, by the line's end.
+    let mut used_below: HashMap<usize, f32> = HashMap::new();
+    let mut next_x_inline: HashMap<usize, f32> = HashMap::new();
+    for (phantom, size) in model.phantoms.iter().zip(sizes) {
+        if phantom.point < visible.start.saturating_sub(1) || phantom.point > visible.end {
             continue;
+        }
+        let at = galley.pos_from_ccursor(CCursor::new(phantom.point)).translate(origin.to_vec2());
+        let byte = char_to_byte(text, phantom.point);
+        let position = match phantom.layout {
+            PhantomLayout::Inline if byte < text.len() && !text[byte..].starts_with('\n') => {
+                let x = next_x_inline.entry(phantom.point).or_insert(at.left() - size.x - char_width * 0.5);
+                let position = egui::pos2(*x, at.top());
+                *x += size.x + char_width;
+                position
+            }
+            PhantomLayout::Inline => egui::pos2(at.left() + char_width, at.top()),
+            PhantomLayout::Below | PhantomLayout::Block => {
+                let line_end = text[byte..].find('\n').map_or(text.len(), |offset| byte + offset);
+                let end = galley.pos_from_ccursor(CCursor::new(byte_to_char(text, line_end))).translate(origin.to_vec2());
+                let used = used_below.entry(line_end).or_insert(0.0);
+                let x = if phantom.layout == PhantomLayout::Below { at.left() } else { origin.x };
+                let position = egui::pos2(x, end.top() + row_height + *used);
+                *used += size.y + 2.0;
+                position
+            }
         };
-        let x = *next_x.entry(row_index).or_insert(origin.x + row.rect.right() + char_width * 2.0);
-        let position = egui::pos2(x, origin.y + row.rect.top());
-        let response = egui::Area::new(Id::new(("plugin_phantom", model.document, phantom.id)))
+        let response = egui::Area::new(phantom_id(model.document, phantom.id))
             .order(egui::Order::Middle)
             .fixed_pos(position)
             .constrain(false)
@@ -552,15 +666,74 @@ fn show_phantoms(
                     .corner_radius(3.0)
                     .inner_margin(egui::Margin::symmetric(4, 0))
                     .show(ui, |ui| {
-                        ui.set_max_width((viewport.right() - x - 8.0).max(char_width * 20.0));
-                        show_lines(ui, &phantom.lines, html_colors, font_size)
+                        ui.set_max_width((viewport.right() - position.x - 8.0).max(char_width * 20.0));
+                        show_html(ui, &phantom.html, html_colors, font_size)
                     })
                     .inner
             });
         if let Some(href) = response.inner {
             events.push(UiEvent::PhantomLinkClicked { phantom: phantom.id, href });
         }
-        next_x.insert(row_index, x + response.response.rect.width() + char_width);
+        // Its room in the text follows its size from the next frame on.
+        if (response.response.rect.size() - *size).length() > 0.5 {
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+/// The annotations of plugins' regions, at the right edge of the view on the row of their region
+/// (several on one row stacked leftwards), with a bar of the region's color (or the plugin's
+/// `annotation_color`) on their left, as Sublime draws them. Over the text when the line is long.
+#[allow(clippy::too_many_arguments)]
+fn show_annotations(
+    ui: &egui::Ui,
+    model: &EditorViewModel,
+    region_colors: &[Color32],
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    viewport: Rect,
+    char_width: f32,
+    font_size: f32,
+    html_colors: &HtmlColors,
+    colors: &Colors,
+    events: &mut Vec<UiEvent>,
+) {
+    let visible = visible_chars(galley, origin, viewport);
+    let mut next_right: HashMap<usize, f32> = HashMap::new();
+    for (set, &scope_color) in model.regions.iter().zip(region_colors) {
+        let color = minihtml_view::parse_color(&set.annotation_color, html_colors).unwrap_or(scope_color);
+        for (index, annotation) in set.annotations.iter().enumerate().filter(|(_, a)| visible.contains(&a.point) || a.point == visible.end) {
+            let at = galley.pos_from_ccursor(CCursor::new(annotation.point));
+            let Some((row_index, row)) = galley.rows.iter().enumerate().find(|(_, r)| (r.rect.top() - at.top()).abs() < 0.5) else {
+                continue;
+            };
+            let right = *next_right.entry(row_index).or_insert(viewport.right() - char_width);
+            let id = Id::new(("plugin_annotation", model.document, &set.key, index));
+            // Its width is known after the first frame: right-aligned from then on.
+            let width = ui.ctx().memory(|m| m.area_rect(id)).map_or(char_width * 20.0, |r| r.width());
+            let left = (right - width).max(origin.x + row.rect.right() + char_width * 2.0).min(right - char_width * 4.0);
+            let response = egui::Area::new(id)
+                .order(egui::Order::Middle)
+                .fixed_pos(egui::pos2(left, origin.y + row.rect.top()))
+                .constrain(false)
+                .show(ui.ctx(), |ui| {
+                    ui.set_clip_rect(viewport);
+                    egui::Frame::new()
+                        .fill(blend(colors.background, color, 0.15))
+                        .stroke(Stroke::new(1.0_f32, blend(colors.background, color, 0.6)))
+                        .corner_radius(3.0)
+                        .inner_margin(egui::Margin::symmetric(4, 0))
+                        .show(ui, |ui| {
+                            ui.set_max_width((right - left).max(char_width * 4.0));
+                            show_html(ui, &annotation.html, html_colors, font_size)
+                        })
+                        .inner
+                });
+            if let Some(href) = response.inner {
+                events.push(UiEvent::AnnotationLinkClicked { document: model.document, key: set.key.clone(), href });
+            }
+            next_right.insert(row_index, left - char_width);
+        }
     }
 }
 
@@ -606,7 +779,7 @@ fn show_popup(
                     egui::ScrollArea::vertical()
                         .max_height(popup.max_height)
                         .auto_shrink([true, true])
-                        .show(ui, |ui| show_lines(ui, &popup.lines, html_colors, font_size))
+                        .show(ui, |ui| show_html(ui, &popup.html, html_colors, font_size))
                         .inner
                 })
                 .inner
@@ -706,7 +879,7 @@ fn show_auto_complete(
                     });
                     if !list.details.is_empty() {
                         ui.separator();
-                        show_lines(ui, &list.details, html_colors, font.size * 0.9);
+                        show_html(ui, &list.details_html, html_colors, font.size * 0.9);
                     }
                 });
         });
@@ -764,6 +937,7 @@ fn kind_color(kind: u8) -> Color32 {
 fn report_hover(
     ui: &egui::Ui,
     document: DocumentId,
+    phantoms: &[PhantomViewModel],
     galley: &egui::Galley,
     origin: egui::Pos2,
     viewport: Rect,
@@ -776,7 +950,12 @@ fn report_hover(
         ctx.data_mut(|d| d.remove::<(usize, u8)>(key));
         return;
     };
-    if ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
+    // Over a phantom, the point is the phantom's (as over the text there).
+    let phantom_point = phantoms
+        .iter()
+        .find(|p| ctx.memory(|m| m.area_rect(phantom_id(document, p.id))).is_some_and(|r| r.contains(pointer)))
+        .map(|p| p.point);
+    if phantom_point.is_none() && ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
         return;
     }
     let still = ctx.input(|i| i.pointer.time_since_last_movement());
@@ -785,9 +964,11 @@ fn report_hover(
         ctx.request_repaint_after(std::time::Duration::from_secs_f32(HOVER_DELAY - still + 0.02));
         return;
     }
-    let point = galley.cursor_from_pos(pointer - origin).ccursor.index;
+    let point = phantom_point.unwrap_or_else(|| galley.cursor_from_pos(pointer - origin).ccursor.index);
     let row = galley.rows.iter().find(|r| pointer.y >= origin.y + r.rect.top() && pointer.y < origin.y + r.rect.bottom());
-    let zone = if pointer.x < viewport.left() + gutter_width {
+    let zone = if phantom_point.is_some() {
+        HoverZone::Text
+    } else if pointer.x < viewport.left() + gutter_width {
         HoverZone::Gutter
     } else if row.is_some_and(|r| pointer.x > origin.x + r.rect.right()) {
         HoverZone::Margin

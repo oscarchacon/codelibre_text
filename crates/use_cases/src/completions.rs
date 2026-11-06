@@ -18,6 +18,7 @@ use entities::text_commands as tc;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use serde_json::{json, Value};
+use std::time::{Duration, Instant};
 
 use crate::editor::Editor;
 
@@ -56,7 +57,34 @@ pub struct AutoComplete {
     flags: u64,
     /// Plugins' `CompletionList`s still to be filled (`set_completions`).
     pending: Vec<u64>,
+    /// The triggers committed before, newest first (`auto_complete_use_history`): they go first.
+    history: Vec<String>,
 }
+
+/// A list waiting for `auto_complete_delay` to open.
+#[derive(Debug, Clone)]
+pub(crate) struct DueAutoComplete {
+    view: DocumentId,
+    due: Instant,
+    sticky: bool,
+}
+
+/// The completion Tab inserted with no list open (`insert_best_completion`), which Tab again
+/// replaces with the next one (`replace_completion_with_next_completion`) while nothing else
+/// changed the text.
+#[derive(Debug, Clone)]
+pub(crate) struct LastCompletion {
+    view: DocumentId,
+    /// Where the completion is in the text (chars), and the change count right after it.
+    start: usize,
+    end: usize,
+    change_count: u64,
+    candidates: Vec<Completion>,
+    index: usize,
+}
+
+/// At most this many committed triggers are remembered (`auto_complete_use_history`).
+const HISTORY_LIMIT: usize = 100;
 
 /// What the sources offered for one prefix.
 #[derive(Default)]
@@ -111,20 +139,58 @@ impl Editor {
         }
         let Some(last) = typed.chars().last() else { return };
         let caret = doc.selection().head;
+        // `rhs_empty` triggers: only with nothing but blanks after the caret on its line.
+        let rest_of_line: String = doc.text.chars().skip(caret).take_while(|c| *c != '\n').collect();
         let scope = self.scope_name(view, caret.saturating_sub(1)).unwrap_or_default();
         let triggers = settings.get("auto_complete_triggers").and_then(Value::as_array).cloned().unwrap_or_default();
         let triggered = triggers.iter().any(|trigger| {
             let characters = trigger.get("characters").and_then(Value::as_str).unwrap_or("");
             let selector = trigger.get("selector").and_then(Value::as_str).unwrap_or("");
-            characters.contains(last) && (selector.is_empty() || matches_selector(&scope, selector))
+            let rhs_empty = trigger.get("rhs_empty").and_then(Value::as_bool).unwrap_or(false);
+            characters.contains(last)
+                && (selector.is_empty() || matches_selector(&scope, selector))
+                && (!rhs_empty || rest_of_line.trim().is_empty())
         });
-        if triggered {
-            self.open_auto_complete(view, true, AutoCompleteOptions::default());
+        let sticky = if triggered {
+            true
         } else if is_word_char(last) {
             let selector = settings.str("auto_complete_selector").unwrap_or(DEFAULT_SELECTOR).to_string();
-            if selector.is_empty() || matches_selector(&scope, &selector) {
-                self.open_auto_complete(view, false, AutoCompleteOptions::default());
+            if !(selector.is_empty() || matches_selector(&scope, &selector)) {
+                return;
             }
+            false
+        } else {
+            return;
+        };
+        // `auto_complete_delay`: the list opens once typing stops for that long.
+        let delay = settings.usize("auto_complete_delay", 0);
+        if delay == 0 {
+            self.open_auto_complete(view, sticky, AutoCompleteOptions::default());
+        } else {
+            let due = Instant::now() + Duration::from_millis(delay as u64);
+            self.state.auto_complete_due = Some(DueAutoComplete { view, due, sticky });
+        }
+    }
+
+    /// A list waits for `auto_complete_delay`: the window must draw again soon.
+    pub fn auto_complete_due(&self) -> Option<Instant> {
+        self.state.auto_complete_due.as_ref().map(|d| d.due)
+    }
+
+    /// Opens the list that waited for `auto_complete_delay` once its time came, if the caret is
+    /// still after a word (or a trigger) in that view.
+    fn open_due_auto_complete(&mut self) {
+        let Some(due) = &self.state.auto_complete_due else { return };
+        if Instant::now() < due.due {
+            return;
+        }
+        let Some(due) = self.state.auto_complete_due.take() else { return };
+        let still_typing = self.active_document().filter(|d| d.id == due.view).is_some_and(|d| {
+            let caret = d.selection().head;
+            d.selection().is_empty() && (due.sticky || caret > word_start(&d.text, caret))
+        });
+        if still_typing {
+            self.open_auto_complete(due.view, due.sticky, AutoCompleteOptions::default());
         }
     }
 
@@ -144,18 +210,29 @@ impl Editor {
             sticky,
             flags: gathered.flags,
             pending: gathered.pending,
+            history: self.completion_history(view),
         };
         list.filter();
         self.state.auto_complete = (!list.shown.is_empty() || !list.pending.is_empty()).then_some(list);
     }
 
+    /// The triggers committed before, when `auto_complete_use_history` is on.
+    fn completion_history(&self, view: DocumentId) -> Vec<String> {
+        if self.settings_of(view).bool("auto_complete_use_history", false) {
+            self.state.completion_history.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Every frame: the list follows the typed word, and goes when the caret leaves it or another
     /// view becomes active. Plugins that asked for it (`DYNAMIC_COMPLETIONS`) are asked again.
     pub(crate) fn update_auto_complete(&mut self) {
+        self.open_due_auto_complete();
         let Some(list) = &self.state.auto_complete else { return };
         let view = list.view;
         let prefix = match self.active_document().filter(|d| d.id == view) {
-            Some(doc) if doc.selection().is_empty() && doc.extra_selections().is_empty() && doc.selection().head >= list.start => {
+            Some(doc) if doc.selection().is_empty() && doc.selection().head >= list.start => {
                 let caret = doc.selection().head;
                 let prefix: String = doc.text.chars().skip(list.start).take(caret - list.start).collect();
                 prefix.chars().all(is_word_char).then_some(prefix)
@@ -186,14 +263,17 @@ impl Editor {
 
     pub fn hide_auto_complete(&mut self) {
         self.state.auto_complete = None;
+        self.state.auto_complete_due = None;
     }
 
-    /// Up / Down / Page Up / Page Down in the list (wraps around at its ends).
+    /// Up / Down / Page Up / Page Down in the list. Up and Down wrap around at its ends with
+    /// `auto_complete_cycle`; otherwise they stop there.
     pub fn move_auto_complete_selection(&mut self, delta: isize) {
+        let cycle = self.view_settings().bool("auto_complete_cycle", false);
         if let Some(list) = self.state.auto_complete.as_mut().filter(|l| !l.shown.is_empty()) {
             let count = list.shown.len() as isize;
             let next = list.selected as isize + delta;
-            list.selected = if delta.abs() == 1 { next.rem_euclid(count) } else { next.clamp(0, count - 1) } as usize;
+            list.selected = if delta.abs() == 1 && cycle { next.rem_euclid(count) } else { next.clamp(0, count - 1) } as usize;
         }
     }
 
@@ -217,7 +297,7 @@ impl Editor {
         }
         let Some(doc) = self.active_document() else { return false };
         let (view, caret) = (doc.id, doc.selection().head);
-        if !doc.selection().is_empty() || !doc.extra_selections().is_empty() {
+        if !doc.selection().is_empty() {
             return false;
         }
         let start = word_start(&doc.text, caret);
@@ -227,8 +307,8 @@ impl Editor {
         let prefix: String = doc.text.chars().skip(start).take(caret - start).collect();
         let options = AutoCompleteOptions { api_only: false, snippets_only: false, commit_single: false };
         let gathered = self.gather_completions(view, start, caret, &prefix, options);
-        let best = if exact {
-            gathered.items.into_iter().find(|c| c.source != CompletionSource::Word && c.trigger == prefix)
+        let candidates: Vec<Completion> = if exact {
+            gathered.items.into_iter().filter(|c| c.source != CompletionSource::Word && c.trigger == prefix).take(1).collect()
         } else {
             let mut list = AutoComplete {
                 view,
@@ -240,16 +320,52 @@ impl Editor {
                 sticky: false,
                 flags: gathered.flags,
                 pending: Vec::new(),
+                history: self.completion_history(view),
             };
             list.filter();
-            list.shown.into_iter().next().map(|s| s.completion)
+            list.shown.into_iter().map(|s| s.completion).collect()
         };
-        match best {
-            Some(completion) => {
-                self.insert_completion(view, start, &completion);
-                true
-            }
-            None => false,
+        let Some(best) = candidates.first().cloned() else { return false };
+        self.insert_completion(view, start, &best);
+        // Tab again tries the next candidate (`replace_completion_with_next_completion`).
+        if let Some(doc) = self.any_document(view) {
+            let end = doc.selection().head;
+            self.state.last_completion = Some(LastCompletion { view, start, end, change_count: doc.change_count(), candidates, index: 0 });
+        }
+        true
+    }
+
+    /// The `last_command` context with `insert_best_completion`: Tab inserted a completion and
+    /// nothing changed the text or moved the caret since.
+    pub fn last_command_was_completion(&self) -> bool {
+        let Some(last) = &self.state.last_completion else { return false };
+        self.active_document()
+            .is_some_and(|d| d.id == last.view && d.change_count() == last.change_count && d.selection() == Selection::caret(last.end))
+    }
+
+    /// `replace_completion_with_next_completion` (Tab after Tab): the completion just inserted
+    /// gives way to the next candidate (the first again after the last).
+    pub fn replace_completion_with_next(&mut self) {
+        if !self.last_command_was_completion() {
+            return;
+        }
+        let Some(mut last) = self.state.last_completion.take() else { return };
+        if last.candidates.len() < 2 {
+            self.state.last_completion = Some(last);
+            return;
+        }
+        last.index = (last.index + 1) % last.candidates.len();
+        let next = last.candidates[last.index].clone();
+        let Some(doc) = self.any_document_mut(last.view) else { return };
+        doc.set_selection(Selection::new(last.start, last.end));
+        // The completion replaces the selection, as if it had been typed over it.
+        doc.edit(|text, selection| Some(tc::replace_selection(text, selection, "")));
+        let start = last.start;
+        self.insert_completion(last.view, start, &next);
+        if let Some(doc) = self.any_document(last.view) {
+            last.end = doc.selection().head;
+            last.change_count = doc.change_count();
+            self.state.last_completion = Some(last);
         }
     }
 
@@ -287,7 +403,11 @@ impl Editor {
         words.into_iter().filter(|w| w.to_lowercase().starts_with(&lower)).collect()
     }
 
+    /// Inserts a completion in place of the word typed from `start` to the caret. With several
+    /// carets, each one gets it in place of the same word typed before it, as in Sublime; a
+    /// snippet's fields are visited at the primary caret only when it is the only one.
     fn insert_completion(&mut self, view: DocumentId, start: usize, completion: &Completion) {
+        self.remember_completion(view, &completion.trigger);
         let Some(doc) = self.any_document_mut(view) else { return };
         let caret = doc.selection().head;
         if caret < start {
@@ -295,13 +415,21 @@ impl Editor {
         }
         let from = if completion.keep_prefix { caret } else { start };
         let replaced = Selection::new(from, caret);
+        if !doc.extra_selections().is_empty() && completion.format != CompletionFormat::Command {
+            let prefix: String = doc.text.chars().skip(start).take(caret - start).collect();
+            let (keep, contents, snippet) = (completion.keep_prefix, completion.contents.clone(), completion.format == CompletionFormat::Snippet);
+            doc.edit_all(|text, selections| {
+                tc::complete_at_each(text, selections, &prefix, keep, |text, at| {
+                    if snippet { tc::insert_snippet(text, at, &contents) } else { tc::replace_selection(text, at, &contents) }
+                })
+            });
+            return;
+        }
         match completion.format {
             CompletionFormat::Text => {
                 doc.edit(|text, _| Some(tc::replace_selection(text, replaced, &completion.contents)));
             }
-            CompletionFormat::Snippet => {
-                doc.edit(|text, _| Some(tc::insert_snippet(text, replaced, &completion.contents)));
-            }
+            CompletionFormat::Snippet => self.insert_snippet_over(view, Some(replaced), &completion.contents),
             CompletionFormat::Command => {
                 doc.edit(|text, _| Some(tc::replace_selection(text, replaced, "")));
                 let (name, args) = parse_command_completion(&completion.contents);
@@ -310,6 +438,17 @@ impl Editor {
                 }
             }
         }
+    }
+
+    /// `auto_complete_use_history`: a committed trigger comes first next time.
+    fn remember_completion(&mut self, view: DocumentId, trigger: &str) {
+        if !self.settings_of(view).bool("auto_complete_use_history", false) || trigger.is_empty() {
+            return;
+        }
+        let history = &mut self.state.completion_history;
+        history.retain(|t| t != trigger);
+        history.insert(0, trigger.to_string());
+        history.truncate(HISTORY_LIMIT);
     }
 
     /// The completions for `prefix` (typed from `start` to the caret): the plugins' first, then
@@ -331,7 +470,18 @@ impl Editor {
         }
         if gathered.flags & INHIBIT_WORD_COMPLETIONS == 0 && !options.snippets_only {
             if let Some(doc) = self.any_document(view) {
-                for word in words_near(&doc.text, caret, &word_around(&doc.text, caret), MAX_WORDS) {
+                let typed = word_around(&doc.text, caret);
+                let mut words = words_near(&doc.text, caret, &typed, MAX_WORDS);
+                // Then the words of the other open views, most recently used first.
+                let others = self.state.recently_used.iter().filter(|id| **id != view).filter_map(|id| self.any_document(*id));
+                for other in others {
+                    if words.len() >= MAX_WORDS {
+                        break;
+                    }
+                    let limit = MAX_WORDS - words.len();
+                    words.extend(words_near(&other.text, 0, &typed, limit).into_iter().filter(|w| !words.contains(w)).collect::<Vec<_>>());
+                }
+                for word in words {
                     if !gathered.items.iter().any(|c| c.trigger == word) {
                         gathered.items.push(Completion::word(&word));
                     }
@@ -399,10 +549,12 @@ impl AutoComplete {
             let starts = completion.trigger.to_lowercase().starts_with(&lower);
             scored.push((starts, score, index, ShownCompletion { completion: completion.clone(), matched }));
         }
+        // With `auto_complete_use_history`, what was committed before comes first, newest first.
+        let remembered = |shown: &ShownCompletion| self.history.iter().position(|t| *t == shown.completion.trigger).unwrap_or(usize::MAX);
         if self.flags & INHIBIT_REORDER != 0 {
             scored.sort_by_key(|(_, _, index, shown)| (shown.completion.source, *index));
         } else {
-            scored.sort_by_key(|(starts, score, index, shown)| (!starts, -score, shown.completion.source, *index));
+            scored.sort_by_key(|(starts, score, index, shown)| (remembered(shown), !starts, -score, shown.completion.source, *index));
         }
         self.shown = scored.into_iter().map(|(_, _, _, shown)| shown).collect();
         // Only the word typed in full: nothing to complete.

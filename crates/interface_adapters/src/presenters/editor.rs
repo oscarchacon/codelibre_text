@@ -5,7 +5,10 @@ use serde_json::{json, Value};
 use use_cases::plugin_popups::{HIDE_ON_MOUSE_MOVE, HIDE_ON_MOUSE_MOVE_AWAY};
 use use_cases::Editor;
 
-use crate::view_models::{AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PhantomViewModel, PopupViewModel, RegionViewModel, Underline};
+use crate::view_models::{
+    AnnotationViewModel, AutoCompleteViewModel, CompletionViewModel, EditorViewModel, HtmlViewModel, PhantomLayout, PhantomViewModel, PopupViewModel,
+    RegionViewModel, Underline,
+};
 use crate::view_state::ViewState;
 
 // Sublime's `add_regions` flags (`sublime.DRAW_EMPTY`, …).
@@ -60,6 +63,7 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
     let popup = editor.plugin_popup().filter(|p| p.view == doc.id).map(|p| PopupViewModel {
         location: p.location.min(len),
         lines: minihtml::parse(&p.content),
+        html: present_html(editor, &p.content),
         max_width: p.max_width,
         max_height: p.max_height,
         hide_on_mouse_move_away: p.flags & (HIDE_ON_MOUSE_MOVE | HIDE_ON_MOUSE_MOVE_AWAY) != 0,
@@ -67,8 +71,18 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
     let mut phantoms: Vec<PhantomViewModel> = doc
         .phantoms()
         .iter()
-        .map(|p| PhantomViewModel { id: p.id, point: p.region.0.max(p.region.1), lines: minihtml::parse(&p.content) })
-        .filter(|p| !p.lines.is_empty())
+        .map(|p| {
+            // Sublime's `LAYOUT_INLINE` (0), `LAYOUT_BELOW` (1), `LAYOUT_BLOCK` (2).
+            let layout = match p.layout {
+                1 => PhantomLayout::Below,
+                2 => PhantomLayout::Block,
+                _ => PhantomLayout::Inline,
+            };
+            let (a, b) = p.region;
+            let point = if layout == PhantomLayout::Inline { a.min(b) } else { a.max(b) };
+            PhantomViewModel { id: p.id, point, lines: minihtml::parse(&p.content), html: present_html(editor, &p.content), layout }
+        })
+        .filter(|p| !p.lines.is_empty() || !p.html.images.is_empty())
         .collect();
     phantoms.sort_by_key(|p| (p.point, p.id));
     Some(EditorViewModel {
@@ -90,7 +104,7 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
         rulers: settings.numbers("rulers"),
         auto_indent: settings.bool("auto_indent", true),
         find_matches,
-        regions: doc.region_sets().iter().filter_map(|set| present_regions(set, len)).collect(),
+        regions: doc.region_sets().iter().filter_map(|set| present_regions(editor, set, len)).collect(),
         show: doc.show_request().map(|r| (r.point.min(len), r.center, doc.show_revision())),
         take_focus,
         popup,
@@ -122,13 +136,42 @@ fn present_auto_complete(editor: &Editor, document: DocumentId, len: usize) -> O
         })
         .collect();
     let selected = list.selected.min(MAX_COMPLETIONS - 1);
-    let details = list.shown.get(selected).map(|s| minihtml::parse(&s.completion.details)).unwrap_or_default();
-    Some(AutoCompleteViewModel { location: list.start.min(len), items, selected, details })
+    let details_source = list.shown.get(selected).map(|s| s.completion.details.clone()).unwrap_or_default();
+    let details = minihtml::parse(&details_source);
+    let details_html = present_html(editor, &details_source);
+    Some(AutoCompleteViewModel { location: list.start.min(len), items, selected, details, details_html })
+}
+
+/// minihtml read into boxes, with the bytes of its images (`<img src>`).
+pub fn present_html(editor: &Editor, html: &str) -> HtmlViewModel {
+    let block = minihtml::parse_html(html);
+    let mut images: Vec<(String, std::rc::Rc<Vec<u8>>)> = Vec::new();
+    let mut sources = Vec::new();
+    image_sources(&block, &mut sources);
+    for src in sources {
+        if images.iter().all(|(s, _)| *s != src) {
+            if let Some(bytes) = editor.html_image(&src) {
+                images.push((src, bytes));
+            }
+        }
+    }
+    HtmlViewModel { block, images }
+}
+
+fn image_sources(block: &minihtml::Block, sources: &mut Vec<String>) {
+    for content in &block.content {
+        match content {
+            minihtml::Content::Line(line) => sources.extend(line.iter().filter_map(|s| s.image.as_ref().map(|i| i.src.clone()))),
+            minihtml::Content::Block(inner) => image_sources(inner, sources),
+            minihtml::Content::Table(rows) => rows.iter().flatten().for_each(|cell| image_sources(cell, sources)),
+            minihtml::Content::Rule => {}
+        }
+    }
 }
 
 /// A region set as drawn: Sublime fills and outlines regions unless the flags say otherwise
 /// (plugins combine the underline flags with `DRAW_NO_FILL | DRAW_NO_OUTLINE`).
-fn present_regions(set: &RegionSet, len: usize) -> Option<RegionViewModel> {
+fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<RegionViewModel> {
     if set.flags & HIDDEN != 0 {
         return None;
     }
@@ -142,6 +185,14 @@ fn present_regions(set: &RegionSet, len: usize) -> Option<RegionViewModel> {
     } else {
         None
     };
+    let mut annotations: Vec<AnnotationViewModel> = set
+        .regions
+        .iter()
+        .zip(&set.annotations)
+        .map(|(&(a, b), html)| AnnotationViewModel { point: a.min(b).min(len), lines: minihtml::parse(html), html: present_html(editor, html) })
+        .filter(|a| !a.lines.is_empty())
+        .collect();
+    annotations.sort_by_key(|a| a.point);
     let mut ranges: Vec<_> = set
         .regions
         .iter()
@@ -156,5 +207,8 @@ fn present_regions(set: &RegionSet, len: usize) -> Option<RegionViewModel> {
         outline: !has(DRAW_NO_OUTLINE),
         underline,
         draw_empty: has(DRAW_EMPTY),
+        key: set.key.clone(),
+        annotations,
+        annotation_color: set.annotation_color.clone(),
     })
 }

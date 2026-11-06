@@ -29,9 +29,19 @@ pub enum UiEvent {
     NewTab,
     /// A group of the layout was clicked (its text, its tab strip or its empty area).
     FocusGroup(usize),
+    /// The line between two columns (`vertical`) or rows was dragged: boundary `index` is now at
+    /// `fraction` of the window.
+    LayoutBoundaryDragged { vertical: bool, index: usize, fraction: f64 },
+    /// A tab (the document at `tab` in the window) was dropped on `group`, at `index` among its tabs.
+    TabDropped { tab: usize, group: usize, index: usize },
+
+    /// A double click on a preview's tab: it stays open as a tab of its own.
+    KeepTab(usize),
 
     ToggleFolder(PathBuf),
     OpenFile(PathBuf),
+    /// A file clicked once in the side bar: a preview (a double click opens it for good).
+    PreviewFile(PathBuf),
     RemoveFolder(PathBuf),
 
     QuickPanelQueryChanged(String),
@@ -50,6 +60,8 @@ pub enum UiEvent {
     /// A link in a plugin's popup or phantom was clicked (its `href`).
     PopupLinkClicked(String),
     PhantomLinkClicked { phantom: u64, href: String },
+    /// A link in an annotation of the region set `key` was clicked.
+    AnnotationLinkClicked { document: DocumentId, key: String, href: String },
     /// Esc, or the mouse moved away from a popup that asked for it.
     PopupDismissed,
     /// The mouse rests over a view (for `on_hover`).
@@ -118,6 +130,13 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
             view.focus_editor = true;
         }
+        UiEvent::LayoutBoundaryDragged { vertical, index, fraction } => editor.move_layout_boundary(vertical, index, fraction),
+        UiEvent::TabDropped { tab, group, index } => {
+            if let Some(id) = editor.state().documents.get(tab).map(|d| d.id) {
+                editor.drop_view_in_group(id, group, index);
+                view.focus_editor = true;
+            }
+        }
 
         UiEvent::ToggleFolder(folder) => {
             if !view.expanded_folders.remove(&folder) {
@@ -125,8 +144,22 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::OpenFile(path) => {
-            editor.open_file(&path);
+            if editor.open_file(&path) {
+                if let Some(id) = editor.active_document().map(|d| d.id) {
+                    editor.keep_document(id);
+                }
+            }
             view.focus_editor = true;
+        }
+        UiEvent::PreviewFile(path) => {
+            editor.preview_file(&path);
+            view.focus_editor = true;
+        }
+        UiEvent::KeepTab(index) => {
+            if let Some(id) = editor.state().documents.get(index).map(|d| d.id) {
+                editor.keep_document(id);
+                editor.activate(index);
+            }
         }
         UiEvent::RemoveFolder(folder) => editor.remove_folder(&folder),
 
@@ -189,6 +222,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
 
         UiEvent::PopupLinkClicked(href) => command_controller::navigate_plugin_popup(editor, view, &href),
         UiEvent::PhantomLinkClicked { phantom, href } => command_controller::navigate_plugin_phantom(editor, view, phantom, &href),
+        UiEvent::AnnotationLinkClicked { document, key, href } => command_controller::navigate_plugin_annotation(editor, view, document, &key, &href),
         UiEvent::PopupDismissed => editor.hide_plugin_popup(),
         UiEvent::Hover { document, point, zone } => editor.plugin_hover(document, point, zone),
 
@@ -238,7 +272,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::CloseDialogAnswered(choice) => {
             if editor.resolve_pending_close(choice) {
                 view.exit_confirmed = true;
-                view.request(ViewRequest::CloseWindow);
+                view.request(ViewRequest::Exit);
             }
         }
         UiEvent::AboutClosed => view.show_about = false,

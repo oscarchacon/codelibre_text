@@ -8,14 +8,12 @@ use crate::view_state::ViewState;
 /// OPEN FILES plus the FOLDERS tree, flattened to the rows that are currently visible.
 pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
     let state = editor.state();
-    let open_files = state
-        .documents
-        .iter()
-        .enumerate()
-        .map(|(index, doc)| OpenFileViewModel {
-            name: editor.document_name(doc),
-            dirty: doc.is_dirty(),
-            active: index == state.active,
+    let groups = editor.group_count();
+    let open_files = (0..groups)
+        .flat_map(|group| editor.group_indexes(group))
+        .map(|index| {
+            let doc = &state.documents[index];
+            OpenFileViewModel { index, group: doc.group, name: editor.document_name(doc), dirty: doc.is_dirty(), active: index == state.active }
         })
         .collect();
 
@@ -38,7 +36,7 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
             add_children(editor, view, root, 1, active_path.as_deref(), &mut folders);
         }
     }
-    SideBarViewModel { open_files, folders }
+    SideBarViewModel { open_files, groups, folders }
 }
 
 fn add_children(

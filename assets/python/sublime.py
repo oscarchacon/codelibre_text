@@ -602,11 +602,11 @@ def _quick_panel_item(item):
 
 
 def active_window():
-    return Window(1)
+    return Window(sublime_api.active_window())
 
 
 def windows():
-    return [Window(1)]
+    return [Window(window_id) for window_id in sublime_api.windows()]
 
 
 def run_command(cmd, args=None):
@@ -704,25 +704,32 @@ def format_command(cmd, args=None):
     return "%s %s" % (cmd, json.dumps(args)) if args else cmd
 
 
-# Syntax definitions are syntect's (``syntax_engine.rs``) and not listed to plugins yet.
+# Syntax definitions are syntect's (``syntax_engine.rs``): those of the packages (their ``path`` is
+# the resource) and syntect's own (whose ``path`` is their name).
 def list_syntaxes():
-    return []
+    return [Syntax(path, name, hidden, scope) for path, name, hidden, scope, _ in sublime_api.list_syntaxes()]
 
 
 def syntax_from_path(path):
+    for syntax in list_syntaxes():
+        if syntax.path == path:
+            return syntax
     return None
 
 
 def find_syntax_by_name(name):
-    return []
+    return [syntax for syntax in list_syntaxes() if syntax.name == name]
 
 
 def find_syntax_by_scope(scope):
-    return []
+    return [syntax for syntax in list_syntaxes() if syntax.scope == scope]
 
 
 def find_syntax_for_file(path, first_line=""):
-    return None
+    """The syntax the editor would give a file of that name (and first line)."""
+    name = sublime_api.find_syntax_for_file(str(path), first_line or "")
+    found = find_syntax_by_name(name)
+    return found[0] if found else None
 
 
 def score_selector(scope_name, selector):
@@ -972,6 +979,70 @@ class Settings:
 Syntax = collections.namedtuple("Syntax", ["path", "name", "hidden", "scope"])
 
 
+class Buffer:
+    """The text of a file, shown by one view or more (its clones)."""
+
+    def __init__(self, buffer_id):
+        self.buffer_id = buffer_id
+
+    def __eq__(self, rhs):
+        return isinstance(rhs, Buffer) and self.buffer_id == rhs.buffer_id
+
+    def __hash__(self):
+        return self.buffer_id
+
+    def __repr__(self):
+        return "Buffer(%d)" % self.buffer_id
+
+    def id(self):
+        return self.buffer_id
+
+    def file_name(self):
+        view = self.primary_view()
+        return view.file_name() if view is not None else None
+
+    def views(self):
+        return [View(view_id) for view_id in sublime_api.buffer_views(self.buffer_id)]
+
+    def primary_view(self):
+        view_id = sublime_api.buffer_primary_view(self.buffer_id)
+        return View(view_id) if view_id else None
+
+
+class ContextStackFrame:
+    """A context of a syntax at a point (``view.context_backtrace``)."""
+
+    __slots__ = ("context_name", "source_file", "source_location")
+
+    def __init__(self, context_name, source_file, source_location):
+        self.context_name = context_name
+        self.source_file = source_file
+        self.source_location = source_location
+
+    def __repr__(self):
+        return "ContextStackFrame(%r, %r, %r)" % (self.context_name, self.source_file, self.source_location)
+
+    def __eq__(self, other):
+        return isinstance(other, ContextStackFrame) and (self.context_name, self.source_file) == (
+            other.context_name, other.source_file)
+
+
+class SymbolRegion:
+    """A symbol of a view: its name, region, syntax, ``SYMBOL_TYPE_*`` and kind."""
+
+    __slots__ = ("name", "region", "syntax", "type", "kind")
+
+    def __init__(self, name, region, syntax, type, kind):
+        self.name = name
+        self.region = region
+        self.syntax = syntax
+        self.type = type
+        self.kind = kind
+
+    def __repr__(self):
+        return "SymbolRegion(%r, %r, %r, %r, %r)" % (self.name, self.region, self.syntax, self.type, self.kind)
+
+
 class View:
     """A tab showing a document. ``view_id`` is the editor's document id."""
 
@@ -998,25 +1069,29 @@ class View:
         return self.view_id
 
     def buffer_id(self):
-        return self.view_id
+        """The buffer it shows: the same for every view of a file (``clone_file``)."""
+        return sublime_api.view_buffer_id(self.view_id)
 
     def buffer(self):
-        return self
+        return Buffer(self.buffer_id())
 
     def primary_view(self):
-        return self
+        return self.buffer().primary_view() or self
 
     def is_valid(self):
         return sublime_api.view_is_valid(self.view_id)
 
     def is_primary(self):
-        return True
+        """The view the buffer was opened in (not a clone)."""
+        return sublime_api.view_is_primary(self.view_id)
 
     def window(self):
-        return Window(1) if self.is_valid() else None
+        window_id = sublime_api.view_window(self.view_id)
+        return Window(window_id) if window_id else None
 
     def clones(self):
-        return []
+        """The other views of its buffer."""
+        return [View(view_id) for view_id in sublime_api.view_clones(self.view_id)]
 
     def file_name(self):
         return sublime_api.view_file_name(self.view_id)
@@ -1065,7 +1140,8 @@ class View:
 
     def syntax(self):
         name = sublime_api.view_syntax(self.view_id)
-        return Syntax("", name, False, "")
+        found = find_syntax_by_name(name)
+        return found[0] if found else Syntax(name, name, False, "")
 
     def assign_syntax(self, syntax):
         if isinstance(syntax, Syntax):
@@ -1192,10 +1268,14 @@ class View:
                 sublime_api.view_extract_tokens_with_scopes(self.view_id, region.begin(), region.end())]
 
     def context_backtrace(self, pt):
-        return []
+        """The syntax's contexts at ``pt``, outermost first, as ``ContextStackFrame``s (their
+        ``source_location`` is not known: ``(-1, -1)``)."""
+        return [ContextStackFrame(name, source, (-1, -1))
+                for name, source in sublime_api.view_context_backtrace(self.view_id, int(pt))]
 
     def meta_info(self, key, pt):
-        return None
+        """The ``.tmPreferences`` setting ``key`` that applies at ``pt`` (``shellVariables``…)."""
+        return sublime_api.view_meta_info(self.view_id, str(key), int(pt))
 
     def style(self):
         """The color scheme's global colors (``foreground``, ``background``, ``caret``…), each
@@ -1208,37 +1288,54 @@ class View:
         ``source_*`` keys (which rule it was) are always empty."""
         return sublime_api.view_style_for_scope(self.view_id, scope)
 
-    # Symbols and folding are not implemented. These stand-ins let plugins that use them load and
-    # run (nothing shows).
+    # Symbols: the ``showInSymbolList`` (and indexed) selectors of the packages' ``.tmPreferences``,
+    # with their ``symbolTransformation``; without them, ``entity.name`` scopes.
+    def _symbol_regions(self, which, type):
+        return [SymbolRegion(name, Region(a, b), syntax, type, tuple(kind))
+                for name, (a, b), syntax, kind in sublime_api.view_symbol_regions(self.view_id, which)]
+
     def symbol_regions(self):
-        return []
+        return self._symbol_regions("symbols", SYMBOL_TYPE_DEFINITION)
 
     def indexed_symbol_regions(self, type=SYMBOL_TYPE_ANY):
-        return []
+        found = []
+        if type in (SYMBOL_TYPE_ANY, SYMBOL_TYPE_DEFINITION):
+            found += self._symbol_regions("indexed", SYMBOL_TYPE_DEFINITION)
+        if type in (SYMBOL_TYPE_ANY, SYMBOL_TYPE_REFERENCE):
+            found += self._symbol_regions("references", SYMBOL_TYPE_REFERENCE)
+        return sorted(found, key=lambda s: s.region.begin())
 
     def symbols(self):
-        return []
+        return [(s.region, s.name) for s in self.symbol_regions()]
 
     def indexed_symbols(self):
-        return []
+        return [(s.region, s.name) for s in self.indexed_symbol_regions(SYMBOL_TYPE_DEFINITION)]
 
     def indexed_references(self):
-        return []
+        return [(s.region, s.name) for s in self.indexed_symbol_regions(SYMBOL_TYPE_REFERENCE)]
 
     def get_symbols(self):
-        return []
+        return self.symbols()
 
     def classify(self, pt):
-        return 0
+        """Sublime's ``CLASS_*`` flags of the point: word and punctuation starts and ends, line
+        starts and ends, empty lines, sub-word starts and ends."""
+        return sublime_api.view_classify(self.view_id, int(pt))
 
     def find_by_class(self, pt, forward, classes, separators="", sub_word_separators=""):
-        word = self.word(pt)
-        if forward:
-            return word.end() if word.end() > pt else min(pt + 1, self.size())
-        return word.begin() if word.begin() < pt else max(pt - 1, 0)
+        """The next point (or previous, ``forward=False``) whose ``classify`` has one of
+        ``classes``; the end (or start) of the text when none has."""
+        return sublime_api.view_find_by_class(self.view_id, int(pt), bool(forward), int(classes), separators or "",
+                                              sub_word_separators or "")
 
     def expand_by_class(self, x, classes, separators="", sub_word_separators=""):
-        return self.word(x)
+        """``x`` grown on both sides to the nearest points with one of ``classes``."""
+        r = _region(x)
+        a = sublime_api.view_find_by_class(self.view_id, r.begin(), False, int(classes), separators or "",
+                                           sub_word_separators or "")
+        b = sublime_api.view_find_by_class(self.view_id, r.end(), True, int(classes), separators or "",
+                                           sub_word_separators or "")
+        return Region(a, b)
 
     def show_popup(self, content, flags=0, location=-1, max_width=320, max_height=240, on_navigate=None,
                    on_hide=None):
@@ -1410,14 +1507,22 @@ class View:
     def add_regions(self, key, regions, scope="", icon="", flags=0, annotations=None, annotation_color="",
                     on_navigate=None, on_close=None, **kwargs):
         """Marks regions (drawn with the scope's color, see ``DRAW_*``); they move with the text.
-        Annotations are not shown yet."""
+        ``annotations`` (minihtml, one per region) show at the right of their lines, their links
+        call ``on_navigate(href)``. (``on_close`` is never called: annotations cannot be closed.)"""
         rows = [[r.a, r.b] for r in (_region(r) for r in regions)]
-        sublime_api.view_add_regions(self.view_id, str(key), rows, scope or "", icon or "", int(flags))
+        _callbacks.pop(_region_callbacks.pop((self.view_id, str(key)), None), None)
+        callback = None
+        if annotations and on_navigate is not None:
+            callback = _register_callbacks(("close",), navigate=on_navigate, close=on_close)
+            _region_callbacks[(self.view_id, str(key))] = callback
+        sublime_api.view_add_regions(self.view_id, str(key), rows, scope or "", icon or "", int(flags),
+                                     [str(a) for a in (annotations or [])], annotation_color or "", callback)
 
     def get_regions(self, key):
         return [Region(a, b) for a, b in sublime_api.view_get_regions(self.view_id, str(key))]
 
     def erase_regions(self, key):
+        _callbacks.pop(_region_callbacks.pop((self.view_id, str(key)), None), None)
         sublime_api.view_erase_regions(self.view_id, str(key))
 
     def set_status(self, key, value):
@@ -1478,7 +1583,8 @@ class Sheet:
         return False
 
     def is_transient(self):
-        return False
+        """A preview (``TRANSIENT``): the next preview in its group takes its place."""
+        return sublime_api.view_is_transient(self.sheet_id)
 
     def close(self, on_close=None):
         return self.view().close(on_close)
@@ -1503,6 +1609,8 @@ class ImageSheet(Sheet):
 # Phantom ids by (view id, key), and the callback id of each phantom with ``on_navigate``.
 _phantoms = {}
 _phantom_callbacks = {}
+# The callback id of each region set with annotations and ``on_navigate``, by (view id, key).
+_region_callbacks = {}
 
 
 class Phantom:
@@ -1655,10 +1763,14 @@ def _completions_json(completions):
 
 
 class Window:
-    """The editor window (there is only one)."""
+    """A window of the editor. Its calls name it (``_window_arg``): the editor answers them about
+    this window, whichever is active."""
 
     def __init__(self, window_id):
         self.window_id = window_id
+
+    def _window_arg(self):
+        return {"__window__": self.window_id}
 
     def __eq__(self, rhs):
         return isinstance(rhs, Window) and self.window_id == rhs.window_id
@@ -1676,44 +1788,49 @@ class Window:
         return self.window_id
 
     def is_valid(self):
-        return True
+        return sublime_api.window_is_valid(self.window_id)
+
+    def new_window(self):
+        """Not Sublime's: a plugin opens a window with ``sublime.run_command("new_window")``."""
+        run_command("new_window")
+        return active_window()
 
     def settings(self):
         return Settings(["window", self.window_id])
 
     def active_view(self):
-        view_id = sublime_api.window_active_view()
+        view_id = sublime_api.window_active_view(self._window_arg())
         return View(view_id) if view_id else None
 
     def views(self):
-        return [View(view_id) for view_id in sublime_api.window_views()]
+        return [View(view_id) for view_id in sublime_api.window_views(self._window_arg())]
 
     def num_groups(self):
-        return sublime_api.window_num_groups()
+        return sublime_api.window_num_groups(self._window_arg())
 
     def active_group(self):
-        return sublime_api.window_active_group()
+        return sublime_api.window_active_group(self._window_arg())
 
     def focus_group(self, group):
-        sublime_api.window_focus_group(group)
+        sublime_api.window_focus_group(group, self._window_arg())
 
     def active_view_in_group(self, group):
-        view_id = sublime_api.window_active_view_in_group(group)
+        view_id = sublime_api.window_active_view_in_group(group, self._window_arg())
         return View(view_id) if view_id else None
 
     def views_in_group(self, group):
-        return [View(view_id) for view_id in sublime_api.window_views_in_group(group)]
+        return [View(view_id) for view_id in sublime_api.window_views_in_group(group, self._window_arg())]
 
     def get_view_index(self, view):
         if view is None:
             return (-1, -1)
-        return tuple(sublime_api.window_get_view_index(view.id()))
+        return tuple(sublime_api.window_get_view_index(view.id(), self._window_arg()))
 
     def focus_view(self, view):
-        sublime_api.window_focus_view(view.id())
+        sublime_api.window_focus_view(view.id(), self._window_arg())
 
     def new_file(self, flags=0, syntax=""):
-        view = View(sublime_api.window_new_file())
+        view = View(sublime_api.window_new_file(self._window_arg()))
         if syntax:
             view.assign_syntax(syntax)
         return view
@@ -1726,7 +1843,7 @@ class Window:
             row = col = None
         if 0 <= group < self.num_groups():
             self.focus_group(group)
-        view_id = sublime_api.window_open_file(fname)
+        view_id = sublime_api.window_open_file(fname, int(flags), self._window_arg())
         if not view_id:
             return None
         view = View(view_id)
@@ -1737,7 +1854,7 @@ class Window:
         return view
 
     def find_open_file(self, fname):
-        view_id = sublime_api.window_find_open_file(fname)
+        view_id = sublime_api.window_find_open_file(fname, self._window_arg())
         return View(view_id) if view_id else None
 
     def run_command(self, cmd, args=None):
@@ -1746,13 +1863,13 @@ class Window:
     def create_output_panel(self, name, unlisted=False):
         """The view of the output panel ``name``, created (or emptied) now. Show it with
         ``run_command("show_panel", {"panel": "output." + name})``."""
-        return View(sublime_api.window_create_output_panel(self.window_id, name))
+        return View(sublime_api.window_create_output_panel(self.window_id, name, self._window_arg()))
 
     def get_output_panel(self, name):
         return self.create_output_panel(name)
 
     def find_output_panel(self, name):
-        view_id = sublime_api.window_find_output_panel(self.window_id, name)
+        view_id = sublime_api.window_find_output_panel(self.window_id, name, self._window_arg())
         return View(view_id) if view_id else None
 
     def create_io_panel(self, name, on_input, unlisted=False):
@@ -1765,13 +1882,13 @@ class Window:
         return self.find_output_panel(name), None
 
     def destroy_output_panel(self, name):
-        sublime_api.window_destroy_output_panel(self.window_id, name)
+        sublime_api.window_destroy_output_panel(self.window_id, name, self._window_arg())
 
     def active_panel(self):
-        return sublime_api.window_active_panel(self.window_id)
+        return sublime_api.window_active_panel(self.window_id, self._window_arg())
 
     def panels(self):
-        return sublime_api.window_panels(self.window_id)
+        return sublime_api.window_panels(self.window_id, self._window_arg())
 
     def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None):
         """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled."""
@@ -1786,20 +1903,20 @@ class Window:
         rows = [_quick_panel_item(item) for item in items]
         sublime_api.window_show_quick_panel(
             self.window_id, rows, flags, selected_index, placeholder or "", callback, on_highlight is not None
-        )
+        , self._window_arg())
 
     def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel):
         """A one-line text field at the bottom. Returns its view."""
         callback = _register_callbacks(("done", "cancel"), done=on_done, change=on_change, cancel=on_cancel)
         return View(sublime_api.window_show_input_panel(
             self.window_id, str(caption), str(initial_text), callback, on_change is not None
-        ))
+        , self._window_arg()))
 
     def status_message(self, msg):
         status_message(msg)
 
     def folders(self):
-        return sublime_api.window_folders()
+        return sublime_api.window_folders(self._window_arg())
 
     def project_file_name(self):
         return None
@@ -1814,14 +1931,14 @@ class Window:
         pass
 
     def layout(self):
-        return sublime_api.window_get_layout()
+        return sublime_api.window_get_layout(self._window_arg())
 
     def get_layout(self):
         return self.layout()
 
     def set_layout(self, layout):
         """``{"cols": [...], "rows": [...], "cells": [[x1, y1, x2, y2], ...]}``, one cell per group."""
-        sublime_api.window_set_layout(layout)
+        sublime_api.window_set_layout(layout, self._window_arg())
 
     def active_sheet(self):
         view = self.active_view()
@@ -1846,10 +1963,12 @@ class Window:
         return [sheet] if sheet else []
 
     def transient_sheet_in_group(self, group):
-        return None
+        view = self.transient_view_in_group(group)
+        return view.sheet() if view is not None else None
 
     def transient_view_in_group(self, group):
-        return None
+        view_id = sublime_api.window_transient_view_in_group(int(group), self._window_arg())
+        return View(view_id) if view_id else None
 
     def focus_sheet(self, sheet):
         if sheet and sheet.view():
@@ -1864,7 +1983,7 @@ class Window:
 
     def set_view_index(self, view, group, index):
         if view is not None and 0 <= group < self.num_groups():
-            sublime_api.window_set_view_index(view.id(), group, index if index >= 0 else 1 << 31)
+            sublime_api.window_set_view_index(view.id(), group, index if index >= 0 else 1 << 31, self._window_arg())
 
     def set_sheet_index(self, sheet, group, index):
         if sheet and sheet.view():

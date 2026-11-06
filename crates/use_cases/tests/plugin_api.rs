@@ -43,6 +43,50 @@ fn reading_the_text() {
 }
 
 #[test]
+fn meta_info_symbols_backtraces_and_classes() {
+    let world = plugin_world()
+        .with_file("/p/a.py", "x = \"  one\"\ny = \"two\"")
+        .with_meta_preference("source.python", json!({ "shellVariables": [{ "name": "TM_COMMENT_START", "value": "# " }] }))
+        .with_meta_preference("string.quoted", json!({ "showInSymbolList": 1, "symbolTransformation": "s/\"//g;s/^\\s+//" }));
+    let mut editor = world.editor_opening(&["/p/a.py"]);
+    let v = view_id(&editor);
+    assert_eq!(
+        call(&world, &mut editor, "view_meta_info", json!([v, "shellVariables", 0])),
+        Ok(json!([{ "name": "TM_COMMENT_START", "value": "# " }]))
+    );
+    assert_eq!(call(&world, &mut editor, "view_meta_info", json!([v, "nothing", 0])), Ok(Value::Null));
+    assert_eq!(
+        call(&world, &mut editor, "view_symbol_regions", json!([v, "symbols"])),
+        Ok(json!([
+            ["one", [4, 11], "Python", [0, "", ""]],
+            ["two", [16, 21], "Python", [0, "", ""]],
+        ]))
+    );
+    assert_eq!(call(&world, &mut editor, "view_symbol_regions", json!([v, "references"])), Ok(json!([])), "no reference list");
+    assert_eq!(
+        call(&world, &mut editor, "view_context_backtrace", json!([v, 6])),
+        Ok(json!([["main", "Packages/Python/Python.sublime-syntax"], ["string", "Packages/Python/Python.sublime-syntax"]]))
+    );
+    // `CLASS_WORD_START | CLASS_SUB_WORD_START | CLASS_LINE_START` at 0.
+    assert_eq!(call(&world, &mut editor, "view_classify", json!([v, 0])), Ok(json!(1 | 16 | 64)));
+    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 0, true, 1, ""])), Ok(json!(7)), "the next word start: one");
+    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 11, false, 64, ""])), Ok(json!(0)));
+    let syntaxes = call(&world, &mut editor, "list_syntaxes", json!([])).unwrap();
+    assert!(syntaxes.as_array().unwrap().contains(&json!(["Packages/Python/Python.sublime-syntax", "Python", false, "source.python", ["py"]])), "{syntaxes}");
+    assert_eq!(call(&world, &mut editor, "find_syntax_for_file", json!(["b.py", ""])), Ok(json!("Python")));
+}
+
+#[test]
+fn plugins_add_to_the_clipboard_history() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    assert_eq!(call(&world, &mut editor, "clipboard_history_push", json!(["from Terminus"])), Ok(Value::Null));
+    assert_eq!(call(&world, &mut editor, "clipboard_history", json!([])), Ok(json!(["from Terminus"])));
+    call(&world, &mut editor, "clipboard_history_clear", json!([])).unwrap();
+    assert!(editor.clipboard_history().is_empty());
+}
+
+#[test]
 fn scopes() {
     let world = plugin_world().with_file("/p/a.py", "s = \"x\"");
     let mut editor = world.editor_opening(&["/p/a.py"]);

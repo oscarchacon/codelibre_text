@@ -358,7 +358,7 @@ fn the_change_count_grows_with_text_changes_only() {
 }
 
 fn region_set(key: &str, regions: &[(usize, usize)]) -> RegionSet {
-    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0 }
+    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0, ..RegionSet::default() }
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn show_requests_are_counted_and_clamped() {
 fn regions_follow_edits_the_widget_makes_in_place() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "héllo world".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0 };
+    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
     doc.add_regions(set);
     doc.text = "XXhéllo world".into();
     doc.note_text_changed();
@@ -434,7 +434,7 @@ fn regions_follow_edits_the_widget_makes_in_place() {
 fn text_typed_right_before_a_region_stays_out_of_it() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "hello".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0 };
+    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
     doc.add_regions(set);
     // The caret is at 0: the "h" went in front, even though the texts read the same either way.
     doc.text = "hhello".into();

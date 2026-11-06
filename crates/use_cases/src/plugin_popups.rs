@@ -8,12 +8,40 @@
 //! middle of a plugin's call. Phantoms live in their [`Document`](entities::document::Document),
 //! whose edits move them.
 
+use std::rc::Rc;
+
 use entities::document::{DocumentId, Phantom};
+use entities::minihtml::data_uri_bytes;
 use entities::selection::Selection;
 use serde_json::{json, Value};
 
 use crate::editor::Editor;
 use crate::plugins::CommandRunner;
+
+impl Editor {
+    /// The bytes of an image of a plugin's minihtml (`<img src>`): a `data:` URI, a resource
+    /// (`res://Packages/…`) or a file (`file://…`). Read once; `None` when it cannot be.
+    pub fn html_image(&self, src: &str) -> Option<Rc<Vec<u8>>> {
+        if let Some(cached) = self.state.html_images.borrow().get(src) {
+            return cached.clone();
+        }
+        let bytes = if let Some(bytes) = data_uri_bytes(src) {
+            Some(bytes)
+        } else if let Some(name) = src.strip_prefix("res://") {
+            let include = self.global_settings().bool("import_sublime_packages", true);
+            self.gateways.resources.load_resource(name.trim_start_matches('/'), include).ok()
+        } else if let Some(path) = src.strip_prefix("file://") {
+            // `file:///C:/x.png` and `file:///home/x.png`.
+            let path = if path.len() > 3 && path.as_bytes()[2] == b':' { &path[1..] } else { path };
+            self.gateways.file_system.read(std::path::Path::new(path)).ok()
+        } else {
+            None
+        };
+        let bytes = bytes.map(Rc::new);
+        self.state.html_images.borrow_mut().insert(src.to_string(), bytes.clone());
+        bytes
+    }
+}
 
 /// Sublime's `HIDE_ON_MOUSE_MOVE`, `HIDE_ON_MOUSE_MOVE_AWAY`, `KEEP_ON_SELECTION_MODIFIED`.
 pub const HIDE_ON_MOUSE_MOVE: u64 = 4;
@@ -114,6 +142,13 @@ impl Editor {
     /// A link was clicked in a phantom: its `on_navigate(href)`.
     pub fn navigate_plugin_phantom(&mut self, phantom: u64, href: &str, run_command: &mut CommandRunner) {
         if let Some(&callback) = self.state.plugins.phantom_callbacks.get(&phantom) {
+            self.plugin_callback(callback, "navigate", json!([href]), run_command);
+        }
+    }
+
+    /// A link was clicked in an annotation of the region set `key`: its `on_navigate(href)`.
+    pub fn navigate_plugin_annotation(&mut self, view: DocumentId, key: &str, href: &str, run_command: &mut CommandRunner) {
+        if let Some(&callback) = self.state.plugins.region_callbacks.get(&(view, key.to_string())) {
             self.plugin_callback(callback, "navigate", json!([href]), run_command);
         }
     }

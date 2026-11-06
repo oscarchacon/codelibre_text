@@ -3,6 +3,8 @@
 		"caption": "File", "mnemonic": "F", "id": "file",
 		"children": [
 			{ "command": "new_file", "caption": "New File" },
+			{ "command": "new_window", "caption": "New Window" },
+			{ "command": "clone_file", "caption": "New View into File" },
 			{ "command": "prompt_open_file", "caption": "Open File…" },
 			{ "command": "prompt_open_folder", "caption": "Open Folder…" },
 			{ "command": "reopen_last_file", "caption": "Reopen Closed File" },
@@ -15,6 +17,7 @@
 			{ "command": "close", "caption": "Close File" },
 			{ "command": "close_all", "caption": "Close All Files" },
 			{ "command": "close_folder_list", "caption": "Close Folder" },
+			{ "command": "close_window", "caption": "Close Window" },
 			{ "caption": "-" },
 			{ "command": "exit", "caption": "Exit" }
 		]
@@ -28,6 +31,7 @@
 			{ "command": "cut", "caption": "Cut" },
 			{ "command": "copy", "caption": "Copy" },
 			{ "command": "paste", "caption": "Paste" },
+			{ "command": "paste_from_history", "caption": "Paste from History" },
 			{ "caption": "-" },
 			{
 				"caption": "Line", "id": "line",
@@ -116,6 +120,20 @@
 				]
 			},
 			{
+				"caption": "Groups", "id": "groups_menu",
+				"children": [
+					{ "command": "new_pane", "args": { "move": false }, "caption": "New Group" },
+					{ "command": "new_pane", "caption": "Move File to New Group" },
+					{ "command": "close_pane", "caption": "Close Group" },
+					{ "caption": "-" },
+					{ "command": "set_max_columns", "args": { "columns": 1 }, "caption": "Max Columns: 1", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 2 }, "caption": "Max Columns: 2", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 3 }, "caption": "Max Columns: 3", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 4 }, "caption": "Max Columns: 4", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 5 }, "caption": "Max Columns: 5", "checkbox": true }
+				]
+			},
+			{
 				"caption": "Focus Group", "id": "focus_group",
 				"children": [
 					{ "command": "focus_neighboring_group", "caption": "Next" },
@@ -174,7 +192,14 @@
 			{ "command": "build", "caption": "Build" },
 			{ "command": "build", "args": { "select": true }, "caption": "Build With…" },
 			{ "command": "cancel_build", "caption": "Cancel Build" },
-			{ "command": "set_build_system", "args": { "file": "" }, "caption": "Automatic Build System" },
+			{
+				"caption": "Build System", "id": "build_system",
+				"children": [
+					{ "command": "set_build_system", "args": { "file": "" }, "caption": "Automatic", "checkbox": true },
+					{ "caption": "-" },
+					{ "command": "$build_systems" }
+				]
+			},
 			{ "command": "show_panel", "args": { "panel": "output.exec" }, "caption": "Show Build Results" },
 			{ "command": "next_result", "caption": "Next Result" },
 			{ "command": "prev_result", "caption": "Previous Result" },

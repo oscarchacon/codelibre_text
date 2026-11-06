@@ -22,6 +22,7 @@ pub fn present_group(editor: &Editor, group: usize) -> Vec<TabViewModel> {
                 tooltip: doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| editor.document_name(doc)),
                 dirty: doc.is_dirty(),
                 active: Some(index) == shown,
+                transient: doc.transient,
             }
         })
         .collect()

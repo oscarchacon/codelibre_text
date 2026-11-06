@@ -928,8 +928,12 @@ msgid "Cancel Build"
 msgstr "Cancelar compilación"
 
 #: assets/Default/Main.sublime-menu
-msgid "Automatic Build System"
-msgstr "Sistema de compilación automático"
+msgid "Build System"
+msgstr "Sistema de compilación"
+
+#: assets/Default/Main.sublime-menu
+msgid "Automatic"
+msgstr "Automático"
 
 #: assets/Default/Main.sublime-menu
 msgid "Show Build Results"
@@ -1124,3 +1128,45 @@ msgstr "Mover archivo al grupo"
 
 msgid "set_layout needs cols, rows and cells"
 msgstr "set_layout necesita cols, rows y cells"
+
+msgid "Paste from History"
+msgstr "Pegar desde el historial"
+
+msgid "Groups"
+msgstr "Grupos"
+
+msgid "New Group"
+msgstr "Nuevo grupo"
+
+msgid "Move File to New Group"
+msgstr "Mover archivo a un grupo nuevo"
+
+msgid "Close Group"
+msgstr "Cerrar grupo"
+
+msgid "Max Columns: 1"
+msgstr "Máx. columnas: 1"
+
+msgid "Max Columns: 2"
+msgstr "Máx. columnas: 2"
+
+msgid "Max Columns: 3"
+msgstr "Máx. columnas: 3"
+
+msgid "Max Columns: 4"
+msgstr "Máx. columnas: 4"
+
+msgid "Max Columns: 5"
+msgstr "Máx. columnas: 5"
+
+msgid "New Window"
+msgstr "Nueva ventana"
+
+msgid "New View into File"
+msgstr "Nueva vista del archivo"
+
+msgid "Close Window"
+msgstr "Cerrar ventana"
+
+msgid "GROUP {number}"
+msgstr "GRUPO {number}"

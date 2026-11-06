@@ -57,6 +57,12 @@
 	"auto_complete_size_limit": 4194304,
 	// Tab commits the selected completion; also Enter unless this is true.
 	"auto_complete_commit_on_tab": false,
+	// Milliseconds typing must stop before the list shows.
+	"auto_complete_delay": 50,
+	// The completions chosen before come first.
+	"auto_complete_use_history": false,
+	// Up at the top of the list goes to its end, and Down at its end to the top.
+	"auto_complete_cycle": false,
 
 	// Tab after a snippet's or a completion's trigger (typed in full) inserts it.
 	"tab_completion": true,

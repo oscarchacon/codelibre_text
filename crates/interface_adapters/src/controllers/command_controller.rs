@@ -5,7 +5,7 @@
 //! `assets/Default/` (keymap, menu, command palette). Names without an arm go to the Python plugins.
 
 use entities::command::Command;
-use entities::document::LineEnding;
+use entities::document::{DocumentId, LineEnding};
 use entities::layout::Layout;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
@@ -102,6 +102,12 @@ pub fn navigate_plugin_phantom(editor: &mut Editor, view: &mut ViewState, phanto
     show_plugin_panels(editor, view);
 }
 
+/// A link clicked in an annotation of a plugin's regions: its `on_navigate`.
+pub fn navigate_plugin_annotation(editor: &mut Editor, view: &mut ViewState, document: DocumentId, key: &str, href: &str) {
+    editor.navigate_plugin_annotation(document, key, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
 pub fn highlight_plugin_item(editor: &mut Editor, view: &mut ViewState, item: usize) {
     editor.highlight_plugin_quick_panel_item(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
 }
@@ -141,6 +147,7 @@ const WINDOW_COMMANDS: &[&str] = &[
     "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
     "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
     "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
+    "new_pane", "close_pane", "set_max_columns", "new_window", "clone_file",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
@@ -161,6 +168,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     };
     let widget_edits = view.widget_edits_requested();
     run_command(editor, view, &command);
+    view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;
     };
@@ -207,7 +215,14 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "revert" => editor.revert_active_document(),
         "close" | "close_file" => editor.close_active_document(),
         "close_all" => editor.close_all_documents(),
-        "close_window" | "exit" => view.request(ViewRequest::CloseWindow),
+        "close_window" => view.request(ViewRequest::CloseWindow),
+        "exit" => view.request(ViewRequest::Exit),
+        "new_window" => {
+            editor.new_window();
+        }
+        "clone_file" => {
+            editor.clone_active_document();
+        }
         "reopen_last_file" => editor.reopen_closed_file(),
         "close_folder_list" => editor.close_all_folders(),
         "refresh_folder_list" => {
@@ -330,12 +345,6 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.use_selection_as_query(true);
             find_next(editor, view, command.name == "find_under");
         }
-        "slurp_find_string" => editor.use_selection_as_query(false),
-        "find_under_expand" => editor.select_word_or_next_occurrence(),
-        "find_all_under" => editor.select_all_occurrences(),
-        "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
-        "split_selection_into_lines" => editor.split_selection_into_lines(),
-        "single_selection" => editor.single_selection(),
         "replace_next" => editor.replace_next(),
         "replace_all" => editor.replace_all(),
 
@@ -363,14 +372,6 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "toggle_full_screen" | "toggle_distraction_free" => {
             view.fullscreen = !view.fullscreen;
             view.request(ViewRequest::SetFullscreen(view.fullscreen));
-        }
-        "increase_font_size" => editor.change_font_size(1.0),
-        "decrease_font_size" => editor.change_font_size(-1.0),
-        "reset_font_size" => editor.reset_font_size(),
-        "toggle_setting" => editor.toggle_setting(command.str_arg("setting")),
-        "set_setting" => {
-            let value = command.args.get("value").cloned().unwrap_or_default();
-            editor.set_setting(command.str_arg("setting"), value);
         }
         "next_view" => editor.cycle_documents(true),
         "prev_view" => editor.cycle_documents(false),
@@ -405,20 +406,43 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.move_active_to_neighboring_group(command.bool_arg("forward", true));
             view.focus_editor = true;
         }
-        "set_file_type" => editor.set_syntax(command.str_arg("syntax")),
-        "set_line_ending" => {
-            let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };
-            editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
+        "new_pane" => {
+            editor.new_pane(command.bool_arg("move", true));
+            view.focus_editor = true;
         }
-
+        "close_pane" => {
+            let group = command.args.get("group").and_then(serde_json::Value::as_i64).filter(|g| *g >= 0).map(|g| g as usize);
+            editor.close_pane(group);
+            view.focus_editor = true;
+        }
+        "set_max_columns" => editor.set_max_columns(command.usize_arg("columns", 4)),
         // ----- done by the text widget itself --------------------------------------------------
         "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
         "redo" | "redo_or_repeat" | "soft_redo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo)),
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
         // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
         "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
-        "copy" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy)),
-        "cut" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut)),
+        "copy" => {
+            editor.remember_copied_selections();
+            view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy));
+        }
+        "cut" => {
+            editor.remember_copied_selections();
+            view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut));
+        }
+        // With an index (the entry chosen in its panel): pastes that entry; without, lists them.
+        "paste_from_history" => match command.args.get("index").and_then(serde_json::Value::as_u64) {
+            Some(index) => {
+                if let Some(text) = editor.take_clipboard_history_entry(index as usize) {
+                    view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));
+                }
+            }
+            None if editor.clipboard_history().is_empty() => {}
+            None => {
+                cancel_quick_panel(editor, view);
+                view.quick_panel = Some(QuickPanel::new(SearchKind::ClipboardHistory, String::new()));
+            }
+        },
         "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
         "paste" | "paste_and_indent" => {
             if let Some(text) = editor.clipboard_text() {
@@ -438,6 +462,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 
         // ----- Python plugins: they can run other commands, which come back here ---------------
         name if EDITING_COMMANDS.contains(&name) => run_editing_command(editor, command),
+        name if EDITOR_COMMANDS.contains(&name) => run_editor_command(editor, command),
         other => {
             if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
                 editor.notify(editor.tr_args("Command not available: {name}", &[("name", &other)]));
@@ -501,20 +526,69 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
     }
 }
 
-/// Runs a built-in command a listener asked for during an event, at once when it only edits text:
-/// a formatter's command in `on_pre_save` must reach the file being saved. The others need the
-/// view state, which use cases do not have: false, and they wait for the next frame.
+/// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
+/// settings and need no view state, so they too run at once inside an event.
+const EDITOR_COMMANDS: &[&str] = &[
+    "slurp_find_string", "find_under_expand", "find_all_under", "select_lines", "split_selection_into_lines",
+    "single_selection", "increase_font_size", "decrease_font_size", "reset_font_size", "toggle_setting", "set_setting",
+    "set_file_type", "set_line_ending", "next_field", "prev_field", "clear_fields", "replace_completion_with_next_completion",
+];
+
+fn run_editor_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "slurp_find_string" => editor.use_selection_as_query(false),
+        "find_under_expand" => editor.select_word_or_next_occurrence(),
+        "find_all_under" => editor.select_all_occurrences(),
+        "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
+        "split_selection_into_lines" => editor.split_selection_into_lines(),
+        "single_selection" => editor.single_selection(),
+        "increase_font_size" => editor.change_font_size(1.0),
+        "decrease_font_size" => editor.change_font_size(-1.0),
+        "reset_font_size" => editor.reset_font_size(),
+        "toggle_setting" => editor.toggle_setting(command.str_arg("setting")),
+        "set_setting" => {
+            let value = command.args.get("value").cloned().unwrap_or_default();
+            editor.set_setting(command.str_arg("setting"), value);
+        }
+        "set_file_type" => editor.set_syntax(command.str_arg("syntax")),
+        "next_field" => editor.move_to_snippet_field(true),
+        "prev_field" => editor.move_to_snippet_field(false),
+        "clear_fields" => editor.clear_snippet_fields(),
+        "replace_completion_with_next_completion" => editor.replace_completion_with_next(),
+        "set_line_ending" => {
+            let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };
+            editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
+        }
+        other => unreachable!("{other} is not in EDITOR_COMMANDS"),
+    }
+}
+
+/// Whether a built-in command can run in the middle of a use case (it needs no view state).
+fn runs_during_event(name: &str) -> bool {
+    EDITING_COMMANDS.contains(&name) || EDITOR_COMMANDS.contains(&name)
+}
+
+/// Runs a built-in command a listener asked for during an event, at once when it needs no view
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. The others
+/// (panels, the widget's undo and clipboard, saving and closing, which would change the views
+/// under the use case that fired the event) answer false and wait for the next frame, which runs
+/// them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
-    if !EDITING_COMMANDS.contains(&command.name.as_str()) {
+    if !runs_during_event(&command.name) {
         return false;
     }
-    let rewritten = editor.plugin_rewrite_command(command, CommandTarget::View);
-    if !EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
+    let target = hook_target(editor, &command.name).unwrap_or(CommandTarget::View);
+    let rewritten = editor.plugin_rewrite_command(command, target);
+    if !runs_during_event(&rewritten.name) {
         editor.queue_plugin_command(rewritten);
         return true;
     }
-    run_editing_command(editor, &rewritten);
-    editor.plugin_command_ran(&rewritten, CommandTarget::View);
+    if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
+        run_editing_command(editor, &rewritten);
+    } else {
+        run_editor_command(editor, &rewritten);
+    }
+    editor.plugin_command_ran(&rewritten, hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View));
     true
 }
 

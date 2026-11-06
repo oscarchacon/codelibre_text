@@ -429,6 +429,79 @@ class ShoutCommand(sublime_plugin.TextCommand):
     assert_eq!(editor.active_document().unwrap().text, "HELLO world");
 }
 
+/// `sublime_plugin.reload_plugin` imports a changed plugin file again: the editor hears its new
+/// commands at once, the old ones go, `plugin_unloaded` / `plugin_loaded` run.
+#[test]
+fn reload_plugin_loads_a_changed_plugin_and_the_editor_hears_its_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import os
+import sublime
+import sublime_plugin
+
+def plugin_loaded():
+    print("loaded first")
+
+def plugin_unloaded():
+    print("unloaded first")
+
+class FirstCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        sublime.status_message("first")
+
+class ReloadIt(sublime_plugin.WindowCommand):
+    def run(self):
+        path = os.path.join(os.path.dirname(__file__), "plugin.py")
+        with open(path) as f:
+            source = f.read()
+        with open(path, "w") as f:
+            f.write(source.replace("First", "Second").replace("first", "second"))
+        sublime_plugin.reload_plugin("MyPkg.plugin")
+"#
+    .replace("class ReloadIt", "class ReloadItCommand");
+    let Some(mut editor) = editor_with(dir.path(), &plugin) else {
+        return;
+    };
+    assert!(editor.is_plugin_command("first"));
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("reload_it"));
+    let console = editor.state().console.clone();
+    assert!(editor.is_plugin_command("second"), "console:\n{console}");
+    assert!(!editor.is_plugin_command("first"), "the old command is gone");
+    assert!(console.contains("unloaded first") && console.contains("loaded second"), "console:\n{console}");
+    command_controller::run(&mut editor, &mut view, &Command::new("second"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("second"));
+}
+
+/// `Default.paste_from_history` is the editor's history, and the modules newer Pythons removed
+/// (`asyncore`, `asynchat`, `distutils.*`) import.
+#[test]
+fn the_clipboard_history_and_removed_modules_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+from Default.paste_from_history import g_clipboard_history
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        import asyncore, asynchat
+        from distutils.util import strtobool
+        from distutils.spawn import find_executable
+        from distutils.dir_util import mkpath
+        g_clipboard_history.push_text("copied in Terminus")
+        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on"), asynchat.async_chat.__name__))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "copied in Terminus 1 async_chat", "console:\n{}", editor.state().console);
+    assert_eq!(editor.clipboard_history(), ["copied in Terminus"]);
+}
+
 #[test]
 fn a_build_like_command_writes_to_an_output_panel_from_a_thread() {
     let dir = tempfile::tempdir().unwrap();
@@ -607,7 +680,7 @@ class Later(sublime_plugin.ViewEventListener):
 #[test]
 fn regions_statuses_and_show_reach_the_editor() {
     let dir = tempfile::tempdir().unwrap();
-    let plugin = r#"
+    let plugin = r##"
 import sublime
 import sublime_plugin
 
@@ -616,13 +689,14 @@ class MarkCommand(sublime_plugin.TextCommand):
         self.view.insert(edit, 0, "alpha beta\ngamma")
         self.view.add_regions("words", [sublime.Region(6, 10), 0], "region.redish", "dot",
                               sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE | sublime.DRAW_SQUIGGLY_UNDERLINE,
-                              annotations=["unused"])
+                              annotations=["<a href='why'>why</a>"], annotation_color="#ff0000",
+                              on_navigate=lambda href: print("annotation link", href))
         self.view.set_status("count", "2 marks")
         self.view.sel().clear()
         self.view.sel().add(sublime.Region(11, 12))
         self.view.show_at_center(self.view.sel())
         sublime.status_message("%s %s" % (self.view.get_regions("words"), self.view.get_status("count")))
-"#;
+"##;
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
@@ -636,8 +710,13 @@ class MarkCommand(sublime_plugin.TextCommand):
     );
     let doc = editor.active_document().unwrap();
     assert_eq!(doc.region_sets()[0].flags, 32 | 256 | 2048);
+    assert_eq!(doc.region_sets()[0].annotations, ["<a href='why'>why</a>"]);
+    assert_eq!(doc.region_sets()[0].annotation_color, "#ff0000");
     assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 11, center: true }));
     assert_eq!(editor.plugin_statuses(doc.id), ["2 marks"]);
+    let id = doc.id;
+    command_controller::navigate_plugin_annotation(&mut editor, &mut view, id, "words", "why");
+    assert!(editor.state().console.contains("annotation link why"), "console:\n{}", editor.state().console);
 }
 
 #[test]
@@ -727,10 +806,7 @@ fn plugins_find_the_api_enums_and_default_modules() {
                   assert sublime.RegionFlags.DRAW_NO_FILL | sublime.RegionFlags.HIDDEN == sublime.DRAW_NO_FILL | sublime.HIDDEN\n\
                   assert sublime.PopupFlags.HIDE_ON_MOUSE_MOVE_AWAY == sublime.HIDE_ON_MOUSE_MOVE_AWAY\n\
                   assert sublime.KindId.COLOR_LIGHT == 18 and sublime.QueryOperator.EQUAL == sublime.OP_EQUAL\n\
-                  history = ClipboardHistory()\n\
-                  for text in ['one', '  two\\nlines', 'one', '']:\n    history.push_text(text)\n\
-                  assert history.get() == [('one', 'one'), ('twolines', '  two\\nlines')], history.get()\n\
-                  assert g_clipboard_history.empty()\n\
+                  assert ClipboardHistory().caption('  two\\nlines') == 'twolines' and g_clipboard_history.LIST_LIMIT == 15\n\
                   import sys\n\
                   expected = '4203' if sys.version_info >= (3, 14) else '4201' if sys.version_info >= (3, 13) else '4200'\n\
                   assert sublime.version() == expected and sublime.arch() in ('x64', 'x32', 'arm64')\n\
@@ -838,7 +914,8 @@ fn event_listeners_hear_the_events_they_define() {
     let PluginMessage::Loaded { events, .. } = loaded else {
         panic!("expected Loaded, got {loaded:?}");
     };
-    assert_eq!(events, ["on_post_save_async", "on_modified"]);
+    // `on_clone` too: view listeners must know the clones (they listen to primary views only).
+    assert_eq!(events, ["on_post_save_async", "on_modified", "on_clone"]);
 
     // The first event of a view asks each ViewEventListener class whether it applies.
     let mut log = String::new();
@@ -949,6 +1026,8 @@ class AskCommand(sublime_plugin.WindowCommand):
             json!("Which?"),
             json!(1),
             json!(false),
+            // The window the call is about.
+            json!({ "__window__": 1 }),
         ]
     );
     host.reply(Ok(Value::Null)).unwrap();
@@ -962,7 +1041,7 @@ class AskCommand(sublime_plugin.WindowCommand):
 
     host.run(PluginCommandKind::Window, "ask", &Value::Null, None).unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_input_panel");
-    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false)]);
+    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false), json!({ "__window__": 1 })]);
     host.reply(Ok(Value::Null)).unwrap();
     assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
     host.callback(2, "done", &json!(["alice"])).unwrap();

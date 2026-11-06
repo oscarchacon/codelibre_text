@@ -128,6 +128,74 @@ impl Editor {
         }
     }
 
+    /// The `max_columns` window setting (`set_max_columns`): `new_pane` adds columns up to it,
+    /// then rows. Sublime's default is 4.
+    pub fn max_columns(&self) -> usize {
+        self.state.plugins.window_settings.get("max_columns").and_then(serde_json::Value::as_u64).map_or(4, |n| n.max(1) as usize)
+    }
+
+    /// `new_pane`: one more group, the layout flowing in rows of `max_columns`; with `move`, the
+    /// active document goes to it (and the focus).
+    pub fn new_pane(&mut self, move_view: bool) {
+        let count = self.group_count() + 1;
+        let layout = Layout::flow(count, self.max_columns());
+        let active = self.active_document().map(|d| d.id);
+        self.set_layout(layout);
+        match active.filter(|_| move_view) {
+            Some(id) => {
+                self.set_view_index(id, count - 1, usize::MAX);
+                self.activate_document(id);
+            }
+            None => self.focus_group(count - 1),
+        }
+    }
+
+    /// `close_pane`: the group (the focused one when `None`) goes; its documents join the group
+    /// before it (the next one for the first), and the layout flows again.
+    pub fn close_pane(&mut self, group: Option<usize>) {
+        let count = self.group_count();
+        let group = group.unwrap_or(self.state.active_group);
+        if count < 2 || group >= count {
+            return;
+        }
+        let into = group.saturating_sub(1);
+        for doc in &mut self.state.documents {
+            if doc.group == group {
+                doc.group = into;
+            } else if doc.group > group {
+                doc.group -= 1;
+            }
+        }
+        let focused = self.state.active_group;
+        self.state.active_group = if focused == group { into } else if focused > group { focused - 1 } else { focused };
+        self.set_layout(Layout::flow(count - 1, self.max_columns()));
+        self.focus_group(self.state.active_group);
+    }
+
+    /// `set_max_columns`: groups flow in rows of at most `columns` from now on (the current ones too).
+    pub fn set_max_columns(&mut self, columns: usize) {
+        let columns = columns.max(1);
+        self.state.plugins.window_settings.insert("max_columns".into(), serde_json::json!(columns));
+        let count = self.group_count();
+        if count > 1 {
+            self.set_layout(Layout::flow(count, columns));
+        }
+    }
+
+    /// Dragging the line between two columns (`vertical`) or rows: boundary `index` to `fraction`.
+    pub fn move_layout_boundary(&mut self, vertical: bool, index: usize, fraction: f64) {
+        self.state.layout.move_boundary(vertical, index, fraction);
+    }
+
+    /// A tab dragged to `group`, at `index` among its tabs: it goes there and takes the focus.
+    pub fn drop_view_in_group(&mut self, id: DocumentId, group: usize, index: usize) {
+        if group >= self.group_count() || self.index_of(id).is_none() {
+            return;
+        }
+        self.set_view_index(id, group, index);
+        self.activate_document(id);
+    }
+
     /// Where a new document goes: in the focused group, after its active document
     /// (`after_active`) or after its last one.
     pub(crate) fn insertion_index(&self, after_active: bool) -> usize {

@@ -10,13 +10,14 @@ use entities::keymap::Keymap;
 use entities::layout::Layout;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
+use entities::meta_info::MetaPreference;
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
 
 use entities::completion::CompletionSet;
 
 use crate::builds::{BuildOption, BuildState};
-use crate::completions::AutoComplete;
+use crate::completions::{AutoComplete, DueAutoComplete, LastCompletion};
 use crate::find_replace::FindCache;
 use crate::gateways::{
     ClipboardGateway, DialogGateway, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
@@ -98,6 +99,8 @@ pub struct EditorState {
     pub session_errors: Vec<String>,
     /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
     pub(crate) line_clipboard: Option<String>,
+    /// What copy and cut put on the clipboard, newest first (see `clipboard_history`).
+    pub(crate) clipboard_history: Vec<String>,
     pub(crate) plugins: PluginState,
     /// The quick / input panels plugins opened.
     pub(crate) plugin_panels: PluginPanels,
@@ -106,10 +109,31 @@ pub struct EditorState {
     pub(crate) builds: BuildState,
     /// The auto-complete list (see `completions`).
     pub(crate) auto_complete: Option<AutoComplete>,
+    /// A list waiting for `auto_complete_delay`.
+    pub(crate) auto_complete_due: Option<DueAutoComplete>,
+    /// The completion Tab inserted last (`replace_completion_with_next_completion`).
+    pub(crate) last_completion: Option<LastCompletion>,
+    /// Triggers committed, newest first (`auto_complete_use_history`).
+    pub(crate) completion_history: Vec<String>,
+    /// The current window (see `windows`): `documents`, `layout`, `folders`… are its.
+    pub(crate) window_id: crate::windows::WindowId,
+    /// The other windows, put away.
+    pub(crate) windows: Vec<crate::windows::WindowSlot>,
+    pub(crate) next_window_id: crate::windows::WindowId,
+    /// The current window is being closed (once its files are).
+    pub(crate) window_closing: bool,
+    /// What each view of a buffer with clones looked like when they last followed each other.
+    pub(crate) buffer_stamps: std::collections::HashMap<DocumentId, crate::clones::BufferStamp>,
+    /// The images of plugins' minihtml, by `src`, read the first time they show.
+    pub(crate) html_images: std::cell::RefCell<std::collections::HashMap<String, Option<Rc<Vec<u8>>>>>,
+    /// The packages' `.tmPreferences` (`view.meta_info`, symbol lists), read with the packages.
+    pub(crate) meta_preferences: Vec<MetaPreference>,
     /// The packages' completions files and snippets, read the first time they are needed.
     pub(crate) completion_sets: Option<Vec<CompletionSet>>,
     /// What the build picker lists (read when it opens: `search` cannot load resources).
     pub(crate) build_options: Vec<BuildOption>,
+    /// The build systems Tools > Build System lists (read when the packages load).
+    pub(crate) menu_build_systems: Vec<BuildOption>,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -153,13 +177,25 @@ impl Editor {
                 console: String::new(),
                 session_errors: Vec::new(),
                 line_clipboard: None,
+                clipboard_history: Vec::new(),
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),
                 builds: BuildState::default(),
                 auto_complete: None,
+                auto_complete_due: None,
+                last_completion: None,
+                completion_history: Vec::new(),
+                html_images: Default::default(),
+                buffer_stamps: Default::default(),
+                window_id: 1,
+                windows: Vec::new(),
+                next_window_id: 1,
+                window_closing: false,
+                meta_preferences: Vec::new(),
                 completion_sets: None,
                 build_options: Vec::new(),
+                menu_build_systems: Vec::new(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,

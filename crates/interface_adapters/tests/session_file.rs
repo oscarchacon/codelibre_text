@@ -31,6 +31,12 @@ fn sample() -> Session {
         layout: vec![("side_bar".into(), false), ("status_bar".into(), true)],
         groups: Some(Layout::columns(2)),
         active_group: 1,
+        // A second window, with a folder and a file of its own.
+        windows: vec![Session {
+            folders: vec![PathBuf::from("/q")],
+            documents: vec![SessionDocument { path: Some(PathBuf::from("/q/b.py")), unsaved_text: None, syntax: "Python".into(), selection: Selection::caret(2), group: 0 }],
+            ..Session::default()
+        }],
     }
 }
 

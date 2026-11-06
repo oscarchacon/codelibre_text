@@ -12,13 +12,15 @@ use entities::find::{self, FindOptions};
 use entities::layout::Layout;
 use entities::selection::Selection;
 use entities::selector::score_selector;
+use entities::text_commands::{classify, find_by_class};
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
 use crate::editing::VIEW_COMMANDS;
 use crate::editor::Editor;
-use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginCommandKind};
 use crate::plugins::CommandRunner;
+use crate::scopes::SymbolList;
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 /// The title of plugins' message dialogs (Sublime's say "Sublime Text").
@@ -89,6 +91,38 @@ fn region(a: usize, b: usize) -> Value {
 impl Editor {
     /// Runs one `sublime_api` function for a plugin.
     pub(crate) fn plugin_call(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
+        // Every view of a buffer shows the same text when a plugin looks.
+        self.sync_clones();
+        let result = self.plugin_call_in_window(function, args, run_command);
+        self.sync_clones();
+        result
+    }
+
+    /// Runs a call in the window it is about: a `window_*` function names its window in a last
+    /// `{"__window__": id}` argument (`sublime.py`), a view's function and `run_command` on a
+    /// view are about that view's window. The window that was current comes back afterwards.
+    fn plugin_call_in_window(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
+        let named = args.last().and_then(|v| v.get("__window__")).and_then(Value::as_u64);
+        let args = if named.is_some() { &args[..args.len() - 1] } else { args };
+        let about_view = |editor: &Editor, at: usize| args.get(at).and_then(Value::as_u64).and_then(|v| editor.window_of_view(v));
+        let window = named.or_else(|| match function {
+            "run_command" if args.first().and_then(Value::as_str) == Some("window") => args.get(1).and_then(Value::as_u64),
+            "run_command" if args.first().and_then(Value::as_str) == Some("view") => about_view(self, 1),
+            f if f.starts_with("view_") => about_view(self, 0),
+            _ => None,
+        });
+        let previous = self.current_window();
+        match window.filter(|&w| w != previous) {
+            Some(window) if self.switch_to_window(window) => {
+                let result = self.plugin_call_unsynced(function, args, run_command);
+                self.switch_to_window(previous);
+                result
+            }
+            _ => self.plugin_call_unsynced(function, args, run_command),
+        }
+    }
+
+    fn plugin_call_unsynced(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
         let a = Args(args);
         match function {
             "status_message" => {
@@ -170,6 +204,42 @@ impl Editor {
                     Ok(json!(bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()))
                 }
             }
+            "windows" => Ok(json!(self.window_ids())),
+            "active_window" => Ok(json!(self.current_window())),
+            "window_id" => Ok(json!(self.current_window())),
+            "window_is_valid" => Ok(json!(self.window_ids().contains(&a.u64(0)?))),
+            "view_window" => Ok(self.window_of_view(a.u64(0)?).map_or(Value::Null, |w| json!(w))),
+            "view_buffer_id" => Ok(json!(self.any_document(a.u64(0)?).ok_or("the view is closed")?.buffer)),
+            "view_clones" => Ok(json!(self.clones_of(a.u64(0)?))),
+            "view_is_primary" => {
+                let view = a.u64(0)?;
+                Ok(json!(self.primary_view(view).is_none_or(|p| p == view)))
+            }
+            "buffer_views" => {
+                let buffer = a.u64(0)?;
+                Ok(json!(self.state.documents.iter().filter(|d| d.buffer == buffer).map(|d| d.id).collect::<Vec<_>>()))
+            }
+            "buffer_primary_view" => {
+                let buffer = a.u64(0)?;
+                let first = self.state.documents.iter().find(|d| d.buffer == buffer).map(|d| d.id);
+                Ok(first.and_then(|v| self.primary_view(v)).map_or(Value::Null, |v| json!(v)))
+            }
+            "plugins_changed" => {
+                let commands = a.value(0).as_array().into_iter().flatten();
+                let commands = commands.filter_map(|c| Some((c.get(0)?.as_str()?.to_string(), PluginCommandKind::from_name(c.get(1)?.as_str()?))));
+                let events = a.value(1).as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from));
+                self.set_plugin_commands(commands.collect(), events.collect());
+                Ok(Value::Null)
+            }
+            "clipboard_history" => Ok(json!(self.clipboard_history())),
+            "clipboard_history_push" => {
+                self.push_clipboard_history(a.str(0)?);
+                Ok(Value::Null)
+            }
+            "clipboard_history_clear" => {
+                self.state.clipboard_history.clear();
+                Ok(Value::Null)
+            }
             "get_clipboard" => self.gateways.clipboard.read_text().map(Value::from),
             "set_clipboard" => self.gateways.clipboard.write_text(a.str(0)?).map(|()| Value::Null),
             "run_command" => {
@@ -189,7 +259,9 @@ impl Editor {
                 Ok(self.active_document().map_or(Value::Null, |d| json!(d.id)))
             }
             "window_open_file" => {
-                let opened = self.open_file(std::path::Path::new(a.str(0)?));
+                // `sublime.TRANSIENT`: a preview.
+                let path = std::path::Path::new(a.str(0)?);
+                let opened = if a.u64(1).unwrap_or(0) & 4 != 0 { self.preview_file(path) } else { self.open_file(path) };
                 Ok(if opened { self.active_document().map_or(Value::Null, |d| json!(d.id)) } else { Value::Null })
             }
             "window_find_open_file" => {
@@ -207,6 +279,7 @@ impl Editor {
             }
             "window_get_view_index" => Ok(json!(self.view_index(a.u64(0)?).map_or((-1, -1), |(g, i)| (g as i64, i as i64)))),
             "window_num_groups" => Ok(json!(self.group_count())),
+            "window_transient_view_in_group" => Ok(self.transient_document_in_group(a.usize(0)?).map_or(Value::Null, |id| json!(id))),
             "window_active_group" => Ok(json!(self.active_group())),
             "window_focus_group" => {
                 self.focus_group(a.usize(0)?);
@@ -326,6 +399,33 @@ impl Editor {
                 Ok(json!([start, end]))
             }
             "view_find_by_selector" => Ok(json!(self.find_by_selector(a.u64(0)?, a.str(1)?))),
+            "view_meta_info" => Ok(self.meta_info(a.u64(0)?, a.str(1)?, a.usize(2)?).unwrap_or(Value::Null)),
+            "view_context_backtrace" => {
+                let frames = self.context_backtrace(a.u64(0)?, a.usize(1)?);
+                Ok(json!(frames.into_iter().map(|f| json!([f.context_name, f.source_file])).collect::<Vec<_>>()))
+            }
+            "view_symbol_regions" => {
+                let list = match a.str(1).unwrap_or("symbols") {
+                    "indexed" => SymbolList::Indexed,
+                    "references" => SymbolList::References,
+                    _ => SymbolList::Symbols,
+                };
+                let view = a.u64(0)?;
+                let syntax = self.any_document(view).map(|d| d.syntax.clone()).unwrap_or_default();
+                let symbols = self.symbol_regions(view, list);
+                Ok(json!(symbols
+                    .into_iter()
+                    .map(|s| json!([s.name, [s.start, s.end], syntax, [s.kind.id, s.kind.letter.to_string().trim(), s.kind.description]]))
+                    .collect::<Vec<_>>()))
+            }
+            "find_syntax_for_file" => Ok(json!(self.gateways.syntaxes.detect(std::path::Path::new(a.str(0)?), a.str(1).unwrap_or_default()))),
+            "list_syntaxes" => Ok(json!(self
+                .gateways
+                .syntaxes
+                .syntax_infos()
+                .into_iter()
+                .map(|s| json!([s.path, s.name, s.hidden, s.scope, s.file_extensions]))
+                .collect::<Vec<_>>())),
             "view_extract_tokens_with_scopes" => {
                 let tokens = self.scoped_ranges(a.u64(0)?, a.usize(1)?, a.usize(2)?);
                 Ok(json!(tokens.into_iter().map(|t| json!([[t.start, t.end], format!("{} ", t.scope)])).collect::<Vec<_>>()))
@@ -359,6 +459,7 @@ impl Editor {
             }
             "view_is_dirty" => json!(doc.is_dirty()),
             "view_is_scratch" => json!(doc.scratch),
+            "view_is_transient" => json!(doc.transient),
             "view_set_scratch" => {
                 doc.scratch = a.bool(1);
                 Value::Null
@@ -393,18 +494,31 @@ impl Editor {
                     .flatten()
                     .filter_map(|r| Some((r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
                     .collect();
+                let annotations = a.value(6).as_array().into_iter().flatten().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
+                let key = a.str(1)?.to_string();
                 doc.add_regions(RegionSet {
-                    key: a.str(1)?.to_string(),
+                    key: key.clone(),
                     regions,
                     scope: a.str(3).unwrap_or_default().to_string(),
                     icon: a.str(4).unwrap_or_default().to_string(),
                     flags: a.u64(5).unwrap_or(0),
+                    annotations,
+                    annotation_color: a.str(7).unwrap_or_default().to_string(),
                 });
+                let id = doc.id;
+                let callbacks = &mut self.state.plugins.region_callbacks;
+                match a.value(8).as_u64() {
+                    Some(callback) => callbacks.insert((id, key), callback),
+                    None => callbacks.remove(&(id, key)),
+                };
                 Value::Null
             }
             "view_get_regions" => json!(doc.regions(a.str(1)?).iter().map(|&(start, end)| [start, end]).collect::<Vec<_>>()),
             "view_erase_regions" => {
-                doc.erase_regions(a.str(1)?);
+                let key = a.str(1)?;
+                doc.erase_regions(key);
+                let id = doc.id;
+                self.state.plugins.region_callbacks.remove(&(id, key.to_string()));
                 Value::Null
             }
             "view_show" => {
@@ -463,6 +577,11 @@ impl Editor {
                 Value::Array(lines)
             }
             "view_word" => region(word_at(&doc.text, point(1)?).start(), word_at(&doc.text, point(2)?).end()),
+            "view_classify" => json!(classify(&doc.text, point(1)?, None)),
+            "view_find_by_class" => {
+                let separators = a.str(4).ok().filter(|s| !s.is_empty());
+                json!(find_by_class(&doc.text, point(1)?, a.bool(2), a.u64(3)? as u32, separators))
+            }
             "view_rowcol" => {
                 let (row, col) = line_col(&doc.text, point(1)?);
                 json!([row, col])

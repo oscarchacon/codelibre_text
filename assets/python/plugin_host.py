@@ -40,6 +40,7 @@ import codelibre_rpc  # noqa: E402
 codelibre_rpc.setup()
 
 import sublime  # noqa: E402
+import sublime_api  # noqa: E402
 import sublime_plugin  # noqa: E402
 
 # The loaded packages by name, in load order (see ``LoadedPackage``).
@@ -340,6 +341,42 @@ def load(message):
     commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
     errors = [error for package in _packages.values() for error in package.errors]
     return {"op": "loaded", "commands": commands, "events": sublime_plugin.events(), "errors": errors}
+
+
+def plugin_modules():
+    return [module for package in _packages.values() for module in package.modules]
+
+
+def tell_commands_changed():
+    """After ``sublime_plugin.reload_plugin`` / ``load_module`` / ``unload_module``: the
+    commands are those of the modules there are now, and the editor hears which."""
+    sublime_plugin.set_commands(plugin_modules())
+    commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
+    sublime_api.plugins_changed(commands, sublime_plugin.events())
+
+
+def module_unloaded(module):
+    for package in _packages.values():
+        package.modules = [m for m in package.modules if m.__name__ != module.__name__]
+    tell_commands_changed()
+
+
+def module_loaded(module):
+    """A module ``load_module`` loads joins its package (the first part of its name), in place of
+    an older one of that name; a module of no loaded package still gives its commands."""
+    package = _packages.get(module.__name__.partition(".")[0])
+    if package is None:
+        package = _packages.setdefault(module.__name__, LoadedPackage(None))
+    names = [m.__name__ for m in package.modules]
+    if module.__name__ in names:
+        package.modules[names.index(module.__name__)] = module
+    else:
+        package.modules.append(module)
+    tell_commands_changed()
+
+
+sublime_plugin._module_unloaded = module_unloaded
+sublime_plugin._module_loaded = module_loaded
 
 
 def run(message):

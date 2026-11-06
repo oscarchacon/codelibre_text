@@ -29,6 +29,14 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
     ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
     ("shims/distutils/version.py", include_str!("../../../../assets/python/shims/distutils/version.py")),
+    ("shims/distutils/errors.py", include_str!("../../../../assets/python/shims/distutils/errors.py")),
+    ("shims/distutils/util.py", include_str!("../../../../assets/python/shims/distutils/util.py")),
+    ("shims/distutils/spawn.py", include_str!("../../../../assets/python/shims/distutils/spawn.py")),
+    ("shims/distutils/dir_util.py", include_str!("../../../../assets/python/shims/distutils/dir_util.py")),
+    ("shims/distutils/file_util.py", include_str!("../../../../assets/python/shims/distutils/file_util.py")),
+    ("shims/distutils/sysconfig.py", include_str!("../../../../assets/python/shims/distutils/sysconfig.py")),
+    ("shims/asyncore.py", include_str!("../../../../assets/python/shims/asyncore.py")),
+    ("shims/asynchat.py", include_str!("../../../../assets/python/shims/asynchat.py")),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).
@@ -298,14 +306,7 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter_map(|c| {
-                    let kind = match c.get(1)?.as_str()? {
-                        "text" => PluginCommandKind::Text,
-                        "window" => PluginCommandKind::Window,
-                        _ => PluginCommandKind::Application,
-                    };
-                    Some((c.get(0)?.as_str()?.to_string(), kind))
-                })
+                .filter_map(|c| Some((c.get(0)?.as_str()?.to_string(), PluginCommandKind::from_name(c.get(1)?.as_str()?))))
                 .collect();
             let strings = |key: &str| {
                 value

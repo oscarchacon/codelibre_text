@@ -28,12 +28,70 @@ fn queued(view: &mut ViewState) -> Vec<String> {
 }
 
 #[test]
+fn text_contexts_look_at_every_selection_and_match_all_needs_all_of_them() {
+    let context = |key: &str, operator: &str, operand: &str, match_all: bool| {
+        json!({ "key": key, "operator": operator, "operand": operand, "match_all": match_all })
+    };
+    let world = World::new()
+        .with_binding(bind(&["("], Command::new("one_caret"), vec![context("preceding_text", "regex_contains", "\\bif$", false)]))
+        .with_binding(bind(&[")"], Command::new("all_carets"), vec![context("following_text", "regex_match", "^$", true)]))
+        .with_binding(bind(&["x"], Command::new("selected"), vec![context("text", "equal", "if", false)]));
+    let mut editor = world.editor();
+    editor.insert_at_selections("if\nel");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(2));
+    editor.add_carets_on_next_line(true);
+    let mut view = ViewState::default();
+    assert!(press(&mut editor, &mut view, "("), "the first caret follows `if`");
+    assert!(press(&mut editor, &mut view, ")"), "nothing follows either caret");
+    assert!(!press(&mut editor, &mut view, "x"), "nothing is selected");
+    assert_eq!(queued(&mut view), vec!["one_caret", "all_carets"]);
+
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(1));
+    assert!(!press(&mut editor, &mut view, ")"), "`f` follows the caret");
+    editor.sync_selection_from_view(id, entities::selection::Selection::new(0, 2));
+    assert!(press(&mut editor, &mut view, "x"));
+}
+
+#[test]
+fn tab_visits_a_snippets_fields_while_there_is_a_next_one() {
+    let has_next = json!({ "key": "has_next_field", "operator": "equal", "operand": true });
+    let world = World::new().with_binding(bind(&["tab"], Command::new("next_field"), vec![has_next]));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(!press(&mut editor, &mut view, "tab"), "no snippet: Tab is Tab");
+    run(&mut editor, &mut view, &Command::with_args("insert_snippet", json!({ "contents": "${1:a}(${2:b})" })));
+    assert!(press(&mut editor, &mut view, "tab"));
+    for command in view.take_commands() {
+        run(&mut editor, &mut view, &command);
+    }
+    assert_eq!(editor.active_document().unwrap().selection(), entities::selection::Selection::new(2, 3), "b");
+    assert!(press(&mut editor, &mut view, "tab"), "then the end of the snippet");
+}
+
+#[test]
 fn bound_keys_queue_their_command_and_are_consumed() {
     let world = World::new().with_binding(bind(&["ctrl+s"], Command::new("save"), vec![]));
     let mut editor = world.editor();
     let mut view = ViewState::default();
     assert!(press(&mut editor, &mut view, "ctrl+s"));
     assert_eq!(queued(&mut view), vec!["save"]);
+}
+
+#[test]
+fn motions_the_widget_cannot_do_run_as_commands() {
+    let world = World::new()
+        .with_binding(bind(&["ctrl+left"], Command::with_args("move", json!({ "by": "words", "forward": false })), vec![]))
+        .with_binding(bind(&["alt+left"], Command::with_args("move", json!({ "by": "subwords", "forward": false })), vec![]))
+        .with_binding(bind(&["ctrl+m"], Command::with_args("move_to", json!({ "to": "brackets" })), vec![]))
+        .with_binding(bind(&["end"], Command::with_args("move_to", json!({ "to": "eol" })), vec![]));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(!press(&mut editor, &mut view, "ctrl+left"), "the widget moves by words");
+    assert!(!press(&mut editor, &mut view, "end"));
+    assert!(press(&mut editor, &mut view, "alt+left"));
+    assert!(press(&mut editor, &mut view, "ctrl+m"));
+    assert_eq!(queued(&mut view), ["move", "move_to"]);
 }
 
 #[test]
@@ -73,10 +131,26 @@ fn clipboard_shortcuts_go_to_the_widget_unless_a_whole_line_is_copied() {
     assert!(!consumed(&mut editor, &mut view, "paste"), "nothing was copied as a line yet");
     assert_eq!(queued(&mut view), vec!["copy", "cut"]);
 
+    // Copy and cut of a selection in the text are commands too (the clipboard history sees
+    // them; the widget copies a frame later); paste of ordinary text stays the widget's.
     let world = World::new().with_preferences(json!({ "copy_with_empty_selection": false }));
     let mut editor = world.editor();
     view.text_has_focus = true;
-    assert!(!consumed(&mut editor, &mut view, "copy"));
+    assert!(consumed(&mut editor, &mut view, "copy"));
+    assert!(!consumed(&mut editor, &mut view, "paste"));
+}
+
+#[test]
+fn a_clipboard_shortcut_can_end_a_chord() {
+    let modifier = if cfg!(target_os = "macos") { "super" } else { "ctrl" };
+    let keys = [format!("{modifier}+k"), format!("{modifier}+v")];
+    let world = World::new().with_binding(bind(&[&keys[0], &keys[1]], Command::new("paste_from_history"), vec![]));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(press(&mut editor, &mut view, &keys[0]));
+    // egui sends the second key as a paste event, not as a key.
+    assert!(matches!(clipboard_shortcut(&mut editor, &mut view, "paste"), KeyHandling::Consumed));
+    assert_eq!(queued(&mut view), vec!["paste_from_history"]);
 }
 
 #[test]
@@ -216,7 +290,7 @@ fn not_equal_context_operator() {
 fn hooked_editor(events: &[&str]) -> (World, Editor, ViewState) {
     let world = World::new()
         .with_binding(bind(&["ctrl+z"], Command::new("undo"), vec![]))
-        .with_binding(bind(&["ctrl+left"], Command::new("move"), vec![]))
+        .with_binding(bind(&["ctrl+left"], Command::with_args("move", json!({ "by": "words", "forward": false })), vec![]))
         .with_plugins(&[], events);
     let editor = world.editor();
     let mut view = ViewState::default();

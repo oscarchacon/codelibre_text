@@ -48,6 +48,9 @@ struct SessionFile {
     groups: Option<serde_json::Value>,
     #[serde(default)]
     active_group: usize,
+    /// The other windows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<SessionFile>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -79,6 +82,7 @@ impl From<&Session> for SessionFile {
             layout: session.layout.clone(),
             groups: session.groups.as_ref().map(Layout::to_json),
             active_group: session.active_group,
+            windows: session.windows.iter().map(SessionFile::from).collect(),
         }
     }
 }
@@ -102,6 +106,7 @@ impl From<SessionFile> for Session {
             layout: file.layout,
             groups: file.groups.as_ref().and_then(Layout::from_json),
             active_group: file.active_group,
+            windows: file.windows.into_iter().map(Session::from).collect(),
         }
     }
 }

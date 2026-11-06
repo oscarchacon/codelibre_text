@@ -42,3 +42,13 @@ fn neighboring_groups_wrap_around() {
     assert_eq!(layout.neighbor(0, false), 2);
     assert_eq!(layout.neighbor(1, true), 2);
 }
+
+#[test]
+fn a_flow_layout_fills_rows_of_max_columns() {
+    let three = Layout::flow(3, 2);
+    assert_eq!(three.cols, vec![0.0, 0.5, 1.0]);
+    assert_eq!(three.rows, vec![0.0, 0.5, 1.0]);
+    assert_eq!(three.cells, vec![[0, 0, 1, 1], [1, 0, 2, 1], [0, 1, 2, 2]], "the last row's one cell spans it");
+    assert_eq!(Layout::flow(2, 4), Layout::columns(2));
+    assert_eq!(Layout::flow(1, 4), Layout::default());
+}

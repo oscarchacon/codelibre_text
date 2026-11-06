@@ -63,8 +63,9 @@ pub struct PluginState {
     /// The events some listener wants (`on_modified`, `on_load_async`…); others are not sent.
     events: HashSet<String>,
     /// Built-in commands that event listeners ran and could not run at once; the next
-    /// [`Editor::poll_plugins`] runs them.
-    queued_commands: Vec<Command>,
+    /// [`Editor::poll_plugins`] runs them, each on the view that was active when it was asked for
+    /// (a `view.run_command` makes its view the active one while it runs).
+    queued_commands: Vec<(Command, Option<DocumentId>)>,
     event_command_runner: Option<EventCommandRunner>,
     /// The view the listeners last heard `on_activated` for.
     active_view: Option<DocumentId>,
@@ -77,6 +78,8 @@ pub struct PluginState {
     pub(crate) popup: Option<crate::plugin_popups::PluginPopup>,
     /// The `on_navigate` callback of each phantom that has one, by phantom id.
     pub(crate) phantom_callbacks: HashMap<u64, u64>,
+    /// The callbacks (`on_navigate`, `on_close`) of region sets with annotations, by view and key.
+    pub(crate) region_callbacks: HashMap<(DocumentId, String), u64>,
     pub(crate) next_phantom_id: u64,
     /// Callbacks to run at the next [`Editor::poll_plugins`] (a popup's `on_hide` when it was
     /// hidden in the middle of a plugin's call): (callback id, name, arguments).
@@ -145,6 +148,14 @@ impl Editor {
         }
     }
 
+    /// `sublime_plugin.reload_plugin` (or `unload_module` / `load_module`) changed the plugins'
+    /// commands and events while the host ran: these are the ones there are now.
+    pub(crate) fn set_plugin_commands(&mut self, commands: Vec<(String, PluginCommandKind)>, events: Vec<String>) {
+        self.state.plugins.commands = commands.into_iter().collect();
+        self.state.plugins.events = events.into_iter().collect();
+        self.state.plugins.command_states.clear();
+    }
+
     /// The settings files plugins opened and those they watch belong to a host that is gone.
     fn forget_plugin_settings(&mut self) {
         self.state.plugins.settings_files.clear();
@@ -155,9 +166,29 @@ impl Editor {
         self.state.plugins.event_command_runner = Some(runner);
     }
 
-    /// A built-in command for the next [`poll_plugins`](Self::poll_plugins).
+    /// A built-in command for the next [`poll_plugins`](Self::poll_plugins), which runs it on the
+    /// view active now (during a `view.run_command`, that view), if it is still open.
     pub fn queue_plugin_command(&mut self, command: Command) {
-        self.state.plugins.queued_commands.push(command);
+        let view = self.active_document().map(|d| d.id);
+        self.state.plugins.queued_commands.push((command, view));
+    }
+
+    /// Runs a queued command with `view` active; the view active before comes back afterwards,
+    /// unless the command changed it (it opened or closed a view…).
+    fn run_queued_command(&mut self, command: &Command, view: Option<DocumentId>, run_command: &mut CommandRunner) {
+        let target = view.and_then(|id| self.index_of(id));
+        let Some(index) = target.filter(|&i| i != self.state.active) else {
+            run_command(self, command);
+            return;
+        };
+        let (previous, target) = (self.active_document().map(|d| d.id), self.state.documents[index].id);
+        self.state.active = index;
+        run_command(self, command);
+        if self.active_document().is_some_and(|d| d.id == target) {
+            if let Some(index) = previous.and_then(|id| self.index_of(id)) {
+                self.state.active = index;
+            }
+        }
     }
 
     /// Runs a plugin command on the active view (text commands) or the window.
@@ -210,6 +241,8 @@ impl Editor {
     /// runs the built-in commands event listeners asked for, and tells the listeners what the
     /// user changed since the last frame (`on_modified`, `on_selection_modified`).
     pub fn poll_plugins(&mut self, run_command: &mut CommandRunner) {
+        // What the text widget edited this frame reaches the other views of its buffer.
+        self.sync_clones();
         for _ in 0..MAX_IDLE_MESSAGES {
             match self.gateways.plugins.try_receive() {
                 Ok(Some(PluginMessage::Call { function, args })) => {
@@ -228,8 +261,8 @@ impl Editor {
                 }
             }
         }
-        for command in std::mem::take(&mut self.state.plugins.queued_commands) {
-            run_command(self, &command);
+        for (command, view) in std::mem::take(&mut self.state.plugins.queued_commands) {
+            self.run_queued_command(&command, view, run_command);
         }
         self.hide_popup_if_moved_away();
         self.update_auto_complete();

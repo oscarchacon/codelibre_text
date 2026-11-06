@@ -6,13 +6,14 @@ use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo, Keymap};
 use entities::localization::{normalize_language_code, Catalog, Language};
 use entities::menu::{merge_menu, MenuItem, PaletteCommand};
+use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
 use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResources};
 use use_cases::project::matches_pattern;
 
 use super::package_files::{find_resources, is_in_default_package, resource_name, resource_path};
-use super::{builtin_resources, package_archives, po_file, sublime_json};
+use super::{builtin_resources, package_archives, plist, po_file, sublime_json};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 
@@ -260,6 +261,19 @@ impl ResourceGateway for SublimeResourceGateway {
 
     fn system_language(&self) -> Option<String> {
         self.system_language.clone()
+    }
+
+    fn load_meta_preferences(&self, include_sublime: bool, errors: &mut Vec<String>) -> Vec<MetaPreference> {
+        let mut preferences = Vec::new();
+        for path in find_resources(&self.paths, include_sublime, |n| n.ends_with(".tmPreferences")) {
+            let name = resource_name(&self.paths, include_sublime, &path).unwrap_or_else(|| path.display().to_string());
+            let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| plist::parse(&text));
+            match parsed {
+                Ok(value) => preferences.extend(MetaPreference::from_plist(&name, &value)),
+                Err(e) => errors.push(format!("{}: {e}", path.display())),
+            }
+        }
+        preferences
     }
 }
 

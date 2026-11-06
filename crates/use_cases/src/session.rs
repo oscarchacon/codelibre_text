@@ -19,6 +19,9 @@ pub struct Session {
     /// The groups of the window (`None`: one group).
     pub groups: Option<Layout>,
     pub active_group: usize,
+    /// The other windows, each as a session of its own (their `layout` flags and `windows`
+    /// unused).
+    pub windows: Vec<Session>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,7 +40,7 @@ impl Editor {
     /// With `hot_exit`, unsaved changes are kept in the session instead of asking.
     pub fn request_exit(&mut self, layout: Vec<(String, bool)>) -> bool {
         let hot_exit = self.global_settings().bool("hot_exit", true);
-        let has_unsaved = self.state.documents.iter().any(Document::is_dirty);
+        let has_unsaved = self.state.documents.iter().any(Document::is_dirty) || self.other_windows().any(|(_, docs, ..)| docs.iter().any(Document::is_dirty));
         if hot_exit || !has_unsaved {
             self.save_session(layout);
             true
@@ -48,26 +51,14 @@ impl Editor {
     }
 
     pub fn save_session(&mut self, layout: Vec<(String, bool)>) {
-        let session = Session {
-            folders: self.state.folders.clone(),
-            documents: self
-                .state
-                .documents
-                .iter()
-                .filter(|d| d.scratch_name.is_none() && (d.path.is_some() || !d.text.is_empty()))
-                .map(|d| SessionDocument {
-                    path: d.path.clone(),
-                    unsaved_text: d.is_dirty().then(|| d.text.clone()),
-                    syntax: d.syntax.clone(),
-                    selection: d.selection(),
-                    group: d.group,
-                })
-                .collect(),
-            active: self.state.active,
-            layout,
-            groups: (self.group_count() > 1).then(|| self.state.layout.clone()),
-            active_group: self.state.active_group,
-        };
+        // The first window is the session's; the others go with it.
+        let current = self.current_window();
+        let first = self.window_ids()[0];
+        self.switch_to_window(first);
+        let mut session = window_session(&self.state.documents, self.state.active, &self.state.layout, self.state.active_group, &self.state.folders);
+        session.layout = layout;
+        session.windows = self.other_windows().map(|(_, docs, active, layout, group, folders)| window_session(docs, active, layout, group, folders)).collect();
+        self.switch_to_window(current);
         if let Err(e) = self.gateways.sessions.save(&session) {
             self.notify(self.tr_args("Could not save the session: {error}", &[("error", &e)]));
         }
@@ -79,9 +70,21 @@ impl Editor {
     }
 
     pub(crate) fn restore_session(&mut self) {
-        let Some(session) = self.gateways.sessions.load() else {
+        let Some(mut session) = self.gateways.sessions.load() else {
             return;
         };
+        let others = std::mem::take(&mut session.windows);
+        self.restore_window(session);
+        // Each other window opens as it was; the first stays the current one.
+        let first = self.current_window();
+        for window in others {
+            self.new_window();
+            self.restore_window(window);
+        }
+        self.switch_to_window(first);
+    }
+
+    fn restore_window(&mut self, session: Session) {
         for folder in session.folders {
             if self.gateways.file_system.is_dir(&folder) {
                 self.add_folder(folder);
@@ -121,5 +124,28 @@ impl Editor {
             self.focus_group(session.active_group);
         }
         loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
+    }
+}
+
+/// One window as the session keeps it: its files (not the scratch views), folders and groups.
+fn window_session(documents: &[Document], active: usize, layout: &Layout, active_group: usize, folders: &[PathBuf]) -> Session {
+    Session {
+        folders: folders.to_vec(),
+        documents: documents
+            .iter()
+            .filter(|d| d.scratch_name.is_none() && (d.path.is_some() || !d.text.is_empty()))
+            .map(|d| SessionDocument {
+                path: d.path.clone(),
+                unsaved_text: d.is_dirty().then(|| d.text.clone()),
+                syntax: d.syntax.clone(),
+                selection: d.selection(),
+                group: d.group,
+            })
+            .collect(),
+        active,
+        layout: Vec::new(),
+        groups: (layout.group_count() > 1).then(|| layout.clone()),
+        active_group,
+        windows: Vec::new(),
     }
 }

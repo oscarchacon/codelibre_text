@@ -23,7 +23,7 @@ use syntect::highlighting::{
     Theme, ThemeItem, ThemeSet, ThemeSettings,
 };
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxDefinition, SyntaxReference, SyntaxSet};
-use use_cases::gateways::{PackagePaths, ScopeSpan};
+use use_cases::gateways::{ContextFrame, PackagePaths, ScopeSpan, SyntaxInfo};
 
 pub type SharedSyntaxEngine = Rc<RefCell<SyntaxEngine>>;
 
@@ -41,6 +41,40 @@ pub struct SyntaxEngine {
     current_scheme: String,
     /// `scope_color` answers by (scheme, scope).
     scope_colors: HashMap<(String, String), Option<Color32>>,
+    /// The resource each package syntax came from, by syntax name.
+    syntax_paths: HashMap<String, String>,
+    /// The names of each syntax's contexts, by syntect's context index (see [`context_names`]);
+    /// worked out the first time a backtrace needs them when the packages were not loaded.
+    context_names: Option<Vec<Vec<String>>>,
+}
+
+/// syntect's `ContextId`s are (index of the syntax in the set, index of the context among the
+/// syntax's contexts sorted by name), and its parser state does not say more than those ids (in
+/// its `Debug` text): the names, by index, for a backtrace.
+fn context_names(builder: &syntect::parsing::SyntaxSetBuilder) -> Vec<Vec<String>> {
+    builder
+        .syntaxes()
+        .iter()
+        .map(|syntax| {
+            let mut names: Vec<String> = syntax.contexts.keys().cloned().collect();
+            names.sort_unstable();
+            names
+        })
+        .collect()
+}
+
+/// The `(syntax index, context index)` of each level of a parser state, outermost first, read
+/// from its `Debug` text (`StateLevel { context: ContextId { syntax_index: 1, context_index: 5 }…`).
+fn context_ids(state: &ParseState) -> Vec<(usize, usize)> {
+    let text = format!("{state:?}");
+    let number_after = |s: &str, key: &str| -> Option<usize> {
+        let at = s.find(key)? + key.len();
+        s[at..].trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+    };
+    text.split("context: ContextId {")
+        .skip(1)
+        .filter_map(|piece| Some((number_after(piece, "syntax_index:")?, number_after(piece, "context_index:")?)))
+        .collect()
 }
 
 /// Sublime's `region.<color>ish` scopes, for color schemes without rules for them.
@@ -70,6 +104,8 @@ impl SyntaxEngine {
             caches: HashMap::new(),
             current_scheme: DEFAULT_SCHEME.to_string(),
             scope_colors: HashMap::new(),
+            syntax_paths: HashMap::new(),
+            context_names: None,
         };
         engine.load_builtin_schemes(&mut Vec::new());
         engine
@@ -89,16 +125,23 @@ impl SyntaxEngine {
 
     pub fn reload(&mut self, include_sublime: bool, errors: &mut Vec<String>) {
         let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
+        self.syntax_paths.clear();
         for path in package_files::find_resources(&self.paths, include_sublime, |n| n.ends_with(".sublime-syntax")) {
             let definition = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| {
                 let fallback_name = path.file_stem().and_then(|s| s.to_str());
                 SyntaxDefinition::load_from_str(&text, true, fallback_name).map_err(|e| e.to_string())
             });
             match definition {
-                Ok(definition) => builder.add(definition),
+                Ok(definition) => {
+                    let resource = package_files::resource_name(&self.paths, include_sublime, &path);
+                    self.syntax_paths.insert(definition.name.clone(), resource.unwrap_or_else(|| path.display().to_string()));
+                    builder.add(definition);
+                }
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
             }
         }
+        // syntect numbers the contexts of each syntax in the order of their names.
+        self.context_names = Some(context_names(&builder));
         self.syntaxes = builder.build();
 
         self.load_builtin_schemes(errors);
@@ -256,46 +299,89 @@ impl SyntaxEngine {
         cache.symbols()
     }
 
-    /// The scopes of one line: parsed again from the state the highlighting cache keeps for its
-    /// start, so only that line is parsed (and what changed since the last paint). Text too big
-    /// to highlight, or plain text, is the syntax's base scope.
+    /// The scopes of one line, kept by the highlighting cache (which parses only what changed
+    /// since the last paint). Text too big to highlight, or plain text, is the syntax's base scope.
     pub fn line_scopes(&mut self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
         let Some(line_text) = text.split_inclusive('\n').nth(line) else {
             return Vec::new();
         };
         let syntax = self.syntax(syntax).clone();
-        let whole = || vec![ScopeSpan { range: 0..line_text.len(), scope: syntax.scope.to_string() }];
         if text.len() > MAX_HIGHLIGHT_BYTES || syntax.name == "Plain Text" {
-            return whole();
+            return vec![ScopeSpan { range: 0..line_text.len(), scope: syntax.scope.to_string() }];
         }
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
         cache.update(text, &self.syntaxes, &syntax, &theme);
-        let Some(cached) = cache.lines.get(line) else { return whole() };
-        let mut parser = cached.state_before.0.clone();
-        let mut stack = cached.state_before.1.path.clone();
-        let Ok(ops) = parser.parse_line(line_text, &self.syntaxes) else { return whole() };
+        cache.lines.get(line).map(|l| l.scopes.clone()).unwrap_or_default()
+    }
 
-        let mut spans: Vec<ScopeSpan> = Vec::new();
-        let mut push = |stack: &ScopeStack, range: Range<usize>| {
-            let scope = stack.as_slice().iter().map(|s| s.build_string()).collect::<Vec<_>>().join(" ");
-            match spans.last_mut() {
-                Some(last) if last.scope == scope => last.range.end = range.end,
-                _ => spans.push(ScopeSpan { range, scope }),
-            }
-        };
-        let mut last = 0;
-        for (pos, op) in &ops {
-            if *pos > last {
-                push(&stack, last..*pos);
-                last = *pos;
-            }
-            let _ = stack.apply(op);
+    /// The scopes of every line (see [`Self::line_scopes`]).
+    pub fn document_scopes(&mut self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
+        let syntax = self.syntax(syntax).clone();
+        if text.len() > MAX_HIGHLIGHT_BYTES || syntax.name == "Plain Text" {
+            let scope = syntax.scope.to_string();
+            return text.split_inclusive('\n').map(|line| vec![ScopeSpan { range: 0..line.len(), scope: scope.clone() }]).collect();
         }
-        if last < line_text.len() {
-            push(&stack, last..line_text.len());
+        let theme = self.scheme(&self.current_scheme).clone();
+        let cache = self.caches.entry(document).or_default();
+        cache.update(text, &self.syntaxes, &syntax, &theme);
+        cache.lines.iter().map(|l| l.scopes.clone()).collect()
+    }
+
+    /// The parser's contexts at byte `column` of `line`: the line's start state (from the cache)
+    /// parsed up to that column, its context ids named (see [`context_names`]).
+    pub fn context_backtrace(&mut self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame> {
+        let syntax = self.syntax(syntax).clone();
+        if text.len() > MAX_HIGHLIGHT_BYTES || syntax.name == "Plain Text" {
+            return Vec::new();
         }
-        spans
+        let theme = self.scheme(&self.current_scheme).clone();
+        let cache = self.caches.entry(document).or_default();
+        cache.update(text, &self.syntaxes, &syntax, &theme);
+        let Some(cached) = cache.lines.get(line) else { return Vec::new() };
+        let mut state = cached.state_before.0.clone();
+        let mut end = column.min(cached.text.len());
+        while !cached.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end > 0 && state.parse_line(&cached.text[..end], &self.syntaxes).is_err() {
+            return Vec::new();
+        }
+        let names = self.context_names.get_or_insert_with(|| context_names(&self.syntaxes.clone().into_builder()));
+        let syntaxes = self.syntaxes.syntaxes();
+        context_ids(&state)
+            .into_iter()
+            .filter_map(|(syntax_index, context_index)| {
+                let name = names.get(syntax_index)?.get(context_index)?;
+                let syntax = syntaxes.get(syntax_index)?;
+                // syntect wraps `main` in its own `__start` / `__main` contexts.
+                let name = match name.as_str() {
+                    "__start" => return None,
+                    "__main" => "main",
+                    anonymous if anonymous.starts_with("#anon") => "anonymous context",
+                    other => other,
+                };
+                Some(ContextFrame {
+                    context_name: name.to_string(),
+                    source_file: self.syntax_paths.get(&syntax.name).cloned().unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// Every syntax, hidden ones too, with the resource it came from.
+    pub fn syntax_infos(&self) -> Vec<SyntaxInfo> {
+        self.syntaxes
+            .syntaxes()
+            .iter()
+            .map(|s| SyntaxInfo {
+                path: self.syntax_paths.get(&s.name).cloned().unwrap_or_else(|| s.name.clone()),
+                name: s.name.clone(),
+                hidden: s.hidden,
+                scope: s.scope.to_string(),
+                file_extensions: s.file_extensions.clone(),
+            })
+            .collect()
     }
 
     /// The text of a document as colored egui text, re-highlighting only what changed.
@@ -365,6 +451,8 @@ struct CachedLine {
     state_before: (ParseState, HighlightState),
     spans: Vec<(Range<usize>, Style)>,
     symbol: Option<String>,
+    /// The line's scopes (bytes of the line), for plugins and the `selector` context.
+    scopes: Vec<ScopeSpan>,
 }
 
 impl HighlightCache {
@@ -419,12 +507,13 @@ impl HighlightCache {
                 }
             }
             let state_before = state.clone();
-            let (spans, symbol) = highlight_line(line_text, &mut state, syntaxes, &highlighter);
+            let (spans, symbol, scopes) = highlight_line(line_text, &mut state, syntaxes, &highlighter);
             lines.push(CachedLine {
                 text: line_text.to_string(),
                 state_before,
                 spans,
                 symbol,
+                scopes,
             });
         }
         self.lines = lines;
@@ -436,41 +525,47 @@ fn highlight_line(
     state: &mut (ParseState, HighlightState),
     syntaxes: &SyntaxSet,
     highlighter: &Highlighter,
-) -> (Vec<(Range<usize>, Style)>, Option<String>) {
+) -> (Vec<(Range<usize>, Style)>, Option<String>, Vec<ScopeSpan>) {
     let Ok(ops) = state.0.parse_line(line, syntaxes) else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, Vec::new());
     };
 
     // Goto Symbol: the first text under an `entity.name.*` scope (HTML tags excluded).
     let entity_name = Scope::new("entity.name").expect("valid scope");
     let entity_tag = Scope::new("entity.name.tag").expect("valid scope");
     let mut symbol = String::new();
+    let mut scopes: Vec<ScopeSpan> = Vec::new();
     let mut stack = state.1.path.clone();
     let mut last = 0;
-    let mut take = |stack: &ScopeStack, piece: &str| {
+    let mut take = |stack: &ScopeStack, range: Range<usize>| {
         let is_symbol = stack
             .as_slice()
             .iter()
             .any(|s| entity_name.is_prefix_of(*s) && !entity_tag.is_prefix_of(*s));
         if is_symbol && symbol.is_empty() {
-            symbol.push_str(piece.trim());
+            symbol.push_str(line[range.clone()].trim());
+        }
+        let scope = stack.as_slice().iter().map(|s| s.build_string()).collect::<Vec<_>>().join(" ");
+        match scopes.last_mut() {
+            Some(previous) if previous.scope == scope => previous.range.end = range.end,
+            _ => scopes.push(ScopeSpan { range, scope }),
         }
     };
     for (pos, op) in &ops {
         if *pos > last {
-            take(&stack, &line[last..*pos]);
+            take(&stack, last..*pos);
         }
         let _ = stack.apply(op);
-        last = *pos;
+        last = last.max(*pos);
     }
     if last < line.len() {
-        take(&stack, &line[last..]);
+        take(&stack, last..line.len());
     }
 
     let spans = RangedHighlightIterator::new(&mut state.1, &ops, line, highlighter)
         .map(|(style, _, range)| (range, style))
         .collect();
-    (spans, (!symbol.is_empty()).then_some(symbol))
+    (spans, (!symbol.is_empty()).then_some(symbol), scopes)
 }
 
 /// `#rrggbb`, or `#rrggbbaa` when not opaque, as Sublime gives colors to plugins.

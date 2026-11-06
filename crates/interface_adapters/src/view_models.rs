@@ -16,9 +16,15 @@ pub struct TabViewModel {
     pub tooltip: String,
     pub dirty: bool,
     pub active: bool,
+    /// A preview (transient view): its title is in italics.
+    pub transient: bool,
 }
 
 pub struct OpenFileViewModel {
+    /// The document's index in the window (for `UiEvent::ActivateTab` / `CloseTab`).
+    pub index: usize,
+    /// The group it is in (the side bar lists them by group when there are several).
+    pub group: usize,
     pub name: String,
     pub dirty: bool,
     pub active: bool,
@@ -39,7 +45,10 @@ pub struct TreeRowViewModel {
 }
 
 pub struct SideBarViewModel {
+    /// By group, then in tab order.
     pub open_files: Vec<OpenFileViewModel>,
+    /// How many groups the window has.
+    pub groups: usize,
     pub folders: Vec<TreeRowViewModel>,
 }
 
@@ -201,6 +210,14 @@ pub struct EditorViewModel {
     pub auto_complete: Option<AutoCompleteViewModel>,
 }
 
+/// minihtml as the view draws it: its boxes, and the bytes of its images by `src` (those that
+/// could be read).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HtmlViewModel {
+    pub block: minihtml::Block,
+    pub images: Vec<(String, std::rc::Rc<Vec<u8>>)>,
+}
+
 /// The auto-complete list, under the typed word.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutoCompleteViewModel {
@@ -211,6 +228,7 @@ pub struct AutoCompleteViewModel {
     pub selected: usize,
     /// The selected completion's `details` (minihtml), shown under the list.
     pub details: Vec<minihtml::Line>,
+    pub details_html: HtmlViewModel,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -232,6 +250,7 @@ pub struct PopupViewModel {
     /// The char it points at: it opens below it.
     pub location: usize,
     pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
     /// In pixels.
     pub max_width: f32,
     pub max_height: f32,
@@ -239,12 +258,26 @@ pub struct PopupViewModel {
     pub hide_on_mouse_move_away: bool,
 }
 
-/// A plugin's phantom (`view.add_phantom`): drawn after the end of the line of `point`.
+/// A plugin's phantom (`view.add_phantom`): `LAYOUT_INLINE` at its point (the text after it moves
+/// aside), `LAYOUT_BELOW` / `LAYOUT_BLOCK` under its line (the lines after it move down).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhantomViewModel {
     pub id: u64,
     pub point: usize,
     pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
+    pub layout: PhantomLayout,
+}
+
+/// Sublime's `LAYOUT_INLINE`, `LAYOUT_BELOW` and `LAYOUT_BLOCK`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhantomLayout {
+    /// In the line, at its point.
+    Inline,
+    /// Under its line, starting at the point's column.
+    Below,
+    /// Under its line, at the left edge.
+    Block,
 }
 
 /// How a plugin's region set is drawn (from Sublime's `DRAW_*` flags).
@@ -261,6 +294,20 @@ pub struct RegionViewModel {
     pub underline: Option<Underline>,
     /// Empty regions are drawn (as a bar where the caret would be).
     pub draw_empty: bool,
+    /// The set's key (a link in its annotations tells it).
+    pub key: String,
+    /// Annotations, by the start of their region: shown at the right of that line.
+    pub annotations: Vec<AnnotationViewModel>,
+    /// The plugin's `annotation_color` (empty: the scope's color).
+    pub annotation_color: String,
+}
+
+/// One annotation of a region (`add_regions(annotations=…)`), its minihtml read into lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotationViewModel {
+    pub point: usize,
+    pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,9 +10,13 @@
 //! | Module | Use cases |
 //! |---|---|
 //! | [`documents`] | new, open, switch, close, reopen, revert, syntax, line endings |
+//! | [`clones`] | several views of one buffer (`clone_file`) |
+//! | [`windows`] | several windows (`new_window`), each with its views, layout and panels |
 //! | [`groups`] | the window's layout, focusing a group, moving views between groups |
 //! | [`saving`] | save, save as, save all |
 //! | [`editing`] | text commands, go to line, paste |
+//! | [`clipboard_history`] | what was copied, for Paste from History |
+//! | [`snippets`] | `insert_snippet` and visiting its fields with Tab |
 //! | [`completions`] | auto-complete: the list, its sources (plugins, completions files, snippets, words), Tab completion |
 //! | [`find_replace`] | find next/previous, find under caret, replace |
 //! | [`preferences`] | settings, font size, color scheme, edit settings files |
@@ -31,6 +35,8 @@
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
 
 pub mod builds;
+pub mod clipboard_history;
+pub mod clones;
 pub mod completions;
 pub mod documents;
 pub mod editing;
@@ -54,5 +60,7 @@ pub mod saving;
 pub mod scopes;
 pub mod search;
 pub mod session;
+pub mod snippets;
+pub mod windows;
 
 pub use editor::{Editor, EditorState, Gateways};

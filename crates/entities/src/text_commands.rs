@@ -95,22 +95,72 @@ pub fn replace_selection(text: &mut String, selection: Selection, insert: &str) 
     Selection::caret(selection.start() + insert.chars().count())
 }
 
-/// Sublime's `insert_snippet` without the field navigation: replaces the selection with
-/// `snippet`, where `$SELECTION` is the selected text, `${1:default}` its default and `$1` / `$0`
-/// nothing. The first field (`$1`, else `$0`) ends selected (its default) or as the caret; with no
-/// field, the caret ends after the text. `\$` is a `$`; other variables stay as written.
+/// Sublime's `insert_snippet`: replaces the selection with `snippet`, where `$SELECTION` is the
+/// selected text, `${1:default}` its default and `$1` / `$0` nothing. The first field (`$1`, else
+/// `$0`) ends selected (its default) or as the caret; with no field, the caret ends after the
+/// text. `\$` is a `$`; other variables stay as written. (The fields to visit with Tab:
+/// [`insert_snippet_fields`].)
 pub fn insert_snippet(text: &mut String, selection: Selection, snippet: &str) -> Selection {
+    let (selection, _) = insert_snippet_fields(text, selection, snippet);
+    selection
+}
+
+/// [`insert_snippet`], and the snippet's fields in the order Tab visits them: `$1`, `$2`… then
+/// `$0` (where the caret ends; the end of the snippet when it has none). Each field is its
+/// regions (several when the field is mirrored, `$1 … $1`), in chars of the new text. Nothing
+/// to visit when the snippet has no numbered field.
+pub fn insert_snippet_fields(text: &mut String, selection: Selection, snippet: &str) -> (Selection, Vec<Vec<(usize, usize)>>) {
     let selected = selected_text(text, selection).to_string();
     let mut out = String::new();
-    let mut fields = Vec::new();
-    expand_snippet(&mut snippet.chars().peekable(), &selected, &mut out, &mut fields, false);
+    let mut found = Vec::new();
+    expand_snippet(&mut snippet.chars().peekable(), &selected, &mut out, &mut found, false);
     let inserted = replace_selection(text, selection, &out);
     let start = selection.start();
-    // Field 0 is where the caret ends after the others: it goes last.
-    match fields.iter().min_by_key(|(number, _, _)| if *number == 0 { u32::MAX } else { *number }) {
-        Some(&(_, a, b)) => Selection::new(start + a, start + b),
-        None => inserted,
+    if found.is_empty() {
+        return (inserted, Vec::new());
     }
+    let mut numbers: Vec<u32> = found.iter().map(|(n, _, _)| *n).collect();
+    // Field 0 is where the caret ends after the others: it goes last.
+    numbers.sort_by_key(|n| if *n == 0 { u32::MAX } else { *n });
+    numbers.dedup();
+    let mut fields: Vec<Vec<(usize, usize)>> = numbers
+        .iter()
+        .map(|number| found.iter().filter(|(n, _, _)| n == number).map(|&(_, a, b)| (start + a, start + b)).collect())
+        .collect();
+    if numbers.last() != Some(&0) {
+        let end = start + out.chars().count();
+        fields.push(vec![(end, end)]);
+    }
+    let (a, b) = fields[0][0];
+    (Selection::new(a, b), fields)
+}
+
+/// A completion committed with several carets (sorted by position): at each one, the `prefix`
+/// typed before it (when the text there is that prefix; with `keep_prefix`, never) is replaced
+/// by what `insert` puts in its place. The new selections, in the same order.
+pub fn complete_at_each(
+    text: &mut String,
+    selections: &[Selection],
+    prefix: &str,
+    keep_prefix: bool,
+    mut insert: impl FnMut(&mut String, Selection) -> Selection,
+) -> Vec<Selection> {
+    let prefix_len = prefix.chars().count();
+    let mut offset: isize = 0;
+    let mut new = Vec::with_capacity(selections.len());
+    for selection in selections {
+        let shift = |p: usize| (p as isize + offset).max(0) as usize;
+        let (start, end) = (shift(selection.start()), shift(selection.end()));
+        let typed = start >= prefix_len && {
+            let (a, b) = (char_to_byte(text, start - prefix_len), char_to_byte(text, start));
+            &text[a..b] == prefix
+        };
+        let from = if selection.is_empty() && typed && !keep_prefix { start - prefix_len } else { start };
+        let before = text.chars().count();
+        new.push(insert(text, Selection::new(from, end)));
+        offset += text.chars().count() as isize - before as isize;
+    }
+    new
 }
 
 /// Appends the expansion of `chars` to `out` until the end, or the `}` that closes a field
@@ -387,6 +437,45 @@ fn enclosing_brackets(chars: &[char], start: usize, end: usize) -> Option<(usize
         }
     }
     None
+}
+
+/// The bracket that opens the one at `close`.
+fn matching_open(chars: &[char], close: usize) -> Option<usize> {
+    let (o, c) = *BRACKETS.iter().find(|&&(_, c)| c == chars[close])?;
+    let mut depth = 0usize;
+    for i in (0..close).rev() {
+        if chars[i] == c {
+            depth += 1;
+        } else if chars[i] == o {
+            if depth == 0 {
+                return Some(i);
+            }
+            depth -= 1;
+        }
+    }
+    None
+}
+
+/// `move_to {"to": "brackets"}` (Ctrl+M): where the caret at `head` goes. Next to a bracket, to
+/// the same side of the one that matches it (just inside or just outside the pair); otherwise
+/// to the closing bracket of the brackets around it. `None` when there are none.
+fn bracket_target(text: &str, head: usize) -> Option<usize> {
+    let chars: Vec<char> = text.chars().collect();
+    let is_open = |i: usize| BRACKETS.iter().any(|&(o, _)| chars.get(i) == Some(&o));
+    let is_close = |i: usize| BRACKETS.iter().any(|&(_, c)| chars.get(i) == Some(&c));
+    if head > 0 && is_open(head - 1) {
+        return matching_close(&chars, head - 1);
+    }
+    if is_close(head) {
+        return matching_open(&chars, head).map(|o| o + 1);
+    }
+    if is_open(head) {
+        return matching_close(&chars, head).map(|c| c + 1);
+    }
+    if head > 0 && is_close(head - 1) {
+        return matching_open(&chars, head - 1);
+    }
+    enclosing_brackets(&chars, head, head).map(|(_, close)| close)
 }
 
 /// The bracket that closes the one at `open`.
@@ -1019,24 +1108,151 @@ pub fn move_to(text: &str, selection: Selection, to: &str, extend: bool) -> Opti
             let first = start + text[start..end].len() - text[start..end].trim_start().len();
             if head == first { start } else { first }
         }
+        "brackets" => return bracket_target(text, selection.head).map(|target| moved(selection, target, extend)),
         _ => return None,
     };
     Some(moved(selection, byte_to_char(text, target), extend))
 }
 
-/// Sublime's `move`: by `characters`, `lines`, `words`, `word_ends`, `subwords` or `subword_ends`
-/// (subwords go like words). `None` for units not supported.
-pub fn move_by(text: &str, selection: Selection, by: &str, forward: bool, extend: bool) -> Option<Selection> {
-    let target = match by {
-        "characters" if !extend && !selection.is_empty() => return Some(Selection::caret(if forward { selection.end() } else { selection.start() })),
-        "characters" if forward => (selection.head + 1).min(text.chars().count()),
-        "characters" => selection.head.saturating_sub(1),
-        "lines" => line_above_or_below(text, selection.head, forward),
-        "words" | "subwords" => word_boundary(text, selection.head, forward, !forward),
-        "word_ends" | "subword_ends" => word_boundary(text, selection.head, forward, forward),
+/// The arguments of `move {"by": ...}`: the unit, plus what `stops` stops at and how many lines
+/// a page is.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MoveBy {
+    pub by: String,
+    pub forward: bool,
+    pub extend: bool,
+    pub stops: Stops,
+    /// Lines that `pages` moves (the lines the view shows).
+    pub page_lines: usize,
+    /// `separators`: the chars that are punctuation for `stops` and sub-words (else the usual
+    /// word chars: letters, digits, `_`).
+    pub separators: Option<String>,
+}
+
+/// Where `move {"by": "stops"}` may stop, as Sublime's arguments of the same names say.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Stops {
+    pub word_begin: bool,
+    pub word_end: bool,
+    pub punct_begin: bool,
+    pub punct_end: bool,
+    pub sub_word_begin: bool,
+    pub sub_word_end: bool,
+    pub line_begin: bool,
+    pub line_end: bool,
+    pub empty_line: bool,
+}
+
+impl Stops {
+    /// Sublime's `CLASS_*` flags (`view.classify`, `find_by_class`) as stops.
+    pub fn from_classes(classes: u32) -> Self {
+        let has = |flag: u32| classes & flag != 0;
+        Self {
+            word_begin: has(1),
+            word_end: has(2),
+            punct_begin: has(4),
+            punct_end: has(8),
+            sub_word_begin: has(16),
+            sub_word_end: has(32),
+            line_begin: has(64),
+            line_end: has(128),
+            empty_line: has(256),
+        }
+    }
+
+    /// Whether the boundary between `before` and `after` (`None` at an end of the text) is a stop.
+    /// `separators`, when given, are the chars that are punctuation (Sublime's `word_separators`):
+    /// other chars that are not blanks are word chars.
+    fn at(&self, before: Option<char>, after: Option<char>, separators: Option<&str>) -> bool {
+        let class = |c: Option<char>| c.map(|c| class_with(c, separators));
+        let (b, a) = (class(before), class(after));
+        let line_begin = matches!(b, None | Some(CharClass::Newline));
+        let line_end = matches!(a, None | Some(CharClass::Newline));
+        let begins = |kind: CharClass| a == Some(kind) && b != Some(kind);
+        let ends = |kind: CharClass| b == Some(kind) && a != Some(kind);
+        // Inside a word: "camelCase" and "snake_case" have sub-word boundaries.
+        let sub_word = match (before, after) {
+            (Some(x), Some(y)) if b == Some(CharClass::Word) && a == Some(CharClass::Word) => {
+                (x.is_lowercase() && y.is_uppercase()) || (x == '_') != (y == '_') || (x.is_alphabetic() != y.is_alphabetic() && x != '_' && y != '_')
+            }
+            _ => false,
+        };
+        (self.word_begin && begins(CharClass::Word))
+            || (self.word_end && ends(CharClass::Word))
+            || (self.punct_begin && begins(CharClass::Punctuation))
+            || (self.punct_end && ends(CharClass::Punctuation))
+            || (self.sub_word_begin && (begins(CharClass::Word) || (sub_word && after != Some('_'))))
+            || (self.sub_word_end && (ends(CharClass::Word) || (sub_word && before != Some('_'))))
+            || (self.line_begin && line_begin)
+            || (self.line_end && line_end)
+            || (self.empty_line && line_begin && line_end)
+    }
+}
+
+/// The first stop after (or before) `position`, or the end (or start) of the text.
+fn next_stop(text: &str, position: usize, forward: bool, stops: &Stops, separators: Option<&str>) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let boundary = |p: usize| stops.at(p.checked_sub(1).map(|i| chars[i]), chars.get(p).copied(), separators);
+    if forward {
+        (position + 1..=chars.len()).find(|&p| boundary(p)).unwrap_or(chars.len())
+    } else {
+        (0..position).rev().find(|&p| boundary(p)).unwrap_or(0)
+    }
+}
+
+/// `view.classify(point)`: the `CLASS_*` flags of the boundary at `point` (chars).
+pub fn classify(text: &str, point: usize, separators: Option<&str>) -> u32 {
+    let before = point.checked_sub(1).and_then(|i| text.chars().nth(i));
+    let after = text.chars().nth(point);
+    (0..9).map(|bit| 1u32 << bit).filter(|&flag| Stops::from_classes(flag).at(before, after, separators)).sum()
+}
+
+/// `view.find_by_class(point, forward, classes)`: the next point after (or before) `point` whose
+/// boundary has one of `classes`; the end (or start) of the text when none has.
+pub fn find_by_class(text: &str, point: usize, forward: bool, classes: u32, separators: Option<&str>) -> usize {
+    next_stop(text, point, forward, &Stops::from_classes(classes), separators)
+}
+
+/// [`char_class`], with `separators` as the punctuation when given.
+fn class_with(c: char, separators: Option<&str>) -> CharClass {
+    match separators {
+        Some(separators) if !separators.is_empty() && c != '\n' && !c.is_whitespace() => {
+            if separators.contains(c) { CharClass::Punctuation } else { CharClass::Word }
+        }
+        _ => char_class(c),
+    }
+}
+
+/// Sublime's `move`: by `characters`, `lines`, `pages`, `words`, `word_ends`, `subwords`,
+/// `subword_ends` or `stops`. `None` for units not supported.
+pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selection> {
+    let (forward, head) = (how.forward, selection.head);
+    let target = match how.by.as_str() {
+        "characters" if !how.extend && !selection.is_empty() => return Some(Selection::caret(if forward { selection.end() } else { selection.start() })),
+        "characters" if forward => (head + 1).min(text.chars().count()),
+        "characters" => head.saturating_sub(1),
+        "lines" => line_above_or_below(text, head, forward),
+        "pages" => (0..how.page_lines.max(1)).fold(head, |at, _| line_above_or_below(text, at, forward)),
+        "words" => word_boundary(text, head, forward, !forward),
+        "word_ends" => word_boundary(text, head, forward, forward),
+        "subwords" | "subword_ends" => {
+            // `subwords` stops where sub-words begin, `subword_ends` where they end, both ways.
+            let begins = how.by == "subwords";
+            let stops = Stops {
+                sub_word_begin: begins,
+                sub_word_end: !begins,
+                punct_begin: begins,
+                punct_end: !begins,
+                line_begin: !forward,
+                line_end: forward,
+                ..Stops::default()
+            };
+            next_stop(text, head, forward, &stops, how.separators.as_deref())
+        }
+        "stops" => next_stop(text, head, forward, &how.stops, how.separators.as_deref()),
         _ => return None,
     };
-    Some(moved(selection, target, extend))
+    Some(moved(selection, target, how.extend))
 }
 
 fn moved(selection: Selection, head: usize, extend: bool) -> Selection {

@@ -49,6 +49,37 @@ impl Layout {
         }
     }
 
+    /// `count` groups in rows of at most `max_columns` (Sublime's `new_pane` / `close_pane` with
+    /// `max_columns`), in reading order; the last cell of a row with fewer groups spans the rest.
+    pub fn flow(count: usize, max_columns: usize) -> Self {
+        let count = count.max(1);
+        let columns = count.min(max_columns.max(1));
+        let rows = count.div_ceil(columns);
+        let mut cells = Vec::with_capacity(count);
+        for row in 0..rows {
+            let in_row = (count - row * columns).min(columns);
+            for column in 0..in_row {
+                let right = if column + 1 == in_row { columns } else { column + 1 };
+                cells.push([column, row, right, row + 1]);
+            }
+        }
+        Self { cols: even(columns), rows: even(rows), cells }
+    }
+
+    /// Moves the boundary between columns (`vertical`) or rows `index` (1 to len - 2) to
+    /// `fraction`, kept between its neighbours.
+    pub fn move_boundary(&mut self, vertical: bool, index: usize, fraction: f64) {
+        let boundaries = if vertical { &mut self.cols } else { &mut self.rows };
+        if index == 0 || index + 1 >= boundaries.len() {
+            return;
+        }
+        const MIN: f64 = 0.05;
+        let (low, high) = (boundaries[index - 1] + MIN, boundaries[index + 1] - MIN);
+        if low <= high {
+            boundaries[index] = fraction.clamp(low, high);
+        }
+    }
+
     pub fn group_count(&self) -> usize {
         self.cells.len()
     }

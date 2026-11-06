@@ -174,3 +174,61 @@ fn the_session_keeps_the_groups() {
     assert_eq!(names_in(&editor, 1), vec!["c.txt"]);
     assert_eq!(editor.active_group(), 1);
 }
+
+#[test]
+fn new_pane_and_close_pane_flow_in_rows_of_max_columns() {
+    let world = world();
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    open(&mut editor, "/p/b.txt");
+    editor.new_pane(true);
+    assert_eq!(editor.group_count(), 2);
+    assert_eq!((names_in(&editor, 0), names_in(&editor, 1)), (vec!["a.txt".to_string()], vec!["b.txt".to_string()]), "b went along");
+    assert_eq!(editor.active_group(), 1);
+
+    editor.set_max_columns(2);
+    editor.new_pane(false);
+    assert_eq!(editor.layout(), &Layout::flow(3, 2), "a second row");
+    assert_eq!(editor.active_group(), 2, "the new, empty group has the focus");
+    assert!(editor.active_document().is_none());
+
+    editor.focus_group(1);
+    editor.close_pane(None);
+    assert_eq!(editor.group_count(), 2);
+    assert_eq!(names_in(&editor, 0), vec!["a.txt", "b.txt"], "the closed group's files join the one before it");
+    assert_eq!(editor.max_columns(), 2);
+}
+
+#[test]
+fn dragging_a_boundary_or_a_tab() {
+    let world = world();
+    let mut editor = two_columns(&world);
+    editor.move_layout_boundary(true, 1, 0.7);
+    assert_eq!(editor.layout().cols, vec![0.0, 0.7, 1.0]);
+    editor.move_layout_boundary(true, 1, 0.999);
+    assert_eq!(editor.layout().cols[1], 0.95, "kept away from the edge");
+
+    let a = editor.state().documents.iter().find(|d| d.name() == "a.txt").unwrap().id;
+    editor.drop_view_in_group(a, 1, 0);
+    assert_eq!(names_in(&editor, 1), vec!["a.txt", "c.txt"]);
+    assert_eq!(active_name(&editor).as_deref(), Some("a.txt"));
+}
+
+#[test]
+fn a_preview_takes_the_place_of_the_last_one_until_it_is_edited() {
+    let world = world();
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    assert!(editor.preview_file(std::path::Path::new("/p/b.txt")));
+    assert!(editor.active_document().unwrap().transient);
+    editor.preview_file(std::path::Path::new("/p/c.txt"));
+    assert_eq!(names_in(&editor, 0), vec!["a.txt", "c.txt"], "b's preview gave way");
+    editor.run_text_command(TextCommand::Insert("x".into()));
+    assert!(!editor.active_document().unwrap().transient, "edited: it stays");
+    editor.preview_file(std::path::Path::new("/p/d.txt"));
+    assert_eq!(names_in(&editor, 0), vec!["a.txt", "c.txt", "d.txt"]);
+    let d = editor.active_document().unwrap().id;
+    assert_eq!(editor.transient_document_in_group(0), Some(d));
+    editor.keep_document(d);
+    assert_eq!(editor.transient_document_in_group(0), None);
+}

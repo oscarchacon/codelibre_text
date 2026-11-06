@@ -104,13 +104,31 @@ fn open_url_and_report_issue_open_the_browser() {
 
 #[test]
 fn close_window_and_exit_ask_the_window_to_close() {
-    for name in ["close_window", "exit"] {
+    for (name, request) in [("close_window", ViewRequest::CloseWindow), ("exit", ViewRequest::Exit)] {
         let world = World::new();
         let mut editor = world.editor();
         let mut view = ViewState::default();
         run(&mut editor, &mut view, &cmd(name));
-        assert_eq!(view.take_requests(), vec![ViewRequest::CloseWindow]);
+        assert_eq!(view.take_requests(), vec![request]);
     }
+}
+
+#[test]
+fn new_window_and_clone_file() {
+    let world = World::new().with_file("/p/a.txt", "abc");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.txt");
+    run(&mut editor, &mut view, &cmd("clone_file"));
+    assert_eq!(editor.state().documents.len(), 2, "two views of a.txt");
+    let (original, clone) = (editor.state().documents[0].id, editor.state().documents[1].id);
+    assert_eq!(editor.clones_of(original), vec![clone]);
+
+    run(&mut editor, &mut view, &cmd("new_window"));
+    assert_eq!(editor.window_ids(), vec![1, 2]);
+    assert_eq!(editor.current_window(), 2);
+    assert!(editor.state().documents.is_empty(), "a new window is empty");
+    assert_eq!(editor.window_of_view(clone), Some(1));
 }
 
 #[test]
@@ -580,6 +598,37 @@ fn copy_and_cut_with_nothing_selected_take_the_whole_line_and_paste_puts_it_abov
 }
 
 #[test]
+fn paste_from_history_lists_what_was_copied_and_pastes_the_choice() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "alpha beta\ngamma", Selection::new(0, 5));
+    run(&mut editor, &mut view, &cmd("paste_from_history"));
+    assert!(view.quick_panel.is_none(), "nothing copied yet: no panel");
+
+    run(&mut editor, &mut view, &cmd("copy"));
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::new(6, 10));
+    run(&mut editor, &mut view, &cmd("cut"));
+    editor.sync_selection_from_view(id, Selection::caret(2));
+    run(&mut editor, &mut view, &cmd("copy"));
+    run(&mut editor, &mut view, &cmd("copy"));
+    assert_eq!(editor.clipboard_history(), ["alpha beta\n", "beta", "alpha"], "newest first, each once");
+    view.take_requests();
+
+    run(&mut editor, &mut view, &cmd("paste_from_history"));
+    let panel = view.quick_panel.as_ref().expect("the history's panel");
+    assert_eq!(panel.kind, SearchKind::ClipboardHistory);
+    let captions: Vec<_> = editor.search(SearchKind::ClipboardHistory, "").into_iter().map(|c| c.caption).collect();
+    assert_eq!(captions, ["alpha beta", "beta", "alpha"]);
+
+    let chosen = editor.search(SearchKind::ClipboardHistory, "").remove(2);
+    let CandidateTarget::Command(paste) = chosen.target else { panic!("a command") };
+    run(&mut editor, &mut view, &paste);
+    assert_eq!(*world.clipboard.borrow(), Ok("alpha".to_string()));
+    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("alpha".into()))]);
+    assert_eq!(editor.clipboard_history()[0], "alpha", "the choice comes first");
+}
+
+#[test]
 fn reset_font_size_uses_default_font_size() {
     let world = World::new().with_preferences(json!({ "default_font_size": 13 }));
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
@@ -667,7 +716,8 @@ fn every_command_in_the_builtin_resources_is_implemented() {
     for source in [builtin_resources::PC_KEYMAP, builtin_resources::OSX_KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
         collect_commands(&sublime_json::parse(source).unwrap(), &mut commands);
     }
-    for command in commands {
+    // `$build_systems` is not a command: the menu presenter puts the build systems there.
+    for command in commands.into_iter().filter(|c| !c.name.starts_with('$')) {
         let world = World::new();
         let mut editor = world.editor();
         let mut view = ViewState::default();
@@ -846,6 +896,48 @@ fn a_listener_s_command_that_needs_the_view_waits_for_the_next_frame() {
     assert!(!view.find_panel.visible);
     poll_plugins(&mut editor, &mut view);
     assert!(view.find_panel.visible);
+}
+
+#[test]
+fn a_listener_s_waiting_command_runs_on_the_view_that_asked() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/b.txt");
+    open(&mut editor, "/p/a.txt");
+    let a = editor.active_document().unwrap().id;
+    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    editor.text_for_editing(a).unwrap().push('!');
+    editor.text_for_editing(b).unwrap().push('?');
+    // `save` needs the controller: it waits for the next frame, and then saves b, not the active a.
+    world.plugins.then([plugin_call("run_command", json!(["view", b, "save", null])), PluginMessage::Done { error: None }]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/b.txt"), "other");
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(world.file_text("/p/b.txt"), "other?");
+    assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+}
+
+#[test]
+fn a_listener_s_settings_and_selection_commands_run_during_the_event() {
+    let world = listening_world(&["on_post_save"]).with_file("/p/c.txt", "one\ntwo\n");
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/c.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("view_selection_set", json!([id, [[0, 7]]])),
+        plugin_call("run_command", json!(["view", id, "split_selection_into_lines", null])),
+        plugin_call("run_command", json!(["window", id, "set_setting", { "setting": "tab_size", "value": 7 }])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    // Done before the next frame: nothing was left for `poll_plugins`.
+    assert_eq!(editor.active_document().unwrap().selections().len(), 2);
+    assert_eq!(editor.global_settings().get("tab_size"), Some(&json!(7)));
 }
 
 #[test]

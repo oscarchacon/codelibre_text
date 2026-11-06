@@ -113,6 +113,41 @@ impl Editor {
         self.activate_document(id);
     }
 
+    /// A preview of a file (Sublime's `TRANSIENT`: a file clicked once in the side bar): it takes
+    /// the place of the focused group's preview, if it has one, until it is edited or kept. A file
+    /// already open is just shown.
+    pub fn preview_file(&mut self, path: &Path) -> bool {
+        let canonical = self.gateways.file_system.canonicalize(path);
+        if let Some(index) = self.state.documents.iter().position(|d| d.path.as_deref() == Some(canonical.as_path())) {
+            self.activate(index);
+            return true;
+        }
+        let group = self.state.active_group;
+        let previous = self.state.documents.iter().find(|d| d.transient && d.group == group && !d.is_dirty()).map(|d| d.id);
+        if !self.open_file(path) {
+            return false;
+        }
+        if let Some(doc) = self.active_document_mut() {
+            doc.transient = true;
+        }
+        if let Some(previous) = previous {
+            self.close_documents(vec![previous]);
+        }
+        true
+    }
+
+    /// The preview becomes a tab of its own (a double click on it, opening it again for good).
+    pub fn keep_document(&mut self, id: DocumentId) {
+        if let Some(doc) = self.any_document_mut(id) {
+            doc.transient = false;
+        }
+    }
+
+    /// The preview of `group`, if it has one (`window.transient_view_in_group`).
+    pub fn transient_document_in_group(&self, group: usize) -> Option<DocumentId> {
+        self.state.documents.iter().find(|d| d.transient && d.group == group).map(|d| d.id)
+    }
+
     pub fn activate(&mut self, index: usize) {
         if let Some(doc) = self.state.documents.get(index) {
             let id = doc.id;
@@ -164,8 +199,9 @@ impl Editor {
     pub fn close_documents(&mut self, ids: Vec<DocumentId>) {
         let mut need_confirmation = Vec::new();
         for id in ids {
+            // A clone of it still shows the buffer: nothing to save yet.
             match self.index_of(id) {
-                Some(index) if self.state.documents[index].is_dirty() => need_confirmation.push(id),
+                Some(index) if self.state.documents[index].is_dirty() && self.clones_of(id).is_empty() => need_confirmation.push(id),
                 Some(index) => self.remove_document(index),
                 None => {}
             }

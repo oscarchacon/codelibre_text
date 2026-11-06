@@ -65,7 +65,10 @@ pub enum WidgetEdit {
 pub enum ViewRequest {
     WidgetEdit(WidgetEdit),
     SetFullscreen(bool),
+    /// Close this window (the application, when it is the last one).
     CloseWindow,
+    /// Quit the application (every window).
+    Exit,
 }
 
 pub struct ViewState {
@@ -92,6 +95,8 @@ pub struct ViewState {
     pub(crate) requests: Vec<ViewRequest>,
     /// Commands done by the text widget whose `on_post_*_command` waits for the widget.
     pub(crate) widget_edits_in_progress: Vec<WidgetEditInProgress>,
+    /// The last command run (the `last_command` key binding context).
+    pub(crate) last_command: Option<String>,
 }
 
 /// A widget edit reaches the widget in the next frame's input, after the frame that asked for it.
@@ -121,6 +126,7 @@ impl Default for ViewState {
             commands: VecDeque::new(),
             requests: Vec::new(),
             widget_edits_in_progress: Vec::new(),
+            last_command: None,
         }
     }
 }
