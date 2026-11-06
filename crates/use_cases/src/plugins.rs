@@ -144,7 +144,7 @@ impl Editor {
             Ok(_) => {}
             Err(e) => self.plugin_load_error(format!("Python plugins: {e}")),
         }
-        // At startup the views come later: `Editor::start` tells the listeners about them.
+        // The views that exist (at startup, those of the session and the command line).
         if !self.state.documents.is_empty() {
             self.plugin_init();
         }
@@ -313,6 +313,22 @@ impl Editor {
             Ok(_) => {}
             Err(e) => self.report_plugin_error(name, &e),
         }
+    }
+
+    /// At startup the views open before the plugins load (so `plugin_loaded` finds them, as in
+    /// Sublime): once loaded, `on_load` for each view of a file on disk (the session's, the command
+    /// line's), then `on_activated` for the active one, as Sublime's `on_api_ready` does.
+    pub(crate) fn plugin_startup_events(&mut self) {
+        let loaded: Vec<DocumentId> = self
+            .state
+            .documents
+            .iter()
+            .filter(|d| d.path.as_deref().is_some_and(|p| self.gateways.file_system.exists(p)))
+            .map(|d| d.id)
+            .collect();
+        loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
+        self.state.plugins.active_view = None;
+        self.plugin_activation_events();
     }
 
     /// `on_deactivated` / `on_activated` when the active document is not the one the listeners

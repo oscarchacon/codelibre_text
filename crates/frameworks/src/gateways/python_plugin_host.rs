@@ -26,6 +26,9 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("Default/__init__.py", include_str!("../../../../assets/python/Default/__init__.py")),
     ("Default/paste_from_history.py", include_str!("../../../../assets/python/Default/paste_from_history.py")),
     ("Default/exec.py", include_str!("../../../../assets/python/Default/exec.py")),
+    ("Default/history_list.py", include_str!("../../../../assets/python/Default/history_list.py")),
+    ("Default/indentation.py", include_str!("../../../../assets/python/Default/indentation.py")),
+    ("Default/side_bar.py", include_str!("../../../../assets/python/Default/side_bar.py")),
     // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
     ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
     ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
@@ -42,6 +45,14 @@ const SUPPORT_FILES: &[(&str, &str)] = &[
     ("shims/cgi.py", include_str!("../../../../assets/python/shims/cgi.py")),
     ("shims/imghdr.py", include_str!("../../../../assets/python/shims/imghdr.py")),
     ("shims/uu.py", include_str!("../../../../assets/python/shims/uu.py")),
+    // certifi (MPL-2.0, unmodified from PyPI): Sublime ships it in `Lib/python3` for every plugin
+    // host, so libraries import it without declaring it (`lsp_utils` 4, the LSP-* helpers).
+    // Last on `sys.path` too: a newer one Package Control installs wins.
+    ("shims/certifi/__init__.py", include_str!("../../../../assets/python/shims/certifi/__init__.py")),
+    ("shims/certifi/core.py", include_str!("../../../../assets/python/shims/certifi/core.py")),
+    ("shims/certifi/cacert.pem", include_str!("../../../../assets/python/shims/certifi/cacert.pem")),
+    ("shims/certifi/py.typed", ""),
+    ("shims/certifi/LICENSE", include_str!("../../../../assets/python/shims/certifi/LICENSE")),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).

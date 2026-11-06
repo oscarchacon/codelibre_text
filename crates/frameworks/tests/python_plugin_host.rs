@@ -83,6 +83,13 @@ fn next_idle(host: &mut PythonPluginHost, log: &mut String) -> PluginMessage {
 
 /// An editor with the real plugin host and `plugin` in the package `MyPkg`; `None` without Python.
 fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
+    let editor = editor_with_load_errors(dir, plugin)?;
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    Some(editor)
+}
+
+/// [`editor_with`], when the plugin is expected to fail to load.
+fn editor_with_load_errors(dir: &Path, plugin: &str) -> Option<Editor> {
     if let Err(e) = find_interpreter(None) {
         eprintln!("skipped: {e}");
         return None;
@@ -108,7 +115,6 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
     });
     editor.set_event_command_runner(command_controller::run_during_event);
     editor.start(Vec::new());
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
     Some(editor)
 }
 
@@ -500,6 +506,114 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
     assert_eq!(status, "copied in Terminus 1 async_chat", "console:\n{}", editor.state().console);
     assert_eq!(editor.clipboard_history(), ["copied in Terminus"]);
+}
+
+/// `Default.indentation` (Alignment), `Default.history_list` (Anaconda) and `Default.side_bar`
+/// (FileManager subclasses `RenamePathCommand`): imported as packages do, and they work.
+#[test]
+fn default_indentation_history_list_and_side_bar_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("old.txt");
+    std::fs::write(&old, "x").unwrap();
+    let plugin = r#"
+import os
+
+import sublime
+import sublime_plugin
+from Default.indentation import line_and_normed_pt
+from Default.history_list import get_jump_history_for_view
+from Default.side_bar import RenamePathCommand
+
+
+class HiddenRenamePathCommand(RenamePathCommand):
+    def is_visible(self):
+        return False
+
+
+class ProbeCommand(sublime_plugin.TextCommand):
+    def run(self, edit, old):
+        self.view.settings().set("tab_size", 4)
+        self.view.insert(edit, 0, "\tab = 1\nsecond line")
+        row_col = line_and_normed_pt(self.view, 3)
+        history = get_jump_history_for_view(self.view)
+        self.view.sel().clear()
+        self.view.sel().add(sublime.Region(1))
+        history.push_selection(self.view)
+        self.view.sel().clear()
+        self.view.sel().add(sublime.Region(12))
+        went_back = history.back(self.view)
+        RenamePathCommand(self.view.window()).on_done(old, os.path.dirname(old), "new.txt")
+        sublime.status_message("%s %s %s" % (row_col, went_back, self.view.sel()[0].a))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    let probe = Command::with_args("probe", serde_json::json!({ "old": old.to_string_lossy() }));
+    command_controller::run(&mut editor, &mut view, &probe);
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "(0, 6) True 1", "console:\n{}", editor.state().console);
+    assert!(dir.path().join("new.txt").is_file() && !old.exists());
+    assert!(editor.is_plugin_command("hidden_rename_path"));
+}
+
+/// `certifi`, which Sublime ships for every plugin host and `lsp_utils` imports without declaring
+/// it: its bundle is a file `ssl` loads.
+#[test]
+fn certifi_is_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import os
+import ssl
+
+import certifi
+import sublime
+import sublime_plugin
+
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        context = ssl.create_default_context(cafile=certifi.where())
+        authorities = context.cert_store_stats()["x509_ca"]
+        sublime.status_message("%s %s" % (os.path.isfile(certifi.where()), authorities > 100))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("True True"), "console:\n{}", editor.state().console);
+}
+
+/// A package that imports one not installed yet (LSP-json before LSP: Package Control installs
+/// them one at a time) loads once that one arrives, without changing itself.
+#[test]
+fn a_package_that_could_not_import_another_loads_once_it_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+from Base.core import GREETING
+
+
+class HelperCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        sublime.status_message(GREETING)
+"#;
+    let Some(mut editor) = editor_with_load_errors(dir.path(), plugin) else {
+        return;
+    };
+    assert!(!editor.is_plugin_command("helper"));
+    assert!(editor.state().load_errors.iter().any(|e| e.contains("No module named 'Base'")), "{:?}", editor.state().load_errors);
+
+    let base = dir.path().join("Packages").join("Base");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(base.join("core.py"), "GREETING = 'from Base'\n").unwrap();
+    editor.load_plugins();
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("helper"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("from Base"));
 }
 
 /// The modules newer Pythons removed entirely (`cgi`, `imghdr`, `pipes`, `uu`) and the names

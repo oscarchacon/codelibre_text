@@ -213,10 +213,11 @@ impl Editor {
         }
     }
 
-    /// Startup: loads packages, restores the previous session and opens the given paths.
+    /// Startup: loads packages, restores the previous session, opens the given paths, then loads
+    /// the plugins. As in Sublime, the window has its views when `plugin_loaded` runs (Color
+    /// Highlight asks for `active_window().active_view()` there); `on_init` gets them all.
     pub fn start(&mut self, paths: Vec<PathBuf>) {
         self.load_packages();
-        self.load_plugins();
         if self.global_settings().bool("hot_exit", true) {
             self.restore_session();
         }
@@ -230,7 +231,8 @@ impl Editor {
         if self.state.documents.is_empty() {
             self.new_file();
         }
-        self.plugin_init();
+        self.load_plugins(); // and `on_init` with those views
+        self.plugin_startup_events();
         if !self.state.load_errors.is_empty() {
             self.notify(self.tr_n(
                 "{count} package resource failed to load (Help > Package Load Errors)",

@@ -205,19 +205,20 @@ fn events_go_only_to_the_host_when_a_listener_wants_them() {
     assert!(world.plugins.events.borrow().is_empty());
 
     let world = World::new().with_plugins(&[], &["on_new", "on_activated_async"]).with_file("/a.txt", "a");
-    // The untitled view the editor starts with is new, and active.
-    world.plugins.then([done(), done()]);
+    // The untitled view the editor starts with existed before the plugins loaded: as in Sublime,
+    // they hear it is active (and get it in `on_init`), not that it is new.
+    world.plugins.then([done()]);
     let mut editor = world.editor();
     let first = editor.active_document().unwrap().id;
-    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_new".to_string(), first), ("on_activated".to_string(), first)]);
+    assert_eq!(world.plugins.events.borrow().as_slice(), [("on_activated".to_string(), first)]);
 
     world.plugins.then([done(), done(), done()]);
     editor.new_file();
     let id = editor.active_document().unwrap().id;
-    assert_eq!(world.plugins.events.borrow()[2..], [("on_new".to_string(), id), ("on_activated".to_string(), id)]);
+    assert_eq!(world.plugins.events.borrow()[1..], [("on_new".to_string(), id), ("on_activated".to_string(), id)]);
     // Opening a file: on_activated (wanted through its async variant); on_load is not wanted.
     open(&mut editor, "/a.txt");
-    assert_eq!(world.plugins.event_names(), ["on_new", "on_activated", "on_new", "on_activated", "on_activated"]);
+    assert_eq!(world.plugins.event_names(), ["on_activated", "on_new", "on_activated", "on_activated"]);
 }
 
 #[test]
@@ -287,7 +288,6 @@ fn edits_and_caret_moves_become_on_modified_and_on_selection_modified() {
 #[test]
 fn built_in_commands_run_by_listeners_wait_for_the_next_poll() {
     let world = World::new().with_plugins(&[], &["on_new"]);
-    world.plugins.then([done()]);
     let mut editor = world.editor();
     world.plugins.then([plugin_call("run_command", json!(["window", 1, "upper_case", null])), done()]);
     editor.new_file();

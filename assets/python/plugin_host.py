@@ -257,6 +257,13 @@ def set_dependency_folders(dependencies):
     sys.path[at:at] = _dependency_folders
 
 
+def failed_import(error):
+    """Whether a load error is a module that could not be imported (not one of ``plugin_loaded``,
+    whose module did import: running it again would start its threads again)."""
+    last = error.rstrip().splitlines()[-1] if error.strip() else ""
+    return " plugin_loaded():\n" not in error and last.startswith(("ModuleNotFoundError", "ImportError"))
+
+
 def load(message):
     """Loads the packages listed, which may be a second time: the packages that are gone or whose
     files changed are unloaded, the new ones loaded, and the others keep running (with their
@@ -278,6 +285,17 @@ def load(message):
         if name not in _packages:
             _packages[name] = load_package(name, dirs, message.get("archives") or [], signatures[name])
             new.append(_packages[name])
+    # A package that could not import another one (LSP-json before LSP, a SublimeLinter linter
+    # before SublimeLinter: Package Control installs them one by one) tries again once new
+    # packages are there, rather than staying broken until the next start.
+    if new:
+        for name, dirs in wanted:
+            package = _packages.get(name)
+            if package is not None and package not in new and any(failed_import(e) for e in package.errors):
+                unload_package(name)
+                importlib.invalidate_caches()
+                _packages[name] = load_package(name, dirs, message.get("archives") or [], signatures[name])
+                new.append(_packages[name])
     order = [name for name, _ in wanted]
     for name in sorted(_packages, key=order.index):
         _packages[name] = _packages.pop(name)

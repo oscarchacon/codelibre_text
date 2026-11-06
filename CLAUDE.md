@@ -105,7 +105,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   real profile (setting `APPDATA` does not work: Windows answers the known folder).
 - Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python` (`compat.py`: the
   standard library names newer Pythons dropped, applied before the plugins; `shims/`: `imp`, `asyncore`, `asynchat`,
-  `distutils.*`, `pipes`, `cgi`, `imghdr`, `uu`, last on `sys.path` for Pythons that dropped them).
+  `distutils.*`, `pipes`, `cgi`, `imghdr`, `uu`, last on `sys.path` for Pythons that dropped them; and `certifi`,
+  which Sublime ships for every host and `lsp_utils` imports undeclared).
 - A `.sublime-package` added to or removed from our `Installed Packages` reloads the packages
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 

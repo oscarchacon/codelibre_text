@@ -363,6 +363,10 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
       has them uses its own): `imp` (gone in 3.12), `asyncore` / `asynchat`, `distutils` (`version`, `util`,
       `dir_util`, `file_util`, `spawn`, `sysconfig`), and `pipes`, `cgi`, `imghdr` and `uu` (3.13).
+      Also `certifi` (MPL-2.0, unmodified from PyPI, `shims/certifi/`): Sublime ships it in `Lib/python3` for
+      every host, so libraries import it without declaring it (`lsp_utils` 4, which the LSP-* helpers use);
+      one Package Control installs comes first. To update it, replace `__init__.py`, `core.py`, `cacert.pem`
+      and `LICENSE` with those of the latest wheel (`pip download certifi --no-deps`).
 - [x] **Removed names**: `assets/python/compat.py`, applied before any plugin is imported: the `collections` ABCs (3.10),
       `inspect.getargspec` / `formatargspec` (3.11), `unittest`'s CamelCase methods, `configparser.SafeConfigParser` /
       `readfp` and `ssl.wrap_socket` / `match_hostname` (3.12), `cgi.escape` / `unescape` / `parse_qs` (3.8), `time.clock`
@@ -409,7 +413,12 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `.py` files (`package_signature`) and unloads (`plugin_unloaded`, its modules, listeners, `add_on_change`
       callbacks) the packages gone or changed, then loads the new ones; commands are rebuilt in load order and `on_init`
       reaches only the new listeners, while view and text listeners of a new package attach to the open views. So a
-      Package Control thread still installing goes on when the first package arrives. The editor keeps the plugins'
+      Package Control thread still installing goes on when the first package arrives. A kept package whose import
+      failed (`ModuleNotFoundError` / `ImportError`, not a `plugin_loaded` error) loads again when new packages
+      arrive: LSP-json or SublimeLinter-flake8 installed before LSP / SublimeLinter work in the same session
+      (`a_package_that_could_not_import_another_loads_once_it_arrives`). At startup the plugins load after the
+      session and the command line's files open, so `plugin_loaded` finds the active view (Color Highlight); then
+      `on_init`, `on_load` for the views of files and `on_activated`, as Sublime's `on_api_ready`. The editor keeps the plugins'
       settings files and watches unless the host started again (`PluginHostGateway::load` answers that). Left alone,
       as in Sublime: the timers of an unloaded package, kept packages that imported a changed one's modules.
 - [x] **A package with plugins and libraries** (2026-11-04, MarkdownPreview 2.8.2 with Markdown, pygments, pymdown-extensions,
@@ -448,7 +457,11 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       editor's own `exec` stays; a plugin's subclass is a command under its own name). `window.create_io_panel` /
       `find_io_panel` answer the output panel and, with an `on_input` callback, the field that types into its process
       (Enter calls `on_input(text)` and keeps the field open, Esc closes it; the field shares the panel, focused through
-      `window.focus_view`). Missing: the `paste_from_history` command and its listener.
+      `window.focus_view`). `indentation` (`line_and_normed_pt`, `pt_from_line_and_normed_pt`,
+      `normed_indentation_pt`: Alignment), `history_list` (`get_jump_history_for_view` and its `JumpHistory`:
+      Anaconda's Find Usages pushes selections there; we have no Jump Back / Forward commands yet) and `side_bar`
+      (`RenamePathCommand`, which FileManager subclasses). Missing: the `paste_from_history` command and its
+      listener, and the other modules of Sublime's `Default` until a package imports them.
 - [x] **Warnings**: `DeprecationWarning` and `SyntaxWarning` (Python 3.12's invalid escapes in old plugins) are not
       shown in the console, as in Sublime, where plugins are not `__main__`.
 - [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
