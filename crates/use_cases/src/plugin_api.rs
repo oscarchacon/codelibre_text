@@ -19,8 +19,9 @@ use serde_json::{json, Map, Value};
 use crate::editing::VIEW_COMMANDS;
 use crate::editor::Editor;
 use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginCommandKind};
+use crate::html_export::HtmlExportOptions;
 use crate::plugins::CommandRunner;
-use crate::scopes::SymbolList;
+use crate::scopes::{SymbolList, SymbolSource, SymbolType};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 /// The title of plugins' message dialogs (Sublime's say "Sublime Text").
@@ -270,7 +271,13 @@ impl Editor {
                 Ok(doc.map_or(Value::Null, |d| json!(d.id)))
             }
             "window_focus_view" => {
-                self.activate_document(a.u64(0)?);
+                let id = a.u64(0)?;
+                if self.plugin_input_panel().is_some_and(|p| p.document.id == id) {
+                    // The panels are not tabs: the field comes back through a request.
+                    self.request_plugin_input_panel();
+                } else {
+                    self.activate_document(id);
+                }
                 Ok(Value::Null)
             }
             "window_set_view_index" => {
@@ -307,6 +314,22 @@ impl Editor {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect::<Vec<_>>())),
+            "window_project_file_name" => Ok(self.project_file().map_or(Value::Null, |p| json!(p.display().to_string()))),
+            "window_workspace_file_name" => Ok(self.workspace_file().map_or(Value::Null, |p| json!(p.display().to_string()))),
+            "window_project_data" => Ok(self.project_data()),
+            "window_set_project_data" => {
+                self.set_project_data(a.value(0).clone());
+                Ok(Value::Null)
+            }
+            "window_extract_variables" => Ok(Value::Object(self.build_variables().into_iter().map(|(name, value)| (name, json!(value))).collect())),
+            "window_new_html_sheet" => {
+                let group = a.value(3).as_i64().filter(|group| *group >= 0).map(|group| group as usize);
+                Ok(json!(self.new_html_sheet(a.str(1)?, a.str(2)?, group)))
+            }
+            "view_set_html_contents" => {
+                self.set_html_sheet(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
             "view_is_valid" => Ok(json!(self.any_document(a.u64(0)?).is_some())),
             "view_find_all_results" => {
                 let results = self.output_results(a.u64(0)?);
@@ -327,7 +350,53 @@ impl Editor {
                 let statuses = self.state.plugins.view_statuses.get(&a.u64(0)?);
                 Ok(json!(statuses.and_then(|s| s.get(a.str(1).unwrap_or_default())).cloned().unwrap_or_default()))
             }
-            "window_create_output_panel" => Ok(json!(self.create_output_panel(a.str(1)?))),
+            "view_overwrite_status" => {
+                let id = a.u64(0)?;
+                self.any_document(id).ok_or("the view is closed")?;
+                Ok(json!(self.overwrite_status(id)))
+            }
+            "view_set_overwrite_status" => {
+                let id = a.u64(0)?;
+                self.any_document(id).ok_or("the view is closed")?;
+                self.set_overwrite_status(id, a.bool(1));
+                Ok(Value::Null)
+            }
+            "window_create_output_panel" => Ok(json!(self.create_output_panel(a.str(1)?, a.bool(2)))),
+            "window_create_io_panel" => {
+                let (output, input) = self.plugin_create_io_panel(a.str(1)?, a.value(3).as_u64(), a.bool(2));
+                Ok(json!([output, input]))
+            }
+            "window_find_io_panel" => {
+                let name = a.str(1)?;
+                Ok(json!([self.find_output_panel(name), self.io_input_panel(name)]))
+            }
+            "window_symbol_locations" => {
+                let source = match a.value(1).as_u64().unwrap_or(0) {
+                    1 => SymbolSource::Index,
+                    2 => SymbolSource::OpenFiles,
+                    _ => SymbolSource::Any,
+                };
+                let wanted = match a.value(2).as_u64().unwrap_or(0) {
+                    1 => SymbolType::Definition,
+                    2 => SymbolType::Reference,
+                    _ => SymbolType::Any,
+                };
+                let locations = self.symbol_locations(a.str(0)?, source, wanted);
+                Ok(json!(locations
+                    .into_iter()
+                    .map(|l| json!({
+                        "path": l.path.map(|p| p.display().to_string()).unwrap_or_default(),
+                        "display_name": l.display_name,
+                        "row": l.row,
+                        "col": l.column,
+                        "syntax": l.syntax,
+                        "type": if l.reference { 2 } else { 1 },
+                        "kind_id": l.kind.id,
+                        "kind_letter": l.kind.letter.to_string(),
+                        "kind_description": l.kind.description,
+                    }))
+                    .collect::<Vec<_>>()))
+            }
             "window_find_output_panel" => Ok(self.find_output_panel(a.str(1)?).map_or(Value::Null, |id| json!(id))),
             "window_destroy_output_panel" => {
                 self.destroy_output_panel(a.str(1)?);
@@ -403,6 +472,24 @@ impl Editor {
             "view_context_backtrace" => {
                 let frames = self.context_backtrace(a.u64(0)?, a.usize(1)?);
                 Ok(json!(frames.into_iter().map(|f| json!([f.context_name, f.source_file])).collect::<Vec<_>>()))
+            }
+            "view_export_to_html" => {
+                let id = a.u64(0)?;
+                let regions: Vec<Selection> = a
+                    .value(1)
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|r| Some(Selection::new(r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
+                    .collect();
+                let regions = (!regions.is_empty()).then_some(regions.as_slice());
+                let options = HtmlExportOptions {
+                    minihtml: a.bool(2),
+                    enclosing_tags: a.bool(3),
+                    font_size: a.bool(4),
+                    font_family: a.bool(5),
+                };
+                Ok(json!(self.export_to_html(id, regions, options).ok_or("the view is closed")?))
             }
             "view_symbol_regions" => {
                 let list = match a.str(1).unwrap_or("symbols") {
@@ -538,8 +625,7 @@ impl Editor {
                 doc.replace_range(point(1)?, point(2)?, a.str(3)?);
                 Value::Null
             }
-            "view_selection_get" => json!(doc.selections().iter().map(|s| [s.anchor, s.head]).collect::<Vec<_>>()),
-            "view_selection_set" => {
+            "view_selection_get" => json!(doc.selections().iter().map(|s| [s.anchor, s.head]).collect::<Vec<_>>()),            "view_selection_set" => {
                 let mut regions: Vec<Selection> = a
                     .value(1)
                     .as_array()

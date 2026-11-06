@@ -55,6 +55,8 @@ pub struct SideBarViewModel {
 pub struct StatusBarViewModel {
     /// e.g. `Line 3, Column 7; 5 characters selected`.
     pub position: String,
+    /// A plugin put the view in overwrite mode (`view.set_overwrite_status`).
+    pub overwrite: bool,
     /// What plugins show for the active view (`view.set_status`), in key order.
     pub plugin_statuses: Vec<String>,
     pub message: Option<String>,
@@ -137,6 +139,8 @@ pub struct OutputPanelViewModel {
     /// [`presenters::output_panel::MAX_LINES`]: crate::presenters::output_panel::MAX_LINES
     pub text: String,
     pub font_size: f32,
+    /// The view's `word_wrap` setting (long lines wrap instead of scrolling sideways).
+    pub word_wrap: bool,
     /// The line of the panel's text that `text` starts with.
     pub first_line: usize,
     /// The line of `text` of the result visited last.
@@ -294,6 +298,8 @@ pub struct RegionViewModel {
     pub underline: Option<Underline>,
     /// Empty regions are drawn (as a bar where the caret would be).
     pub draw_empty: bool,
+    /// `DRAW_EMPTY_AS_OVERWRITE`: an empty region is drawn as a block, like an overwrite caret.
+    pub overwrite_empty: bool,
     /// The set's key (a link in its annotations tells it).
     pub key: String,
     /// Annotations, by the start of their region: shown at the right of that line.

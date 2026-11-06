@@ -10,7 +10,12 @@ libraries for the Python we run, Package Control upgrades itself; 2026-11-05 Pac
 removal deferred to the next start, `Default.exec`, `view.style` / `style_for_scope`, popups, phantoms, `on_hover`,
 auto-complete and plugins' completions, groups and layouts; 2026-11-06 local channels / repositories, unpacked
 packages and `revert_package` tried, event commands on the view that asked, `move` by pages / stops / sub-words and
-`move_to brackets`, Tools > Build System, region annotations). The rest of B and phase C below are the pending work, in order.
+`move_to brackets`, Tools > Build System, region annotations). 2026-11-06: the checkboxes and "missing" lists were
+checked against the code (clones, windows, completions, phantoms, groups and `reload_plugin` are done; scopes only lack
+exact score values and whole-file scans); the rest of B and phase C below are the pending work, in order. Also on
+2026-11-06: projects (`project_data`, `$project*`, project builds), `create_io_panel` with its `on_input` field,
+`window.symbol_locations` and the `lookup_*` functions, `PERSISTENT` regions in the session, `set_overwrite_status`,
+`new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`.
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -101,7 +106,8 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
 
 ### Conventions
 
-- Positions are char indices (like `Selection`); view id = `DocumentId`; there is one window (id 1).
+- Positions are char indices (like `Selection`); view id = `DocumentId`; windows are ids from 1 (`WindowId`, the first
+  is 1). Clones share a `Document::buffer`; each view has its own selections, regions, phantoms and scroll.
 - `view.sel()` sends the whole list on every change (`view_selection_set`); the **last** region becomes
   the primary selection the text widget shows. A cleared selection stays on the Python side until refilled.
 - Settings targets: `["view", id]`, `["file", "Name.sublime-settings"]`, `["window", 1]`.
@@ -133,10 +139,11 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   `Window` (active_view, views, new_file, open_file incl. `ENCODED_POSITION`, find_open_file, focus_view, folders,
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
-- Stand-ins (so plugins do not crash, but nothing visible happens yet), for what phase C will implement:
-  `meta_info`, symbols, `show_popup_menu` (a quick panel), `CompletionItem` / `CompletionList`,
-  folding, the view's geometry (`text_to_layout`…, a fixed 8×16 font), groups / layouts / sheets (`Sheet`), the symbol
-  index, `list_syntaxes` / `find_syntax_*`. (Scopes, styles, popups and phantoms were stand-ins too; phase C made them real.)
+- Stand-ins (so plugins do not crash, but nothing visible happens yet), for what phase C still has to finish:
+  `show_popup_menu` (a quick panel), folding, the view's geometry (`text_to_layout`…, a fixed 8×16 font), sheets
+  (`TextSheet` / `ImageSheet`). (Meta and symbol information, completions, groups / layouts, `list_syntaxes` /
+  `find_syntax_*`, scopes, styles, popups and phantoms were stand-ins too; phase C made them real. `HtmlSheet` and
+  `new_html_sheet` are real: a read-only tab with the plain text of the minihtml.)
   (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
 ## Phase B — events, panels, async (in progress)
@@ -156,8 +163,9 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       keeps a copy of the text and compares it after each edit (the widget edits in place), once a frame the
       changes go in an `on_text_changed` query. Several carets count as one change from the first to the last.
       The columns of `HistoricPosition` are chars, also in `col_utf8` / `col_utf16`.
-- [ ] Events still missing: `on_clone`, `on_new_window` and `applies_to_primary_view_only` wait for clones and several windows
-      (phase C). (`on_hover` is done, with popups: phase C.)
+- [x] Clones and windows: `on_clone` (also for `ViewEventListener`s, with `applies_to_primary_view_only`) and
+      `on_new_window` / `on_pre_close_window`; `view.clones()` / `view.is_primary()`. (`on_hover` is done, with popups:
+      phase C.)
 - [x] Built-in commands that edit text (`EDITING_COMMANDS` in `command_controller.rs`) run at once inside an event or
       query, on the view that asked (`Editor::set_event_command_runner`, set by `compose()`), through the hooks, so a
       formatter's `view.run_command(...)` in `on_pre_save` reaches the file.
@@ -165,12 +173,13 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `command_controller.rs`: `split_selection_into_lines`, `find_all_under`, `set_setting`, `set_file_type`…) also run at once.
       The others (panels, the widget's undo / clipboard, `save`, `close`…) wait for the next frame, and then run on the view
       that asked (`queue_plugin_command` keeps it; the active view comes back afterwards).
-- [ ] Still not at once: those that need `ViewState`, and `save` / `close`, which would change the views under the use case
-      that fired the event; moving their `ViewState` changes out of those arms would allow it.
+- [ ] Still not at once: `save` / `close`, `select_all`, the widget's undo / clipboard and the panel / build commands;
+      they change views or `ViewState` under the use case that fired the event, so they wait for the next frame
+      (`runs_during_event` in `command_controller.rs`).
 - [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
       listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
       becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
-      `match_all` is always false.
+      `match_all` goes to the listeners.
 - [x] **`on_text_command` / `on_window_command`**: `command_controller::run` asks before every command; a `(name, args)`
       answer runs instead (once: the new command is not asked about again). `on_post_text_command` /
       `on_post_window_command` after it, with the command that ran. Plugin commands go by their kind (application
@@ -189,8 +198,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       and the completion list stay the widget's; `on_post_text_command` fires after that frame. With several selections the
       widget only knows the primary one, so the use cases do the edit instead (as without listeners). Without listeners
       nothing changes: every key goes straight to the widget.
+- [x] `on_post_text_command_async` / `on_post_window_command_async` run on the async thread; a listener that defines only
+      the `_async` form still makes the editor ask (`sublime_plugin.events` advertises the sync name).
 - [ ] Hooks, still missing: a `left_delete` / `move` the user binds in a keymap runs as a command (the use case, not the
-      widget), so it is outside the widget's undo; `on_post_*_async` run on the async thread.
+      widget), so it is outside the widget's undo.
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `; the minihtml of details and annotations is shown as text,
       annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -239,18 +250,26 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] **Tools > Build System**: Automatic, then every build system by name (`{"command": "$build_systems"}` in the menu,
       expanded by `presenters::menu`, read at each package load: `Editor::menu_build_systems`); each runs
       `set_build_system`, the one set is checked. Builds inside zipped packages load since `.sublime-package` support.
-- [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), variants in
-      the Build System menu. There is no Ctrl+Break: egui has no such key.
-- [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
-      built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
-      `delete_word`, `select_all`, `insert`) and `append` in a panel (the command controller only knows tabs), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
+- [x] **Projects**: a `.sublime-project` opened from File > Open Project…, the palette (`project_open`) or a plugin is a
+      project (`entities/src/project.rs`): its `folders` become the window's folders (`set_folders`,
+      `sync_project_folders`), its `settings` layer over the global ones, its `build_systems` are builds (with
+      `$project`, `$project_path`, `$project_name`, `$project_base_name`, `$project_extension`, `$project_file`,
+      `$project_file_path`) and `project_data` / `set_project_data` read and write it (the file is saved), with
+      `extract_variables` understanding `$project*`. The commands are `prompt_open_project` / `open_project` and
+      `close_project`, with Sublime's `prompt_open_project_or_workspace` / `open_project_or_workspace` as aliases
+      (workspaces are not read). The session keeps the project open.
+- [ ] Builds, still missing: variants in the Build System menu. There is no Ctrl+Break: egui has no such key.
+- [ ] Output panels, still missing: the panel's own syntax highlighting, selections drawn, built-in commands other than
+      `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`, `delete_word`, `select_all`,
+      `insert`), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
+      `append` and result lines work in panels; `unlisted`, `word_wrap` and `font_size` of the view are respected.
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
       `cancel`, `next_input`, `BackInputHandler`, `sublime.ListInputItem`) and runs the command itself. Key bindings
       and menus run the command directly. `preview` goes to the status bar.
 - [ ] Input handlers, still missing: they are not inside the palette as in Sublime (no breadcrumb, `Backspace` does
-      not go back to the previous handler), `initial_selection`, `want_event`, HTML previews.
+      not go back to the previous handler), `want_event`, HTML previews. `initial_selection` keeps its regions.
 - [x] **Command metadata**: `is_visible`, `is_enabled`, `is_checked`, `description` of every plugin command in the
       menus and the palette, asked in one `command_states` query when a menu or the palette opens (`plugin_commands.rs`)
       and only if some command defines them. Menus hide, grey out and check their items; the palette leaves out
@@ -267,11 +286,14 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       works in `select_folder_dialog`. `allow_folders` is ignored: the native dialog picks either files or folders.
 - [x] **Statuses**: `view.set_status/get_status/erase_status`, kept by the editor per view
       (`PluginState::view_statuses`, dropped with the view) and shown after the caret position, in key order.
+      `view.set_overwrite_status` / `overwrite_status` (`PluginState::overwrite_views`, `OVR` in the status bar).
 - [x] **Regions drawn**: `view.add_regions(key, regions, scope, icon, flags)` / `get_regions` / `erase_regions` keep a
       `RegionSet` in the `Document`, moved by its edits (`replace_range`). Drawn under the text in the scope's color
       (the color scheme's rule, or a built-in color for `region.<color>ish`): filled and outlined unless
-      `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar, `HIDDEN` not
-      drawn; `dot` / `circle` / `bookmark` icons in the gutter (any other icon is a dot).
+      `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar,
+      `DRAW_EMPTY_AS_OVERWRITE` as a block, `HIDDEN` not drawn; `dot` / `circle` / `bookmark` icons in the gutter
+      (any other icon is a dot). `PERSISTENT` sets go to the session (`SessionDocument::regions`) and come back with
+      the file.
 - [x] Regions move with every edit, also the widget's: `add_regions` keeps a copy of the text, compared in
       `Document::note_text_changed`. An edit with several selections is one change from the first caret to the
       last, so regions between the carets collapse.
@@ -280,11 +302,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
       lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
-- [ ] Regions, still missing: `PERSISTENT`,
-      `DRAW_EMPTY_AS_OVERWRITE`, icon files, the minimap.
+- [ ] Regions, still missing: icon files, the minimap.
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
-      a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are phase C.
+      a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are unpacked, above.
 - [x] `view.change_count()`, `view.is_scratch/set_scratch` (`Document::scratch`: never dirty), `view.close(on_close)`
       (a dirty view asks first and answers false).
 - [x] `view.show/show_at_center` (point, region or selection): `Document::request_show`, followed by the view
@@ -337,9 +358,11 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `CODELIBRE_TEXT_DATA` in `app_directories.rs`): Package Control prefixes them with `\\?\`, after which `/` is no
       separator, and with `C:/…` it could not list `Installed Packages`.
 - [x] **Removed modules**: `assets/python/shims/` (written to `Lib/python/shims`, last on `sys.path`, so a Python that still
-      has them uses its own): `imp` (gone in 3.12) and `distutils.version` (`LooseVersion`, `StrictVersion`).
-- [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14 here).
-      More shims as plugins need them (`asyncore` / `asynchat`, the rest of `distutils`). Done in `plugin_host.py`:
+      has them uses its own): `imp` (gone in 3.12), `asyncore` / `asynchat` and `distutils` (`version`, `util`,
+      `dir_util`, `file_util`, `spawn`, `sysconfig`).
+- [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run whatever Python 3 is installed (3.14
+      here), not a bundled 3.8 / 3.3. `sublime.version()` reports the build whose plugin host runs that Python (4203 for
+      3.14+, 4201 for 3.13, else 4200). More shims as plugins need them. Done in `plugin_host.py`:
       `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did
       (`restore_entry_points_by_group`; Markdown needs it). Libraries for 3.8 run on 3.14 only while they avoid what
       later Pythons removed; compiled ones (`cp38` wheels) cannot.
@@ -402,7 +425,9 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       errors kept in `errs_by_file` but not drawn inline). They are only imported, not loaded as plugins: their listeners
       would make every copy / paste a command for the hooks, and `set_commands` skips classes of `Default.*` (the
       editor's own `exec` stays; a plugin's subclass is a command under its own name). `window.create_io_panel` /
-      `find_io_panel` answer `(output panel, None)`. Missing: the `paste_from_history` command and its listener.
+      `find_io_panel` answer the output panel and, with an `on_input` callback, the field that types into its process
+      (Enter calls `on_input(text)` and keeps the field open, Esc closes it; the field shares the panel, focused through
+      `window.focus_view`). Missing: the `paste_from_history` command and its listener.
 - [x] **Warnings**: `DeprecationWarning` and `SyntaxWarning` (Python 3.12's invalid escapes in old plugins) are not
       shown in the console, as in Sublime, where plugins are not `__main__`.
 - [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
@@ -412,13 +437,13 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       concerned reload (see reloading above).
 - [x] **Package settings**: `edit_settings` (Preferences > Package Settings > <package> > Settings, a package's palette
       entries) opens the package's own file as the read-only left view (`load_resource`, also inside archives; our
-      `Default` package's are built in) and the `User` copy next to it, as tabs (no groups). A package's keymap no longer
-      shows ours. Preferences > Package Settings is a real submenu packages merge into (`id` `package-settings`); the menu
-      presenter hides submenus left empty and separators at an edge or doubled.
+      `Default` package's are built in) and the `User` copy next to it, as tabs (not side by side in a group). A
+      package's keymap no longer shows ours. Preferences > Package Settings is a real submenu packages merge into (`id`
+      `package-settings`); the menu presenter hides submenus left empty and separators at an edge or doubled.
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
-- [x] `window.set_view_index` / `set_sheet_index` move the tab (`Editor::move_document`; one group, so only the index
-      counts). Package Control moves its message view with them.
+- [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).
+      Package Control moves its message view with them.
 - [x] **Scopes** from the syntax engine: `SyntaxGateway::line_scopes` parses one line again from the parser state the
       highlighting cache keeps for its start (`SyntaxEngine::line_scopes`); the use cases (`use_cases/src/scopes.rs`)
       turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,
@@ -432,8 +457,16 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `scope_style`, `SyntaxEngine`: syntect's `style_mod_for_stack` on the whole scope stack): globals and a scope's
       `foreground`, `background` (when a rule sets one), `bold` / `italic` / `underline`, as `#rrggbb` or `#rrggbbaa`.
       The `source_*` keys are empty; the global `color_scheme`, not a view's own.
-- [ ] Scopes, still missing: `meta_info` (`.tmPreferences`), `symbol_regions` / `indexed_symbols`, `context_backtrace`,
-      Sublime's exact `extract_scope` and score values, `match_all` in contexts; `find_by_selector` and `extract_scope`
+- [x] **`view.export_to_html`** (`use_cases/src/html_export.rs`): the regions asked for (or the whole view) as HTML,
+      each run in a `<span>` with the scheme's color, background and bold / italic / underline; a `<pre>` keeps the
+      lines and spaces; `enclosing_tags` adds the `<div>` with the background color (and `font_size` / `font_family`);
+      `minihtml` uses the same shapes, which our minihtml reads. `&`, `<` and `>` are escaped.
+- [x] `meta_info` (`.tmPreferences`), `symbol_regions` / `indexed_symbols` / `indexed_references`, `context_backtrace`
+      (`entities/src/meta_info.rs`), and `match_all` in key binding contexts. `window.symbol_locations` (and the
+      deprecated `lookup_symbol_in_index` / `_in_open_files`, `lookup_references_in_index` / `_in_open_files`) search
+      the open files (`use_cases/src/scopes.rs::symbol_locations`); the index on disk is not kept, so `INDEX` answers
+      the saved open files.
+- [ ] Scopes, still missing: Sublime's exact `extract_scope` and score values; `find_by_selector` and `extract_scope`
       parse the whole file every call.
 - [x] **Completions** (`use_cases/src/completions.rs`, `entities/src/completion.rs`, drawn by `editor_view.rs`): the
       auto-complete list opens while typing a word where `auto_complete_selector` matches (or a character of
@@ -450,8 +483,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       the word grows), `INHIBIT_REORDER`; formats text, snippet (`insert_snippet`: the first field selected) and
       command (the command runs); `KEEP_PREFIX`. Tab after a trigger typed in full inserts it (`tab_completion`,
       `insert_best_completion`). `view.is_auto_complete_visible()`, `view.extract_completions()`.
-- [ ] Completions, still missing: the snippet fields after the first (Tab to the next one), several carets (only the
-      primary one is completed), `auto_complete_delay`, `auto_complete_use_history`, `auto_complete_cycle`,
+- [x] The rest: snippet fields after the first (`next_field` / `prev_field` / `clear_fields`), several carets
+      (`complete_at_each`), `auto_complete_delay`, `auto_complete_use_history`, `auto_complete_cycle`,
       `replace_completion_with_next_completion`, the words of the other open views, `rhs_empty` triggers.
 - [x] **Popups** (`use_cases/src/plugin_popups.rs`): `show_popup` (location, `max_width` / `max_height`, `on_navigate`,
       `on_hide`), `update_popup`, `is_popup_visible`, `hide_popup`. One popup, drawn by `editor_view.rs` in an egui `Area`
@@ -467,12 +500,12 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       images, `font-size`, tables as tables.
 - [x] **Phantoms**: `add_phantom` / `erase_phantoms` / `erase_phantom_by_id` / `query_phantom(s)`, `PhantomSet.update`
       (an equal phantom where edits moved it keeps its id, as in Sublime); kept in the `Document` (`Phantom`), moved by
-      its edits like regions; links call `on_navigate`. Missing: every layout is drawn after the end of the line of the
-      region's end, over the text: `LAYOUT_BLOCK` / `LAYOUT_BELOW` make no room under the line, `LAYOUT_INLINE` does not
-      push the text aside.
+      its edits like regions; links call `on_navigate`. Every layout is drawn where Sublime draws it: `LAYOUT_INLINE`
+      pushes the text after its point aside, `LAYOUT_BELOW` / `LAYOUT_BLOCK` make room under the line.
 - [x] **`on_hover(view, point, hover_zone)`**: the view reports where the mouse rested for 0.5 s (text, gutter or the
       margin after a line, not over a popup), once per place, only when a listener defines it (a query, so
-      `ViewEventListener`s hear it too). Missing: annotations (`add_regions`' `annotations`), `on_hover` over phantoms.
+      `ViewEventListener`s hear it too), also over phantoms.
+- [ ] `on_hover` still missing: over annotations (`add_regions`' `annotations`).
 - [x] **Groups and layouts** (`use_cases/src/groups.rs`, `entities/src/layout.rs`, drawn by `app.rs::show_group`): each
       document is in a group (`Document::group`), the tabs of a group are its documents in window order, and a group shows
       the one used last. `set_layout` (View > Layout, Alt+Shift+1…5/8/9), `focus_group` (Ctrl+1…9),
@@ -483,11 +516,15 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       API: `num_groups`, `active_group`, `focus_group`, `layout` / `get_layout` / `set_layout`, `views_in_group`,
       `active_view_in_group`, `get_view_index` / `set_view_index` (group and index), `sheets_in_group`,
       `active_sheet_in_group`, `move_sheets_to_group`, `Sheet.group()`, `open_file(group=)`.
-- [ ] Groups, still missing: dragging the borders between groups, dragging tabs between them, `new_pane` / `close_pane`
-      and `set_max_columns` (Python in Sublime's `Default`), the side bar's open files by group, `transient` views.
-- [ ] **Several windows and clones** (`new_window`, `clone_file`, `view.clones()`): egui's viewports for windows; a clone
-      needs the view (selection, scroll) apart from the `Document`.
-- [ ] `sublime_plugin.reload_plugin`. (Saving a plugin reloads only its package: see reloading above.)
+- [x] The rest: dragging the borders between groups and tabs between them, `new_pane` / `close_pane` /
+      `set_max_columns`, the side bar's open files by group, `transient` views (`window.transient_view_in_group`).
+- [x] **Several windows and clones** (`new_window`, `clone_file`, `view.clones()`, `view.is_primary()`): each window has
+      its own views, layout, groups, folders, output panels and settings; a clone keeps its selections, regions,
+      phantoms and scroll apart from the `Document` (edits and saves are shared).
+- [x] **`window.new_html_sheet`** (`HtmlSheet`): a read-only scratch tab whose text is the plain text of the minihtml
+      (`entities/src/minihtml.rs`), in the group it asks for. `HtmlSheet.set_contents` replaces that text; links are not
+      clickable.
+- [x] `sublime_plugin.reload_plugin` / `unload_plugin`. (Saving a plugin reloads only its package: see reloading above.)
 
 `crates/frameworks/tests/sublime_packages.rs` (`-- --ignored`) loads the packages of the Sublime Text installed here:
 68 syntaxes, 34 color schemes, 20 build systems, their plugins, no errors (2026-10-30). Language keymaps load; their

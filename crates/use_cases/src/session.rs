@@ -1,8 +1,8 @@
 //! Use cases: hot exit (restore folders and unsaved buffers on the next start) and quitting.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use entities::document::Document;
+use entities::document::{Document, RegionSet};
 use entities::layout::Layout;
 use entities::selection::Selection;
 
@@ -12,6 +12,8 @@ use crate::editor::{Editor, PendingClose};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Session {
     pub folders: Vec<PathBuf>,
+    /// The window's `.sublime-project` file, if it has one.
+    pub project: Option<PathBuf>,
     pub documents: Vec<SessionDocument>,
     pub active: usize,
     /// UI layout flags owned by the outer circles (e.g. `side_bar`), stored as-is.
@@ -32,6 +34,8 @@ pub struct SessionDocument {
     pub syntax: String,
     pub selection: Selection,
     pub group: usize,
+    /// The `PERSISTENT` regions of the view.
+    pub regions: Vec<RegionSet>,
 }
 
 impl Editor {
@@ -55,9 +59,9 @@ impl Editor {
         let current = self.current_window();
         let first = self.window_ids()[0];
         self.switch_to_window(first);
-        let mut session = window_session(&self.state.documents, self.state.active, &self.state.layout, self.state.active_group, &self.state.folders);
+        let mut session = window_session(&self.state.documents, self.state.active, &self.state.layout, self.state.active_group, &self.state.folders, self.state.project.as_ref().and_then(|p| p.file.as_deref()));
         session.layout = layout;
-        session.windows = self.other_windows().map(|(_, docs, active, layout, group, folders)| window_session(docs, active, layout, group, folders)).collect();
+        session.windows = self.other_windows().map(|(_, docs, active, layout, group, folders, project)| window_session(docs, active, layout, group, folders, project)).collect();
         self.switch_to_window(current);
         if let Err(e) = self.gateways.sessions.save(&session) {
             self.notify(self.tr_args("Could not save the session: {error}", &[("error", &e)]));
@@ -90,6 +94,9 @@ impl Editor {
                 self.add_folder(folder);
             }
         }
+        if let Some(project) = session.project.filter(|path| self.gateways.file_system.exists(path)) {
+            self.open_project(&project);
+        }
         if let Some(layout) = session.groups {
             self.set_layout(layout);
         }
@@ -115,6 +122,7 @@ impl Editor {
             }
             doc.syntax = self.gateways.syntaxes.resolve(&saved.syntax);
             doc.set_selection(saved.selection);
+            doc.restore_regions(saved.regions);
             doc.group = saved.group.min(self.group_count() - 1);
             self.state.documents.push(doc);
         }
@@ -128,9 +136,10 @@ impl Editor {
 }
 
 /// One window as the session keeps it: its files (not the scratch views), folders and groups.
-fn window_session(documents: &[Document], active: usize, layout: &Layout, active_group: usize, folders: &[PathBuf]) -> Session {
+fn window_session(documents: &[Document], active: usize, layout: &Layout, active_group: usize, folders: &[PathBuf], project: Option<&Path>) -> Session {
     Session {
         folders: folders.to_vec(),
+        project: project.map(Path::to_path_buf),
         documents: documents
             .iter()
             .filter(|d| d.scratch_name.is_none() && (d.path.is_some() || !d.text.is_empty()))
@@ -140,6 +149,7 @@ fn window_session(documents: &[Document], active: usize, layout: &Layout, active
                 syntax: d.syntax.clone(),
                 selection: d.selection(),
                 group: d.group,
+                regions: d.persistent_regions(),
             })
             .collect(),
         active,

@@ -56,6 +56,40 @@ pub struct SymbolRegion {
     pub kind: SymbolKind,
 }
 
+/// Where a symbol of the window is (Sublime's `SymbolLocation`): a place in an open file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolLocation {
+    /// The file's path (`None` for a view that is not a file).
+    pub path: Option<std::path::PathBuf>,
+    /// The path shown to the user: relative to the first open folder when the file is under it.
+    pub display_name: String,
+    /// Zero-based.
+    pub row: usize,
+    pub column: usize,
+    pub syntax: String,
+    pub kind: SymbolKind,
+    /// From the references list (not a definition).
+    pub reference: bool,
+}
+
+/// Which documents `window.symbol_locations` searches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolSource {
+    /// Both the index and the open files (they are the same here: no file is indexed on disk).
+    Any,
+    /// The open files that are saved (the index built while scanning is not kept).
+    Index,
+    OpenFiles,
+}
+
+/// Which symbols `window.symbol_locations` wants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolType {
+    Any,
+    Definition,
+    Reference,
+}
+
 impl Editor {
     /// The scope of the char at `point`, as Sublime writes it: names separated by spaces, with
     /// a space at the end. At the end of the text, the scope of the last char.
@@ -222,8 +256,10 @@ impl Editor {
                 finish(run.take(), &mut symbols);
                 continue;
             }
+            // A run stays on its line: a symbol is one line, even when its scope spans several.
+            let starts_line = doc.text[..char_to_byte(&doc.text, token.start)].ends_with('\n');
             match &mut run {
-                Some((_, end, _)) if *end == token.start => *end = token.end,
+                Some((_, end, scope)) if *end == token.start && scope.as_str() == token.scope && !starts_line => *end = token.end,
                 _ => {
                     finish(run.take(), &mut symbols);
                     run = Some((token.start, token.end, token.scope));
@@ -234,7 +270,59 @@ impl Editor {
         symbols
     }
 
+    /// `window.symbol_locations(symbol, source, type)`: where a symbol is, in the open files (the
+    /// ones that have a path, and all of them for `OpenFiles`). The index is not kept on disk, so
+    /// `Index` answers the saved open files too.
+    pub fn symbol_locations(&self, symbol: &str, source: SymbolSource, wanted: SymbolType) -> Vec<SymbolLocation> {
+        let definitions = wanted != SymbolType::Reference;
+        let references = wanted != SymbolType::Definition;
+        let mut locations = Vec::new();
+        for doc in &self.state.documents {
+            if source != SymbolSource::OpenFiles && doc.path.is_none() {
+                continue;
+            }
+            let mut found: Vec<(SymbolRegion, bool)> = Vec::new();
+            if definitions {
+                found.extend(self.symbol_regions(doc.id, SymbolList::Indexed).into_iter().map(|s| (s, false)));
+            }
+            if references {
+                found.extend(self.symbol_regions(doc.id, SymbolList::References).into_iter().map(|s| (s, true)));
+            }
+            for (region, reference) in found.into_iter().filter(|(region, _)| region.name == symbol) {
+                let (row, column) = line_col(&doc.text, region.start);
+                locations.push(SymbolLocation {
+                    path: doc.path.clone(),
+                    display_name: self.display_path(doc.path.as_deref()),
+                    row,
+                    column,
+                    syntax: doc.syntax.clone(),
+                    kind: region.kind.clone(),
+                    reference,
+                });
+            }
+        }
+        locations
+    }
+
+    /// A file's path as the user sees it: relative to the first open folder, else its own path.
+    fn display_path(&self, path: Option<&std::path::Path>) -> String {
+        let Some(path) = path else { return String::new() };
+        self.state
+            .folders
+            .iter()
+            .find_map(|folder| path.strip_prefix(folder).ok())
+            .map_or_else(|| path.display().to_string(), |relative| relative.display().to_string())
+    }
+
     pub(crate) fn line_spans(&self, doc: &Document, line: usize) -> Vec<ScopeSpan> {
         self.gateways.syntaxes.line_scopes(doc.id, &doc.text, &doc.syntax, line)
     }
+}
+
+/// The zero-based line and column (in chars) of a char point.
+fn line_col(text: &str, point: usize) -> (usize, usize) {
+    let byte = char_to_byte(text, point);
+    let row = text[..byte].matches('\n').count();
+    let column = text[..byte].rfind('\n').map_or(byte, |at| byte - at - 1);
+    (row, column)
 }

@@ -7,6 +7,7 @@
 			{ "command": "clone_file", "caption": "New View into File" },
 			{ "command": "prompt_open_file", "caption": "Open File…" },
 			{ "command": "prompt_open_folder", "caption": "Open Folder…" },
+			{ "command": "prompt_open_project", "caption": "Open Project…" },
 			{ "command": "reopen_last_file", "caption": "Reopen Closed File" },
 			{ "caption": "-" },
 			{ "command": "save", "caption": "Save" },
@@ -17,6 +18,7 @@
 			{ "command": "close", "caption": "Close File" },
 			{ "command": "close_all", "caption": "Close All Files" },
 			{ "command": "close_folder_list", "caption": "Close Folder" },
+			{ "command": "close_project", "caption": "Close Project" },
 			{ "command": "close_window", "caption": "Close Window" },
 			{ "caption": "-" },
 			{ "command": "exit", "caption": "Exit" }

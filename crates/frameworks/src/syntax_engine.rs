@@ -445,6 +445,9 @@ struct HighlightCache {
     lines: Vec<CachedLine>,
 }
 
+/// A highlighted line: its styled spans, its Goto Symbol name and its scopes.
+type Highlighted = (Vec<(Range<usize>, Style)>, Option<String>, Vec<ScopeSpan>);
+
 #[derive(Clone)]
 struct CachedLine {
     text: String,
@@ -525,7 +528,7 @@ fn highlight_line(
     state: &mut (ParseState, HighlightState),
     syntaxes: &SyntaxSet,
     highlighter: &Highlighter,
-) -> (Vec<(Range<usize>, Style)>, Option<String>, Vec<ScopeSpan>) {
+) -> Highlighted {
     let Ok(ops) = state.0.parse_line(line, syntaxes) else {
         return (Vec::new(), None, Vec::new());
     };

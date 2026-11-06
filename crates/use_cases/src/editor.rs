@@ -11,6 +11,7 @@ use entities::layout::Layout;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
+use entities::project::Project;
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
 
@@ -79,6 +80,8 @@ pub struct EditorState {
     /// The group with the focus.
     pub active_group: usize,
     pub folders: Vec<PathBuf>,
+    /// The window's `.sublime-project` (its folders, build systems and `$project*`).
+    pub project: Option<Project>,
     pub settings: SettingsLayers,
     pub keymap: Keymap,
     pub main_menu: Vec<MenuItem>,
@@ -163,6 +166,7 @@ impl Editor {
                 layout: Layout::default(),
                 active_group: 0,
                 folders: Vec::new(),
+                project: None,
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
                 main_menu: Vec::new(),

@@ -134,6 +134,9 @@ pub struct TextChange {
     pub text: String,
 }
 
+/// `sublime.PERSISTENT`: a region set kept in the session, so it survives a restart.
+pub const PERSISTENT: u64 = 16;
+
 /// A named set of regions a plugin marks (a linter's errors, a search's matches…). The regions
 /// move with the text.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -659,6 +662,18 @@ impl Document {
 
     pub fn region_sets(&self) -> &[RegionSet] {
         &self.region_sets
+    }
+
+    /// The region sets a plugin asked to keep across runs (`sublime.PERSISTENT`).
+    pub fn persistent_regions(&self) -> Vec<RegionSet> {
+        self.region_sets.iter().filter(|set| set.flags & PERSISTENT != 0).cloned().collect()
+    }
+
+    /// Puts back the region sets of the session.
+    pub fn restore_regions(&mut self, sets: Vec<RegionSet>) {
+        for set in sets {
+            self.add_regions(set);
+        }
     }
 
     /// Nothing needs the copy of the text any more.

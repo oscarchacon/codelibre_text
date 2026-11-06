@@ -10,6 +10,8 @@
 	{ "caption": "File: Close All", "command": "close_all" },
 	{ "caption": "File: Reopen Closed File", "command": "reopen_last_file" },
 	{ "caption": "Project: Close Folder", "command": "close_folder_list" },
+	{ "caption": "Project: Open Project…", "command": "prompt_open_project" },
+	{ "caption": "Project: Close Project", "command": "close_project" },
 	{ "caption": "Build", "command": "build" },
 	{ "caption": "Build With…", "command": "build", "args": { "select": true } },
 	{ "caption": "Build: Cancel", "command": "cancel_build" },

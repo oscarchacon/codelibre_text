@@ -9,6 +9,15 @@
 //! are resolved when defined (the color scheme's, such as `var(--foreground)`, are left to the
 //! view). `<script>` is skipped. Whitespace collapses outside `pre`.
 
+/// A CSS declaration: property and value.
+type Declarations = Vec<(String, String)>;
+
+/// A rule that applies: its specificity, its order, and its declarations.
+type ScoredDeclarations = (u32, usize, Declarations);
+
+/// A rule that applies, its declarations borrowed.
+type BorrowedDeclarations<'a> = (u32, usize, &'a Declarations);
+
 /// A run of text (or an image) with one style.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Span {
@@ -351,7 +360,7 @@ impl Parser {
         }
         // `html` / `body` / `:root` rules style the document itself (and define its variables).
         let root = &self.elements[0];
-        let mut found: Vec<(u32, usize, Vec<(String, String)>)> = self
+        let mut found: Vec<ScoredDeclarations> = self
             .rules
             .iter()
             .filter_map(|rule| {
@@ -389,7 +398,7 @@ impl Parser {
 
     /// The declarations that apply to the element on top of the stack, lowest priority first.
     fn matching_declarations(&self) -> Vec<(String, String)> {
-        let mut found: Vec<(u32, usize, &Vec<(String, String)>)> = Vec::new();
+        let mut found: Vec<BorrowedDeclarations> = Vec::new();
         for rule in &self.rules {
             let best = rule.selectors.iter().filter(|s| self.selector_matches(s)).map(|s| s.iter().map(Compound::specificity).sum()).max();
             if let Some(specificity) = best {

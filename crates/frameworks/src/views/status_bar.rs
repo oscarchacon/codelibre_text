@@ -12,6 +12,10 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, status: &StatusBa
     let small = |s: &str| RichText::new(s).size(12.0).color(chrome.fg_dim);
     ui.horizontal_centered(|ui| {
         ui.add_space(8.0);
+        if status.overwrite {
+            ui.label(RichText::new("OVR").size(12.0).color(chrome.fg_dim));
+            ui.add_space(8.0);
+        }
         ui.label(small(&status.position));
         for plugin_status in &status.plugin_statuses {
             ui.add_space(12.0);

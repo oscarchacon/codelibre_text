@@ -47,6 +47,7 @@ fn panel() -> OutputPanelViewModel {
         name: "exec".into(),
         text: "compiling\na.py:2:5 boom\na.py:3:1 second\n".into(),
         font_size: 13.0,
+        word_wrap: true,
         first_line: 10,
         current_line: None,
         result_revision: 0,

@@ -13,6 +13,7 @@ use crate::view_state::ViewState;
 
 // Sublime's `add_regions` flags (`sublime.DRAW_EMPTY`, …).
 const DRAW_EMPTY: u64 = 1;
+const DRAW_EMPTY_AS_OVERWRITE: u64 = 4;
 const DRAW_NO_FILL: u64 = 32;
 const HIDDEN: u64 = 128;
 const DRAW_NO_OUTLINE: u64 = 256;
@@ -207,6 +208,7 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         outline: !has(DRAW_NO_OUTLINE),
         underline,
         draw_empty: has(DRAW_EMPTY),
+        overwrite_empty: has(DRAW_EMPTY_AS_OVERWRITE),
         key: set.key.clone(),
         annotations,
         annotation_color: set.annotation_color.clone(),

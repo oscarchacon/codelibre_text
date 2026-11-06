@@ -52,6 +52,8 @@ pub struct PluginState {
     pub(crate) view_settings: HashMap<DocumentId, Map<String, Value>>,
     /// Status bar texts plugins set on a view (`view.set_status(key, text)`), sorted by key.
     pub(crate) view_statuses: HashMap<DocumentId, BTreeMap<String, String>>,
+    /// Views a plugin put in overwrite mode (`view.set_overwrite_status`).
+    pub(crate) overwrite_views: HashSet<DocumentId>,
     pub(crate) settings_files: HashMap<String, SettingsFile>,
     pub(crate) window_settings: Map<String, Value>,
     /// The settings objects with `add_on_change` callbacks, and the values they last heard about.
@@ -434,6 +436,20 @@ impl Editor {
             }
             _ => self.show_console(),
         }
+    }
+
+    /// `view.set_overwrite_status(True)`: the status bar shows OVR for that view.
+    pub fn set_overwrite_status(&mut self, id: DocumentId, enabled: bool) {
+        if enabled {
+            self.state.plugins.overwrite_views.insert(id);
+        } else {
+            self.state.plugins.overwrite_views.remove(&id);
+        }
+    }
+
+    /// `view.is_overwrite_status_enabled()`.
+    pub fn overwrite_status(&self, id: DocumentId) -> bool {
+        self.state.plugins.overwrite_views.contains(&id)
     }
 
     /// Counts one more plugin request in progress; false (and a console line) when they nest too deeply.

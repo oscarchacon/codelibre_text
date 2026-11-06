@@ -228,7 +228,7 @@ pub fn show(
                 let visible = visible_chars(galley, origin, viewport);
                 events.push(UiEvent::VisibleRange(model.document, visible.start, visible.end));
                 for (regions, &color) in model.regions.iter().zip(&region_colors) {
-                    shapes.extend(region_shapes(regions, color, galley, origin, visible.clone()));
+                    shapes.extend(region_shapes(regions, color, galley, origin, visible.clone(), char_width));
                 }
                 for extra in &model.extra_selections {
                     for rect in range_rects(galley, extra.start(), extra.end()) {
@@ -260,7 +260,7 @@ pub fn show(
                     show_auto_complete(ui, model.document, list, galley, origin, viewport, &font, row_height, &html_colors, &colors, events);
                 }
                 if model.report_hover {
-                    report_hover(ui, model.document, &model.phantoms, galley, origin, viewport, gutter_width, events);
+                    report_hover(ui, model, &model.phantoms, galley, origin, viewport, gutter_width, events);
                 }
 
                 if reveal {
@@ -382,12 +382,18 @@ fn region_shapes(
     galley: &egui::Galley,
     origin: egui::Pos2,
     visible: Range<usize>,
+    char_width: f32,
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
     let stroke = Stroke::new(1.0_f32, color);
     for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
         if range.is_empty() {
-            if regions.draw_empty {
+            if regions.overwrite_empty {
+                // `DRAW_EMPTY_AS_OVERWRITE`: a block where the next char would go.
+                let at = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2());
+                let block = Rect::from_min_max(at.left_top(), at.left_bottom() + egui::vec2(char_width, 0.0));
+                shapes.push(Shape::rect_filled(block, 0.0, color.gamma_multiply(0.5)));
+            } else if regions.draw_empty {
                 let at = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2());
                 shapes.push(Shape::line_segment([at.left_top(), at.left_bottom()], stroke));
             }
@@ -934,9 +940,10 @@ fn kind_color(kind: u8) -> Color32 {
 
 /// When the mouse has rested over the text, the gutter or after a line for [`HOVER_DELAY`], says
 /// where once (`on_hover`); nothing over a popup or panel on top.
+#[allow(clippy::too_many_arguments)]
 fn report_hover(
     ui: &egui::Ui,
-    document: DocumentId,
+    model: &EditorViewModel,
     phantoms: &[PhantomViewModel],
     galley: &egui::Galley,
     origin: egui::Pos2,
@@ -944,6 +951,7 @@ fn report_hover(
     gutter_width: f32,
     events: &mut Vec<UiEvent>,
 ) {
+    let document = model.document;
     let ctx = ui.ctx();
     let key = Id::new(("hover_reported", document));
     let Some(pointer) = ctx.pointer_hover_pos().filter(|p| viewport.contains(*p)) else {
@@ -955,7 +963,12 @@ fn report_hover(
         .iter()
         .find(|p| ctx.memory(|m| m.area_rect(phantom_id(document, p.id))).is_some_and(|r| r.contains(pointer)))
         .map(|p| p.point);
-    if phantom_point.is_none() && ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
+    // Over an annotation, the point is its region's.
+    let annotation_point = model.regions.iter().flat_map(|set| set.annotations.iter().enumerate().map(move |(i, a)| (set, i, a))).find_map(|(set, index, annotation)| {
+        let id = Id::new(("plugin_annotation", document, &set.key, index));
+        ctx.memory(|m| m.area_rect(id)).is_some_and(|r| r.contains(pointer)).then_some(annotation.point)
+    });
+    if phantom_point.is_none() && annotation_point.is_none() && ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
         return;
     }
     let still = ctx.input(|i| i.pointer.time_since_last_movement());
@@ -964,10 +977,14 @@ fn report_hover(
         ctx.request_repaint_after(std::time::Duration::from_secs_f32(HOVER_DELAY - still + 0.02));
         return;
     }
-    let point = phantom_point.unwrap_or_else(|| galley.cursor_from_pos(pointer - origin).ccursor.index);
+    let point = phantom_point
+        .or(annotation_point)
+        .unwrap_or_else(|| galley.cursor_from_pos(pointer - origin).ccursor.index);
     let row = galley.rows.iter().find(|r| pointer.y >= origin.y + r.rect.top() && pointer.y < origin.y + r.rect.bottom());
     let zone = if phantom_point.is_some() {
         HoverZone::Text
+    } else if annotation_point.is_some() {
+        HoverZone::Margin
     } else if pointer.x < viewport.left() + gutter_width {
         HoverZone::Gutter
     } else if row.is_some_and(|r| pointer.x > origin.x + r.rect.right()) {

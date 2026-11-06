@@ -1170,3 +1170,31 @@ msgstr "Fermer la fenêtre"
 
 msgid "GROUP {number}"
 msgstr "GROUPE {number}"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Project…"
+msgstr "Ouvrir un projet…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Project"
+msgstr "Fermer le projet"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Open Project…"
+msgstr "Projet : Ouvrir un projet…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Close Project"
+msgstr "Projet : Fermer le projet"
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: {error}"
+msgstr "{name} n'est pas un projet : {error}"
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: it needs to be an object"
+msgstr "{name} n'est pas un projet : il doit être un objet"
+
+#: crates/use_cases/src/project.rs
+msgid "Could not save {name}: {error}"
+msgstr "Impossible d'enregistrer {name} : {error}"

@@ -31,6 +31,10 @@ msgid "Open Folder…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Open Project…"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Reopen Closed File"
 msgstr ""
 
@@ -61,6 +65,10 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Close Folder"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Project"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -596,6 +604,14 @@ msgid "Project: Close Folder"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
+msgid "Project: Open Project…"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Close Project"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
 msgid "Build: Cancel"
 msgstr ""
 
@@ -976,6 +992,18 @@ msgstr ""
 
 #: crates/use_cases/src/plugins.rs
 msgid "{name} failed: {error} (View > Show Console)"
+msgstr ""
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: {error}"
+msgstr ""
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: it needs to be an object"
+msgstr ""
+
+#: crates/use_cases/src/project.rs
+msgid "Could not save {name}: {error}"
 msgstr ""
 
 #: crates/use_cases/src/saving.rs

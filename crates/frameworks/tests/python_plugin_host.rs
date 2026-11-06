@@ -937,6 +937,39 @@ fn event_listeners_hear_the_events_they_define() {
     host.reply(Ok(Value::Null)).unwrap();
 }
 
+/// A listener that defines only the `_async` form of a post-command method is still advertised to
+/// the editor (it asks for the sync name), and the host queues that form after the command.
+#[test]
+fn an_async_only_post_command_listener_hears_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Listener(sublime_plugin.EventListener):
+    def on_post_text_command_async(self, view, name, args):
+        sublime.status_message("after " + name)
+"#;
+    let Some((mut host, loaded)) = host_with(dir.path(), &[("listener.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { events, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(events.iter().any(|e| e == "on_post_text_command"), "events: {events:?}");
+    let mut log = String::new();
+    host.query("on_post_text_command", Some(1), &json!(["shout", {}])).unwrap();
+    assert_eq!(next(&mut host, &mut log), PluginMessage::Answer(Value::Null));
+    match next_idle(&mut host, &mut log) {
+        PluginMessage::Call { function, args } => {
+            assert_eq!(function, "status_message");
+            assert_eq!(args, vec![json!("after shout")]);
+        }
+        other => panic!("expected status_message, got {other:?}"),
+    }
+    host.reply(Ok(Value::Null)).unwrap();
+}
+
 #[test]
 fn a_pre_save_listener_formats_the_file_before_it_is_written() {
     let dir = tempfile::tempdir().unwrap();

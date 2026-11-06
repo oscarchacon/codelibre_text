@@ -4,10 +4,11 @@
 //! (the window being drawn, or the one a plugin's call is about). Buffers, settings files,
 //! packages and plugins are the application's.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use entities::document::{Document, DocumentId};
 use entities::layout::Layout;
+use entities::project::Project;
 use serde_json::{json, Map, Value};
 
 use crate::editor::Editor;
@@ -25,6 +26,7 @@ pub(crate) struct WindowSlot {
     layout: Layout,
     active_group: usize,
     folders: Vec<PathBuf>,
+    project: Option<Project>,
     recently_used: Vec<DocumentId>,
     closed_files: Vec<PathBuf>,
     output_panels: OutputPanels,
@@ -68,6 +70,7 @@ impl Editor {
         std::mem::swap(&mut state.layout, &mut slot.layout);
         std::mem::swap(&mut state.active_group, &mut slot.active_group);
         std::mem::swap(&mut state.folders, &mut slot.folders);
+        std::mem::swap(&mut state.project, &mut slot.project);
         std::mem::swap(&mut state.recently_used, &mut slot.recently_used);
         std::mem::swap(&mut state.closed_files, &mut slot.closed_files);
         std::mem::swap(&mut state.output_panels, &mut slot.output_panels);
@@ -141,8 +144,11 @@ impl Editor {
     }
 
     /// The views of every window but the current one, by window (for the session).
-    pub(crate) fn other_windows(&self) -> impl Iterator<Item = (WindowId, &[Document], usize, &Layout, usize, &[PathBuf])> {
-        self.state.windows.iter().map(|w| (w.id, w.documents.as_slice(), w.active, &w.layout, w.active_group, w.folders.as_slice()))
+    pub(crate) fn other_windows(&self) -> impl Iterator<Item = (WindowId, &[Document], usize, &Layout, usize, &[PathBuf], Option<&Path>)> {
+        self.state
+            .windows
+            .iter()
+            .map(|w| (w.id, w.documents.as_slice(), w.active, &w.layout, w.active_group, w.folders.as_slice(), w.project.as_ref().and_then(|p| p.file.as_deref())))
     }
 
     /// An `EventListener` method that takes the window (`on_new_window`, `on_pre_close_window`).

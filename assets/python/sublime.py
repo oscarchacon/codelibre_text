@@ -1043,6 +1043,24 @@ class SymbolRegion:
         return "SymbolRegion(%r, %r, %r, %r, %r)" % (self.name, self.region, self.syntax, self.type, self.kind)
 
 
+class SymbolLocation:
+    """Where a symbol is (``window.symbol_locations``): its file, line and column, syntax and kind."""
+
+    __slots__ = ("path", "display_name", "row", "col", "syntax", "type", "kind")
+
+    def __init__(self, path, display_name, row, col, syntax, type, kind):
+        self.path = path
+        self.display_name = display_name
+        self.row = row
+        self.col = col
+        self.syntax = syntax
+        self.type = type
+        self.kind = kind
+
+    def __repr__(self):
+        return "SymbolLocation(%r, %r, %r, %r)" % (self.path, self.row, self.col, self.syntax)
+
+
 class View:
     """A tab showing a document. ``view_id`` is the editor's document id."""
 
@@ -1409,10 +1427,10 @@ class View:
         return False
 
     def overwrite_status(self):
-        return False
+        return sublime_api.view_overwrite_status(self.view_id)
 
     def set_overwrite_status(self, value):
-        pass
+        sublime_api.view_set_overwrite_status(self.view_id, bool(value))
 
     def command_history(self, index, modifying_only=False):
         return ("", None, 0)
@@ -1440,7 +1458,17 @@ class View:
 
     def export_to_html(self, regions=None, minihtml=False, enclosing_tags=False, font_size=True,
                        font_family=True):
-        return ""
+        """The text as HTML with the color scheme's styles: the regions given (a region or a
+        list), or the whole view. ``enclosing_tags`` wraps it in a ``<div>`` with the background
+        color, the font size and the font family."""
+        if regions is None:
+            sent = None
+        else:
+            if isinstance(regions, Region):
+                regions = [regions]
+            sent = [[region.a, region.b] for region in regions]
+        return sublime_api.view_export_to_html(
+            self.view_id, sent, bool(minihtml), bool(enclosing_tags), bool(font_size), bool(font_family))
 
     def transform_region_from(self, region, change_id):
         return region
@@ -1596,10 +1624,10 @@ class TextSheet(Sheet):
 
 class HtmlSheet(Sheet):
     def set_name(self, name):
-        pass
+        self.view().set_name(name)
 
     def set_contents(self, contents):
-        pass
+        sublime_api.view_set_html_contents(self.sheet_id, contents)
 
 
 class ImageSheet(Sheet):
@@ -1863,7 +1891,7 @@ class Window:
     def create_output_panel(self, name, unlisted=False):
         """The view of the output panel ``name``, created (or emptied) now. Show it with
         ``run_command("show_panel", {"panel": "output." + name})``."""
-        return View(sublime_api.window_create_output_panel(self.window_id, name, self._window_arg()))
+        return View(sublime_api.window_create_output_panel(self.window_id, name, bool(unlisted), self._window_arg()))
 
     def get_output_panel(self, name):
         return self.create_output_panel(name)
@@ -1873,13 +1901,17 @@ class Window:
         return View(view_id) if view_id else None
 
     def create_io_panel(self, name, on_input, unlisted=False):
-        """An output panel and the view to type its process's input in: ``(output, input)``.
-        Input panels of output panels are not implemented, so ``input`` is ``None`` (``on_input``
-        is never called)."""
-        return self.create_output_panel(name, unlisted), None
+        """An output panel and the field that types into its process: ``(output, input)``.
+        Enter calls ``on_input(text)`` and keeps the field open; ``input`` is ``None`` when
+        ``on_input`` is ``None``."""
+        callback = _register_callbacks((), input=on_input) if on_input is not None else None
+        output, field = sublime_api.window_create_io_panel(
+            self.window_id, name, bool(unlisted), callback, self._window_arg())
+        return View(output), (View(field) if field else None)
 
     def find_io_panel(self, name):
-        return self.find_output_panel(name), None
+        output, field = sublime_api.window_find_io_panel(self.window_id, name, self._window_arg())
+        return (View(output) if output else None), (View(field) if field else None)
 
     def destroy_output_panel(self, name):
         sublime_api.window_destroy_output_panel(self.window_id, name, self._window_arg())
@@ -1919,16 +1951,16 @@ class Window:
         return sublime_api.window_folders(self._window_arg())
 
     def project_file_name(self):
-        return None
+        return sublime_api.window_project_file_name(self._window_arg())
 
     def workspace_file_name(self):
-        return None
+        return sublime_api.window_workspace_file_name(self._window_arg())
 
     def project_data(self):
-        return {"folders": [{"path": folder} for folder in self.folders()]}
+        return sublime_api.window_project_data(self._window_arg())
 
     def set_project_data(self, data):
-        pass
+        sublime_api.window_set_project_data(self._window_arg(), data)
 
     def layout(self):
         return sublime_api.window_get_layout(self._window_arg())
@@ -1997,26 +2029,37 @@ class Window:
             self.focus_view(views[0])
 
     def new_html_sheet(self, name, contents, flags=0, group=-1):
-        return None
+        """A read-only tab with the text of the minihtml ``contents`` (links are not clickable)."""
+        view_id = sublime_api.window_new_html_sheet(self.window_id, str(name), str(contents), int(group), self._window_arg())
+        return HtmlSheet(view_id)
 
     def promote_sheet(self, sheet):
         pass
 
     def lookup_symbol_in_index(self, symbol):
-        return []
+        return self.symbol_locations(symbol, SYMBOL_SOURCE_INDEX, SYMBOL_TYPE_DEFINITION)
 
     def lookup_symbol_in_open_files(self, symbol):
-        return []
+        return self.symbol_locations(symbol, SYMBOL_SOURCE_OPEN_FILES, SYMBOL_TYPE_DEFINITION)
 
     def lookup_references_in_index(self, symbol):
-        return []
+        return self.symbol_locations(symbol, SYMBOL_SOURCE_INDEX, SYMBOL_TYPE_REFERENCE)
 
     def lookup_references_in_open_files(self, symbol):
-        return []
+        return self.symbol_locations(symbol, SYMBOL_SOURCE_OPEN_FILES, SYMBOL_TYPE_REFERENCE)
 
     def symbol_locations(self, sym, source=SYMBOL_SOURCE_ANY, type=SYMBOL_TYPE_ANY, kind_id=KIND_ID_AMBIGUOUS,
                          kind_letter=""):
-        return []
+        found = [SymbolLocation(
+            location["path"], location["display_name"], location["row"], location["col"],
+            location["syntax"], location["type"],
+            (location["kind_id"], location["kind_letter"], location["kind_description"]))
+            for location in sublime_api.window_symbol_locations(self._window_arg(), str(sym), int(source), int(type))]
+        if kind_id != KIND_ID_AMBIGUOUS:
+            found = [location for location in found if location.kind[0] == kind_id]
+        if kind_letter:
+            found = [location for location in found if location.kind[1] == kind_letter]
+        return found
 
     def is_sidebar_visible(self):
         return True
@@ -2055,23 +2098,7 @@ class Window:
         return 0
 
     def extract_variables(self):
-        variables = {"packages": packages_path(), "platform": platform().capitalize()
-                     if platform() != "osx" else "OSX"}
-        folders = self.folders()
-        if folders:
-            variables["folder"] = folders[0]
-        view = self.active_view()
-        file_name = view.file_name() if view else None
-        if file_name:
-            base, extension = os.path.splitext(os.path.basename(file_name))
-            variables.update({
-                "file": file_name,
-                "file_path": os.path.dirname(file_name),
-                "file_name": os.path.basename(file_name),
-                "file_base_name": base,
-                "file_extension": extension.lstrip("."),
-            })
-        return variables
+        return sublime_api.window_extract_variables(self._window_arg())
 
 
 class Edit:

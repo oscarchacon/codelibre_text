@@ -28,9 +28,10 @@
 //! | [`plugin_panels`] | the quick and input panels plugins open |
 //! | [`plugin_popups`] | popups and phantoms plugins show (minihtml), their links, `on_hover` |
 //! | [`plugin_hooks`] | key presses (`on_query_context`) and commands (`on_text_command`, …) plugins take part in |
+//! | [`html_export`] | `view.export_to_html`: the text as HTML with the color scheme's styles |
 //! | [`output_panels`] | output panels (build and plugin output at the bottom), the `append` command, `next_result` |
 //! | [`builds`] | build systems: `build`, `exec`, `cancel_build` |
-//! | [`project`] | folders, folder listing, file index |
+//! | [`project`] | projects (`.sublime-project`), folders, folder listing, file index |
 //! | [`search`] | command palette, Goto Anything, pickers |
 //! | [`session`] | hot exit: save and restore the session, exit confirmation |
 
@@ -45,6 +46,7 @@ pub mod find_replace;
 pub mod gateways;
 pub mod groups;
 pub mod help;
+pub mod html_export;
 pub mod localization;
 pub mod output_panels;
 pub mod packages;

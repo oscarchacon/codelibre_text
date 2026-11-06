@@ -5,7 +5,7 @@ Native desktop text editor compatible with Sublime Text resources, written with 
 edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architecture.md` first.
 
 ## Workspace = the four circles (dependencies point inwards only)
-- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `selector`, `Keymap`, `Settings`, `Menu`).
+- `crates/entities` — business rules, no I/O (`Document`, `Selection`, `text_commands`, `find`, `build`, `project`, `selector`, `Keymap`, `Settings`, `Menu`).
 - `crates/use_cases` — `Editor` + use case modules + gateway traits (`gateways.rs`).
 - `crates/interface_adapters` — controllers, presenters, view models, `ViewState`, Sublime file-format gateways.
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
@@ -101,20 +101,19 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `CODELIBRE_TEXT_DATA=<folder>` uses that folder instead of all of the above, to try things without touching the
   real profile (setting `APPDATA` does not work: Windows answers the known folder).
 - Plugin host modules are rewritten at every start to `%APPDATA%\codelibre_text\data\Lib\python` (`shims/`: `imp`,
-  `distutils.version`, last on `sys.path` for Pythons that dropped them).
+  `asyncore`, `asynchat`, `distutils.*`, last on `sys.path` for Pythons that dropped them).
 - A `.sublime-package` added to or removed from our `Installed Packages` reloads the packages
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
-  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata) — the rest
-  of B (what each item lists as still missing) and C (several windows and clones, the rest of completions, popups / phantoms; most
-  of that API has do-nothing stand-ins in `sublime.py`) are checklists with the files to touch.
+  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows, completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done, and the scopes are down to exact values and whole-file scans. The items still unticked there are what remains, with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin phase B and C
-(`docs/plugins.md`), several windows and clones (groups are done: `use_cases/src/groups.rs`), minimap, folding, snippet fields after the first, find in files.
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
+phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`,
+region icon files, a bundled Python 3.8/3.3 host), minimap, folding, find in files.
 Highlighting is skipped above 4 MB.

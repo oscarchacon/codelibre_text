@@ -55,7 +55,10 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                 }
                 view.input_panel = Some(InputPanelState { focus_requested: true });
                 view.find_panel.visible = false;
-                editor.hide_output_panel();
+                // An io panel types next to the output it belongs to; a one-shot one replaces it.
+                if editor.plugin_input_panel().is_some_and(|p| p.io.is_none()) {
+                    editor.hide_output_panel();
+                }
             }
         }
     }
@@ -118,11 +121,17 @@ pub fn change_plugin_input(editor: &mut Editor, view: &mut ViewState, text: &str
 
 /// Enter (`done`) or Esc in a plugin's input panel.
 pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool) {
+    // An io panel (`create_io_panel`) stays open after Enter, with the focus.
+    let stays = done && editor.plugin_input_panel().is_some_and(|p| p.io.is_some());
     if view.input_panel.take().is_none() {
         return;
     }
     editor.finish_plugin_input_panel(done, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
-    view.focus_editor = true;
+    if stays {
+        view.input_panel = Some(InputPanelState { focus_requested: true });
+    } else {
+        view.focus_editor = true;
+    }
     show_plugin_panels(editor, view);
 }
 
@@ -141,6 +150,8 @@ pub fn run_from_palette(editor: &mut Editor, view: &mut ViewState, command: Comm
 const WINDOW_COMMANDS: &[&str] = &[
     "new_file", "prompt_open_file", "prompt_open_folder", "prompt_add_folder", "open_file", "open_dir", "save_all",
     "close", "close_file", "close_all", "close_window", "exit", "reopen_last_file", "close_folder_list",
+    "prompt_open_project", "prompt_open_project_or_workspace", "open_project", "open_project_or_workspace",
+    "close_project",
     "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
     "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
@@ -271,6 +282,11 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "reopen_last_file" => editor.reopen_closed_file(),
         "close_folder_list" => editor.close_all_folders(),
+        "prompt_open_project" | "prompt_open_project_or_workspace" => editor.prompt_open_project(),
+        "open_project" | "open_project_or_workspace" => {
+            editor.open_project(std::path::Path::new(&command.str_arg("file")));
+        }
+        "close_project" => editor.close_project(),
         "refresh_folder_list" => {
             view.forget_folder_listings();
             editor.refresh_file_index();

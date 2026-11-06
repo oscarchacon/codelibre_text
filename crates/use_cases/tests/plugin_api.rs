@@ -209,8 +209,8 @@ fn closed_views_and_unknown_functions() {
     assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
     assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_new_html_sheet", json!([1, {}])),
-        Err("sublime_api.window_new_html_sheet is not implemented yet".into())
+        call(&world, &mut editor, "window_not_a_real_function", json!([1, {}])),
+        Err("sublime_api.window_not_a_real_function is not implemented yet".into())
     );
     assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
     assert_eq!(
@@ -480,6 +480,58 @@ fn built_in_commands_that_work_in_panels() {
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bye");
     let refused = call(&world, &mut editor, "run_command", json!(["view", id, "sort_lines", null]));
     assert!(refused.unwrap_err().starts_with("sort_lines cannot run in a panel"));
+}
+
+#[test]
+fn a_view_exports_html() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "x = \"hi\"\n");
+    let id = view_id(&editor);
+    let html = call(&world, &mut editor, "view_export_to_html", json!([id, null, false, false, true, true])).unwrap();
+    let html = html.as_str().unwrap();
+    assert!(html.starts_with("<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">x = </span>"), "{html}");
+    assert!(html.contains("<span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span>"), "{html}");
+    // A region: only it is exported, and the enclosing div adds the colors.
+    let region = call(&world, &mut editor, "view_export_to_html", json!([id, [[4, 8]], false, true, false, false]));
+    assert_eq!(
+        region,
+        Ok(json!(
+            "<div style=\"color: #ffffff; background-color: #000000;\">\
+             <pre style=\"margin: 0;\"><span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span></pre></div>"
+        ))
+    );
+}
+
+#[test]
+fn an_io_panel_keeps_its_field_and_calls_on_input() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, 7])).unwrap();
+    let output = ids[0].as_u64().unwrap();
+    let input = ids[1].as_u64().unwrap();
+    assert_eq!(call(&world, &mut editor, "window_find_io_panel", json!([1, "exec"])), Ok(json!([output, input])));
+
+    // Enter: `on_input` hears the text, the field empties and stays open.
+    call(&world, &mut editor, "view_insert", json!([input, 0, "hello"])).unwrap();
+    editor.finish_plugin_input_panel(true, &mut |_, _| {});
+    assert_eq!(world.plugins.callbacks.borrow().as_slice(), [(7, "input".to_string(), json!(["hello"]))]);
+    assert_eq!(editor.plugin_input_panel().unwrap().document.text, "");
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(true)));
+
+    // Esc closes it without a call.
+    editor.finish_plugin_input_panel(false, &mut |_, _| {});
+    assert!(editor.plugin_input_panel().is_none());
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(false)));
+}
+
+#[test]
+fn an_io_panel_without_a_callback_has_no_input_field() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, null])).unwrap();
+    assert!(ids[0].is_number());
+    assert_eq!(ids[1], Value::Null);
+    assert!(editor.plugin_input_panel().is_none());
 }
 
 #[test]

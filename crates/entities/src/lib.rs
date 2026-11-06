@@ -17,6 +17,7 @@ pub mod localization;
 pub mod menu;
 pub mod meta_info;
 pub mod minihtml;
+pub mod project;
 pub mod selection;
 pub mod selector;
 pub mod settings;

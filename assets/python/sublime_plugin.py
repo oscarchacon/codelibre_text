@@ -183,9 +183,15 @@ class _CommandInput:
         on_change = None
         if type(handler).preview is not CommandInputHandler.preview:
             on_change = lambda value: self._preview(handler, value)
-        self.window.show_input_panel(
+        panel = self.window.show_input_panel(
             caption, text, lambda value: self._answer(handler, value), on_change, handler.cancel,
         )
+        initial_selection = getattr(handler, "initial_selection", None)
+        if panel is not None and initial_selection is not None:
+            regions = initial_selection() or []
+            if regions:
+                panel.sel().clear()
+                panel.sel().add_all(regions)
 
     def _ask_list(self, handler):
         items = handler.list_items()
@@ -442,6 +448,16 @@ def events():
     listeners = _event_listeners + _view_listener_classes
     names = [n for e in VIEW_EVENTS for n in (e, e + "_async")] + list(QUERY_EVENTS)
     found = [n for n in names if any(callable(getattr(listener, n, None)) for listener in listeners)]
+    # A post-command or window listener may define only the `_async` form of its method: the
+    # host queues it after the sync one, so the editor still has to be told to ask.
+    for event, wanted in (
+        ("on_post_text_command", listeners),
+        ("on_post_window_command", listeners),
+        ("on_new_window", _event_listeners),
+        ("on_pre_close_window", _event_listeners),
+    ):
+        if event not in found and any(callable(getattr(listener, event + "_async", None)) for listener in wanted):
+            found.append(event)
     if _text_listener_classes:
         found.append("on_text_changed")
     # View and text listeners need to know which views are clones.

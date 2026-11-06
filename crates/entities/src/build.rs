@@ -40,16 +40,28 @@ pub struct BuildVariant {
 impl BuildSystem {
     /// `platform` is Sublime's name for it (`Windows`, `OSX`, `Linux`). `None` if `json` is not an object.
     pub fn from_json(resource: &str, json: &Value, platform: &str) -> Option<Self> {
+        let file_name = resource.rsplit('/').next().unwrap_or(resource);
+        Self::from_merged(resource, file_name.strip_suffix(".sublime-build").unwrap_or(file_name), json, platform)
+    }
+
+    /// A build system of a `.sublime-project` (`resources` names it, as `set_build_system` does):
+    /// it requires a `name`, which its file cousins take from the file.
+    pub fn from_project_json(resource: &str, json: &Value, platform: &str) -> Option<Self> {
+        let merged = for_platform(json.as_object()?, platform);
+        let name = merged.get("name")?.as_str()?.to_string();
+        Self::from_merged(resource, &name, json, platform)
+    }
+
+    fn from_merged(resource: &str, name: &str, json: &Value, platform: &str) -> Option<Self> {
         let merged = for_platform(json.as_object()?, platform);
         let strings = |key: &str| -> Vec<String> {
             let items = merged.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
             items.iter().filter_map(Value::as_str).map(String::from).collect()
         };
-        let file_name = resource.rsplit('/').next().unwrap_or(resource);
         let variants = merged.get("variants").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         Some(Self {
             resource: resource.to_string(),
-            name: file_name.strip_suffix(".sublime-build").unwrap_or(file_name).to_string(),
+            name: name.to_string(),
             selector: merged.get("selector").and_then(Value::as_str).unwrap_or_default().to_string(),
             file_patterns: strings("file_patterns"),
             keyfiles: strings("keyfiles"),

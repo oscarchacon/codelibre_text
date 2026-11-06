@@ -382,6 +382,24 @@ fn phantoms_move_with_the_text_and_are_erased_by_key_or_id() {
 }
 
 #[test]
+fn only_persistent_regions_go_to_the_session() {
+    let mut doc = from_bytes(b"abcdef");
+    doc.add_regions(region_set("kept", &[(1, 3)]));
+    let mut persistent = region_set("lint", &[(4, 5)]);
+    persistent.flags = PERSISTENT;
+    doc.add_regions(persistent);
+    let saved = doc.persistent_regions();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].key, "lint");
+
+    let mut restored = Document::new_untitled(2, LineEnding::Unix);
+    // The session puts the text back first, as the regions are kept within it.
+    restored.replace_range(0, 0, "abcdef");
+    restored.restore_regions(saved);
+    assert_eq!(restored.regions("lint"), vec![(4, 5)]);
+}
+
+#[test]
 fn plugin_regions_move_with_the_text() {
     let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
     doc.add_regions(region_set("lint", &[(4, 7), (8, 13)]));

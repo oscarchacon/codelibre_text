@@ -4,9 +4,19 @@ use std::path::Path;
 use std::time::Duration;
 
 use entities::document::{Document, DocumentError, DocumentId, LineEnding};
+use entities::minihtml;
 use entities::selection::Selection;
 
 use crate::editor::{CloseChoice, Editor, PendingClose};
+
+/// The plain text of a minihtml document: its lines' text, images as their `alt`.
+fn minihtml_text(html: &str) -> String {
+    minihtml::parse(html)
+        .iter()
+        .map(|line| line.iter().map(|span| span.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 impl Editor {
     pub fn new_file(&mut self) {
@@ -32,6 +42,10 @@ impl Editor {
     /// empty buffer that will be saved there (like `subl new.txt`). Returns false on error.
     pub fn open_file(&mut self, path: &Path) -> bool {
         let path = self.gateways.file_system.canonicalize(path);
+        // A project file opens its project instead of a text tab (Sublime does the same).
+        if path.extension().and_then(|e| e.to_str()) == Some("sublime-project") {
+            return self.open_project(&path);
+        }
         if let Some(index) = self
             .state
             .documents
@@ -90,6 +104,38 @@ impl Editor {
         let syntax = self.gateways.syntaxes.resolve(syntax);
         self.add_document(Document::scratch(id, name, text, &syntax, read_only), false);
         self.activate_document(id);
+    }
+
+    /// `window.new_html_sheet`: a read-only scratch tab with the text of the minihtml `contents`.
+    /// An existing sheet with the same name gets the new text.
+    pub fn new_html_sheet(&mut self, name: &str, contents: &str, group: Option<usize>) -> DocumentId {
+        let text = minihtml_text(contents);
+        if let Some(id) = self.state.documents.iter().find(|d| d.scratch_name.as_deref() == Some(name)).map(|d| d.id) {
+            self.set_html_sheet(id, contents);
+            if let Some(group) = group {
+                self.set_view_index(id, group, usize::MAX);
+            }
+            self.activate_document(id);
+            return id;
+        }
+        let id = self.next_document_id();
+        let syntax = self.gateways.syntaxes.resolve("Plain Text");
+        self.add_document(Document::scratch(id, name, &text, &syntax, true), false);
+        if let Some(group) = group {
+            self.set_view_index(id, group, usize::MAX);
+        }
+        self.activate_document(id);
+        id
+    }
+
+    /// `HtmlSheet.set_contents`: new minihtml for an HTML sheet (its view's text becomes the new
+    /// text).
+    pub fn set_html_sheet(&mut self, id: DocumentId, contents: &str) {
+        let Some(doc) = self.any_document_mut(id) else { return };
+        let read_only = std::mem::replace(&mut doc.read_only, false);
+        let end = doc.char_count();
+        doc.replace_range(0, end, &minihtml_text(contents));
+        doc.read_only = read_only;
     }
 
     /// An empty, unmodified untitled tab, alone in its group, is replaced by the opened file, as
@@ -266,6 +312,7 @@ impl Editor {
         self.state.recently_used.retain(|d| *d != doc.id);
         self.state.plugins.view_settings.remove(&doc.id);
         self.state.plugins.view_statuses.remove(&doc.id);
+        self.state.plugins.overwrite_views.remove(&doc.id);
         self.plugin_event("on_close", doc.id);
         if self.state.documents.is_empty() {
             self.state.active = 0;
