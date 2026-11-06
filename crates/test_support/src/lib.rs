@@ -424,6 +424,13 @@ impl SyntaxGateway for FakeSyntaxes {
         }
     }
 
+    fn syntax_path(&self, syntax: &str) -> String {
+        match syntax {
+            "Plain Text" => "Packages/Text/Plain text.tmLanguage".into(),
+            name => format!("Packages/{name}/{name}.sublime-syntax"),
+        }
+    }
+
     fn base_scope(&self, syntax: &str) -> String {
         match syntax {
             "Plain Text" => "text.plain".into(),

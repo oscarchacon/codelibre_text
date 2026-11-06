@@ -81,11 +81,12 @@ jobs:
       - name: Install Rust
         shell: bash
         run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
-      # Python runs the plugin host tests (crates/frameworks/tests/python_plugin_host.rs).
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: Swatinem/rust-cache@v2
+      # The plugin host tests (crates/frameworks/tests/python_plugin_host.rs) run on the Python the
+      # installers bring, found in target/debug/python as next to an installed editor.
+      - name: Download Python
+        shell: bash
+        run: sh packaging/python/fetch_python.sh target/debug/python
       - name: Tests
         run: cargo test --workspace
       - name: Clippy

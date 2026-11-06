@@ -204,6 +204,14 @@ impl SyntaxEngine {
         self.syntax(&name).name.clone()
     }
 
+    pub fn syntax_path(&self, syntax: &str) -> String {
+        let name = &self.syntax(syntax).name;
+        match self.syntax_paths.get(name) {
+            Some(path) => path.clone(),
+            None => builtin_syntax_path(name),
+        }
+    }
+
     pub fn base_scope(&self, syntax: &str) -> String {
         find_syntax(&self.syntaxes, syntax).scope.to_string()
     }
@@ -641,6 +649,14 @@ fn find_syntax<'a>(syntaxes: &'a SyntaxSet, name: &str) -> &'a SyntaxReference {
     syntaxes
         .find_syntax_by_name(name)
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+}
+
+/// The resource Sublime's own copy of a built-in syntax has (plugins test its file name).
+fn builtin_syntax_path(name: &str) -> String {
+    match name {
+        "Plain Text" => "Packages/Text/Plain text.tmLanguage".into(),
+        name => format!("Packages/{name}/{name}.sublime-syntax"),
+    }
 }
 
 fn find_scheme<'a>(schemes: &'a BTreeMap<String, Theme>, name: &str) -> &'a Theme {

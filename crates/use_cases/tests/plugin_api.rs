@@ -404,6 +404,21 @@ fn view_settings_layer_on_top_of_the_syntax_settings() {
 }
 
 #[test]
+fn a_view_s_syntax_setting_is_its_syntax_resource() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let target = json!(["view", view_id(&editor)]);
+    let plain = json!([true, "Packages/Text/Plain text.tmLanguage"]);
+    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(plain), "never None (Pretty JSON)");
+    call(&world, &mut editor, "settings_set", json!([target, "syntax", "Packages/Python/Python.sublime-syntax"])).unwrap();
+    assert_eq!(editor.active_document().unwrap().syntax, "Python", "setting it assigns the syntax");
+    let python = json!([true, "Packages/Python/Python.sublime-syntax"]);
+    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(python));
+    let all = call(&world, &mut editor, "settings_all", json!([target])).unwrap();
+    assert_eq!(all["syntax"], json!("Packages/Python/Python.sublime-syntax"));
+}
+
+#[test]
 fn plugin_settings_files_are_loaded_changed_and_saved_to_user() {
     let world = plugin_world();
     world

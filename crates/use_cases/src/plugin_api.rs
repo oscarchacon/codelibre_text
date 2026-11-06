@@ -766,7 +766,14 @@ impl Editor {
 
     fn plugin_settings_all(&mut self, target: &SettingsTarget) -> Map<String, Value> {
         match target {
-            SettingsTarget::View(id) => self.settings_of(*id).values().clone(),
+            SettingsTarget::View(id) => {
+                let mut values = self.settings_of(*id).values().clone();
+                // Every view of Sublime has it; plugins take its file name (`os.path.basename`).
+                if let Some(doc) = self.any_document(*id) {
+                    values.insert("syntax".into(), json!(self.gateways.syntaxes.syntax_path(&doc.syntax)));
+                }
+                values
+            }
             SettingsTarget::File(name) if name == PREFERENCES => self.global_settings().values().clone(),
             SettingsTarget::File(name) => self.settings_file(name).values.clone(),
             SettingsTarget::Window => self.state.plugins.window_settings.clone(),
@@ -823,6 +830,15 @@ impl Editor {
             }
         };
         match target {
+            // As in Sublime, setting it changes the view's syntax (`set_syntax_file`).
+            SettingsTarget::View(id) if key == "syntax" => {
+                if let Some(path) = value.as_str() {
+                    let syntax = self.gateways.syntaxes.resolve(path);
+                    if let Some(doc) = self.any_document_mut(*id) {
+                        doc.syntax = syntax;
+                    }
+                }
+            }
             SettingsTarget::View(id) => set(self.state.plugins.view_settings.entry(*id).or_default(), value),
             SettingsTarget::File(name) => {
                 if name == PREFERENCES {

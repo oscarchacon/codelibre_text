@@ -16,8 +16,8 @@ exact score values and whole-file scans); the rest of B and phase C below are th
 2026-11-06: projects (`project_data`, `$project*`, project builds), `create_io_panel` with its `on_input` field,
 `window.symbol_locations` and the `lookup_*` functions, `PERSISTENT` regions in the session, `set_overwrite_status`,
 `new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`; `compat.py` (the
-standard library names newer Pythons dropped) with four more shims (`pipes`, `cgi`, `imghdr`, `uu`), and an installed
-Python 3.8 preferred for the host.
+standard library names newer Pythons dropped) with four more shims (`pipes`, `cgi`, `imghdr`, `uu`), and the host's Python:
+3.13 inside every installer, native x64 and ARM64, offline (`packaging/python/fetch_python.sh`).
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
 ## How it works
@@ -116,8 +116,8 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   `Preferences.sublime-settings` changes apply at once (session overrides) and are written on `save_settings`.
 - Plugins load from every package folder with top-level `.py` files (ours and, with `import_sublime_packages`,
   Sublime's, except its `Default`), each package imported as a Python package so relative imports work.
-- Settings: `python_plugins` (default true), `python_interpreter` (default: `py -3.8`, `python3.8`, `py -3`,
-  `python3`, `python`, `uv python find`).
+- Settings: `python_plugins` (default true), `python_interpreter` (default: the Python 3.13 bundled with the editor,
+  else `py -3.13`, `python3.13`, `py -3`, `python3`, `python`, `uv python find`).
 - Output and tracebacks go to the console (`Ctrl+\``, View > Show Console); load errors also go to Help > Package Load Errors.
   Load errors, plugin command failures, a dead host and Package Control install failures are also written, with
   their UTC time, to the error log (`data\Local\Errors.log`, Help > Error Log; `Editor::record_errors`), and
@@ -354,7 +354,7 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       Package Control 4 does when it migrates one: `st4_py<ours>_<platform>_<arch>`, `st4_py<ours>_<platform>`,
       `st4_py38`, `st4`, `st3`, `all` (`st3_<platform>*` are compiled for 3.3: left out).
 - [x] **Package Control 4 migrates them** in our own profile (`bootstrap._migrate_dependencies`, when
-      `0_package_control_loader.sublime-package` is in our `Installed Packages`): each to a library in `Lib/python314`
+      `0_package_control_loader.sublime-package` is in our `Installed Packages`): each to a library in `Lib/python313`
       (with its `dist-info`), then deletes the dependency's folder and the loader and says so in a message; plugins import
       the library in the same session (`package_control_migrates_package_control_3_dependencies`, no network; also tried
       in the window). The paths plugins get have the platform's separators (`plugin_host.py::load`, and
@@ -370,12 +370,25 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `find_loader` / `get_loader` (3.12); `asyncio.get_event_loop()` makes a loop again as in 3.8 (3.14).
       `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did, and takes
       `group=` on 3.9: Markdown needs both.
-- [ ] **Python version**: plugins target 3.8 (or 3.3 via `.python-version`); we run the Python 3 installed, preferring a
-      3.8 when there is one (`find_interpreter`), not a bundled 3.8 / 3.3. `sublime.version()` reports the build whose
-      plugin host runs that Python (4203 for 3.14+, 4201 for 3.13, else 4200). Libraries for 3.8 run on 3.14 only while
-      they avoid what later Pythons removed; compiled ones (`cp38` wheels) cannot.
-      On macOS that is often Apple's `/usr/bin/python3` (3.9, LibreSSL), whose `SSLContext.post_handshake_auth` cannot be
-      set: `compat.py::allow_post_handshake_auth` makes it a no-op, or every Package Control download fails.
+- [x] **Python 3.13 bundled** (2026-11-06): every installer carries its Python, so plugins and Package Control work
+      offline with nothing else installed (the release builds download it, users never do). 3.13 is the Python of
+      Sublime's current plugin host (build 4201 on): `sublime.version()` is 4201, Package Control installs libraries
+      for it in `Lib/python313`, compiled ones too, and packages are written and tested for it. Python has no LTS:
+      3.13 gets security fixes until October 2029; moving to a newer one is changing `fetch_python.sh` (version,
+      release, hashes) and checking `sublime.version()` maps it. Plugins written for 3.8 run on it through `compat.py`
+      / `shims/` and the `Lib/python38` libraries kept on `sys.path` (see above).
+      It is a relocatable CPython 3.13.18 (python-build-standalone, `install_only_stripped`, SHA-256 pinned in
+      `packaging/python/fetch_python.sh`, without tests / IDLE / Tk: about 60 MB), native for x64 and ARM64 on Windows,
+      macOS and Linux. `find_interpreter` uses it after the `python_interpreter` setting (`bundled_interpreter`):
+      `<exe folder>/python` (Windows, the portable archives), `Contents/Resources/python` (macOS app, each Mach-O signed
+      ad hoc), `../lib/codelibre-text/python` (Linux `.deb` / `.rpm`, `install.sh`), and `target/<profile>/python` for a
+      development build and its tests (`sh packaging/python/fetch_python.sh target/debug/python`; CI does it; the script
+      skips the download when `python/BUILD` already names that build). Without it the installed Python is used: a 3.13
+      first (also in the Mac folders a Finder-opened app's `PATH` lacks), then `python3`; `sublime.version()` reports the
+      build whose host runs that Python (4203 for 3.14+, 4201 for 3.13, else 4200) and `compat.py` covers Apple's
+      `/usr/bin/python3` (3.9 with LibreSSL: `allow_post_handshake_auth`).
+- [ ] Python 3.3 / 3.8 hosts: not bundled; every package runs on the one Python. `.python-version` is not read;
+      `"disable_plugin_host_3.3": true` makes Package Control install every package's libraries for it.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
       It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,
@@ -448,6 +461,10 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `Default` package's are built in) and the `User` copy next to it, as tabs (not side by side in a group). A
       package's keymap no longer shows ours. Preferences > Package Settings is a real submenu packages merge into (`id`
       `package-settings`); the menu presenter hides submenus left empty and separators at an edge or doubled.
+- [x] **A view's `syntax` setting** (2026-11-06, found by installing Pretty JSON from the window): every view has
+      it, the syntax's resource (`SyntaxGateway::syntax_path`; built-in ones get Sublime's path, `Packages/Text/Plain
+      text.tmLanguage`), so plugins can take its file name; setting it changes the view's syntax. Without it Pretty
+      JSON formatted and then failed (`os.path.basename(None)`).
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).

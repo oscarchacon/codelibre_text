@@ -267,6 +267,9 @@ pub trait SyntaxGateway {
     fn detect(&self, path: &Path, first_line: &str) -> String;
     /// Resolves a syntax name or a `.sublime-syntax` path to a known syntax name.
     fn resolve(&self, name_or_path: &str) -> String;
+    /// The resource a syntax is named by in a view's `syntax` setting
+    /// (`Packages/JSON/JSON.sublime-syntax`); a built-in one gets the path Sublime's own has.
+    fn syntax_path(&self, syntax: &str) -> String;
     /// The scope of a whole file in a syntax (`source.python`); what build `selector`s match.
     fn base_scope(&self, syntax: &str) -> String;
     fn syntax_names(&self) -> Vec<String>;

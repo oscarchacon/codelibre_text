@@ -13,7 +13,7 @@ use codelibre_text::gateways::{
     child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
     syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
 };
-use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
+use codelibre_text::gateways::python_plugin_host::{bundled_interpreter, find_interpreter, PythonPluginHost};
 use codelibre_text::syntax_engine::SyntaxEngine;
 use entities::command::Command;
 use interface_adapters::controllers::command_controller;
@@ -1404,6 +1404,28 @@ def plugin_loaded():
 fn a_missing_interpreter_is_reported() {
     let error = find_interpreter(Some("/no/such/python")).unwrap_err();
     assert!(error.contains("python_interpreter"), "{error}");
+}
+
+/// The Python an installer puts next to the editor is found from the executable's path:
+/// beside it (Windows, portable archives), in the macOS app's `Resources`, in `lib` on Linux.
+#[test]
+fn the_bundled_python_is_found_next_to_the_executable() {
+    let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
+    for (executable, python) in [
+        ("codelibre_text", "python"),
+        ("CodeLibre Text.app/Contents/MacOS/codelibre_text", "CodeLibre Text.app/Contents/Resources/python"),
+        ("usr/bin/codelibre_text", "usr/lib/codelibre-text/python"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join(executable);
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        assert_eq!(bundled_interpreter(&executable), None);
+        let python = dir.path().join(python).join(program);
+        fs::create_dir_all(python.parent().unwrap()).unwrap();
+        fs::write(&python, "").unwrap();
+        let found = bundled_interpreter(&executable).expect("bundled python");
+        assert_eq!(fs::canonicalize(found).unwrap(), fs::canonicalize(&python).unwrap());
+    }
 }
 
 #[test]

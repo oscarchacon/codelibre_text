@@ -18,6 +18,8 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
   `frameworks/src/gateways/python_plugin_host.rs`). Design, protocol and the **pending phases B and C**: `docs/plugins.md`.
 - `assets/icons/` — app icon (`.png` window icon in `main.rs`, `.ico` embedded in the .exe by `frameworks/build.rs`, `.icns` for macOS);
   `packaging/linux` (`.desktop` + `install.sh`) and `packaging/macos` (`Info.plist` + `make_app.sh`). `.gitattributes` keeps them LF.
+- `packaging/python/fetch_python.sh` — the Python 3.13 (python-build-standalone, SHA-256 pinned) every installer bundles (offline) for the
+  plugins; `find_interpreter` / `bundled_interpreter` (`python_plugin_host.rs`) look for it next to the executable.
 
 Never add an outer-circle dependency to an inner crate's `Cargo.toml`; use a gateway trait instead.
 Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, View Models, Gateways.
@@ -36,7 +38,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).
-  `frameworks/tests/python_plugin_host.rs` runs a real Python 3 (skipped with a message when none is found).
+  `frameworks/tests/python_plugin_host.rs` runs a real Python 3 (skipped with a message when none is found): the 3.13 the
+  installers bring once `sh packaging/python/fetch_python.sh target/debug/python` put it there (CI does), else the installed one.
 - `Cargo.lock` is gitignored. Dependencies build at `opt-level = 2` in dev (syntect is slow unoptimized).
 - Only positional `files` and `--fullscreen` are used from `crates/frameworks/src/cli.rs`.
 
@@ -116,5 +119,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
 phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`,
-region icon files, a bundled Python 3.8/3.3 host), minimap, folding, find in files.
+region icon files, a Python 3.3 host), minimap, folding, find in files.
 Highlighting is skipped above 4 MB.

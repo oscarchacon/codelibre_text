@@ -96,16 +96,16 @@
 	"import_sublime_packages": true,
 
 	// Run the Python plugins (.py files) of the packages, like Sublime Text.
-	// They need Python 3 installed; see View > Show Console for their output.
+	// They run in the Python 3.13 that comes with the editor; see View > Show Console for their output.
 	"python_plugins": true,
 
-	// Path of the Python 3 interpreter for plugins. Empty: use py -3.8, python3.8, py -3,
-	// python3, python or the one `uv python find` reports, whichever works first (an installed
-	// Python 3.8 is preferred: it is what Sublime's plugin hosts run).
+	// Path of the Python 3 interpreter for plugins. Empty: the Python 3.13 that comes with the
+	// editor (what Sublime's plugin host runs); without it, py -3.13, python3.13, py -3, python3,
+	// python or the one `uv python find` reports, whichever works first.
 	"python_interpreter": "",
 
 	// Every plugin runs in that one Python, so there is no Python 3.3 host: Package Control then
-	// installs every package's libraries for its newer host (Lib/python38), as in Sublime Text.
+	// installs every package's libraries for that Python (Lib/python313), as in Sublime Text.
 	"disable_plugin_host_3.3": true,
 
 	// Packages that are not loaded at all. Package Control changes this list while it upgrades.
