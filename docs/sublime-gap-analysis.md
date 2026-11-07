@@ -54,7 +54,8 @@ cannot be told apart by the string scan and are listed under native.
 
 ## Settings not yet read (most user-visible first)
 
-- Editing: `auto_match_enabled`, `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, `copy_with_empty_selection`,
+- Editing: ~~`auto_match_enabled`~~ (done: the keymaps' auto-pairing bindings, with the `eol_selector` context and
+  the `Delete Left Right` macro; `insert_snippet` at every caret), `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, `copy_with_empty_selection`,
   `word_separators`, `sub_word_separators`, `drag_text`, `trim_automatic_white_space`, `indent_to_bracket`, `use_tab_stops`.
 - Display: `font_face`, `font_options`, `draw_white_space`, `draw_indent_guides`, `indent_guide_options`, `match_brackets*`, `match_selection`,
   `match_tags`, `caret_style`, `block_caret`, `line_padding_top/bottom`, `wrap_width`, `relative_line_numbers`, `highlight_line_number`,

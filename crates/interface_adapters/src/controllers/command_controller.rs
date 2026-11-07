@@ -693,6 +693,12 @@ fn find_next(editor: &mut Editor, view: &mut ViewState, forward: bool) {
 /// Sublime's built-in line macros (`res://Packages/Default/<Name>.sublime-macro`).
 fn run_macro(editor: &mut Editor, file: &str) {
     let name = file.rsplit('/').next().unwrap_or("").trim_end_matches(".sublime-macro");
+    // Backspace between an auto-paired `(` and `)` (or quotes): both go, at every caret.
+    if name == "Delete Left Right" {
+        editor.run_view_command_on_active(&Command::new("left_delete"));
+        editor.run_view_command_on_active(&Command::new("right_delete"));
+        return;
+    }
     let command = match name {
         "Delete Line" => TextCommand::DeleteLine,
         "Add Line" => TextCommand::AddLine { before: false },

@@ -34,6 +34,22 @@ fn scope_name_is_the_scope_of_the_char_at_the_point() {
     assert_eq!(editor.scope_name(999, 0), None);
 }
 
+/// `eol_selector` looks at the end of each caret's line: a string still open there.
+#[test]
+fn caret_contexts_know_the_scope_at_the_end_of_the_line() {
+    let world = World::new();
+    world.disk.put("/p/b.py", "s = \"open\nt = 1");
+    let mut editor = world.editor();
+    editor.open_file(Path::new("/p/b.py"));
+    let doc = id(&editor);
+    editor.sync_selection_from_view(doc, Selection::caret(2));
+    editor.add_carets_on_next_line(true);
+    let contexts = editor.caret_contexts();
+    let eol: Vec<&str> = contexts.iter().map(|c| c.eol_scope.trim()).collect();
+    assert_eq!(eol, ["source.python string.quoted.double", "source.python"]);
+    assert_eq!(contexts[0].scope.trim(), "source.python", "the caret itself is outside the string");
+}
+
 #[test]
 fn an_empty_document_has_its_syntax_base_scope() {
     let world = World::new();
