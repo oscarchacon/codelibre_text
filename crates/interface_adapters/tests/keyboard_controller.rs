@@ -53,6 +53,122 @@ fn text_contexts_look_at_every_selection_and_match_all_needs_all_of_them() {
     assert!(press(&mut editor, &mut view, "x"));
 }
 
+// ----- auto-pairing (the built-in keymap's `auto_match_enabled` bindings) ---------------------------
+
+/// A world with the built-in keymap's auto-pairing bindings and `auto_match_enabled` set to `enabled`.
+fn auto_pair_world(enabled: bool) -> World {
+    let keymap = interface_adapters::gateways::sublime_json::parse(interface_adapters::gateways::builtin_resources::PC_KEYMAP).unwrap();
+    let mut world = World::new().with_preferences(json!({ "auto_match_enabled": enabled }));
+    for item in keymap.as_array().unwrap() {
+        let context = item["context"].as_array().cloned().unwrap_or_default();
+        if !context.iter().any(|c| c["key"] == "setting.auto_match_enabled") {
+            continue;
+        }
+        let keys: Vec<&str> = item["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap()).collect();
+        let command = Command::with_args(item["command"].as_str().unwrap(), item["args"].clone());
+        world = world.with_binding(bind(&keys, command, context));
+    }
+    world
+}
+
+/// Types `keys` (one key each, `backspace` included) as the window does: through the keymap, else
+/// as the text widget would.
+fn type_keys(editor: &mut Editor, view: &mut ViewState, keys: &[&str]) {
+    for &key in keys {
+        // A space is not a key name: the widget types it.
+        if KeyCombo::parse(key).is_some() && press(editor, view, key) {
+            for command in view.take_commands() {
+                run(editor, view, &command);
+            }
+        } else if key == "backspace" {
+            editor.run_view_command_on_active(&Command::new("left_delete"));
+        } else {
+            editor.insert_at_selections(key);
+        }
+    }
+}
+
+fn text_and_caret(editor: &Editor) -> (String, usize, usize) {
+    let doc = editor.active_document().unwrap();
+    (doc.text.clone(), doc.selection().start(), doc.selection().end())
+}
+
+#[test]
+fn brackets_and_quotes_are_paired_stepped_over_and_deleted_together() {
+    let world = auto_pair_world(true);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    type_keys(&mut editor, &mut view, &["(", "x"]);
+    assert_eq!(text_and_caret(&editor), ("(x)".into(), 2, 2));
+    type_keys(&mut editor, &mut view, &[")"]);
+    assert_eq!(text_and_caret(&editor), ("(x)".into(), 3, 3), "`)` steps over the closing one");
+    type_keys(&mut editor, &mut view, &[" ", "[", "{", "\""]);
+    assert_eq!(text_and_caret(&editor), ("(x) [{\"\"}]".into(), 7, 7));
+    type_keys(&mut editor, &mut view, &["backspace", "backspace"]);
+    assert_eq!(text_and_caret(&editor), ("(x) []".into(), 5, 5), "Backspace deletes both of a pair");
+    type_keys(&mut editor, &mut view, &["]"]);
+    assert_eq!(text_and_caret(&editor), ("(x) []".into(), 6, 6));
+}
+
+#[test]
+fn pairs_are_not_added_before_text_or_after_a_word_for_quotes() {
+    let world = auto_pair_world(true);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.insert_at_selections("word");
+    type_keys(&mut editor, &mut view, &["'"]);
+    assert_eq!(text_and_caret(&editor).0, "word'", "an apostrophe after a word");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(0));
+    type_keys(&mut editor, &mut view, &["("]);
+    assert_eq!(text_and_caret(&editor).0, "(word'", "text follows the caret");
+}
+
+#[test]
+fn a_selection_is_wrapped_in_the_pair() {
+    let world = auto_pair_world(true);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.insert_at_selections("ab");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::new(0, 2));
+    type_keys(&mut editor, &mut view, &["["]);
+    assert_eq!(text_and_caret(&editor), ("[ab]".into(), 1, 3), "the text stays selected");
+}
+
+#[test]
+fn every_caret_gets_its_pair() {
+    let world = auto_pair_world(true);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.insert_at_selections("a\nb");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, entities::selection::Selection::caret(1));
+    editor.add_carets_on_next_line(true);
+    type_keys(&mut editor, &mut view, &["("]);
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.text, "a()\nb()");
+    let carets: Vec<usize> = doc.selections().iter().map(|s| s.head).collect();
+    assert_eq!(carets.len(), 2);
+    assert!(carets.contains(&2) && carets.contains(&6), "{carets:?}");
+}
+
+#[test]
+fn pairing_is_off_without_the_setting_and_in_a_focused_panel() {
+    let world = auto_pair_world(false);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(!press(&mut editor, &mut view, "("), "auto_match_enabled is false");
+
+    let world = auto_pair_world(true);
+    let mut editor = world.editor();
+    view.find_panel.visible = true;
+    view.text_has_focus = false;
+    assert!(!press(&mut editor, &mut view, "("), "typed in the find panel");
+    view.text_has_focus = true;
+    assert!(press(&mut editor, &mut view, "("), "the text has the focus again");
+}
+
 #[test]
 fn tab_visits_a_snippets_fields_while_there_is_a_next_one() {
     let has_next = json!({ "key": "has_next_field", "operator": "equal", "operand": true });

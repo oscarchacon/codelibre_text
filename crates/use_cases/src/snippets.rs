@@ -11,9 +11,30 @@ use crate::editor::Editor;
 
 impl Editor {
     /// Replaces the selection of the active document with a snippet and selects its first field.
+    /// With several selections, each one gets the snippet (its own `$SELECTION`) and a caret on
+    /// its first field; Tab does not visit the other fields then.
     pub fn insert_snippet(&mut self, contents: &str) {
-        let Some(view) = self.active_document().map(|d| d.id) else { return };
-        self.insert_snippet_over(view, None, contents);
+        let Some(doc) = self.active_document_mut() else { return };
+        if doc.extra_selections().is_empty() {
+            let view = doc.id;
+            self.insert_snippet_over(view, None, contents);
+            return;
+        }
+        doc.edit_all(|text, selections| {
+            let mut order: Vec<usize> = (0..selections.len()).collect();
+            order.sort_by_key(|&i| selections[i].start());
+            let mut new = selections.to_vec();
+            // In text order: each insertion moves the selections after it.
+            let mut shift: isize = 0;
+            for i in order {
+                let moved = |p: usize| (p as isize + shift).max(0) as usize;
+                let selection = Selection::new(moved(selections[i].anchor), moved(selections[i].head));
+                let before = text.chars().count() as isize;
+                new[i] = tc::insert_snippet(text, selection, contents);
+                shift += text.chars().count() as isize - before;
+            }
+            new
+        });
     }
 
     /// Replaces `replaced` (else the selection) of `view` with a snippet and selects its first field.

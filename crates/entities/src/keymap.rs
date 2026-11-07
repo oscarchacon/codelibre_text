@@ -95,7 +95,8 @@ impl KeyCombo {
     }
 
     /// A single printable symbol such as `/` or `?`.
-    fn is_symbol(&self) -> bool {
+    /// One character that is not a letter or digit (`?`, `(`, `"`).
+    pub fn is_symbol(&self) -> bool {
         self.key.chars().count() == 1 && !self.key.chars().all(char::is_alphanumeric)
     }
 }

@@ -32,6 +32,16 @@ fn widget_does(command: &Command) -> bool {
     }
 }
 
+/// The find / input panel or the quick panel is open and the text does not have the focus.
+fn typing_goes_to_a_panel(view: &ViewState) -> bool {
+    !view.text_has_focus && (view.find_panel.visible || view.input_panel.is_some() || view.quick_panel.is_some())
+}
+
+/// A key that types a symbol (`)`, `"`, `]`), with no modifier but Shift.
+fn typed_character(alternatives: &[KeyCombo]) -> bool {
+    alternatives.iter().any(|c| c.is_symbol() && !c.ctrl && !c.alt && !c.super_key)
+}
+
 pub enum KeyHandling {
     /// The key belongs to the text / focused widget.
     PassThrough,
@@ -62,8 +72,9 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         panel_has_focus: view.find_panel.visible || view.input_panel.is_some(),
         num_selections: editor.active_document().map_or(1, |d| d.extra_selections().len() + 1),
         settings: editor.view_settings(),
-        // The scopes come from the highlighting cache.
-        carets: editor.caret_contexts(),
+        // The scopes come from the highlighting cache. Not while a panel takes the typing: `(` in
+        // the find panel must not pair brackets in the file.
+        carets: if typing_goes_to_a_panel(view) { Vec::new() } else { editor.caret_contexts() },
         has_next_field: editor.has_snippet_field(true),
         has_prev_field: editor.has_snippet_field(false),
         // Typing is not a command here: what Tab completed counts only while nothing changed.
@@ -81,7 +92,13 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         // Listeners hear every widget command as a command (and may replace it): leaving these
         // keys to the widget would hide undo, deleting, caret movement and the clipboard from them.
         // (Whole-line copy/paste is decided once, on the clipboard event: see `clipboard_shortcut`.)
-        KeyResult::Command(command) if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) => KeyHandling::PassThrough,
+        // A typed character bound to one of them (`)` stepping over the closing bracket with `move`)
+        // runs it: the widget would type the character instead.
+        KeyResult::Command(command)
+            if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) && !typed_character(alternatives) =>
+        {
+            KeyHandling::PassThrough
+        }
         KeyResult::Command(command) => {
             view.queue_command(command);
             KeyHandling::Consumed
@@ -183,9 +200,11 @@ impl KeyContext for ViewKeyContext {
             _ => None,
         };
         match key {
-            "selector" => {
+            // `eol_selector`: the scope at the end of the caret's line (a string still open there).
+            "selector" | "eol_selector" => {
                 let selector = operand.as_str()?;
-                let matches = |c: &CaretContext| matches_selector(&c.scope, selector);
+                let eol = key == "eol_selector";
+                let matches = |c: &CaretContext| matches_selector(if eol { &c.eol_scope } else { &c.scope }, selector);
                 return match operator {
                     "equal" => self.per_caret(match_all, |c| Some(matches(c))),
                     "not_equal" => self.per_caret(match_all, |c| Some(!matches(c))),

@@ -4,7 +4,7 @@
 use entities::document::{Document, DocumentId};
 use entities::meta_info::{meta_value, selectors_where_on, shell_variable, symbol_kind, transform_symbol, SymbolKind};
 use entities::selector::matches_selector;
-use entities::text::char_to_byte;
+use entities::text::{byte_to_char, char_to_byte};
 use serde_json::Value;
 
 use crate::editor::Editor;
@@ -27,6 +27,8 @@ pub struct ScopedRange {
 pub struct CaretContext {
     /// The scope at its caret (`selector`).
     pub scope: String,
+    /// The scope at the end of its line (`eol_selector`: whether a string goes on past it).
+    pub eol_scope: String,
     /// Its line before it (`preceding_text`) and after it (`following_text`).
     pub preceding_text: String,
     pub following_text: String,
@@ -126,6 +128,7 @@ impl Editor {
                 let line_end = text[end..].find('\n').map_or(text.len(), |at| end + at);
                 CaretContext {
                     scope: self.scope_name(doc.id, s.head).unwrap_or_default(),
+                    eol_scope: self.scope_name(doc.id, byte_to_char(text, line_end)).unwrap_or_default(),
                     preceding_text: text[line_begin..start].to_string(),
                     following_text: text[end..line_end].to_string(),
                     text: text[start..end].to_string(),

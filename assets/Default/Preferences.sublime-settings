@@ -25,6 +25,9 @@
 	// Copy the indentation of the current line when pressing enter
 	"auto_indent": true,
 
+	// Typing an opening bracket or quote adds the closing one (Default.sublime-keymap)
+	"auto_match_enabled": true,
+
 	// Wrap long lines
 	"word_wrap": false,
 
