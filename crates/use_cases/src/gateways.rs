@@ -233,6 +233,27 @@ pub struct ScopeSpan {
     pub scope: String,
 }
 
+/// How a color scheme draws a scope (`view.style_for_scope`): colors as `#rrggbb` (`#rrggbbaa`
+/// when not opaque). `background` only when a rule sets one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScopeStyle {
+    pub foreground: String,
+    pub background: Option<String>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+/// A syntax as plugins see it (`sublime.Syntax`): its resource path, name, whether it is hidden
+/// from menus, and its base scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxInfo {
+    pub path: String,
+    pub name: String,
+    pub hidden: bool,
+    pub scope: String,
+}
+
 /// Syntax definitions and color schemes.
 pub trait SyntaxGateway {
     /// Reloads syntaxes and color schemes from packages. Problems are appended to `errors`.
@@ -244,7 +265,14 @@ pub trait SyntaxGateway {
     /// The scope of a whole file in a syntax (`source.python`); what build `selector`s match.
     fn base_scope(&self, syntax: &str) -> String;
     fn syntax_names(&self) -> Vec<String>;
+    /// Every syntax, hidden ones too (`sublime.list_syntaxes`).
+    fn syntaxes(&self) -> Vec<SyntaxInfo>;
     fn color_scheme_names(&self) -> Vec<String>;
+    /// The global colors of a color scheme (`view.style()`): `background`, `foreground`, `caret`…
+    /// as `#rrggbb`; the ones it does not set are left out.
+    fn scheme_globals(&self, scheme: &str) -> Vec<(String, String)>;
+    /// How a color scheme draws `scope` (space-separated scopes, outermost first).
+    fn scope_style(&self, scheme: &str, scope: &str) -> ScopeStyle;
     /// Functions, classes, headings… of a document, for Goto Symbol.
     fn symbols(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol>;
     /// The scopes of line `line` of `text` (lines end after `\n`), in order, covering the whole

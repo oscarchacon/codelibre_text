@@ -333,6 +333,17 @@ def status_message(msg):
     sublime_api.status_message(str(msg))
 
 
+def _tr(msgid, **args):
+    """A message of our own ``Default`` modules in the interface language, with its ``{name}``s
+    filled: the msgid must be one of the editor's own (``tr`` in the Rust code), or it stays English."""
+    return sublime_api.translate(msgid, None, None, {k: str(v) for k, v in args.items()})
+
+
+def _tr_n(singular, plural, count, **args):
+    """``_tr`` for a message with a singular and a plural form; ``{count}`` is filled too."""
+    return sublime_api.translate(singular, plural, int(count), {k: str(v) for k, v in args.items()})
+
+
 def error_message(msg):
     sublime_api.error_message(str(msg))
 
@@ -704,25 +715,33 @@ def format_command(cmd, args=None):
     return "%s %s" % (cmd, json.dumps(args)) if args else cmd
 
 
-# Syntax definitions are syntect's (``syntax_engine.rs``) and not listed to plugins yet.
+# Syntax definitions are syntect's (``syntax_engine.rs``). Those from packages have their resource
+# path; syntect's built-in ones ``Packages/<name>/<name>.sublime-syntax``.
 def list_syntaxes():
-    return []
+    return [Syntax(*syntax) for syntax in sublime_api.list_syntaxes()]
 
 
 def syntax_from_path(path):
-    return None
+    """The syntax at that resource path, or with that file name (``Python.sublime-syntax``)."""
+    syntaxes = list_syntaxes()
+    for syntax in syntaxes:
+        if syntax.path == path:
+            return syntax
+    stem = os.path.splitext(os.path.basename(path or ""))[0]
+    return next((syntax for syntax in syntaxes if syntax.name == stem), None)
 
 
 def find_syntax_by_name(name):
-    return []
+    return [syntax for syntax in list_syntaxes() if syntax.name == name]
 
 
 def find_syntax_by_scope(scope):
-    return []
+    return [syntax for syntax in list_syntaxes() if syntax.scope == scope]
 
 
 def find_syntax_for_file(path, first_line=""):
-    return None
+    found = sublime_api.find_syntax_for_file(str(path or ""), str(first_line or ""))
+    return Syntax(*found) if found else None
 
 
 def score_selector(scope_name, selector):
@@ -1065,7 +1084,8 @@ class View:
 
     def syntax(self):
         name = sublime_api.view_syntax(self.view_id)
-        return Syntax("", name, False, "")
+        found = find_syntax_by_name(name)
+        return found[0] if found else Syntax("", name, False, "")
 
     def assign_syntax(self, syntax):
         if isinstance(syntax, Syntax):
@@ -1198,12 +1218,19 @@ class View:
         return None
 
     def style(self):
-        return {"foreground": "#000000", "background": "#ffffff", "caret": "#000000",
-                "selection": "#c0d8f0", "line_highlight": "#f0f0f0"}
+        """The global colors of the color scheme (``#rrggbb``): ``background``, ``foreground``,
+        ``caret``, ``selection``…, the ones it sets."""
+        return sublime_api.view_style(self.view_id)
 
     def style_for_scope(self, scope):
-        style = self.style()
-        return {"foreground": style["foreground"], "source_line": 0, "source_column": 0, "source_file": ""}
+        """``foreground`` (``background`` when a rule sets one), ``bold``, ``italic``, ``underline``…
+        of the rules that match ``scope``. Where the rule comes from is not known."""
+        style = sublime_api.view_style_for_scope(self.view_id, str(scope))
+        style.setdefault("glow", False)
+        style.setdefault("stippled_underline", False)
+        style.setdefault("squiggly_underline", False)
+        style.update({"source_line": 0, "source_column": 0, "source_file": ""})
+        return style
 
     # Symbols need scopes; folding, popups, phantoms and auto-complete are not implemented. These
     # stand-ins let plugins that use them load and run (nothing shows).

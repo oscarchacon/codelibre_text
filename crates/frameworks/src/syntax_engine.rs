@@ -22,7 +22,7 @@ use syntect::highlighting::{
     Theme, ThemeItem, ThemeSet, ThemeSettings,
 };
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxDefinition, SyntaxReference, SyntaxSet};
-use use_cases::gateways::{PackagePaths, ScopeSpan};
+use use_cases::gateways::{PackagePaths, ScopeSpan, ScopeStyle, SyntaxInfo};
 
 pub type SharedSyntaxEngine = Rc<RefCell<SyntaxEngine>>;
 
@@ -40,6 +40,9 @@ pub struct SyntaxEngine {
     current_scheme: String,
     /// `scope_color` answers by (scheme, scope).
     scope_colors: HashMap<(String, String), Option<Color32>>,
+    /// The resource path (`Packages/<package>/….sublime-syntax`) of the syntaxes loaded from
+    /// packages, by name; syntect's built-in ones have none.
+    syntax_paths: HashMap<String, String>,
 }
 
 /// Sublime's `region.<color>ish` scopes, for color schemes without rules for them.
@@ -69,6 +72,7 @@ impl SyntaxEngine {
             caches: HashMap::new(),
             current_scheme: DEFAULT_SCHEME.to_string(),
             scope_colors: HashMap::new(),
+            syntax_paths: HashMap::new(),
         };
         engine.load_builtin_schemes(&mut Vec::new());
         engine
@@ -88,13 +92,19 @@ impl SyntaxEngine {
 
     pub fn reload(&mut self, include_sublime: bool, errors: &mut Vec<String>) {
         let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
+        self.syntax_paths.clear();
         for path in package_files::find_resources(&self.paths, include_sublime, |n| n.ends_with(".sublime-syntax")) {
             let definition = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| {
                 let fallback_name = path.file_stem().and_then(|s| s.to_str());
                 SyntaxDefinition::load_from_str(&text, true, fallback_name).map_err(|e| e.to_string())
             });
             match definition {
-                Ok(definition) => builder.add(definition),
+                Ok(definition) => {
+                    if let Some(resource) = package_files::resource_name(&self.paths, include_sublime, &path) {
+                        self.syntax_paths.insert(definition.name.clone(), resource);
+                    }
+                    builder.add(definition)
+                }
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
             }
         }
@@ -166,6 +176,70 @@ impl SyntaxEngine {
 
     pub fn syntax_names(&self) -> Vec<String> {
         self.syntaxes.syntaxes().iter().filter(|s| !s.hidden).map(|s| s.name.clone()).collect()
+    }
+
+    /// Every syntax for plugins. Those from packages have their resource path; syntect's built-in
+    /// ones get the path Sublime's own would have (`Packages/<name>/<name>.sublime-syntax`, which
+    /// `resolve` turns back into the name), Plain Text Sublime's `Packages/Text/Plain text.tmLanguage`.
+    pub fn syntax_list(&self) -> Vec<SyntaxInfo> {
+        self.syntaxes
+            .syntaxes()
+            .iter()
+            .map(|s| SyntaxInfo {
+                path: self.syntax_paths.get(&s.name).cloned().unwrap_or_else(|| match s.name.as_str() {
+                    "Plain Text" => "Packages/Text/Plain text.tmLanguage".to_string(),
+                    name => format!("Packages/{name}/{name}.sublime-syntax"),
+                }),
+                name: s.name.clone(),
+                hidden: s.hidden,
+                scope: s.scope.to_string(),
+            })
+            .collect()
+    }
+
+    /// The global colors of a color scheme, by Sublime's names (`view.style()`).
+    pub fn scheme_globals(&self, scheme: &str) -> Vec<(String, String)> {
+        let s = &self.scheme(scheme).settings;
+        [
+            ("foreground", s.foreground),
+            ("background", s.background),
+            ("caret", s.caret),
+            ("line_highlight", s.line_highlight),
+            ("selection", s.selection),
+            ("selection_foreground", s.selection_foreground),
+            ("selection_border", s.selection_border),
+            ("inactive_selection", s.inactive_selection),
+            ("gutter", s.gutter),
+            ("gutter_foreground", s.gutter_foreground),
+            ("find_highlight", s.find_highlight),
+            ("find_highlight_foreground", s.find_highlight_foreground),
+            ("guide", s.guide),
+            ("active_guide", s.active_guide),
+            ("accent", s.accent),
+            ("highlight", s.highlight),
+            ("shadow", s.shadow),
+        ]
+        .into_iter()
+        .filter_map(|(name, color)| color.map(|c| (name.to_string(), hex(c))))
+        .collect()
+    }
+
+    /// How a color scheme draws `scope` (the rules that match the whole stack, merged as when
+    /// highlighting); the foreground falls back to the scheme's.
+    pub fn scope_style(&self, scheme: &str, scope: &str) -> ScopeStyle {
+        let theme = self.scheme(scheme);
+        let modifier = ScopeStack::from_str(scope.trim())
+            .map(|stack| Highlighter::new(theme).style_mod_for_stack(stack.as_slice()))
+            .unwrap_or_default();
+        let font = modifier.font_style.unwrap_or_else(FontStyle::empty);
+        let foreground = modifier.foreground.or(theme.settings.foreground).unwrap_or(Color::BLACK);
+        ScopeStyle {
+            foreground: hex(foreground),
+            background: modifier.background.map(hex),
+            bold: font.contains(FontStyle::BOLD),
+            italic: font.contains(FontStyle::ITALIC),
+            underline: font.contains(FontStyle::UNDERLINE),
+        }
     }
 
     pub fn forget(&mut self, document: DocumentId) {
@@ -411,6 +485,14 @@ fn highlight_line(
         .map(|(style, _, range)| (range, style))
         .collect();
     (spans, (!symbol.is_empty()).then_some(symbol))
+}
+
+/// `#rrggbb`, or `#rrggbbaa` when not opaque, as Sublime gives colors to plugins.
+fn hex(c: Color) -> String {
+    match c.a {
+        255 => format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b),
+        a => format!("#{:02x}{:02x}{:02x}{a:02x}", c.r, c.g, c.b),
+    }
 }
 
 pub fn to_color32(c: Color) -> Color32 {

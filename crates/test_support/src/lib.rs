@@ -31,7 +31,7 @@ use serde_json::{json, Map, Value};
 use use_cases::gateways::{
     ArchiveFolder, ClipboardGateway, DialogGateway, DirectoryEntry, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
     FileFilter, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway, ProcessRequest,
-    ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
+    ResourceGateway, ScopeSpan, ScopeStyle, SessionGateway, ShellGateway, SyntaxGateway, SyntaxInfo, UiResources,
 };
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
@@ -428,8 +428,38 @@ impl SyntaxGateway for FakeSyntaxes {
         std::iter::once("Plain Text").chain(SYNTAXES.iter().map(|(_, n)| *n)).map(String::from).collect()
     }
 
+    /// The syntax names, each at `Packages/<name>/<name>.sublime-syntax` with its base scope.
+    fn syntaxes(&self) -> Vec<SyntaxInfo> {
+        self.syntax_names()
+            .into_iter()
+            .map(|name| SyntaxInfo {
+                path: format!("Packages/{name}/{name}.sublime-syntax"),
+                scope: self.base_scope(&name),
+                hidden: false,
+                name,
+            })
+            .collect()
+    }
+
     fn color_scheme_names(&self) -> Vec<String> {
         vec!["Daylight".into(), "Monokai".into(), "Solarized (dark)".into()]
+    }
+
+    /// Every scheme: a dark background, a light foreground (Monokai's).
+    fn scheme_globals(&self, _scheme: &str) -> Vec<(String, String)> {
+        vec![("foreground".into(), "#f8f8f2".into()), ("background".into(), "#272822".into())]
+    }
+
+    /// `comment…` is grey and italic, anything else the foreground.
+    fn scope_style(&self, _scheme: &str, scope: &str) -> ScopeStyle {
+        let comment = scope.split_whitespace().any(|s| s.starts_with("comment"));
+        ScopeStyle {
+            foreground: if comment { "#75715e" } else { "#f8f8f2" }.into(),
+            background: None,
+            bold: false,
+            italic: comment,
+            underline: false,
+        }
     }
 
     fn symbols(&self, _document: DocumentId, _text: &str, _syntax: &str) -> Vec<Symbol> {

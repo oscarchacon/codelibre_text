@@ -142,6 +142,49 @@ fn package_color_schemes_are_loaded_in_both_formats() {
     assert_eq!(mine.settings.background.map(to_color32), Some(egui::Color32::from_rgb(1, 2, 3)));
 }
 
+/// `view.style()` and `view.style_for_scope()` for plugins.
+#[test]
+fn styles_come_from_the_color_scheme_rules() {
+    let (dir, mut engine) = engine();
+    let scheme = r##"{ "name": "Mine",
+        "globals": { "background": "#010203", "foreground": "#f0f0f0", "caret": "#ff000080" },
+        "rules": [
+            { "scope": "comment", "foreground": "#808080", "font_style": "italic" },
+            { "scope": "string", "foreground": "#00ff00", "background": "#002200", "font_style": "bold underline" }
+        ] }"##;
+    write(&dir, "User/Mine.sublime-color-scheme", scheme);
+    engine.reload(false, &mut Vec::new());
+    let globals = engine.scheme_globals("Mine");
+    assert_eq!(&globals[..3], [
+        ("foreground".to_string(), "#f0f0f0".to_string()),
+        ("background".to_string(), "#010203".to_string()),
+        ("caret".to_string(), "#ff000080".to_string()),
+    ]);
+    assert_eq!(globals.len(), 3, "unset colors are left out: {globals:?}");
+
+    let comment = engine.scope_style("Mine", "source.python comment.line.python ");
+    assert_eq!((comment.foreground.as_str(), comment.background, comment.italic, comment.bold), ("#808080", None, true, false));
+    let string = engine.scope_style("Mine", "source.python string.quoted");
+    assert_eq!(string.background.as_deref(), Some("#002200"));
+    assert!(string.bold && string.underline && !string.italic);
+    assert_eq!(engine.scope_style("Mine", "source.python").foreground, "#f0f0f0", "the scheme's foreground");
+    assert_eq!(engine.scope_style("Monokai", "").foreground, "#f8f8f2");
+}
+
+#[test]
+fn the_syntaxes_for_plugins_have_paths_and_scopes() {
+    let (dir, mut engine) = engine();
+    write(&dir, "Toy/syntaxes/Toy.sublime-syntax", TOY_SYNTAX);
+    engine.reload(false, &mut Vec::new());
+    let syntaxes = engine.syntax_list();
+    let find = |name: &str| syntaxes.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("no {name}"));
+    assert_eq!((find("Toy").path.as_str(), find("Toy").scope.as_str()), ("Packages/Toy/syntaxes/Toy.sublime-syntax", "source.toy"));
+    assert_eq!(find("Python").path, "Packages/Python/Python.sublime-syntax");
+    assert_eq!(find("Python").scope, "source.python");
+    assert_eq!(find("Plain Text").path, "Packages/Text/Plain text.tmLanguage");
+    assert_eq!(engine.resolve(&find("Toy").path), "Toy", "the path resolves back");
+}
+
 // ----- highlighting --------------------------------------------------------------------------------
 
 #[test]

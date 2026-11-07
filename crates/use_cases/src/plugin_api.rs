@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 
 use crate::editing::VIEW_COMMANDS;
 use crate::editor::Editor;
-use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel, SyntaxInfo};
 use crate::plugins::CommandRunner;
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
@@ -81,6 +81,11 @@ fn file_filters(value: &Value) -> Vec<FileFilter> {
     value.as_array().map(|entries| entries.iter().filter_map(filter).collect()).unwrap_or_default()
 }
 
+/// `[path, name, hidden, scope]`, which `sublime.Syntax` is made from.
+fn syntax_info(syntax: &SyntaxInfo) -> Value {
+    json!([syntax.path, syntax.name, syntax.hidden, syntax.scope])
+}
+
 fn region(a: usize, b: usize) -> Value {
     json!([a, b])
 }
@@ -93,6 +98,21 @@ impl Editor {
             "status_message" => {
                 self.notify(a.str(0)?);
                 Ok(Value::Null)
+            }
+            // `sublime._tr(msgid, **args)` / `_tr_n(singular, plural, count, **args)`: the messages of our
+            // own `Default` modules are the editor's own strings (`builds.rs`), so they are translated too.
+            "translate" => {
+                let values: Vec<(String, String)> = a
+                    .value(3)
+                    .as_object()
+                    .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().map_or_else(|| v.to_string(), String::from))).collect())
+                    .unwrap_or_default();
+                let args: Vec<(&str, &dyn std::fmt::Display)> =
+                    values.iter().map(|(k, v)| (k.as_str(), v as &dyn std::fmt::Display)).collect();
+                Ok(json!(match a.value(1).as_str() {
+                    Some(plural) => self.tr_n(a.str(0)?, plural, a.usize(2)?, &args),
+                    None => self.tr_args(a.str(0)?, &args),
+                }))
             }
             "error_message" | "message_dialog" => {
                 let message = a.str(0)?.to_string();
@@ -257,6 +277,33 @@ impl Editor {
                 let id = a.u64(0)?;
                 self.close_documents(vec![id]);
                 Ok(json!(self.index_of(id).is_none()))
+            }
+            "list_syntaxes" => Ok(json!(self.gateways.syntaxes.syntaxes().iter().map(syntax_info).collect::<Vec<_>>())),
+            // The syntax a file would open with, by its name, else its first line (Plain Text otherwise).
+            "find_syntax_for_file" => {
+                let name = self.gateways.syntaxes.detect(std::path::Path::new(a.str(0)?), a.str(1).unwrap_or_default());
+                let syntaxes = self.gateways.syntaxes.syntaxes();
+                Ok(syntaxes.iter().find(|s| s.name == name).map_or(Value::Null, syntax_info))
+            }
+            // The color scheme of the `color_scheme` setting (views have no scheme of their own yet).
+            "view_style" => {
+                self.any_document(a.u64(0)?).ok_or("the view is closed")?;
+                let globals = self.gateways.syntaxes.scheme_globals(&self.color_scheme_name());
+                Ok(Value::Object(globals.into_iter().map(|(name, color)| (name, json!(color))).collect()))
+            }
+            "view_style_for_scope" => {
+                self.any_document(a.u64(0)?).ok_or("the view is closed")?;
+                let style = self.gateways.syntaxes.scope_style(&self.color_scheme_name(), a.str(1)?);
+                let mut answer = Map::from_iter([
+                    ("foreground".to_string(), json!(style.foreground)),
+                    ("bold".to_string(), json!(style.bold)),
+                    ("italic".to_string(), json!(style.italic)),
+                    ("underline".to_string(), json!(style.underline)),
+                ]);
+                if let Some(background) = style.background {
+                    answer.insert("background".to_string(), json!(background));
+                }
+                Ok(Value::Object(answer))
             }
             _ if function.starts_with("view_") => self.plugin_view_call(function, &a),
             _ => Err(format!("sublime_api.{function} is not implemented yet")),

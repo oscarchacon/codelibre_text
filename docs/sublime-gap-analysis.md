@@ -17,7 +17,9 @@ Compared against the installed Sublime Text 4 (`C:\Program Files\Sublime Text`):
   and macros, plus every `*Command` class in its `.py` files; and the keys of `Preferences.sublime-settings`.
 - Project side: names matched in `command_controller.rs` / `WIDGET_COMMANDS`, and setting keys read in `crates/*/src`.
 
-Totals: **88 / 287** commands handled, **17 / 200** settings read.
+Totals (2026-10-26, not recalculated since): **88 / 287** commands handled, **17 / 200** settings read. Later work
+(multiple cursors, `open_url`, `copy_with_empty_selection`, builds, output panels…) is struck out or removed below;
+`docs/sublime-native-commands.md` is the up-to-date list for native commands.
 
 "Native" = the name appears in `sublime_text.exe` (built into the core). "Python" = defined in `Default.sublime-package`
 (port them as Rust use cases: Sublime's `Default` package is not loaded as a plugin; Python plugin support is in
@@ -38,7 +40,7 @@ cannot be told apart by the string scan and are listed under native.
 | Split layouts | `set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`, `new_pane`, `close_pane`, `clone_file` | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
-| Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
+| Find in Files | `show_panel` `find_in_files` (opens the ordinary find panel: no *Where* field, no search in files), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
 | Auto-complete & snippets | `auto_complete`, `hide_auto_complete`, `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
 | Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |
@@ -54,7 +56,7 @@ cannot be told apart by the string scan and are listed under native.
 
 ## Settings not yet read (most user-visible first)
 
-- Editing: `auto_match_enabled`, `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, `copy_with_empty_selection`,
+- Editing: `auto_match_enabled`, `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, ~~`copy_with_empty_selection`~~ (done),
   `word_separators`, `sub_word_separators`, `drag_text`, `trim_automatic_white_space`, `indent_to_bracket`, `use_tab_stops`.
 - Display: `font_face`, `font_options`, `draw_white_space`, `draw_indent_guides`, `indent_guide_options`, `match_brackets*`, `match_selection`,
   `match_tags`, `caret_style`, `block_caret`, `line_padding_top/bottom`, `wrap_width`, `relative_line_numbers`, `highlight_line_number`,
@@ -68,7 +70,8 @@ cannot be told apart by the string scan and are listed under native.
 
 ## Suggested order
 
-1. Multiple cursors (`select_lines`, `split_selection_into_lines`, `find_all_under`) — builds on `Document::edit_all`.
+1. ~~Multiple cursors (`select_lines`, `split_selection_into_lines`, `find_all_under`)~~ (done); still missing:
+   `find_under_expand_skip`, the `unselect_*` / `select_to_*` commands, Ctrl+click and column selection.
 2. Find panel toggles + `find_all` + Find in Files.
 3. `wrap_lines`, `expand_selection_to_paragraph`, `toggle_bookmark`/`next_bookmark`, `switch_file` — small entity-level work.
 4. Status-bar and display settings (`draw_white_space`, `match_brackets`, `font_face`, `show_encoding`…).

@@ -32,7 +32,7 @@ command_controller ──run "foo"──▶ use_cases::plugins ──PluginHostG
 | Which built-ins are window commands for the hooks (`WINDOW_COMMANDS`), hooks around every command (`run`) | `crates/interface_adapters/src/controllers/command_controller.rs` | Interface Adapters |
 | `poll_plugins` every frame, after the UI events (`command_controller::poll_plugins`) | `crates/frameworks/src/app.rs` | Frameworks |
 | The `sublime_api` functions the editor answers | `crates/use_cases/src/plugin_api.rs` | Use Cases |
-| Quick / input panels plugins open, and the answers to their callbacks | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
+| Quick / input panels plugins open, and the answers to their callbacks (tested in `use_cases/tests/plugin_api.rs`) | `crates/use_cases/src/plugin_panels.rs` | Use Cases |
 | Showing them (`show_plugin_panels`), answers from the views (`SearchKind::PluginItems`, `UiEvent::InputPanel*`) | `crates/interface_adapters/src/controllers/{command,ui}_controller.rs` | Interface Adapters |
 | The input panel view | `crates/frameworks/src/views/input_panel.rs` | Frameworks |
 | Output panels (documents that are not tabs, `any_document`), the `append` command, results (`next_result`) | `crates/use_cases/src/output_panels.rs` | Use Cases |
@@ -129,10 +129,10 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
   project_data, extract_variables, run_command, settings), `Settings`, `load_settings`/`save_settings`, `run_command`,
   `status_message`/`error_message`/`message_dialog`, clipboard, version/platform/arch/paths, constants.
 - Stand-ins (so plugins do not crash, but nothing visible happens yet), for what phase C will implement:
-  `style_for_scope`, `meta_info`, symbols, popups
+  `meta_info`, symbols, popups
   (`show_popup_menu` is a quick panel), phantoms (`Phantom`, `PhantomSet`), `CompletionItem` / `CompletionList`,
   folding, the view's geometry (`text_to_layout`…, a fixed 8×16 font), groups / layouts / sheets (`Sheet`), the symbol
-  index, `list_syntaxes` / `find_syntax_*`. (Scopes were stand-ins too; phase C made them real.)
+  index. (Scopes, styles and `list_syntaxes` / `find_syntax_*` were stand-ins too; phase C made them real.)
   (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
 ## Phase B — events, panels, async (in progress)
@@ -216,7 +216,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       read by threads that wake the window; a new build replaces the running one; `cancel_build` kills the whole tree. A
       plugin's own `exec` command wins. Ignored: `encoding` (UTF-8, lossy), `syntax`, `word_wrap`.
 - [ ] Builds, still missing: `$project*` variables and a project's `build_systems` (projects are not read), the Tools >
-      Build System list (`$build_systems`), `from Default.exec import ExecCommand`, and the builds inside Sublime's zipped
+      Build System list (`$build_systems`), and the builds inside Sublime's zipped
       packages (`Python`, `C++`…), which need `.sublime-package` (phase C). There is no Ctrl+Break: egui has no such key.
 - [ ] Output panels, still missing: the panel's own syntax highlighting / `word_wrap`, selections drawn, `unlisted`,
       built-in commands other than `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`,
@@ -350,8 +350,16 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`Default` modules**: Sublime's `Default` is not loaded, so `assets/python/Default/` (written to `Lib/python/Default`)
       has our own modules packages import: `paste_from_history` (`ClipboardHistory`, `g_clipboard_history`). They are
       only imported, not loaded as plugins: their listeners would make every copy / paste a command for the hooks.
-      Missing: `Default.exec` (`ExecCommand`, `AsyncProcess`, `ProcessListener`: build plugins subclass them), and the
-      `paste_from_history` command and its listener.
+      Their classes are not commands either (`sublime_plugin._is_own_default`), only the subclasses packages define.
+- [x] **`Default.exec`** (2026-11-07): `ExecCommand`, `AsyncProcess`, `ProcessListener`, for build plugins that subclass
+      them; `exec` itself stays the built-in. Like the built-in: the `exec` panel with `result_*` settings, `working_dir`
+      (default the file's folder, else the first folder), `env` and `path` (`$VARIABLES` expanded), `/bin/sh -c` or
+      `cmd` for `shell_cmd`, a new build kills the running one, `kill` writes `[Cancelled]`, `[Finished in …]` (with
+      `[cmd: …]` / `[dir: …]` / `[path: …]` on failure, `quiet`), "Build finished with N errors". `on_data` /
+      `on_finished` go to the main thread as `append_data` / `finish` (Sublime 3's names, which subclasses override),
+      text decoded with `encoding`. Its messages are the editor's (`sublime._tr` / `_tr_n` → `translate`), translated.
+      stdout and stderr are one stream; annotations (`update_annotations`) do nothing (phase C).
+- [ ] Still missing from `Default`: the `paste_from_history` command and its listener.
 - [x] **Warnings**: `DeprecationWarning` and `SyntaxWarning` (Python 3.12's invalid escapes in old plugins) are not
       shown in the console, as in Sublime, where plugins are not `__main__`.
 - [x] **Package Control's disabling**: Disable / Enable Package and the steps around Upgrade / Remove only change
@@ -377,9 +385,20 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] The **`selector` key binding context** (`keyboard_controller.rs`): it matches when the scope at some caret does.
       Language keymaps now apply when their other contexts are known (`insert_snippet` expands `$SELECTION` and puts the
       caret on the first field: `text_commands::insert_snippet`); those with `preceding_text` / `following_text` still do not.
-- [ ] Scopes, still missing: `style_for_scope` and `view.style` (the color scheme's colors), `meta_info`
+- [x] **Styles** (2026-11-07): `view.style()` is the `color_scheme`'s globals (`#rrggbb`, `#rrggbbaa` when not opaque;
+      those it does not set are left out) and `view.style_for_scope(scope)` the rules matching the whole scope stack,
+      merged as when highlighting (`SyntaxGateway::scheme_globals` / `scope_style`, `SyntaxEngine`): `foreground` (else
+      the scheme's), `background` when a rule sets one, `bold` / `italic` / `underline`. Views have no color scheme of
+      their own (a view's `color_scheme` setting is not read); `glow`, the other underlines and `source_*` are fixed.
+- [ ] Scopes, still missing: `meta_info`
       (`.tmPreferences`), `symbol_regions` / `indexed_symbols`, `context_backtrace`, Sublime's exact `extract_scope` and
       score values, `match_all` in contexts; `find_by_selector` and `extract_scope` parse the whole file every call.
+- [x] **Syntaxes for plugins** (2026-11-07): `sublime.list_syntaxes` (hidden ones too), `find_syntax_by_name`,
+      `find_syntax_by_scope`, `syntax_from_path` (the path, else the file name) and `find_syntax_for_file` (as a file
+      opens: name, else first line) are syntect's syntaxes (`SyntaxGateway::syntaxes`); `view.syntax()` returns the
+      full `Syntax`. Those loaded from packages have their resource path; syntect's built-in ones get
+      `Packages/<name>/<name>.sublime-syntax` (Plain Text `Packages/Text/Plain text.tmLanguage`), which
+      `assign_syntax` resolves back.
 - [ ] **Completions**: `on_query_completions`, `CompletionItem`, `view.auto_complete` (needs an auto-complete UI first).
 - [ ] **Popups, phantoms, annotations, hover** (`show_popup` with minihtml, `PhantomSet`, `on_hover`).
 - [ ] **Several windows, clones, groups/layouts** (`new_window`, `set_layout`, `move_to_group`).

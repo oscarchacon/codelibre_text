@@ -4,6 +4,8 @@ Application, window and text commands, their input handlers, and the view events
 ``EventListener`` and ``ViewEventListener``, and ``TextChangeListener``.
 """
 
+import os
+import sys
 import traceback
 
 import sublime
@@ -324,6 +326,17 @@ def register_listeners(module):
                     value().attach(buffer)
 
 
+_OWN_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Default")
+
+
+def _is_own_default(cls):
+    """A class of our own ``Default`` modules (``Default.exec.ExecCommand``): a plugin that imports
+    it does not make it a command, so ``exec`` stays the editor's built-in. Its subclasses count."""
+    module = sys.modules.get(cls.__module__)
+    path = getattr(module, "__file__", None) or ""
+    return bool(path) and os.path.dirname(os.path.abspath(path)) == _OWN_DEFAULT
+
+
 def set_commands(modules):
     """The commands are those defined in (or imported into) the plugin modules, in load order: a
     later one replaces a command of the same name. Objects of classes that are gone are dropped."""
@@ -331,6 +344,8 @@ def set_commands(modules):
     for module in modules:
         for value in list(vars(module).values()):
             if not isinstance(value, type) or value in _BASES or not issubclass(value, Command):
+                continue
+            if _is_own_default(value):
                 continue
             for base, kind in KINDS:
                 if issubclass(value, base):

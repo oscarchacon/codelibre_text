@@ -185,6 +185,37 @@ fn the_window_and_its_views() {
 }
 
 #[test]
+fn styles_and_syntaxes() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "x");
+    let v = view_id(&editor);
+    let style = call(&world, &mut editor, "view_style", json!([v])).unwrap();
+    assert_eq!(style, json!({"foreground": "#f8f8f2", "background": "#272822"}));
+    let comment = call(&world, &mut editor, "view_style_for_scope", json!([v, "source.rust comment.line"])).unwrap();
+    assert_eq!(comment, json!({"foreground": "#75715e", "bold": false, "italic": true, "underline": false}));
+    assert!(call(&world, &mut editor, "view_style", json!([999])).is_err(), "a closed view");
+
+    let syntaxes = call(&world, &mut editor, "list_syntaxes", json!([])).unwrap();
+    assert!(syntaxes.as_array().unwrap().contains(&json!(["Packages/Python/Python.sublime-syntax", "Python", false, "source.python"])));
+    let python = call(&world, &mut editor, "find_syntax_for_file", json!(["/p/a.py", ""])).unwrap();
+    assert_eq!(python[1], json!("Python"));
+    let shebang = call(&world, &mut editor, "find_syntax_for_file", json!(["script", "#!/usr/bin/env python3"])).unwrap();
+    assert_eq!(shebang[1], json!("Python"), "by the first line");
+}
+
+/// `sublime._tr` / `_tr_n` (our `Default.exec`): the editor's own messages, with their names filled.
+#[test]
+fn translate_fills_the_editors_own_messages() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let finished = call(&world, &mut editor, "translate", json!(["[Finished in {time}s]", null, null, {"time": "1.5"}]));
+    assert_eq!(finished, Ok(json!("[Finished in 1.5s]")));
+    let errors = json!(["Build finished with {count} error", "Build finished with {count} errors", 2, {}]);
+    assert_eq!(call(&world, &mut editor, "translate", errors), Ok(json!("Build finished with 2 errors")));
+    assert!(call(&world, &mut editor, "translate", json!([7])).is_err(), "the msgid must be a string");
+}
+
+#[test]
 fn messages_and_the_clipboard() {
     let world = plugin_world();
     let mut editor = world.editor();

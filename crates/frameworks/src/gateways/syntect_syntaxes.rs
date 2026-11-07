@@ -2,7 +2,7 @@ use std::path::Path;
 
 use entities::document::DocumentId;
 use entities::symbol::Symbol;
-use use_cases::gateways::{ScopeSpan, SyntaxGateway};
+use use_cases::gateways::{ScopeSpan, ScopeStyle, SyntaxGateway, SyntaxInfo};
 
 use crate::syntax_engine::SharedSyntaxEngine;
 
@@ -30,8 +30,20 @@ impl SyntaxGateway for SyntectSyntaxes {
         self.0.borrow().syntax_names()
     }
 
+    fn syntaxes(&self) -> Vec<SyntaxInfo> {
+        self.0.borrow().syntax_list()
+    }
+
     fn color_scheme_names(&self) -> Vec<String> {
         self.0.borrow().scheme_names()
+    }
+
+    fn scheme_globals(&self, scheme: &str) -> Vec<(String, String)> {
+        self.0.borrow().scheme_globals(scheme)
+    }
+
+    fn scope_style(&self, scheme: &str, scope: &str) -> ScopeStyle {
+        self.0.borrow().scope_style(scheme, scope)
     }
 
     fn symbols(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol> {

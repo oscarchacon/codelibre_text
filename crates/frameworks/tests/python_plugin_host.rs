@@ -387,6 +387,65 @@ class FakeBuildCommand(sublime_plugin.WindowCommand):
     assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
 }
 
+const EXEC_SUBCLASS: &str = r#"
+import sublime
+from Default.exec import ExecCommand, AsyncProcess, ProcessListener
+
+class MyBuildCommand(ExecCommand):
+    def on_data(self, proc, data):
+        super().on_data(proc, data.upper())
+"#;
+
+/// `Default.exec`'s classes are not commands: `exec` stays the built-in; subclasses are.
+#[test]
+fn default_exec_classes_are_imported_but_only_subclasses_are_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some((_host, loaded)) = host_with(dir.path(), &[("my_build.py", EXEC_SUBCLASS)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { commands, errors, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(errors.is_empty(), "{errors:?}");
+    let names: Vec<&str> = commands.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["my_build"]);
+}
+
+/// Wait (polling like the window) until the status bar says `prefix…`.
+fn wait_for_status(editor: &mut Editor, view: &mut ViewState, prefix: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !editor_status(editor).starts_with(prefix) && Instant::now() < deadline {
+        command_controller::poll_plugins(editor, view);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(editor_status(editor).starts_with(prefix), "status {:?}; console:\n{}", editor_status(editor), editor.state().console);
+}
+
+#[test]
+fn a_subclass_of_default_exec_builds_into_the_exec_panel_and_can_be_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(mut editor) = editor_with(dir.path(), EXEC_SUBCLASS) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    let failing = if cfg!(windows) { "echo hello& exit 3" } else { "echo hello; exit 3" };
+    let build = json!({ "shell_cmd": failing, "file_regex": "^(.+):(\\d+)", "working_dir": dir.path() });
+    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", build));
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+    wait_for_status(&mut editor, &mut view, "Build finished");
+    let text = editor.shown_output_panel().unwrap().document.text.clone();
+    assert!(text.starts_with("HELLO\n\n[Finished in "), "{text:?}");
+    assert!(text.contains("s with exit code 3]\n[cmd: "), "{text:?}");
+    assert!(text.ends_with(&format!("[dir: {}]\n", dir.path().display())), "{text:?}");
+    assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
+
+    let long = if cfg!(windows) { "ping -n 30 127.0.0.1 > nul" } else { "sleep 30" };
+    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", json!({ "shell_cmd": long })));
+    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", json!({ "kill": true })));
+    let text = editor.shown_output_panel().unwrap().document.text.clone();
+    assert_eq!(text, "\n[Cancelled]\n", "console:\n{}", editor.state().console);
+}
+
 #[test]
 fn regions_statuses_and_show_reach_the_editor() {
     let dir = tempfile::tempdir().unwrap();
@@ -554,6 +613,38 @@ class TlsCommand(sublime_plugin.TextCommand):
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("tls"));
     assert_eq!(editor_status(&editor), "ready SSLContext", "console:\n{}", editor.state().console);
+}
+
+/// `view.style()`, `style_for_scope` and the syntax functions, from syntect's syntaxes and Monokai.
+#[test]
+fn plugins_read_the_color_scheme_and_the_syntaxes() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class StylesCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        style = self.view.style()
+        comment = self.view.style_for_scope("source.python comment.line.number-sign.python")
+        python = sublime.find_syntax_by_scope("source.python")[0]
+        by_file = sublime.find_syntax_for_file("a.py")
+        same = sublime.syntax_from_path(python.path) == python and sublime.find_syntax_by_name("Python") == [python]
+        self.view.assign_syntax(python)
+        sublime.status_message("%s %s %s %s %s %s %s" % (style["background"], comment["foreground"], comment["italic"],
+            python.path, by_file.name, same, self.view.syntax().scope))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("styles"));
+    assert_eq!(
+        editor_status(&editor),
+        "#272822 #75715e False Packages/Python/Python.sublime-syntax Python True source.python",
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 fn editor_status(editor: &Editor) -> String {
