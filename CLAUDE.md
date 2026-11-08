@@ -39,6 +39,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   straight in) by `.github/scripts/goes-to-main.sh`: final and `-rc`, `-alpha` / `-beta` while its `PRERELEASES_TO_MAIN`
   is true (TODO), any version with a tag `to-main/<version>` or `main/<version>` on develop or the release branch
   (pushed before the build: merged when it ends; after: at once).
+  The whole flow, with diagrams, for contributors: `docs/release-flow.md` (keep it in step with the workflows).
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).
