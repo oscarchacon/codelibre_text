@@ -27,14 +27,18 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Build / verify
 - `cargo build` / `cargo run -- <folder-or-file>...` (root `default-members` is the frameworks crate).
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
-- CI (`.github/workflows/ci.yml`) runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
-  and pull requests into them or a `release/**` branch. macOS joins them when the commit has a tag `macos-test*` (pushed
+- CI (`.github/workflows/ci.yml`) builds and runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
+  and pull requests into them or a `release/**` branch (SonarQube is a TODO job there). macOS joins them when the commit has a tag `macos-test*` (pushed
   with it: `git push --atomic -f origin develop macos-test`; the tag starts no run of its own), a manual run with
   `macos` checked, and before every release build.
-- A tag `open-release/<version>` (`open-release.yml`) creates `release/<version>` from the last release branch built
-  for every platform and opens the pull request from `develop` into it.
-- Releases (`release.yml`, on a push to `release/**`): a final version is merged into `main` (`to-main.yml`); a pre-release (`-alpha`, `-rc`…) only
-  when a tag `to-main/<version>` or `main/<version>` exists (pushed before the build: merged when it ends; after: at once).
+- A tag `open-release/<version>` (`open-release.yml`) creates `release/<version>` from `main` and opens the pull request
+  from `develop` into it (or create the branch from `main` by hand on the web). Creating a `release/**` branch builds nothing.
+- `release-pr.yml` writes that pull request's description from its commits and PRs (`.github/scripts/release-pr-body.sh`),
+  on open and every push; text outside `<!-- auto:start -->` / `<!-- auto:end -->` is kept.
+- Releases (`release.yml`, on a push to `release/**` other than its creation) go to `main` (`to-main.yml`, `release/<version>`
+  straight in) by `.github/scripts/goes-to-main.sh`: final and `-rc`, `-alpha` / `-beta` while its `PRERELEASES_TO_MAIN`
+  is true (TODO), any version with a tag `to-main/<version>` or `main/<version>` on develop or the release branch
+  (pushed before the build: merged when it ends; after: at once).
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.
   `use_cases/tests/documents.rs` sleeps 1.6 s (external-change check interval).
