@@ -167,29 +167,26 @@ also needs it where it shows installed applications:
 
 ### Release installers
 
-A release starts with a tag `open-release/<version>`: `.github/workflows/open-release.yml` creates
-the branch `release/<version>` from the last `release/<version>` branch whose release has the
-installers of every platform, and opens a pull request from `develop` into it:
+Releases follow [Branches, tags and releases](docs/release-flow.md), with diagrams of the whole
+flow. In short: changes go into `develop` by pull request; a tag `open-release/<version>` creates the
+branch `release/<version>` from `main` and opens a pull request from `develop` into it, whose
+description is written from the commits; merging it builds the Windows setup and portable `.zip`
+(x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux `.deb`, `.rpm` and portable
+`.tar.xz` (x64 and ARM64), uploaded to a draft GitHub Release to review and publish by hand:
 
 ```bash
 git tag open-release/0.1.1-alpha develop && git push origin open-release/0.1.1-alpha
 ```
 
-Merging that pull request (or pushing a branch `release/<version>`) (for example `release/0.1.0-alpha`) runs
-`.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
-setup and portable `.zip` (x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux
-`.deb`, `.rpm` and portable `.tar.xz` (x64 and ARM64). They are uploaded to a draft GitHub Release to review and publish
-by hand; pushing again replaces its files. The `.deb`, `.rpm` and a `SHA256SUMS` of every file are
-signed with the release GPG key (secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has
-a build provenance attestation; the Windows and macOS installers are not signed yet. See the
-[Code signing policy](docs/code-signing.md). When every build of a final version succeeds, a pull
-request takes the branch to `main` with its version in `Cargo.toml` and is merged at once
-(`.github/workflows/to-main.yml`). A pre-release (`-alpha`, `-beta`, `-rc`…) stays out of `main` until
-a tag `to-main/<version>` (or `main/<version>`) exists. Pushed before the build, it goes to `main`
-when the build ends; pushed after it, at once. A build that fails never reaches `main`:
+The `.deb`, `.rpm` and a `SHA256SUMS` of every file are signed with the release GPG key (secrets
+`GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has a build provenance attestation; the
+Windows and macOS installers are not signed yet. See the [Code signing policy](docs/code-signing.md).
+Once every installer is built, final versions and release candidates (and, for now, alpha and beta
+versions) go from `release/<version>` straight into `main`; any version does with a tag
+`to-main/<version>`, pushed at any time. A build that fails never reaches `main`:
 
 ```bash
-git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha
+git tag to-main/0.1.0-alpha develop && git push origin to-main/0.1.0-alpha
 ```
 
 This needs a token that can write contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
@@ -284,7 +281,8 @@ organized.
 ## Contributing
 
 Pull requests are welcome, and so are translations: no Rust is needed to translate the
-interface ([docs/translating.md](docs/translating.md)). Please run these before sending a pull request:
+interface ([docs/translating.md](docs/translating.md)). Branch from `develop` and send the pull request
+into it ([branches, tags and releases](docs/release-flow.md)). Please run these before sending a pull request:
 
 ```bash
 cargo test --workspace

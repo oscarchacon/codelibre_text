@@ -1,12 +1,17 @@
 # Takes a release/<version> branch to main: commits its version in Cargo.toml to the branch, then a
 # pull request merges it into main at once (if it cannot be merged, a conflict, it stays open to
 # solve by hand).
-# - The release workflow calls it for final versions (no -alpha, -beta, -rc...) once every
-#   installer is uploaded.
-# - A pre-release goes to main only when asked: push a tag to-main/<version> or main/<version>
-#   (git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha). Main never gets a version
-#   whose builds failed: pushed before the build, the tag only tells the release workflow, which
-#   calls this when every installer is uploaded; pushed after it, this merges at once.
+# release/<version> goes straight into main: develop never does.
+# - The release workflow calls it once every installer is uploaded, for the versions
+#   .github/scripts/goes-to-main.sh takes to main (final, rc, and for now alpha and beta).
+# - Any version goes to main when asked: push a tag to-main/<version> or main/<version>, on develop
+#   or on release/<version>, at any time (git tag to-main/0.1.0-alpha develop && git push origin
+#   to-main/0.1.0-alpha). Main never gets a version whose builds failed: pushed before the build,
+#   the tag only tells the release workflow, which calls this when every installer is uploaded;
+#   pushed after it, this merges at once. The tag also refreshes the description of the open pull
+#   request into release/<version> (release-pr.yml), which then says it goes to main.
+# TODO: merge main back into develop after a release, so the "chore: release <version>" commits of
+# Cargo.toml do not conflict in the next pull request from develop.
 name: To main
 
 on:
@@ -25,6 +30,18 @@ permissions:
   contents: read
 
 jobs:
+  # A tag pushed: the open pull request into release/<version> now says it goes to main.
+  describe:
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/release-pr.yml
+    with:
+      # to-main/<version> or main/<version>: release-pr.yml keeps what follows the last /.
+      version: ${{ github.ref_name }}
+    secrets: inherit
+
   main:
     runs-on: ubuntu-latest
     permissions:

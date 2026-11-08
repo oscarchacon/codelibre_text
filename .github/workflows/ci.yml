@@ -1,5 +1,5 @@
-# Tests and clippy on Linux and Windows: for every push to main or develop and every pull request
-# into main, develop or a release/<version> branch. macOS joins them only when asked, since its
+# Build, tests and clippy on Linux and Windows: for every push to main or develop and every pull
+# request into main, develop or a release/<version> branch (TODO: SonarQube, at the end). macOS joins them only when asked, since its
 # runners are slow and scarce:
 # - the commit pushed (or a pull request's last one) has a tag macos-test (or macos-test-<anything>):
 #   git tag -f macos-test && git push --atomic -f origin develop macos-test
@@ -87,7 +87,33 @@ jobs:
       - name: Download Python
         shell: bash
         run: sh packaging/python/fetch_python.sh target/debug/python
+      # Every crate and target compiles (the installers' --release build is release.yml's).
+      - name: Build
+        run: cargo build --workspace --all-targets
       - name: Tests
         run: cargo test --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # TODO(sonarqube): analyse every pull request with SonarQube once a server is available:
+  # sonarqube:
+  #   needs: test
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0  # SonarQube blames the new code from the history.
+  #     - name: Coverage
+  #       run: |
+  #         cargo install cargo-llvm-cov --locked
+  #         cargo llvm-cov --workspace --lcov --output-path lcov.info
+  #     - uses: SonarSource/sonarqube-scan-action@v5
+  #       env:
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  #       with:
+  #         args: -Dsonar.rust.lcov.reportPaths=lcov.info
+  #     - uses: SonarSource/sonarqube-quality-gate-action@v1
+  #       env:
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

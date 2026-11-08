@@ -1,11 +1,11 @@
-# Opens a release: creates the branch release/<version> from the last release/<version> branch
-# whose build succeeded (its GitHub release, draft or published, has the installers of every
-# platform), and a pull request from develop into it. Merging that pull request builds the release
-# (release.yml).
+# Opens a release: creates the branch release/<version> from main and a pull request from develop
+# into it, described from its commits (release-pr.yml). Merging that pull request builds the
+# release (release.yml); creating the branch builds nothing.
 # - Push a tag open-release/<version>:
 #   git tag open-release/0.1.1-alpha develop && git push origin open-release/0.1.1-alpha
 # - Or Actions > Open release > Run workflow (once this file is in main).
-# The new branch starts with an empty [skip ci] commit, so creating it does not build the old code.
+# - Or create release/<version> from main by hand on the web and open the pull request from develop:
+#   release-pr.yml describes it all the same.
 name: Open release
 
 on:
@@ -28,6 +28,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       # This secret holds a token that can write contents, pull requests and workflows: by default
       # github.token cannot create pull requests.
@@ -35,7 +37,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - id: version
-        name: Read the version and find the release to start from
+        name: Read the version
         env:
           INPUT: ${{ inputs.version }}
           TAG: ${{ github.ref_name }}
@@ -49,49 +51,30 @@ jobs:
             echo "::error::release/$version exists already"
             exit 1
           fi
-          # Every installer release.yml uploads, by the end of its name.
-          required=(-linux-x64.tar.xz -linux-arm64.tar.xz _amd64.deb _arm64.deb .x86_64.rpm .aarch64.rpm
-                    -windows-x64-setup.exe -windows-arm64-setup.exe -windows-x64.zip -windows-arm64.zip
-                    -macos-arm64.dmg SHA256SUMS SHA256SUMS.asc)
-          base=""
-          # Newest first.
-          while read -r tag; do
-            candidate="${tag#v}"
-            gh api "repos/$GH_REPO/branches/release/$candidate" --silent 2> /dev/null || continue
-            assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
-            missing=""
-            for end in "${required[@]}"; do
-              grep -q -- "$end\$" <<< "$assets" || missing="$missing $end"
-            done
-            if [ -z "$missing" ]; then
-              base="$candidate"
-              break
-            fi
-            echo "release $tag lacks:$missing"
-          done < <(gh api "repos/$GH_REPO/releases" --paginate --jq 'sort_by(.created_at) | reverse | .[].tag_name')
-          if [ -z "$base" ]; then
-            echo "::error::no release/<version> branch has a release with every installer"
-            exit 1
-          fi
-          echo "release/$version starts from release/$base"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          ref: release/${{ steps.version.outputs.base }}
-          token: ${{ env.GH_TOKEN }}
-      - name: Create the branch
+      # The branch is main as it is: its push creates the branch, which release.yml skips.
+      - name: Create the branch from main
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty --message "chore: open release $VERSION [skip ci]"
-          git push origin "HEAD:refs/heads/release/$VERSION"
+          sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+          gh api "repos/$GH_REPO/git/refs" -f "ref=refs/heads/release/$VERSION" -f "sha=$sha" --silent
+          echo "release/$VERSION created from main ($sha)"
       - name: Open the pull request from develop
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          BASE: ${{ steps.version.outputs.base }}
         run: |
           gh pr create --head develop --base "release/$VERSION" --title "Release $VERSION" \
-            --body "develop into release/$VERSION (which starts from release/$BASE, the last release built for every platform). Merging it builds the installers of v$VERSION."
+            --body "develop into release/$VERSION (created from main). The description is being written from the commits."
+
+  # The description from the commits (also run by the pull request's own opened event when the
+  # token above is RELEASE_PUSH_TOKEN: writing it twice is harmless).
+  describe:
+    needs: open
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/release-pr.yml
+    with:
+      version: ${{ needs.open.outputs.version }}
+    secrets: inherit
