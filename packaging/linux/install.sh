@@ -10,6 +10,11 @@ prefix=${PREFIX:-$HOME/.local}
 cargo build --release --manifest-path "$root/Cargo.toml"
 
 install -Dm755 "$root/target/release/codelibre_text" "$prefix/bin/codelibre_text"
+# Python for the plugins, found from bin/ in lib/codelibre-text.
+sh "$root/packaging/python/fetch_python.sh" "$root/target/release/python"
+rm -rf "$prefix/lib/codelibre-text/python"
+mkdir -p "$prefix/lib/codelibre-text"
+cp -R "$root/target/release/python" "$prefix/lib/codelibre-text/python"
 install -Dm644 "$root/assets/icons/codelibre_text.png" "$prefix/share/icons/hicolor/256x256/apps/codelibre_text.png"
 install -Dm644 "$root/packaging/linux/codelibre_text.desktop" "$prefix/share/applications/codelibre_text.desktop"
 

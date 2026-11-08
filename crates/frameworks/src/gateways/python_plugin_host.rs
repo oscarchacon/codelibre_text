@@ -18,16 +18,41 @@ use use_cases::gateways::{PluginCommandKind, PluginHostGateway, PluginLoad, Plug
 const SUPPORT_FILES: &[(&str, &str)] = &[
     ("plugin_host.py", include_str!("../../../../assets/python/plugin_host.py")),
     ("codelibre_rpc.py", include_str!("../../../../assets/python/codelibre_rpc.py")),
+    ("compat.py", include_str!("../../../../assets/python/compat.py")),
     ("sublime_api.py", include_str!("../../../../assets/python/sublime_api.py")),
     ("sublime.py", include_str!("../../../../assets/python/sublime.py")),
     ("sublime_plugin.py", include_str!("../../../../assets/python/sublime_plugin.py")),
     // Our own `Default` modules that packages import (Sublime's `Default` is not loaded).
     ("Default/__init__.py", include_str!("../../../../assets/python/Default/__init__.py")),
     ("Default/paste_from_history.py", include_str!("../../../../assets/python/Default/paste_from_history.py")),
+    ("Default/exec.py", include_str!("../../../../assets/python/Default/exec.py")),
+    ("Default/history_list.py", include_str!("../../../../assets/python/Default/history_list.py")),
+    ("Default/indentation.py", include_str!("../../../../assets/python/Default/indentation.py")),
+    ("Default/side_bar.py", include_str!("../../../../assets/python/Default/side_bar.py")),
     // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
     ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
     ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
     ("shims/distutils/version.py", include_str!("../../../../assets/python/shims/distutils/version.py")),
+    ("shims/distutils/errors.py", include_str!("../../../../assets/python/shims/distutils/errors.py")),
+    ("shims/distutils/util.py", include_str!("../../../../assets/python/shims/distutils/util.py")),
+    ("shims/distutils/spawn.py", include_str!("../../../../assets/python/shims/distutils/spawn.py")),
+    ("shims/distutils/dir_util.py", include_str!("../../../../assets/python/shims/distutils/dir_util.py")),
+    ("shims/distutils/file_util.py", include_str!("../../../../assets/python/shims/distutils/file_util.py")),
+    ("shims/distutils/sysconfig.py", include_str!("../../../../assets/python/shims/distutils/sysconfig.py")),
+    ("shims/asyncore.py", include_str!("../../../../assets/python/shims/asyncore.py")),
+    ("shims/asynchat.py", include_str!("../../../../assets/python/shims/asynchat.py")),
+    ("shims/pipes.py", include_str!("../../../../assets/python/shims/pipes.py")),
+    ("shims/cgi.py", include_str!("../../../../assets/python/shims/cgi.py")),
+    ("shims/imghdr.py", include_str!("../../../../assets/python/shims/imghdr.py")),
+    ("shims/uu.py", include_str!("../../../../assets/python/shims/uu.py")),
+    // certifi (MPL-2.0, unmodified from PyPI): Sublime ships it in `Lib/python3` for every plugin
+    // host, so libraries import it without declaring it (`lsp_utils` 4, the LSP-* helpers).
+    // Last on `sys.path` too: a newer one Package Control installs wins.
+    ("shims/certifi/__init__.py", include_str!("../../../../assets/python/shims/certifi/__init__.py")),
+    ("shims/certifi/core.py", include_str!("../../../../assets/python/shims/certifi/core.py")),
+    ("shims/certifi/cacert.pem", include_str!("../../../../assets/python/shims/certifi/cacert.pem")),
+    ("shims/certifi/py.typed", ""),
+    ("shims/certifi/LICENSE", include_str!("../../../../assets/python/shims/certifi/LICENSE")),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).
@@ -184,6 +209,7 @@ impl PluginHostGateway for PythonPluginHost {
                 "name": p.name,
                 "dirs": p.dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
+            "dependencies": request.dependencies.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(),
             "archives": request.archives.iter().map(|(unpacked, archives)| {
                 json!([unpacked.display().to_string(), archives.display().to_string()])
             }).collect::<Vec<_>>(),
@@ -296,14 +322,7 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter_map(|c| {
-                    let kind = match c.get(1)?.as_str()? {
-                        "text" => PluginCommandKind::Text,
-                        "window" => PluginCommandKind::Window,
-                        _ => PluginCommandKind::Application,
-                    };
-                    Some((c.get(0)?.as_str()?.to_string(), kind))
-                })
+                .filter_map(|c| Some((c.get(0)?.as_str()?.to_string(), PluginCommandKind::from_name(c.get(1)?.as_str()?))))
                 .collect();
             let strings = |key: &str| {
                 value
@@ -321,7 +340,13 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
 }
 
 /// A Python 3 interpreter, as a program and its first arguments: the `python_interpreter`
-/// setting, else the first of `py -3`, `python3`, `python` and `uv python find` that works.
+/// setting, else the Python 3.13 the installers bring ([`bundled_interpreter`]), else the first of
+/// `py -3.13`, `python3.13` (also in the usual folders a Mac app's `PATH` lacks), `py -3`,
+/// `python3`, `python` and `uv python find` that works.
+///
+/// 3.13 is the Python of Sublime's current plugin host (build 4201 on), and Package Control
+/// installs the libraries built for the host's Python: an installed 3.13 is used when there is
+/// one, even if another `python3` comes first in `PATH`.
 pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
     if let Some(path) = setting {
         let python = vec![path.to_string()];
@@ -331,9 +356,18 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
             Err(format!("\"python_interpreter\": {path} is not a Python 3 interpreter"))
         };
     }
-    let candidates = [vec!["py", "-3"], vec!["python3"], vec!["python"]];
-    for candidate in candidates {
-        let python: Vec<String> = candidate.into_iter().map(String::from).collect();
+    let bundled = std::env::current_exe().ok().and_then(|exe| bundled_interpreter(&exe));
+    if let Some(python) = bundled {
+        let python = vec![python.display().to_string()];
+        if is_python3(&python) {
+            return Ok(python);
+        }
+    }
+    let words = |candidate: &[&str]| candidate.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut candidates = vec![words(&["py", "-3.13"]), words(&["python3.13"])];
+    candidates.extend(PYTHON_FOLDERS.iter().map(|folder| vec![format!("{folder}/python3.13")]));
+    candidates.extend([words(&["py", "-3"]), words(&["python3"]), words(&["python"])]);
+    for python in candidates {
         if is_python3(&python) {
             return Ok(python);
         }
@@ -351,6 +385,27 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
         }
     }
     Err("no Python 3 interpreter found: install Python 3 or set \"python_interpreter\" in Preferences".into())
+}
+
+/// Where a Python 3.13 installed by hand lives when it is not in `PATH`: an app opened from the
+/// Finder or the Dock gets only `/usr/bin:/bin:/usr/sbin:/sbin`.
+const PYTHON_FOLDERS: &[&str] = if cfg!(target_os = "macos") {
+    &["/Library/Frameworks/Python.framework/Versions/3.13/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+} else {
+    &[]
+};
+
+/// The Python the installers put next to the editor (`packaging/python/fetch_python.sh`), so
+/// plugins work offline with nothing else installed:
+/// `python` beside the executable (Windows, the portable archives, a development build's
+/// `target/<profile>/python`), `Contents/Resources/python` in the macOS app, and
+/// `lib/codelibre-text/python` beside `bin` (the Linux packages and `install.sh`), and the
+/// development build's for the tests in `target/<profile>/deps`.
+pub fn bundled_interpreter(executable: &Path) -> Option<PathBuf> {
+    let folder = executable.parent()?;
+    let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
+    let places = ["python", "../Resources/python", "../lib/codelibre-text/python", "../python"];
+    places.into_iter().map(|place| folder.join(place).join(program)).find(|python| python.is_file())
 }
 
 /// Runs the interpreter once. (The Windows Store's `python.exe` placeholder fails here.)

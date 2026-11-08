@@ -7,12 +7,18 @@ use std::time::Instant;
 use entities::document::{Document, DocumentId, LineEnding};
 use entities::find::FindOptions;
 use entities::keymap::Keymap;
+use entities::layout::Layout;
 use entities::localization::Translations;
 use entities::menu::{MenuItem, PaletteCommand};
+use entities::meta_info::MetaPreference;
+use entities::project::Project;
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
 
+use entities::completion::CompletionSet;
+
 use crate::builds::{BuildOption, BuildState};
+use crate::completions::{AutoComplete, DueAutoComplete, LastCompletion};
 use crate::find_replace::FindCache;
 use crate::gateways::{
     ClipboardGateway, DialogGateway, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, PluginHostGateway, ProcessGateway,
@@ -66,9 +72,16 @@ pub enum CloseChoice {
 /// the use case methods.
 pub struct EditorState {
     pub documents: Vec<Document>,
-    /// Index of the active document in `documents`.
+    /// Index of the active document in `documents` (out of range when the focused group is
+    /// empty). It is in `active_group`.
     pub active: usize,
+    /// How the window is split into groups (see [`crate::groups`]).
+    pub layout: Layout,
+    /// The group with the focus.
+    pub active_group: usize,
     pub folders: Vec<PathBuf>,
+    /// The window's `.sublime-project` (its folders, build systems and `$project*`).
+    pub project: Option<Project>,
     pub settings: SettingsLayers,
     pub keymap: Keymap,
     pub main_menu: Vec<MenuItem>,
@@ -89,14 +102,41 @@ pub struct EditorState {
     pub session_errors: Vec<String>,
     /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
     pub(crate) line_clipboard: Option<String>,
+    /// What copy and cut put on the clipboard, newest first (see `clipboard_history`).
+    pub(crate) clipboard_history: Vec<String>,
     pub(crate) plugins: PluginState,
     /// The quick / input panels plugins opened.
     pub(crate) plugin_panels: PluginPanels,
     /// The output panels plugins created (not tabs).
     pub(crate) output_panels: OutputPanels,
     pub(crate) builds: BuildState,
+    /// The auto-complete list (see `completions`).
+    pub(crate) auto_complete: Option<AutoComplete>,
+    /// A list waiting for `auto_complete_delay`.
+    pub(crate) auto_complete_due: Option<DueAutoComplete>,
+    /// The completion Tab inserted last (`replace_completion_with_next_completion`).
+    pub(crate) last_completion: Option<LastCompletion>,
+    /// Triggers committed, newest first (`auto_complete_use_history`).
+    pub(crate) completion_history: Vec<String>,
+    /// The current window (see `windows`): `documents`, `layout`, `folders`… are its.
+    pub(crate) window_id: crate::windows::WindowId,
+    /// The other windows, put away.
+    pub(crate) windows: Vec<crate::windows::WindowSlot>,
+    pub(crate) next_window_id: crate::windows::WindowId,
+    /// The current window is being closed (once its files are).
+    pub(crate) window_closing: bool,
+    /// What each view of a buffer with clones looked like when they last followed each other.
+    pub(crate) buffer_stamps: std::collections::HashMap<DocumentId, crate::clones::BufferStamp>,
+    /// The images of plugins' minihtml, by `src`, read the first time they show.
+    pub(crate) html_images: std::cell::RefCell<std::collections::HashMap<String, Option<Rc<Vec<u8>>>>>,
+    /// The packages' `.tmPreferences` (`view.meta_info`, symbol lists), read with the packages.
+    pub(crate) meta_preferences: Vec<MetaPreference>,
+    /// The packages' completions files and snippets, read the first time they are needed.
+    pub(crate) completion_sets: Option<Vec<CompletionSet>>,
     /// What the build picker lists (read when it opens: `search` cannot load resources).
     pub(crate) build_options: Vec<BuildOption>,
+    /// The build systems Tools > Build System lists (read when the packages load).
+    pub(crate) menu_build_systems: Vec<BuildOption>,
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
@@ -123,7 +163,10 @@ impl Editor {
             state: EditorState {
                 documents: Vec::new(),
                 active: 0,
+                layout: Layout::default(),
+                active_group: 0,
                 folders: Vec::new(),
+                project: None,
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
                 main_menu: Vec::new(),
@@ -138,11 +181,25 @@ impl Editor {
                 console: String::new(),
                 session_errors: Vec::new(),
                 line_clipboard: None,
+                clipboard_history: Vec::new(),
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),
                 builds: BuildState::default(),
+                auto_complete: None,
+                auto_complete_due: None,
+                last_completion: None,
+                completion_history: Vec::new(),
+                html_images: Default::default(),
+                buffer_stamps: Default::default(),
+                window_id: 1,
+                windows: Vec::new(),
+                next_window_id: 1,
+                window_closing: false,
+                meta_preferences: Vec::new(),
+                completion_sets: None,
                 build_options: Vec::new(),
+                menu_build_systems: Vec::new(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
                 next_id: 0,
@@ -156,10 +213,11 @@ impl Editor {
         }
     }
 
-    /// Startup: loads packages, restores the previous session and opens the given paths.
+    /// Startup: loads packages, restores the previous session, opens the given paths, then loads
+    /// the plugins. As in Sublime, the window has its views when `plugin_loaded` runs (Color
+    /// Highlight asks for `active_window().active_view()` there); `on_init` gets them all.
     pub fn start(&mut self, paths: Vec<PathBuf>) {
         self.load_packages();
-        self.load_plugins();
         if self.global_settings().bool("hot_exit", true) {
             self.restore_session();
         }
@@ -173,7 +231,8 @@ impl Editor {
         if self.state.documents.is_empty() {
             self.new_file();
         }
-        self.plugin_init();
+        self.load_plugins(); // and `on_init` with those views
+        self.plugin_startup_events();
         if !self.state.load_errors.is_empty() {
             self.notify(self.tr_n(
                 "{count} package resource failed to load (Help > Package Load Errors)",
@@ -231,7 +290,7 @@ impl Editor {
 
     /// Settings of one document (or output panel): its syntax-specific settings plus what plugins
     /// set on its view.
-    pub(crate) fn settings_of(&self, id: DocumentId) -> Settings {
+    pub fn settings_of(&self, id: DocumentId) -> Settings {
         let Some(doc) = self.any_document(id) else {
             return self.global_settings();
         };

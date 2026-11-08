@@ -31,7 +31,9 @@ impl Editor {
         self.state.keymap = resources.keymap;
         self.state.main_menu = resources.main_menu;
         self.state.palette = resources.palette;
+        self.state.completion_sets = None;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
+        self.state.meta_preferences = self.gateways.resources.load_meta_preferences(include_sublime, &mut errors);
         self.load_translations(&mut errors);
         self.record_errors(&errors);
         self.state.load_errors = errors;
@@ -41,6 +43,7 @@ impl Editor {
             doc.syntax = self.gateways.syntaxes.resolve(&doc.syntax);
         }
         self.refresh_file_index();
+        self.refresh_menu_build_systems();
         self.state.installed_packages = self.installed_packages_stamp();
         self.state.installed_packages_changed = None;
         self.state.ignored_packages = self.global_settings().get("ignored_packages").cloned();

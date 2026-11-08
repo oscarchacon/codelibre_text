@@ -33,7 +33,7 @@ impl KeyContext for WithPlugins<'_> {
     }
 
     fn query_all(&self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
-        let known = self.context.query(key, operator, operand);
+        let known = self.context.query_all(key, operator, operand, match_all);
         known.or_else(|| self.editor.borrow_mut().plugin_query_context(key, operator, operand, match_all))
     }
 }

@@ -20,6 +20,8 @@ egui = "0.31"
 eframe = { version = "0.31", features = ["wgpu"] }
 # Syntax highlighting: Sublime Text's own formats (.sublime-syntax, .tmTheme)
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+# The images of plugins' minihtml (`<img>`: PNG, JPEG and GIF, as Sublime's)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 # Native file dialogs and clipboard
 rfd = "0.15"
 arboard = "3"

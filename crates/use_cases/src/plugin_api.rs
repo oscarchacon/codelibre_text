@@ -9,15 +9,19 @@ use entities::build::expand_variables;
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
+use entities::layout::Layout;
 use entities::selection::Selection;
 use entities::selector::score_selector;
+use entities::text_commands::{classify, find_by_class};
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
 use crate::editing::VIEW_COMMANDS;
 use crate::editor::Editor;
-use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginCommandKind};
+use crate::html_export::HtmlExportOptions;
 use crate::plugins::CommandRunner;
+use crate::scopes::{SymbolList, SymbolSource, SymbolType};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 /// The title of plugins' message dialogs (Sublime's say "Sublime Text").
@@ -88,6 +92,38 @@ fn region(a: usize, b: usize) -> Value {
 impl Editor {
     /// Runs one `sublime_api` function for a plugin.
     pub(crate) fn plugin_call(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
+        // Every view of a buffer shows the same text when a plugin looks.
+        self.sync_clones();
+        let result = self.plugin_call_in_window(function, args, run_command);
+        self.sync_clones();
+        result
+    }
+
+    /// Runs a call in the window it is about: a `window_*` function names its window in a last
+    /// `{"__window__": id}` argument (`sublime.py`), a view's function and `run_command` on a
+    /// view are about that view's window. The window that was current comes back afterwards.
+    fn plugin_call_in_window(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
+        let named = args.last().and_then(|v| v.get("__window__")).and_then(Value::as_u64);
+        let args = if named.is_some() { &args[..args.len() - 1] } else { args };
+        let about_view = |editor: &Editor, at: usize| args.get(at).and_then(Value::as_u64).and_then(|v| editor.window_of_view(v));
+        let window = named.or_else(|| match function {
+            "run_command" if args.first().and_then(Value::as_str) == Some("window") => args.get(1).and_then(Value::as_u64),
+            "run_command" if args.first().and_then(Value::as_str) == Some("view") => about_view(self, 1),
+            f if f.starts_with("view_") => about_view(self, 0),
+            _ => None,
+        });
+        let previous = self.current_window();
+        match window.filter(|&w| w != previous) {
+            Some(window) if self.switch_to_window(window) => {
+                let result = self.plugin_call_unsynced(function, args, run_command);
+                self.switch_to_window(previous);
+                result
+            }
+            _ => self.plugin_call_unsynced(function, args, run_command),
+        }
+    }
+
+    fn plugin_call_unsynced(&mut self, function: &str, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
         let a = Args(args);
         match function {
             "status_message" => {
@@ -169,6 +205,42 @@ impl Editor {
                     Ok(json!(bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()))
                 }
             }
+            "windows" => Ok(json!(self.window_ids())),
+            "active_window" => Ok(json!(self.current_window())),
+            "window_id" => Ok(json!(self.current_window())),
+            "window_is_valid" => Ok(json!(self.window_ids().contains(&a.u64(0)?))),
+            "view_window" => Ok(self.window_of_view(a.u64(0)?).map_or(Value::Null, |w| json!(w))),
+            "view_buffer_id" => Ok(json!(self.any_document(a.u64(0)?).ok_or("the view is closed")?.buffer)),
+            "view_clones" => Ok(json!(self.clones_of(a.u64(0)?))),
+            "view_is_primary" => {
+                let view = a.u64(0)?;
+                Ok(json!(self.primary_view(view).is_none_or(|p| p == view)))
+            }
+            "buffer_views" => {
+                let buffer = a.u64(0)?;
+                Ok(json!(self.state.documents.iter().filter(|d| d.buffer == buffer).map(|d| d.id).collect::<Vec<_>>()))
+            }
+            "buffer_primary_view" => {
+                let buffer = a.u64(0)?;
+                let first = self.state.documents.iter().find(|d| d.buffer == buffer).map(|d| d.id);
+                Ok(first.and_then(|v| self.primary_view(v)).map_or(Value::Null, |v| json!(v)))
+            }
+            "plugins_changed" => {
+                let commands = a.value(0).as_array().into_iter().flatten();
+                let commands = commands.filter_map(|c| Some((c.get(0)?.as_str()?.to_string(), PluginCommandKind::from_name(c.get(1)?.as_str()?))));
+                let events = a.value(1).as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from));
+                self.set_plugin_commands(commands.collect(), events.collect());
+                Ok(Value::Null)
+            }
+            "clipboard_history" => Ok(json!(self.clipboard_history())),
+            "clipboard_history_push" => {
+                self.push_clipboard_history(a.str(0)?);
+                Ok(Value::Null)
+            }
+            "clipboard_history_clear" => {
+                self.state.clipboard_history.clear();
+                Ok(Value::Null)
+            }
             "get_clipboard" => self.gateways.clipboard.read_text().map(Value::from),
             "set_clipboard" => self.gateways.clipboard.write_text(a.str(0)?).map(|()| Value::Null),
             "run_command" => {
@@ -188,7 +260,9 @@ impl Editor {
                 Ok(self.active_document().map_or(Value::Null, |d| json!(d.id)))
             }
             "window_open_file" => {
-                let opened = self.open_file(std::path::Path::new(a.str(0)?));
+                // `sublime.TRANSIENT`: a preview.
+                let path = std::path::Path::new(a.str(0)?);
+                let opened = if a.u64(1).unwrap_or(0) & 4 != 0 { self.preview_file(path) } else { self.open_file(path) };
                 Ok(if opened { self.active_document().map_or(Value::Null, |d| json!(d.id)) } else { Value::Null })
             }
             "window_find_open_file" => {
@@ -197,12 +271,40 @@ impl Editor {
                 Ok(doc.map_or(Value::Null, |d| json!(d.id)))
             }
             "window_focus_view" => {
-                self.activate_document(a.u64(0)?);
+                let id = a.u64(0)?;
+                if self.plugin_input_panel().is_some_and(|p| p.document.id == id) {
+                    // The panels are not tabs: the field comes back through a request.
+                    self.request_plugin_input_panel();
+                } else {
+                    self.activate_document(id);
+                }
                 Ok(Value::Null)
             }
             "window_set_view_index" => {
-                self.move_document(a.u64(0)?, a.usize(1)?);
+                self.set_view_index(a.u64(0)?, a.usize(1)?, a.usize(2)?);
                 Ok(Value::Null)
+            }
+            "window_get_view_index" => Ok(json!(self.view_index(a.u64(0)?).map_or((-1, -1), |(g, i)| (g as i64, i as i64)))),
+            "window_num_groups" => Ok(json!(self.group_count())),
+            "window_transient_view_in_group" => Ok(self.transient_document_in_group(a.usize(0)?).map_or(Value::Null, |id| json!(id))),
+            "window_active_group" => Ok(json!(self.active_group())),
+            "window_focus_group" => {
+                self.focus_group(a.usize(0)?);
+                Ok(Value::Null)
+            }
+            "window_get_layout" => Ok(self.layout().to_json()),
+            "window_set_layout" => {
+                let layout = Layout::from_json(a.value(0)).ok_or("not a layout: it needs cols, rows and cells")?;
+                self.set_layout(layout);
+                Ok(Value::Null)
+            }
+            "window_views_in_group" => {
+                let ids: Vec<_> = self.group_indexes(a.usize(0)?).into_iter().map(|i| self.state.documents[i].id).collect();
+                Ok(json!(ids))
+            }
+            "window_active_view_in_group" => {
+                let index = self.active_index_in_group(a.usize(0)?);
+                Ok(index.map_or(Value::Null, |i| json!(self.state.documents[i].id)))
             }
             "window_show_quick_panel" => self.plugin_show_quick_panel(args, run_command),
             "window_show_input_panel" => self.plugin_show_input_panel(args, run_command),
@@ -212,6 +314,22 @@ impl Editor {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect::<Vec<_>>())),
+            "window_project_file_name" => Ok(self.project_file().map_or(Value::Null, |p| json!(p.display().to_string()))),
+            "window_workspace_file_name" => Ok(self.workspace_file().map_or(Value::Null, |p| json!(p.display().to_string()))),
+            "window_project_data" => Ok(self.project_data()),
+            "window_set_project_data" => {
+                self.set_project_data(a.value(0).clone());
+                Ok(Value::Null)
+            }
+            "window_extract_variables" => Ok(Value::Object(self.build_variables().into_iter().map(|(name, value)| (name, json!(value))).collect())),
+            "window_new_html_sheet" => {
+                let group = a.value(3).as_i64().filter(|group| *group >= 0).map(|group| group as usize);
+                Ok(json!(self.new_html_sheet(a.str(1)?, a.str(2)?, group)))
+            }
+            "view_set_html_contents" => {
+                self.set_html_sheet(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
             "view_is_valid" => Ok(json!(self.any_document(a.u64(0)?).is_some())),
             "view_find_all_results" => {
                 let results = self.output_results(a.u64(0)?);
@@ -232,7 +350,53 @@ impl Editor {
                 let statuses = self.state.plugins.view_statuses.get(&a.u64(0)?);
                 Ok(json!(statuses.and_then(|s| s.get(a.str(1).unwrap_or_default())).cloned().unwrap_or_default()))
             }
-            "window_create_output_panel" => Ok(json!(self.create_output_panel(a.str(1)?))),
+            "view_overwrite_status" => {
+                let id = a.u64(0)?;
+                self.any_document(id).ok_or("the view is closed")?;
+                Ok(json!(self.overwrite_status(id)))
+            }
+            "view_set_overwrite_status" => {
+                let id = a.u64(0)?;
+                self.any_document(id).ok_or("the view is closed")?;
+                self.set_overwrite_status(id, a.bool(1));
+                Ok(Value::Null)
+            }
+            "window_create_output_panel" => Ok(json!(self.create_output_panel(a.str(1)?, a.bool(2)))),
+            "window_create_io_panel" => {
+                let (output, input) = self.plugin_create_io_panel(a.str(1)?, a.value(3).as_u64(), a.bool(2));
+                Ok(json!([output, input]))
+            }
+            "window_find_io_panel" => {
+                let name = a.str(1)?;
+                Ok(json!([self.find_output_panel(name), self.io_input_panel(name)]))
+            }
+            "window_symbol_locations" => {
+                let source = match a.value(1).as_u64().unwrap_or(0) {
+                    1 => SymbolSource::Index,
+                    2 => SymbolSource::OpenFiles,
+                    _ => SymbolSource::Any,
+                };
+                let wanted = match a.value(2).as_u64().unwrap_or(0) {
+                    1 => SymbolType::Definition,
+                    2 => SymbolType::Reference,
+                    _ => SymbolType::Any,
+                };
+                let locations = self.symbol_locations(a.str(0)?, source, wanted);
+                Ok(json!(locations
+                    .into_iter()
+                    .map(|l| json!({
+                        "path": l.path.map(|p| p.display().to_string()).unwrap_or_default(),
+                        "display_name": l.display_name,
+                        "row": l.row,
+                        "col": l.column,
+                        "syntax": l.syntax,
+                        "type": if l.reference { 2 } else { 1 },
+                        "kind_id": l.kind.id,
+                        "kind_letter": l.kind.letter.to_string(),
+                        "kind_description": l.kind.description,
+                    }))
+                    .collect::<Vec<_>>()))
+            }
             "window_find_output_panel" => Ok(self.find_output_panel(a.str(1)?).map_or(Value::Null, |id| json!(id))),
             "window_destroy_output_panel" => {
                 self.destroy_output_panel(a.str(1)?);
@@ -243,11 +407,112 @@ impl Editor {
             "window_panels" => Ok(json!(self.output_panel_names())),
             "score_selector" => Ok(json!(score_selector(a.str(0)?, a.str(1)?))),
             "view_scope_name" => Ok(json!(self.scope_name(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?)),
+            "view_show_popup" => {
+                let location = a.value(3).as_i64().unwrap_or(-1);
+                let size = |i: usize| a.value(i).as_f64().unwrap_or(0.0) as f32;
+                let callback = a.value(6).as_u64();
+                self.show_plugin_popup(a.u64(0)?, a.str(1)?, a.u64(2).unwrap_or(0), location, size(4), size(5), callback)?;
+                Ok(Value::Null)
+            }
+            "view_update_popup" => {
+                self.update_plugin_popup(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
+            "view_is_auto_complete_visible" => {
+                Ok(json!(self.auto_complete().is_some_and(|list| list.view == a.u64(0).unwrap_or(0))))
+            }
+            "view_extract_completions" => {
+                let point = a.value(2).as_i64().and_then(|p| usize::try_from(p).ok());
+                Ok(json!(self.extract_completions(a.u64(0)?, a.str(1)?, point)))
+            }
+            "completion_list_set" => {
+                self.fill_completion_list(a.u64(0)?, a.value(1), a.u64(2).unwrap_or(0));
+                Ok(Value::Null)
+            }
+            "view_is_popup_visible" =>Ok(json!(self.plugin_popup_visible(a.u64(0)?))),
+            "view_hide_popup" => {
+                if self.plugin_popup_visible(a.u64(0)?) {
+                    self.hide_plugin_popup();
+                }
+                Ok(Value::Null)
+            }
+            "view_add_phantom" => {
+                let id = self.add_plugin_phantom(a.u64(0)?, a.str(1)?, (a.usize(2)?, a.usize(3)?), a.str(4)?, a.u64(5).unwrap_or(1), a.value(6).as_u64())?;
+                Ok(json!(id))
+            }
+            "view_erase_phantoms" => {
+                self.erase_plugin_phantoms(a.u64(0)?, a.str(1)?);
+                Ok(Value::Null)
+            }
+            "view_erase_phantom_by_id" => {
+                self.erase_plugin_phantom(a.u64(0)?, a.u64(1)?);
+                Ok(Value::Null)
+            }
+            "view_query_phantom" => Ok(self.query_plugin_phantom(a.u64(0)?, a.u64(1)?)),
+            "view_query_phantoms" => {
+                let view = a.u64(0)?;
+                let ids: Vec<u64> = a.value(1).as_array().map(|ids| ids.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                let found = ids.iter().filter_map(|&id| self.query_plugin_phantom(view, id).as_array().and_then(|r| r.first().cloned()));
+                Ok(json!(found.collect::<Vec<_>>()))
+            }
+            "view_style" => Ok(Value::Object(self.gateways.syntaxes.scheme_style(&self.color_scheme_name()))),
+            "view_style_for_scope" => {
+                let mut style = self.gateways.syntaxes.scope_style(&self.color_scheme_name(), a.str(1)?);
+                for (key, value) in [("source_line", json!(0)), ("source_column", json!(0)), ("source_file", json!(""))] {
+                    style.entry(key).or_insert(value);
+                }
+                Ok(Value::Object(style))
+            }
             "view_extract_scope" => {
                 let (start, end) = self.extract_scope(a.u64(0)?, a.usize(1)?).ok_or("the view is closed")?;
                 Ok(json!([start, end]))
             }
             "view_find_by_selector" => Ok(json!(self.find_by_selector(a.u64(0)?, a.str(1)?))),
+            "view_meta_info" => Ok(self.meta_info(a.u64(0)?, a.str(1)?, a.usize(2)?).unwrap_or(Value::Null)),
+            "view_context_backtrace" => {
+                let frames = self.context_backtrace(a.u64(0)?, a.usize(1)?);
+                Ok(json!(frames.into_iter().map(|f| json!([f.context_name, f.source_file])).collect::<Vec<_>>()))
+            }
+            "view_export_to_html" => {
+                let id = a.u64(0)?;
+                let regions: Vec<Selection> = a
+                    .value(1)
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|r| Some(Selection::new(r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
+                    .collect();
+                let regions = (!regions.is_empty()).then_some(regions.as_slice());
+                let options = HtmlExportOptions {
+                    minihtml: a.bool(2),
+                    enclosing_tags: a.bool(3),
+                    font_size: a.bool(4),
+                    font_family: a.bool(5),
+                };
+                Ok(json!(self.export_to_html(id, regions, options).ok_or("the view is closed")?))
+            }
+            "view_symbol_regions" => {
+                let list = match a.str(1).unwrap_or("symbols") {
+                    "indexed" => SymbolList::Indexed,
+                    "references" => SymbolList::References,
+                    _ => SymbolList::Symbols,
+                };
+                let view = a.u64(0)?;
+                let syntax = self.any_document(view).map(|d| d.syntax.clone()).unwrap_or_default();
+                let symbols = self.symbol_regions(view, list);
+                Ok(json!(symbols
+                    .into_iter()
+                    .map(|s| json!([s.name, [s.start, s.end], syntax, [s.kind.id, s.kind.letter.to_string().trim(), s.kind.description]]))
+                    .collect::<Vec<_>>()))
+            }
+            "find_syntax_for_file" => Ok(json!(self.gateways.syntaxes.detect(std::path::Path::new(a.str(0)?), a.str(1).unwrap_or_default()))),
+            "list_syntaxes" => Ok(json!(self
+                .gateways
+                .syntaxes
+                .syntax_infos()
+                .into_iter()
+                .map(|s| json!([s.path, s.name, s.hidden, s.scope, s.file_extensions]))
+                .collect::<Vec<_>>())),
             "view_extract_tokens_with_scopes" => {
                 let tokens = self.scoped_ranges(a.u64(0)?, a.usize(1)?, a.usize(2)?);
                 Ok(json!(tokens.into_iter().map(|t| json!([[t.start, t.end], format!("{} ", t.scope)])).collect::<Vec<_>>()))
@@ -281,6 +546,7 @@ impl Editor {
             }
             "view_is_dirty" => json!(doc.is_dirty()),
             "view_is_scratch" => json!(doc.scratch),
+            "view_is_transient" => json!(doc.transient),
             "view_set_scratch" => {
                 doc.scratch = a.bool(1);
                 Value::Null
@@ -315,18 +581,31 @@ impl Editor {
                     .flatten()
                     .filter_map(|r| Some((r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
                     .collect();
+                let annotations = a.value(6).as_array().into_iter().flatten().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
+                let key = a.str(1)?.to_string();
                 doc.add_regions(RegionSet {
-                    key: a.str(1)?.to_string(),
+                    key: key.clone(),
                     regions,
                     scope: a.str(3).unwrap_or_default().to_string(),
                     icon: a.str(4).unwrap_or_default().to_string(),
                     flags: a.u64(5).unwrap_or(0),
+                    annotations,
+                    annotation_color: a.str(7).unwrap_or_default().to_string(),
                 });
+                let id = doc.id;
+                let callbacks = &mut self.state.plugins.region_callbacks;
+                match a.value(8).as_u64() {
+                    Some(callback) => callbacks.insert((id, key), callback),
+                    None => callbacks.remove(&(id, key)),
+                };
                 Value::Null
             }
             "view_get_regions" => json!(doc.regions(a.str(1)?).iter().map(|&(start, end)| [start, end]).collect::<Vec<_>>()),
             "view_erase_regions" => {
-                doc.erase_regions(a.str(1)?);
+                let key = a.str(1)?;
+                doc.erase_regions(key);
+                let id = doc.id;
+                self.state.plugins.region_callbacks.remove(&(id, key.to_string()));
                 Value::Null
             }
             "view_show" => {
@@ -346,8 +625,7 @@ impl Editor {
                 doc.replace_range(point(1)?, point(2)?, a.str(3)?);
                 Value::Null
             }
-            "view_selection_get" => json!(doc.selections().iter().map(|s| [s.anchor, s.head]).collect::<Vec<_>>()),
-            "view_selection_set" => {
+            "view_selection_get" => json!(doc.selections().iter().map(|s| [s.anchor, s.head]).collect::<Vec<_>>()),            "view_selection_set" => {
                 let mut regions: Vec<Selection> = a
                     .value(1)
                     .as_array()
@@ -385,6 +663,11 @@ impl Editor {
                 Value::Array(lines)
             }
             "view_word" => region(word_at(&doc.text, point(1)?).start(), word_at(&doc.text, point(2)?).end()),
+            "view_classify" => json!(classify(&doc.text, point(1)?, None)),
+            "view_find_by_class" => {
+                let separators = a.str(4).ok().filter(|s| !s.is_empty());
+                json!(find_by_class(&doc.text, point(1)?, a.bool(2), a.u64(3)? as u32, separators))
+            }
             "view_rowcol" => {
                 let (row, col) = line_col(&doc.text, point(1)?);
                 json!([row, col])
@@ -483,7 +766,14 @@ impl Editor {
 
     fn plugin_settings_all(&mut self, target: &SettingsTarget) -> Map<String, Value> {
         match target {
-            SettingsTarget::View(id) => self.settings_of(*id).values().clone(),
+            SettingsTarget::View(id) => {
+                let mut values = self.settings_of(*id).values().clone();
+                // Every view of Sublime has it; plugins take its file name (`os.path.basename`).
+                if let Some(doc) = self.any_document(*id) {
+                    values.insert("syntax".into(), json!(self.gateways.syntaxes.syntax_path(&doc.syntax)));
+                }
+                values
+            }
             SettingsTarget::File(name) if name == PREFERENCES => self.global_settings().values().clone(),
             SettingsTarget::File(name) => self.settings_file(name).values.clone(),
             SettingsTarget::Window => self.state.plugins.window_settings.clone(),
@@ -540,6 +830,15 @@ impl Editor {
             }
         };
         match target {
+            // As in Sublime, setting it changes the view's syntax (`set_syntax_file`).
+            SettingsTarget::View(id) if key == "syntax" => {
+                if let Some(path) = value.as_str() {
+                    let syntax = self.gateways.syntaxes.resolve(path);
+                    if let Some(doc) = self.any_document_mut(*id) {
+                        doc.syntax = syntax;
+                    }
+                }
+            }
             SettingsTarget::View(id) => set(self.state.plugins.view_settings.entry(*id).or_default(), value),
             SettingsTarget::File(name) => {
                 if name == PREFERENCES {

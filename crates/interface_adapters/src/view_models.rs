@@ -6,16 +6,25 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::keymap::KeyCombo;
+use entities::minihtml;
 use entities::selection::Selection;
 
 pub struct TabViewModel {
+    /// The document's index in the window (for `UiEvent::ActivateTab` / `CloseTab`).
+    pub index: usize,
     pub title: String,
     pub tooltip: String,
     pub dirty: bool,
     pub active: bool,
+    /// A preview (transient view): its title is in italics.
+    pub transient: bool,
 }
 
 pub struct OpenFileViewModel {
+    /// The document's index in the window (for `UiEvent::ActivateTab` / `CloseTab`).
+    pub index: usize,
+    /// The group it is in (the side bar lists them by group when there are several).
+    pub group: usize,
     pub name: String,
     pub dirty: bool,
     pub active: bool,
@@ -36,13 +45,18 @@ pub struct TreeRowViewModel {
 }
 
 pub struct SideBarViewModel {
+    /// By group, then in tab order.
     pub open_files: Vec<OpenFileViewModel>,
+    /// How many groups the window has.
+    pub groups: usize,
     pub folders: Vec<TreeRowViewModel>,
 }
 
 pub struct StatusBarViewModel {
     /// e.g. `Line 3, Column 7; 5 characters selected`.
     pub position: String,
+    /// A plugin put the view in overwrite mode (`view.set_overwrite_status`).
+    pub overwrite: bool,
     /// What plugins show for the active view (`view.set_status`), in key order.
     pub plugin_statuses: Vec<String>,
     pub message: Option<String>,
@@ -125,6 +139,8 @@ pub struct OutputPanelViewModel {
     /// [`presenters::output_panel::MAX_LINES`]: crate::presenters::output_panel::MAX_LINES
     pub text: String,
     pub font_size: f32,
+    /// The view's `word_wrap` setting (long lines wrap instead of scrolling sideways).
+    pub word_wrap: bool,
     /// The line of the panel's text that `text` starts with.
     pub first_line: usize,
     /// The line of `text` of the result visited last.
@@ -147,8 +163,23 @@ pub struct FindPanelViewModel {
     pub focus_requested: bool,
 }
 
+/// One pane of the window's layout: its tabs and the document it shows.
+pub struct GroupViewModel {
+    pub group: usize,
+    /// Where it is, as fractions of the editor area: `[left, top, right, bottom]`.
+    pub rect: [f32; 4],
+    /// It has the focus.
+    pub active: bool,
+    pub tabs: Vec<TabViewModel>,
+    pub editor: Option<EditorViewModel>,
+}
+
 pub struct EditorViewModel {
     pub document: DocumentId,
+    pub group: usize,
+    /// The document of the focused group: it takes the keyboard focus. Clicking another group's
+    /// text gives that group the focus.
+    pub active: bool,
     pub read_only: bool,
     pub syntax: String,
     pub color_scheme: String,
@@ -174,6 +205,83 @@ pub struct EditorViewModel {
     /// changes with each request.
     pub show: Option<(usize, bool, u64)>,
     pub take_focus: bool,
+    /// A plugin's popup on this view.
+    pub popup: Option<PopupViewModel>,
+    /// Plugins' phantoms, by position.
+    pub phantoms: Vec<PhantomViewModel>,
+    /// Some plugin listens to `on_hover`: the view reports where the mouse rests.
+    pub report_hover: bool,
+    pub auto_complete: Option<AutoCompleteViewModel>,
+}
+
+/// minihtml as the view draws it: its boxes, and the bytes of its images by `src` (those that
+/// could be read).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HtmlViewModel {
+    pub block: minihtml::Block,
+    pub images: Vec<(String, std::rc::Rc<Vec<u8>>)>,
+}
+
+/// The auto-complete list, under the typed word.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutoCompleteViewModel {
+    /// The char where the typed word starts: the list opens below it.
+    pub location: usize,
+    /// The first rows (a long list is cut: typing narrows it).
+    pub items: Vec<CompletionViewModel>,
+    pub selected: usize,
+    /// The selected completion's `details` (minihtml), shown under the list.
+    pub details: Vec<minihtml::Line>,
+    pub details_html: HtmlViewModel,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompletionViewModel {
+    pub trigger: String,
+    /// Chars of `trigger` the typed text matched (drawn highlighted).
+    pub matched: Vec<usize>,
+    pub annotation: String,
+    /// The badge's letter (empty: no badge) and the kind's name.
+    pub kind_letter: String,
+    pub kind_name: String,
+    /// Sublime's `KindId`, which picks the badge's color.
+    pub kind_id: u8,
+}
+
+/// A plugin's popup (`view.show_popup`), its minihtml read into lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopupViewModel {
+    /// The char it points at: it opens below it.
+    pub location: usize,
+    pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
+    /// In pixels.
+    pub max_width: f32,
+    pub max_height: f32,
+    /// It goes when the mouse moves away from it (`HIDE_ON_MOUSE_MOVE*`).
+    pub hide_on_mouse_move_away: bool,
+}
+
+/// A plugin's phantom (`view.add_phantom`): `LAYOUT_INLINE` at its point (the text after it moves
+/// aside), `LAYOUT_BELOW` / `LAYOUT_BLOCK` under its line (the lines after it move down).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhantomViewModel {
+    pub id: u64,
+    pub point: usize,
+    pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
+    pub layout: PhantomLayout,
+}
+
+/// Sublime's `LAYOUT_INLINE`, `LAYOUT_BELOW` and `LAYOUT_BLOCK`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhantomLayout {
+    /// In the line, at its point.
+    Inline,
+    /// Under its line, starting at the point's column.
+    Below,
+    /// Under its line, at the left edge.
+    Block,
 }
 
 /// How a plugin's region set is drawn (from Sublime's `DRAW_*` flags).
@@ -190,6 +298,22 @@ pub struct RegionViewModel {
     pub underline: Option<Underline>,
     /// Empty regions are drawn (as a bar where the caret would be).
     pub draw_empty: bool,
+    /// `DRAW_EMPTY_AS_OVERWRITE`: an empty region is drawn as a block, like an overwrite caret.
+    pub overwrite_empty: bool,
+    /// The set's key (a link in its annotations tells it).
+    pub key: String,
+    /// Annotations, by the start of their region: shown at the right of that line.
+    pub annotations: Vec<AnnotationViewModel>,
+    /// The plugin's `annotation_color` (empty: the scope's color).
+    pub annotation_color: String,
+}
+
+/// One annotation of a region (`add_regions(annotations=…)`), its minihtml read into lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotationViewModel {
+    pub point: usize,
+    pub lines: Vec<minihtml::Line>,
+    pub html: HtmlViewModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

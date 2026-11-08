@@ -11,6 +11,7 @@ use entities::document::DocumentId;
 use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
 use entities::menu::{MenuItem, PaletteCommand};
+use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{Map, Value};
@@ -224,6 +225,9 @@ pub trait ResourceGateway {
     fn unpack_packages(&self, include_sublime_packages: bool, errors: &mut Vec<String>);
     /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
     fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
+    /// The packages' `.tmPreferences` (TextMate metadata: `shellVariables`, symbol lists…), in
+    /// load order. Problems are appended to `errors`.
+    fn load_meta_preferences(&self, include_sublime_packages: bool, errors: &mut Vec<String>) -> Vec<MetaPreference>;
 }
 
 /// A piece of a line and its scope, e.g. `source.python string.quoted.double.python`.
@@ -231,6 +235,28 @@ pub trait ResourceGateway {
 pub struct ScopeSpan {
     pub range: std::ops::Range<usize>,
     pub scope: String,
+}
+
+/// A context of the syntax's parser at a point, outermost first: Sublime's `ContextStackFrame`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextFrame {
+    /// The context's name in its syntax (`main`, `string`…; `anonymous context` for inline ones).
+    pub context_name: String,
+    /// The syntax's resource (`Packages/Python/Python.sublime-syntax`), empty for built-in ones.
+    pub source_file: String,
+}
+
+/// A syntax, as `sublime.list_syntaxes()` describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxInfo {
+    /// Its resource (`Packages/Python/Python.sublime-syntax`), or its name for built-in ones.
+    pub path: String,
+    pub name: String,
+    pub hidden: bool,
+    /// Its base scope (`source.python`).
+    pub scope: String,
+    /// The file extensions (and names) it is for.
+    pub file_extensions: Vec<String>,
 }
 
 /// Syntax definitions and color schemes.
@@ -241,6 +267,9 @@ pub trait SyntaxGateway {
     fn detect(&self, path: &Path, first_line: &str) -> String;
     /// Resolves a syntax name or a `.sublime-syntax` path to a known syntax name.
     fn resolve(&self, name_or_path: &str) -> String;
+    /// The resource a syntax is named by in a view's `syntax` setting
+    /// (`Packages/JSON/JSON.sublime-syntax`); a built-in one gets the path Sublime's own has.
+    fn syntax_path(&self, syntax: &str) -> String;
     /// The scope of a whole file in a syntax (`source.python`); what build `selector`s match.
     fn base_scope(&self, syntax: &str) -> String;
     fn syntax_names(&self) -> Vec<String>;
@@ -250,8 +279,23 @@ pub trait SyntaxGateway {
     /// The scopes of line `line` of `text` (lines end after `\n`), in order, covering the whole
     /// line. Ranges are bytes of the line. Nothing for a line past the end.
     fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan>;
+    /// The scopes of every line (as [`line_scopes`](Self::line_scopes) gives each), from the
+    /// highlighting cache: nothing is parsed again but what changed.
+    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>>;
+    /// The parser's contexts at byte `column` of line `line`, outermost first
+    /// (`view.context_backtrace`).
+    fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame>;
+    /// Every syntax loaded (`sublime.list_syntaxes()`), hidden ones too.
+    fn syntax_infos(&self) -> Vec<SyntaxInfo>;
     /// The document was closed; cached data about it can go.
     fn forget(&self, document: DocumentId);
+    /// A color scheme's global colors (`foreground`, `background`, `caret`, `selection`…), as
+    /// `"#rrggbb"` (or `"#rrggbbaa"` when not opaque): Sublime's `view.style()`.
+    fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, Value>;
+    /// What a color scheme gives the scopes `scope` (several, space-separated, innermost last):
+    /// `foreground` (the scheme's if no rule sets it), `background` when a rule sets it, and
+    /// `bold` / `italic` / `underline` when true: Sublime's `view.style_for_scope()`.
+    fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, Value>;
 }
 
 /// Hot-exit storage.
@@ -271,6 +315,9 @@ pub struct PluginPackage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginLoad {
     pub packages: Vec<PluginPackage>,
+    /// Package Control 3's dependencies (`Packages/<dep>` with `dependency-metadata.json`, never
+    /// migrated to libraries): the host puts the variant for its Python (`all`, `st3`…) on `sys.path`.
+    pub dependencies: Vec<PathBuf>,
     /// `sublime.packages_path()`.
     pub packages_path: PathBuf,
     /// Where packages are unpacked and the folder of their archives: plugins there see the paths
@@ -288,6 +335,17 @@ pub enum PluginCommandKind {
     Text,
     Window,
     Application,
+}
+
+impl PluginCommandKind {
+    /// From the host's name for it: `text`, `window`, anything else an application command.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "text" => Self::Text,
+            "window" => Self::Window,
+            _ => Self::Application,
+        }
+    }
 }
 
 /// A message from the plugin host.

@@ -35,11 +35,11 @@ cannot be told apart by the string scan and are listed under native.
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |
 | Navigation history | `jump_back`, `jump_forward`, `_jump`, `add_jump_record` | native / py |
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
-| Split layouts | `set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`, `new_pane`, `close_pane`, `clone_file` | native / py |
+| Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
-| Auto-complete & snippets | `auto_complete`, `hide_auto_complete`, `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
+| Snippets | `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
 | Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |
 | Git / modifications | `next_modification`, `prev_modification`, `revert_modification`, `revert_hunk`, `toggle_inline_diff` (needs `mini_diff`) | native |
@@ -54,7 +54,8 @@ cannot be told apart by the string scan and are listed under native.
 
 ## Settings not yet read (most user-visible first)
 
-- Editing: `auto_match_enabled`, `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, `copy_with_empty_selection`,
+- Editing: ~~`auto_match_enabled`~~ (done: the keymaps' auto-pairing bindings, with the `eol_selector` context and
+  the `Delete Left Right` macro; `insert_snippet` at every caret), `auto_close_tags`, `smart_indent`, `detect_indentation`, `shift_tab_unindent`, `copy_with_empty_selection`,
   `word_separators`, `sub_word_separators`, `drag_text`, `trim_automatic_white_space`, `indent_to_bracket`, `use_tab_stops`.
 - Display: `font_face`, `font_options`, `draw_white_space`, `draw_indent_guides`, `indent_guide_options`, `match_brackets*`, `match_selection`,
   `match_tags`, `caret_style`, `block_caret`, `line_padding_top/bottom`, `wrap_width`, `relative_line_numbers`, `highlight_line_number`,
@@ -63,7 +64,7 @@ cannot be told apart by the string scan and are listed under native.
   `binary_file_patterns`, `close_windows_when_empty`, `open_files_in_new_window`.
 - Status bar: `show_encoding`, `show_line_endings`, `show_line_column`, `show_syntax`, `show_indentation`, `show_full_path`.
 - Find: `find_selected_text`, `auto_find_in_selection`, `close_find_after_*`, `find_in_files_*`.
-- Feature-bound (need the feature first): `auto_complete*`, `spell_check`/`dictionary`, `mini_diff`/`git_diff_target`, `show_git_status`,
+- Feature-bound (need the feature first): `auto_complete_delay` / `_use_history` / `_cycle`, `spell_check`/`dictionary`, `mini_diff`/`git_diff_target`, `show_git_status`,
   `index_*`, `show_definitions`, `hot_exit_projects`, `remember_layout`, `vintage_*`.
 
 ## Suggested order

@@ -928,8 +928,12 @@ msgid "Cancel Build"
 msgstr "Cancelar compilación"
 
 #: assets/Default/Main.sublime-menu
-msgid "Automatic Build System"
-msgstr "Sistema de compilación automático"
+msgid "Build System"
+msgstr "Sistema de compilación"
+
+#: assets/Default/Main.sublime-menu
+msgid "Automatic"
+msgstr "Automático"
 
 #: assets/Default/Main.sublime-menu
 msgid "Show Build Results"
@@ -1073,3 +1077,124 @@ msgstr "Ayuda: Abrir registro de errores"
 
 msgid "No errors have been logged"
 msgstr "No se ha registrado ningún error"
+
+msgid "Layout"
+msgstr "Diseño"
+
+msgid "Single"
+msgstr "Uno solo"
+
+msgid "Columns: 2"
+msgstr "Columnas: 2"
+
+msgid "Columns: 3"
+msgstr "Columnas: 3"
+
+msgid "Columns: 4"
+msgstr "Columnas: 4"
+
+msgid "Rows: 2"
+msgstr "Filas: 2"
+
+msgid "Rows: 3"
+msgstr "Filas: 3"
+
+msgid "Grid: 4"
+msgstr "Cuadrícula: 4"
+
+msgid "Focus Group"
+msgstr "Enfocar grupo"
+
+msgid "Next"
+msgstr "Siguiente"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Group 1"
+msgstr "Grupo 1"
+
+msgid "Group 2"
+msgstr "Grupo 2"
+
+msgid "Group 3"
+msgstr "Grupo 3"
+
+msgid "Group 4"
+msgstr "Grupo 4"
+
+msgid "Move File To Group"
+msgstr "Mover archivo al grupo"
+
+msgid "set_layout needs cols, rows and cells"
+msgstr "set_layout necesita cols, rows y cells"
+
+msgid "Paste from History"
+msgstr "Pegar desde el historial"
+
+msgid "Groups"
+msgstr "Grupos"
+
+msgid "New Group"
+msgstr "Nuevo grupo"
+
+msgid "Move File to New Group"
+msgstr "Mover archivo a un grupo nuevo"
+
+msgid "Close Group"
+msgstr "Cerrar grupo"
+
+msgid "Max Columns: 1"
+msgstr "Máx. columnas: 1"
+
+msgid "Max Columns: 2"
+msgstr "Máx. columnas: 2"
+
+msgid "Max Columns: 3"
+msgstr "Máx. columnas: 3"
+
+msgid "Max Columns: 4"
+msgstr "Máx. columnas: 4"
+
+msgid "Max Columns: 5"
+msgstr "Máx. columnas: 5"
+
+msgid "New Window"
+msgstr "Nueva ventana"
+
+msgid "New View into File"
+msgstr "Nueva vista del archivo"
+
+msgid "Close Window"
+msgstr "Cerrar ventana"
+
+msgid "GROUP {number}"
+msgstr "GRUPO {number}"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Project…"
+msgstr "Abrir proyecto…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Project"
+msgstr "Cerrar proyecto"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Open Project…"
+msgstr "Proyecto: Abrir proyecto…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Close Project"
+msgstr "Proyecto: Cerrar proyecto"
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: {error}"
+msgstr "{name} no es un proyecto: {error}"
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: it needs to be an object"
+msgstr "{name} no es un proyecto: debe ser un objeto"
+
+#: crates/use_cases/src/project.rs
+msgid "Could not save {name}: {error}"
+msgstr "No se pudo guardar {name}: {error}"

@@ -3,8 +3,11 @@
 		"caption": "File", "mnemonic": "F", "id": "file",
 		"children": [
 			{ "command": "new_file", "caption": "New File" },
+			{ "command": "new_window", "caption": "New Window" },
+			{ "command": "clone_file", "caption": "New View into File" },
 			{ "command": "prompt_open_file", "caption": "Open File…" },
 			{ "command": "prompt_open_folder", "caption": "Open Folder…" },
+			{ "command": "prompt_open_project", "caption": "Open Project…" },
 			{ "command": "reopen_last_file", "caption": "Reopen Closed File" },
 			{ "caption": "-" },
 			{ "command": "save", "caption": "Save" },
@@ -15,6 +18,8 @@
 			{ "command": "close", "caption": "Close File" },
 			{ "command": "close_all", "caption": "Close All Files" },
 			{ "command": "close_folder_list", "caption": "Close Folder" },
+			{ "command": "close_project", "caption": "Close Project" },
+			{ "command": "close_window", "caption": "Close Window" },
 			{ "caption": "-" },
 			{ "command": "exit", "caption": "Exit" }
 		]
@@ -28,6 +33,7 @@
 			{ "command": "cut", "caption": "Cut" },
 			{ "command": "copy", "caption": "Copy" },
 			{ "command": "paste", "caption": "Paste" },
+			{ "command": "paste_from_history", "caption": "Paste from History" },
 			{ "caption": "-" },
 			{
 				"caption": "Line", "id": "line",
@@ -102,6 +108,57 @@
 			{ "command": "toggle_status_bar", "caption": "Status Bar" },
 			{ "command": "show_panel", "args": { "panel": "console", "toggle": true }, "caption": "Show Console" },
 			{ "command": "toggle_full_screen", "caption": "Enter Full Screen" },
+			{ "caption": "-", "id": "groups" },
+			{
+				"caption": "Layout", "id": "layout",
+				"children": [
+					{ "caption": "Single", "command": "set_layout", "args": { "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]] } },
+					{ "caption": "Columns: 2", "command": "set_layout", "args": { "cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]] } },
+					{ "caption": "Columns: 3", "command": "set_layout", "args": { "cols": [0.0, 0.33, 0.66, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1], [2, 0, 3, 1]] } },
+					{ "caption": "Columns: 4", "command": "set_layout", "args": { "cols": [0.0, 0.25, 0.5, 0.75, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1], [2, 0, 3, 1], [3, 0, 4, 1]] } },
+					{ "caption": "Rows: 2", "command": "set_layout", "args": { "cols": [0.0, 1.0], "rows": [0.0, 0.5, 1.0], "cells": [[0, 0, 1, 1], [0, 1, 1, 2]] } },
+					{ "caption": "Rows: 3", "command": "set_layout", "args": { "cols": [0.0, 1.0], "rows": [0.0, 0.33, 0.66, 1.0], "cells": [[0, 0, 1, 1], [0, 1, 1, 2], [0, 2, 1, 3]] } },
+					{ "caption": "Grid: 4", "command": "set_layout", "args": { "cols": [0.0, 0.5, 1.0], "rows": [0.0, 0.5, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1], [0, 1, 1, 2], [1, 1, 2, 2]] } }
+				]
+			},
+			{
+				"caption": "Groups", "id": "groups_menu",
+				"children": [
+					{ "command": "new_pane", "args": { "move": false }, "caption": "New Group" },
+					{ "command": "new_pane", "caption": "Move File to New Group" },
+					{ "command": "close_pane", "caption": "Close Group" },
+					{ "caption": "-" },
+					{ "command": "set_max_columns", "args": { "columns": 1 }, "caption": "Max Columns: 1", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 2 }, "caption": "Max Columns: 2", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 3 }, "caption": "Max Columns: 3", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 4 }, "caption": "Max Columns: 4", "checkbox": true },
+					{ "command": "set_max_columns", "args": { "columns": 5 }, "caption": "Max Columns: 5", "checkbox": true }
+				]
+			},
+			{
+				"caption": "Focus Group", "id": "focus_group",
+				"children": [
+					{ "command": "focus_neighboring_group", "caption": "Next" },
+					{ "command": "focus_neighboring_group", "args": { "forward": false }, "caption": "Previous" },
+					{ "caption": "-" },
+					{ "command": "focus_group", "args": { "group": 0 }, "caption": "Group 1" },
+					{ "command": "focus_group", "args": { "group": 1 }, "caption": "Group 2" },
+					{ "command": "focus_group", "args": { "group": 2 }, "caption": "Group 3" },
+					{ "command": "focus_group", "args": { "group": 3 }, "caption": "Group 4" }
+				]
+			},
+			{
+				"caption": "Move File To Group", "id": "move_to_group",
+				"children": [
+					{ "command": "move_to_neighboring_group", "caption": "Next" },
+					{ "command": "move_to_neighboring_group", "args": { "forward": false }, "caption": "Previous" },
+					{ "caption": "-" },
+					{ "command": "move_to_group", "args": { "group": 0 }, "caption": "Group 1" },
+					{ "command": "move_to_group", "args": { "group": 1 }, "caption": "Group 2" },
+					{ "command": "move_to_group", "args": { "group": 2 }, "caption": "Group 3" },
+					{ "command": "move_to_group", "args": { "group": 3 }, "caption": "Group 4" }
+				]
+			},
 			{ "caption": "-" },
 			{
 				"caption": "Font", "id": "font",
@@ -137,7 +194,14 @@
 			{ "command": "build", "caption": "Build" },
 			{ "command": "build", "args": { "select": true }, "caption": "Build With…" },
 			{ "command": "cancel_build", "caption": "Cancel Build" },
-			{ "command": "set_build_system", "args": { "file": "" }, "caption": "Automatic Build System" },
+			{
+				"caption": "Build System", "id": "build_system",
+				"children": [
+					{ "command": "set_build_system", "args": { "file": "" }, "caption": "Automatic", "checkbox": true },
+					{ "caption": "-" },
+					{ "command": "$build_systems" }
+				]
+			},
 			{ "command": "show_panel", "args": { "panel": "output.exec" }, "caption": "Show Build Results" },
 			{ "command": "next_result", "caption": "Next Result" },
 			{ "command": "prev_result", "caption": "Previous Result" },

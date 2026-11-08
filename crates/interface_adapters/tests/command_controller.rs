@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::selection::Selection;
-use interface_adapters::controllers::command_controller::{close_quick_panel, poll_plugins, run, run_during_event};
+use interface_adapters::controllers::command_controller::{close_quick_panel, hooked_widget_input, poll_plugins, run, run_during_event};
 use interface_adapters::gateways::{builtin_resources, sublime_json};
-use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit};
+use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::{json, Value};
 use test_support::{active_text, open, plugin_call, status, World};
 use use_cases::editing::TextCommand;
@@ -104,13 +104,31 @@ fn open_url_and_report_issue_open_the_browser() {
 
 #[test]
 fn close_window_and_exit_ask_the_window_to_close() {
-    for name in ["close_window", "exit"] {
+    for (name, request) in [("close_window", ViewRequest::CloseWindow), ("exit", ViewRequest::Exit)] {
         let world = World::new();
         let mut editor = world.editor();
         let mut view = ViewState::default();
         run(&mut editor, &mut view, &cmd(name));
-        assert_eq!(view.take_requests(), vec![ViewRequest::CloseWindow]);
+        assert_eq!(view.take_requests(), vec![request]);
     }
+}
+
+#[test]
+fn new_window_and_clone_file() {
+    let world = World::new().with_file("/p/a.txt", "abc");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/a.txt");
+    run(&mut editor, &mut view, &cmd("clone_file"));
+    assert_eq!(editor.state().documents.len(), 2, "two views of a.txt");
+    let (original, clone) = (editor.state().documents[0].id, editor.state().documents[1].id);
+    assert_eq!(editor.clones_of(original), vec![clone]);
+
+    run(&mut editor, &mut view, &cmd("new_window"));
+    assert_eq!(editor.window_ids(), vec![1, 2]);
+    assert_eq!(editor.current_window(), 2);
+    assert!(editor.state().documents.is_empty(), "a new window is empty");
+    assert_eq!(editor.window_of_view(clone), Some(1));
 }
 
 #[test]
@@ -396,6 +414,8 @@ fn text_commands_by_sublime_name() {
         (cmd("title_case"), "ab cd", Selection::new(0, 5), "Ab Cd"),
         (cmd("swap_case"), "aB", caret(0), "Ab"),
         (cmd("transpose"), "ab", caret(1), "ba"),
+        (cmd("delete_word"), "one two", caret(7), "one "),
+        (cmd_with("delete_word", json!({ "forward": true })), "one two", caret(4), "one "),
         (cmd("expand_tabs"), "\tx", caret(0), "    x"),
         (cmd("unexpand_tabs"), "    x", caret(0), "\tx"),
         (cmd("trim_trailing_white_space"), "a  ", caret(0), "a"),
@@ -580,6 +600,37 @@ fn copy_and_cut_with_nothing_selected_take_the_whole_line_and_paste_puts_it_abov
 }
 
 #[test]
+fn paste_from_history_lists_what_was_copied_and_pastes_the_choice() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "alpha beta\ngamma", Selection::new(0, 5));
+    run(&mut editor, &mut view, &cmd("paste_from_history"));
+    assert!(view.quick_panel.is_none(), "nothing copied yet: no panel");
+
+    run(&mut editor, &mut view, &cmd("copy"));
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::new(6, 10));
+    run(&mut editor, &mut view, &cmd("cut"));
+    editor.sync_selection_from_view(id, Selection::caret(2));
+    run(&mut editor, &mut view, &cmd("copy"));
+    run(&mut editor, &mut view, &cmd("copy"));
+    assert_eq!(editor.clipboard_history(), ["alpha beta\n", "beta", "alpha"], "newest first, each once");
+    view.take_requests();
+
+    run(&mut editor, &mut view, &cmd("paste_from_history"));
+    let panel = view.quick_panel.as_ref().expect("the history's panel");
+    assert_eq!(panel.kind, SearchKind::ClipboardHistory);
+    let captions: Vec<_> = editor.search(SearchKind::ClipboardHistory, "").into_iter().map(|c| c.caption).collect();
+    assert_eq!(captions, ["alpha beta", "beta", "alpha"]);
+
+    let chosen = editor.search(SearchKind::ClipboardHistory, "").remove(2);
+    let CandidateTarget::Command(paste) = chosen.target else { panic!("a command") };
+    run(&mut editor, &mut view, &paste);
+    assert_eq!(*world.clipboard.borrow(), Ok("alpha".to_string()));
+    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("alpha".into()))]);
+    assert_eq!(editor.clipboard_history()[0], "alpha", "the choice comes first");
+}
+
+#[test]
 fn reset_font_size_uses_default_font_size() {
     let world = World::new().with_preferences(json!({ "default_font_size": 13 }));
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
@@ -667,7 +718,8 @@ fn every_command_in_the_builtin_resources_is_implemented() {
     for source in [builtin_resources::PC_KEYMAP, builtin_resources::OSX_KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
         collect_commands(&sublime_json::parse(source).unwrap(), &mut commands);
     }
-    for command in commands {
+    // `$build_systems` is not a command: the menu presenter puts the build systems there.
+    for command in commands.into_iter().filter(|c| !c.name.starts_with('$')) {
         let world = World::new();
         let mut editor = world.editor();
         let mut view = ViewState::default();
@@ -849,6 +901,48 @@ fn a_listener_s_command_that_needs_the_view_waits_for_the_next_frame() {
 }
 
 #[test]
+fn a_listener_s_waiting_command_runs_on_the_view_that_asked() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/b.txt");
+    open(&mut editor, "/p/a.txt");
+    let a = editor.active_document().unwrap().id;
+    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    editor.text_for_editing(a).unwrap().push('!');
+    editor.text_for_editing(b).unwrap().push('?');
+    // `save` needs the controller: it waits for the next frame, and then saves b, not the active a.
+    world.plugins.then([plugin_call("run_command", json!(["view", b, "save", null])), PluginMessage::Done { error: None }]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/b.txt"), "other");
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(world.file_text("/p/b.txt"), "other?");
+    assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+}
+
+#[test]
+fn a_listener_s_settings_and_selection_commands_run_during_the_event() {
+    let world = listening_world(&["on_post_save"]).with_file("/p/c.txt", "one\ntwo\n");
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/c.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("view_selection_set", json!([id, [[0, 7]]])),
+        plugin_call("run_command", json!(["view", id, "split_selection_into_lines", null])),
+        plugin_call("run_command", json!(["window", id, "set_setting", { "setting": "tab_size", "value": 7 }])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    // Done before the next frame: nothing was left for `poll_plugins`.
+    assert_eq!(editor.active_document().unwrap().selections().len(), 2);
+    assert_eq!(editor.global_settings().get("tab_size"), Some(&json!(7)));
+}
+
+#[test]
 fn a_listener_s_editing_command_goes_through_the_hooks() {
     let world = listening_world(&["on_pre_save", "on_text_command", "on_post_text_command"]);
     let mut editor = world.editor();
@@ -953,4 +1047,87 @@ fn the_default_keymaps_bind_what_the_hooks_must_hear() {
         assert_eq!(bound(&format!("{primary}+y")), Some("redo_or_repeat"));
         assert_eq!(bound(&format!("{primary}+a")), Some("select_all"));
     }
+}
+
+#[test]
+fn typing_asks_the_listener_and_replays_it_to_the_widget() {
+    let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let typed = Command::with_args("insert", json!({ "characters": "a" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("a".into())));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("a".into()))]);
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries[0].0, "on_text_command");
+    assert_eq!(queries[0].2, json!(["insert", { "characters": "a" }]));
+    drop(queries);
+
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(world.plugins.queries.borrow().len(), 1, "the widget has not typed it yet");
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    poll_plugins(&mut editor, &mut view);
+    let queries = world.plugins.queries.borrow();
+    assert_eq!(queries[1].0, "on_post_text_command");
+    assert_eq!(queries[1].2, json!(["insert", { "characters": "a" }]));
+}
+
+#[test]
+fn a_listener_replaces_the_typed_characters_the_widget_receives() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "()" }]))]);
+    let typed = Command::with_args("insert", json!({ "characters": "(" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("(".into())));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("()".into()))]);
+}
+
+#[test]
+fn typing_with_several_selections_edits_all_of_them() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "abc\nabc", Selection::caret(1));
+    editor.add_carets_on_next_line(true);
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    let typed = Command::with_args("insert", json!({ "characters": "x" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("x".into())));
+    assert_eq!(active_text(&editor), "axbc\naxbc");
+    assert!(view.take_requests().is_empty(), "the use case did it, not the widget");
+}
+
+#[test]
+fn deleting_and_moving_replay_the_widget_key_when_nobody_replaces_them() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let backspace = WidgetEdit::Key { key: WidgetKey::Backspace, shift: false };
+    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("left_delete"), backspace.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(backspace)]);
+    let right = WidgetEdit::Key { key: WidgetKey::Right, shift: true };
+    let command = Command::with_args("move", json!({ "by": "characters", "forward": true, "extend": true }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, right.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(right)]);
+}
+
+#[test]
+fn enter_and_tab_replay_their_key_so_indentation_still_applies() {
+    let world = World::new().with_plugins(&[], &["on_text_command"]);
+    let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\n" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, enter.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(enter)]);
+    let tab = WidgetEdit::Key { key: WidgetKey::Tab, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\t" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, tab.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(tab)]);
+    let unindent = WidgetEdit::Key { key: WidgetKey::Tab, shift: true };
+    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("unindent"), unindent.clone()));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(unindent)]);
+
+    // A listener that changes them gets its characters typed instead.
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "  " }]))]);
+    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    let command = Command::with_args("insert", json!({ "characters": "\n" }));
+    assert!(hooked_widget_input(&mut editor, &mut view, command, enter));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("  ".into()))]);
 }

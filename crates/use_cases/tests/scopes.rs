@@ -5,7 +5,7 @@ use std::path::Path;
 
 use entities::selection::Selection;
 use test_support::World;
-use use_cases::scopes::ScopedRange;
+use use_cases::scopes::{ScopedRange, SymbolSource, SymbolType};
 use use_cases::Editor;
 
 const CODE: &str = "x = \"hi\"\ny = 1\nz = \"a\"";
@@ -32,6 +32,22 @@ fn scope_name_is_the_scope_of_the_char_at_the_point() {
     let end = CODE.chars().count();
     assert_eq!(editor.scope_name(id(&editor), end).unwrap(), "source.python string.quoted.double ", "the last char's");
     assert_eq!(editor.scope_name(999, 0), None);
+}
+
+/// `eol_selector` looks at the end of each caret's line: a string still open there.
+#[test]
+fn caret_contexts_know_the_scope_at_the_end_of_the_line() {
+    let world = World::new();
+    world.disk.put("/p/b.py", "s = \"open\nt = 1");
+    let mut editor = world.editor();
+    editor.open_file(Path::new("/p/b.py"));
+    let doc = id(&editor);
+    editor.sync_selection_from_view(doc, Selection::caret(2));
+    editor.add_carets_on_next_line(true);
+    let contexts = editor.caret_contexts();
+    let eol: Vec<&str> = contexts.iter().map(|c| c.eol_scope.trim()).collect();
+    assert_eq!(eol, ["source.python string.quoted.double", "source.python"]);
+    assert_eq!(contexts[0].scope.trim(), "source.python", "the caret itself is outside the string");
 }
 
 #[test]
@@ -80,4 +96,25 @@ fn caret_scopes_has_one_scope_per_selection() {
     editor.sync_selection_from_view(id(&editor), Selection::new(2, 3));
     editor.select_all_occurrences();
     assert_eq!(editor.caret_scopes(), vec!["source.python "; 3]);
+}
+
+#[test]
+fn symbol_locations_find_a_symbol_in_the_open_files() {
+    let world = World::new().with_meta_preference("text.plain", serde_json::json!({ "showInSymbolList": true }));
+    world.disk.put("/p/a.txt", "first line\nsecond line\n");
+    let mut editor = world.editor();
+    editor.add_folder(std::path::PathBuf::from("/p"));
+    editor.open_file(Path::new("/p/a.txt"));
+
+    let found = editor.symbol_locations("second line", SymbolSource::OpenFiles, SymbolType::Definition);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].row, found[0].column), (1, 0));
+    assert_eq!(found[0].display_name, "a.txt");
+    assert_eq!(found[0].syntax, "Plain Text");
+    assert_eq!(found[0].path.as_deref(), Some(Path::new("/p/a.txt")));
+    assert!(!found[0].reference);
+
+    // The Index answers the same here: no file is indexed on disk.
+    assert_eq!(editor.symbol_locations("second line", SymbolSource::Index, SymbolType::Definition), found);
+    assert!(editor.symbol_locations("nowhere", SymbolSource::OpenFiles, SymbolType::Any).is_empty());
 }

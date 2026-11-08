@@ -15,11 +15,23 @@ msgid "New File"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "New Window"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "New View into File"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Open File…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Open Folder…"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Project…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -56,6 +68,14 @@ msgid "Close Folder"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Close Project"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Window"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 #: crates/frameworks/src/views/dialogs.rs
 msgid "Exit"
 msgstr ""
@@ -82,6 +102,11 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Paste"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+#: crates/interface_adapters/src/presenters/quick_panel.rs
+msgid "Paste from History"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -277,6 +302,106 @@ msgid "Enter Full Screen"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Layout"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Single"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Columns: 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Rows: 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Rows: 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Grid: 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Groups"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "New Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Move File to New Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Close Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Max Columns: 1"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Max Columns: 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Max Columns: 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Max Columns: 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Max Columns: 5"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Next"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 1"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Group 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Move File To Group"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Font"
 msgstr ""
 
@@ -355,7 +480,11 @@ msgid "Cancel Build"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
-msgid "Automatic Build System"
+msgid "Build System"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Automatic"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -472,6 +601,14 @@ msgstr ""
 
 #: assets/Default/Default.sublime-commands
 msgid "Project: Close Folder"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Open Project…"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Project: Close Project"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
@@ -729,6 +866,11 @@ msgid_plural "Build finished with {count} errors"
 msgstr[0] ""
 msgstr[1] ""
 
+#: crates/use_cases/src/clipboard_history.rs
+#: crates/use_cases/src/editing.rs
+msgid "Clipboard unavailable: {error}"
+msgstr ""
+
 #: crates/use_cases/src/documents.rs
 msgid "{path} looks like a binary file"
 msgstr ""
@@ -743,10 +885,6 @@ msgstr ""
 
 #: crates/use_cases/src/editing.rs
 msgid "No indentation rules for {syntax}"
-msgstr ""
-
-#: crates/use_cases/src/editing.rs
-msgid "Clipboard unavailable: {error}"
 msgstr ""
 
 #: crates/use_cases/src/editor.rs
@@ -856,6 +994,18 @@ msgstr ""
 msgid "{name} failed: {error} (View > Show Console)"
 msgstr ""
 
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: {error}"
+msgstr ""
+
+#: crates/use_cases/src/project.rs
+msgid "{name} is not a project: it needs to be an object"
+msgstr ""
+
+#: crates/use_cases/src/project.rs
+msgid "Could not save {name}: {error}"
+msgstr ""
+
 #: crates/use_cases/src/saving.rs
 msgid "This view is read only"
 msgstr ""
@@ -894,6 +1044,10 @@ msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
 msgid "Overlay not supported: {name}"
+msgstr ""
+
+#: crates/interface_adapters/src/controllers/command_controller.rs
+msgid "set_layout needs cols, rows and cells"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs
@@ -1059,6 +1213,10 @@ msgstr ""
 
 #: crates/frameworks/src/views/side_bar.rs
 msgid "OPEN FILES"
+msgstr ""
+
+#: crates/frameworks/src/views/side_bar.rs
+msgid "GROUP {number}"
 msgstr ""
 
 #: crates/frameworks/src/views/side_bar.rs

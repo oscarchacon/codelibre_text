@@ -16,6 +16,10 @@ contents:
     dst: /usr/bin/codelibre_text
     file_info:
       mode: 0755
+  # Python for the plugins (packaging/python/fetch_python.sh target/release/python).
+  - src: target/release/python
+    dst: /usr/lib/codelibre-text/python
+    type: tree
   - src: packaging/linux/codelibre_text.desktop
     dst: /usr/share/applications/codelibre_text.desktop
     file_info:
@@ -38,7 +42,7 @@ rpm:
   signature:
     key_file: ${GPG_KEY_FILE}
 
-# Python runs the plugins and Vulkan or OpenGL draw the window; the editor installs without them.
+# Vulkan or OpenGL draw the window; the editor installs without them. Python comes with it.
 overrides:
   deb:
     depends:
@@ -46,7 +50,6 @@ overrides:
       - libgcc-s1
       - libxkbcommon0
     recommends:
-      - python3
       - libvulkan1
       - libgl1
   rpm:
@@ -55,6 +58,5 @@ overrides:
       - libgcc
       - libxkbcommon
     recommends:
-      - python3
       - vulkan-loader
       - mesa-libGL
