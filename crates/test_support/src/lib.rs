@@ -31,8 +31,9 @@ use serde_json::{json, Map, Value};
 use use_cases::gateways::{
     ArchiveFolder, ClipboardGateway, DialogGateway, DirectoryEntry, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
     FileFilter, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway, ProcessRequest,
-    ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway, UiResources,
+    ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway, UiResources, ContextFrame, SyntaxInfo,
 };
+use entities::meta_info::MetaPreference;
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
 use use_cases::{Editor, Gateways};
@@ -275,6 +276,8 @@ pub struct Resources {
     pub package_files: RefCell<BTreeMap<String, Vec<u8>>>,
     /// `include_sublime_packages` of every `unpack_packages` call.
     pub unpacks: RefCell<Vec<bool>>,
+    /// The packages' `.tmPreferences`.
+    pub meta_preferences: RefCell<Vec<MetaPreference>>,
 }
 
 struct FakeResources(Rc<Resources>);
@@ -370,6 +373,10 @@ impl ResourceGateway for FakeResources {
         let bytes = self.load_resource(name, include_sublime)?;
         serde_json::from_slice(&bytes).map_err(|e| e.to_string())
     }
+
+    fn load_meta_preferences(&self, _include_sublime: bool, _errors: &mut Vec<String>) -> Vec<MetaPreference> {
+        self.0.meta_preferences.borrow().clone()
+    }
 }
 
 // ----- syntaxes ------------------------------------------------------------------------------------
@@ -417,6 +424,13 @@ impl SyntaxGateway for FakeSyntaxes {
         }
     }
 
+    fn syntax_path(&self, syntax: &str) -> String {
+        match syntax {
+            "Plain Text" => "Packages/Text/Plain text.tmLanguage".into(),
+            name => format!("Packages/{name}/{name}.sublime-syntax"),
+        }
+    }
+
     fn base_scope(&self, syntax: &str) -> String {
         match syntax {
             "Plain Text" => "text.plain".into(),
@@ -430,6 +444,22 @@ impl SyntaxGateway for FakeSyntaxes {
 
     fn color_scheme_names(&self) -> Vec<String> {
         vec!["Daylight".into(), "Monokai".into(), "Solarized (dark)".into()]
+    }
+
+    /// White on black, and the scheme asked for under `scheme`.
+    fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        let style = serde_json::json!({ "foreground": "#ffffff", "background": "#000000", "scheme": scheme });
+        style.as_object().cloned().unwrap_or_default()
+    }
+
+    /// Strings are red and bold; the rest white. The scheme and scopes asked for under `scheme` / `scope`.
+    fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, serde_json::Value> {
+        let style = if scope.split_whitespace().any(|s| s.starts_with("string")) {
+            serde_json::json!({ "foreground": "#ff0000", "bold": true, "scheme": scheme, "scope": scope })
+        } else {
+            serde_json::json!({ "foreground": "#ffffff", "scheme": scheme, "scope": scope })
+        };
+        style.as_object().cloned().unwrap_or_default()
     }
 
     fn symbols(&self, _document: DocumentId, _text: &str, _syntax: &str) -> Vec<Symbol> {
@@ -455,6 +485,34 @@ impl SyntaxGateway for FakeSyntaxes {
             spans.push(ScopeSpan { range: start..line_text.len(), scope: if quoted { string } else { base } });
         }
         spans
+    }
+
+    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
+        (0..text.split_inclusive('\n').count()).map(|line| self.line_scopes(document, text, syntax, line)).collect()
+    }
+
+    /// `main`, and `string` inside double quotes, of `Packages/<syntax>/<syntax>.sublime-syntax`.
+    fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame> {
+        let file = format!("Packages/{syntax}/{syntax}.sublime-syntax");
+        let frame = |name: &str| ContextFrame { context_name: name.to_string(), source_file: file.clone() };
+        let in_string = self
+            .line_scopes(document, text, syntax, line)
+            .iter()
+            .any(|s| s.range.start < column && column < s.range.end && s.scope.contains("string"));
+        if in_string { vec![frame("main"), frame("string")] } else { vec![frame("main")] }
+    }
+
+    fn syntax_infos(&self) -> Vec<SyntaxInfo> {
+        self.syntax_names()
+            .into_iter()
+            .map(|name| SyntaxInfo {
+                path: format!("Packages/{name}/{name}.sublime-syntax"),
+                scope: self.base_scope(&name),
+                hidden: false,
+                file_extensions: SYNTAXES.iter().filter(|(_, n)| *n == name).map(|(e, _)| e.to_string()).collect(),
+                name,
+            })
+            .collect()
     }
 
     fn forget(&self, document: DocumentId) {
@@ -741,6 +799,7 @@ impl World {
                 ui_loads: RefCell::default(),
                 package_files: RefCell::default(),
                 unpacks: RefCell::default(),
+                meta_preferences: RefCell::default(),
             }),
             syntaxes: Rc::default(),
             session: Rc::default(),
@@ -784,6 +843,14 @@ impl World {
     /// A package file plugins can find and load (`Packages/<package>/<path>`).
     pub fn with_resource(self, name: &str, contents: impl Into<Vec<u8>>) -> Self {
         self.resources.package_files.borrow_mut().insert(name.to_string(), contents.into());
+        self
+    }
+
+    /// A `.tmPreferences` of a package: where it applies and its `settings`.
+    pub fn with_meta_preference(self, selector: &str, settings: Value) -> Self {
+        let settings = settings.as_object().cloned().unwrap_or_default();
+        let name = format!("Packages/Test/{}.tmPreferences", self.resources.meta_preferences.borrow().len());
+        self.resources.meta_preferences.borrow_mut().push(MetaPreference { name, selector: selector.to_string(), settings });
         self
     }
 

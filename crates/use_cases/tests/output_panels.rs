@@ -95,7 +95,7 @@ fn append_also_works_in_tabs_and_other_built_in_commands_do_not_run_in_panels() 
     assert_eq!(editor.active_document().unwrap().text, "x");
     assert_eq!(
         call(&world, &mut editor, "run_command", json!(["view", panel, "sort_lines", {}])),
-        Err("sort_lines cannot run in a panel yet (only move, move_to, left_delete, right_delete, select_all, insert, append and plugin commands)".into())
+        Err("sort_lines cannot run in a panel yet (only move, move_to, left_delete, right_delete, delete_word, select_all, insert, append and plugin commands)".into())
     );
 }
 

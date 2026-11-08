@@ -26,6 +26,8 @@ pub enum SearchKind {
     PluginItems,
     /// Build systems and their variants (`build {"select": true}`).
     BuildSystems,
+    /// Paste from History: what was copied, newest first.
+    ClipboardHistory,
 }
 
 /// What choosing a result does.
@@ -134,6 +136,15 @@ impl Editor {
                     }
                 }
             }
+            SearchKind::ClipboardHistory => {
+                for (index, caption) in self.clipboard_history_captions().into_iter().enumerate() {
+                    if let Some(s) = score(&caption, query) {
+                        let command = Command::with_args("paste_from_history", serde_json::json!({ "index": index }));
+                        // An empty query keeps the order: newest first.
+                        scored.push((if query.is_empty() { -(index as i64) } else { s }, Candidate::new(caption, CandidateTarget::Command(command))));
+                    }
+                }
+            }
             SearchKind::PluginItems => {
                 let items = self.plugin_quick_panel().map(|p| p.items.as_slice()).unwrap_or_default();
                 for (index, item) in items.iter().enumerate() {
@@ -164,7 +175,16 @@ impl Editor {
         let Some(doc) = self.active_document() else {
             return Vec::new();
         };
-        let symbols = self.gateways.syntaxes.symbols(doc.id, &doc.text, &doc.syntax);
+        // The `.tmPreferences` symbol lists when the packages have them, as in Sublime; else the
+        // first `entity.name` of each line.
+        let symbols = if self.has_symbol_preferences() {
+            self.symbol_regions(doc.id, crate::scopes::SymbolList::Symbols)
+                .into_iter()
+                .map(|s| entities::symbol::Symbol { line: entities::text::line_col(&doc.text, s.start).0, name: s.name })
+                .collect()
+        } else {
+            self.gateways.syntaxes.symbols(doc.id, &doc.text, &doc.syntax)
+        };
         let mut scored: Vec<(i64, Candidate)> = symbols
             .into_iter()
             .filter_map(|symbol| {

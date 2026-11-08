@@ -12,6 +12,10 @@
 #ifndef BinDir
   #define BinDir "..\..\target\release"
 #endif
+; Python for the plugins, installed with the editor (offline): sh packaging/python/fetch_python.sh <BinDir>\python
+#ifndef PythonDir
+  #define PythonDir BinDir + "\python"
+#endif
 #if AppArch == "arm64"
   #define InstallArchitectures "arm64"
 #else
@@ -50,6 +54,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#BinDir}\codelibre_text.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "{#PythonDir}\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; An upgrade replaces the whole Python (no module of an older one left behind); the uninstaller
+; also takes the bytecode the plugins compiled there.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\python"
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\python"
 
 [Icons]
 Name: "{autoprograms}\CodeLibre Text"; Filename: "{app}\codelibre_text.exe"

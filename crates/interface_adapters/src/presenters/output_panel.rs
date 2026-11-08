@@ -13,10 +13,12 @@ pub fn present(editor: &Editor) -> Option<OutputPanelViewModel> {
         .nth(MAX_LINES)
         .map_or(0, |(i, _)| i + 1);
     let first_line = text[..start].matches('\n').count();
+    let settings = editor.settings_of(panel.document.id);
     Some(OutputPanelViewModel {
         name: panel.name.clone(),
         text: text[start..].to_string(),
-        font_size: editor.global_settings().f32("font_size", 11.0),
+        font_size: settings.f32("font_size", 11.0),
+        word_wrap: settings.bool("word_wrap", true),
         first_line,
         current_line: panel.current_result.and_then(|line| line.checked_sub(first_line)),
         result_revision: panel.result_revision,

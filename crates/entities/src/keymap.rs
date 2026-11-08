@@ -95,7 +95,8 @@ impl KeyCombo {
     }
 
     /// A single printable symbol such as `/` or `?`.
-    fn is_symbol(&self) -> bool {
+    /// One character that is not a letter or digit (`?`, `(`, `"`).
+    pub fn is_symbol(&self) -> bool {
         self.key.chars().count() == 1 && !self.key.chars().all(char::is_alphanumeric)
     }
 }
@@ -143,6 +144,26 @@ pub trait KeyContext {
     /// match, not just one. Only plugins' contexts tell the difference.
     fn query_all(&self, key: &str, operator: &str, operand: &Value, _match_all: bool) -> Option<bool> {
         self.query(key, operator, operand)
+    }
+}
+
+/// A context condition on a text (`preceding_text`, `following_text`, `text`): Sublime's
+/// `equal`, `not_equal`, `regex_match` (the whole text), `not_regex_match`, `regex_contains`,
+/// `not_regex_contains`. `None` for another operator or a regex that does not compile.
+pub fn compare_text(operator: &str, text: &str, operand: &Value) -> Option<bool> {
+    let pattern = operand.as_str()?;
+    let regex = |anchored: bool| {
+        let source = if anchored { format!("^(?:{pattern})$") } else { pattern.to_string() };
+        regex::Regex::new(&source).ok()
+    };
+    match operator {
+        "equal" => Some(text == pattern),
+        "not_equal" => Some(text != pattern),
+        "regex_match" => Some(regex(true)?.is_match(text)),
+        "not_regex_match" => Some(!regex(true)?.is_match(text)),
+        "regex_contains" => Some(regex(false)?.is_match(text)),
+        "not_regex_contains" => Some(!regex(false)?.is_match(text)),
+        _ => None,
     }
 }
 

@@ -4,23 +4,48 @@ use std::path::Path;
 use std::time::Duration;
 
 use entities::document::{Document, DocumentError, DocumentId, LineEnding};
+use entities::minihtml;
 use entities::selection::Selection;
 
 use crate::editor::{CloseChoice, Editor, PendingClose};
+
+/// The plain text of a minihtml document: its lines' text, images as their `alt`.
+fn minihtml_text(html: &str) -> String {
+    minihtml::parse(html)
+        .iter()
+        .map(|line| line.iter().map(|span| span.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 impl Editor {
     pub fn new_file(&mut self) {
         let id = self.next_document_id();
         let doc = Document::new_untitled(id, self.default_line_ending());
-        self.state.documents.push(doc);
+        self.add_document(doc, false);
         self.plugin_event("on_new", id);
-        self.activate(self.state.documents.len() - 1);
+        self.activate_document(id);
+    }
+
+    /// Puts a document in the focused group (see [`Editor::insertion_index`]); returns its index.
+    fn add_document(&mut self, mut doc: Document, after_active: bool) -> usize {
+        doc.group = self.state.active_group;
+        let index = self.insertion_index(after_active);
+        self.state.documents.insert(index, doc);
+        if self.state.active != crate::groups::NO_DOCUMENT && self.state.active >= index {
+            self.state.active += 1;
+        }
+        index
     }
 
     /// Opens a file, or focuses it if it is already open. A path that does not exist becomes an
     /// empty buffer that will be saved there (like `subl new.txt`). Returns false on error.
     pub fn open_file(&mut self, path: &Path) -> bool {
         let path = self.gateways.file_system.canonicalize(path);
+        // A project file opens its project instead of a text tab (Sublime does the same).
+        if path.extension().and_then(|e| e.to_str()) == Some("sublime-project") {
+            return self.open_project(&path);
+        }
         if let Some(index) = self
             .state
             .documents
@@ -77,34 +102,103 @@ impl Editor {
         }
         let id = self.next_document_id();
         let syntax = self.gateways.syntaxes.resolve(syntax);
-        self.state
-            .documents
-            .push(Document::scratch(id, name, text, &syntax, read_only));
-        self.activate(self.state.documents.len() - 1);
+        self.add_document(Document::scratch(id, name, text, &syntax, read_only), false);
+        self.activate_document(id);
     }
 
-    /// An empty, unmodified untitled tab is replaced by the opened file, as in Sublime.
-    fn insert_document(&mut self, doc: Document) {
-        let replaces_pristine = self.state.documents.len() == 1
+    /// `window.new_html_sheet`: a read-only scratch tab with the text of the minihtml `contents`.
+    /// An existing sheet with the same name gets the new text.
+    pub fn new_html_sheet(&mut self, name: &str, contents: &str, group: Option<usize>) -> DocumentId {
+        let text = minihtml_text(contents);
+        if let Some(id) = self.state.documents.iter().find(|d| d.scratch_name.as_deref() == Some(name)).map(|d| d.id) {
+            self.set_html_sheet(id, contents);
+            if let Some(group) = group {
+                self.set_view_index(id, group, usize::MAX);
+            }
+            self.activate_document(id);
+            return id;
+        }
+        let id = self.next_document_id();
+        let syntax = self.gateways.syntaxes.resolve("Plain Text");
+        self.add_document(Document::scratch(id, name, &text, &syntax, true), false);
+        if let Some(group) = group {
+            self.set_view_index(id, group, usize::MAX);
+        }
+        self.activate_document(id);
+        id
+    }
+
+    /// `HtmlSheet.set_contents`: new minihtml for an HTML sheet (its view's text becomes the new
+    /// text).
+    pub fn set_html_sheet(&mut self, id: DocumentId, contents: &str) {
+        let Some(doc) = self.any_document_mut(id) else { return };
+        let read_only = std::mem::replace(&mut doc.read_only, false);
+        let end = doc.char_count();
+        doc.replace_range(0, end, &minihtml_text(contents));
+        doc.read_only = read_only;
+    }
+
+    /// An empty, unmodified untitled tab, alone in its group, is replaced by the opened file, as
+    /// in Sublime.
+    fn insert_document(&mut self, mut doc: Document) {
+        let group = self.state.active_group;
+        let replaces_pristine = self.group_indexes(group).len() == 1
             && self
                 .active_document()
                 .is_some_and(|d| d.path.is_none() && d.scratch_name.is_none() && d.text.is_empty());
+        let id = doc.id;
         if replaces_pristine {
-            let old = std::mem::replace(&mut self.state.documents[0], doc);
+            doc.group = group;
+            let index = self.state.active;
+            let old = std::mem::replace(&mut self.state.documents[index], doc);
             self.gateways.syntaxes.forget(old.id);
             self.state.recently_used.retain(|id| *id != old.id);
-            self.activate(0);
         } else {
-            let index = (self.state.active + 1).min(self.state.documents.len());
-            self.state.documents.insert(index, doc);
-            self.activate(index);
+            self.add_document(doc, true);
         }
+        self.activate_document(id);
+    }
+
+    /// A preview of a file (Sublime's `TRANSIENT`: a file clicked once in the side bar): it takes
+    /// the place of the focused group's preview, if it has one, until it is edited or kept. A file
+    /// already open is just shown.
+    pub fn preview_file(&mut self, path: &Path) -> bool {
+        let canonical = self.gateways.file_system.canonicalize(path);
+        if let Some(index) = self.state.documents.iter().position(|d| d.path.as_deref() == Some(canonical.as_path())) {
+            self.activate(index);
+            return true;
+        }
+        let group = self.state.active_group;
+        let previous = self.state.documents.iter().find(|d| d.transient && d.group == group && !d.is_dirty()).map(|d| d.id);
+        if !self.open_file(path) {
+            return false;
+        }
+        if let Some(doc) = self.active_document_mut() {
+            doc.transient = true;
+        }
+        if let Some(previous) = previous {
+            self.close_documents(vec![previous]);
+        }
+        true
+    }
+
+    /// The preview becomes a tab of its own (a double click on it, opening it again for good).
+    pub fn keep_document(&mut self, id: DocumentId) {
+        if let Some(doc) = self.any_document_mut(id) {
+            doc.transient = false;
+        }
+    }
+
+    /// The preview of `group`, if it has one (`window.transient_view_in_group`).
+    pub fn transient_document_in_group(&self, group: usize) -> Option<DocumentId> {
+        self.state.documents.iter().find(|d| d.transient && d.group == group).map(|d| d.id)
     }
 
     pub fn activate(&mut self, index: usize) {
         if let Some(doc) = self.state.documents.get(index) {
             let id = doc.id;
             self.state.active = index;
+            self.state.active_group = doc.group;
             self.state.recently_used.retain(|d| *d != id);
             self.state.recently_used.insert(0, id);
             self.plugin_activation_events();
@@ -117,24 +211,21 @@ impl Editor {
         }
     }
 
-    /// Moves a tab to `index` (the last place when beyond it); the active tab stays active.
+    /// Moves a tab to `index` among the tabs of its group (the last place when beyond them); the
+    /// active tab stays active.
     pub fn move_document(&mut self, id: DocumentId, index: usize) {
-        let Some(from) = self.index_of(id) else { return };
-        let active = self.state.documents.get(self.state.active).map(|d| d.id);
-        let doc = self.state.documents.remove(from);
-        let to = index.min(self.state.documents.len());
-        self.state.documents.insert(to, doc);
-        if let Some(active) = active.and_then(|a| self.index_of(a)) {
-            self.state.active = active;
+        if let Some((group, _)) = self.view_index(id) {
+            self.set_view_index(id, group, index);
         }
     }
 
-    /// Next / previous tab in tab order.
+    /// Next / previous tab of the focused group, in tab order.
     pub fn cycle_documents(&mut self, forward: bool) {
-        let count = self.state.documents.len();
+        let tabs = self.group_indexes(self.state.active_group);
+        let count = tabs.len();
         if count > 0 {
-            let active = self.state.active;
-            self.activate(if forward { (active + 1) % count } else { (active + count - 1) % count });
+            let at = tabs.iter().position(|&i| i == self.state.active).unwrap_or(0);
+            self.activate(tabs[if forward { (at + 1) % count } else { (at + count - 1) % count }]);
         }
     }
 
@@ -154,8 +245,9 @@ impl Editor {
     pub fn close_documents(&mut self, ids: Vec<DocumentId>) {
         let mut need_confirmation = Vec::new();
         for id in ids {
+            // A clone of it still shows the buffer: nothing to save yet.
             match self.index_of(id) {
-                Some(index) if self.state.documents[index].is_dirty() => need_confirmation.push(id),
+                Some(index) if self.state.documents[index].is_dirty() && self.clones_of(id).is_empty() => need_confirmation.push(id),
                 Some(index) => self.remove_document(index),
                 None => {}
             }
@@ -211,6 +303,7 @@ impl Editor {
         let Some(index) = self.index_of(id) else {
             return;
         };
+        let active = self.active_document().map(|d| d.id);
         let doc = self.state.documents.remove(index);
         self.gateways.syntaxes.forget(doc.id);
         if let Some(path) = doc.path {
@@ -219,13 +312,15 @@ impl Editor {
         self.state.recently_used.retain(|d| *d != doc.id);
         self.state.plugins.view_settings.remove(&doc.id);
         self.state.plugins.view_statuses.remove(&doc.id);
+        self.state.plugins.overwrite_views.remove(&doc.id);
         self.plugin_event("on_close", doc.id);
         if self.state.documents.is_empty() {
             self.state.active = 0;
-        } else if let Some(recent) = self.state.recently_used.first().and_then(|id| self.index_of(*id)) {
-            self.activate(recent);
-        } else {
-            self.activate(index.min(self.state.documents.len() - 1));
+        } else if active == Some(doc.id) {
+            // Its group keeps the focus, even when left empty.
+            self.focus_group(doc.group);
+        } else if let Some(active) = active.and_then(|a| self.index_of(a)) {
+            self.state.active = active;
         }
     }
 

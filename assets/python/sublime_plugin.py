@@ -106,10 +106,10 @@ class TextChangeListener:
 
     def attach(self, buffer):
         self.buffer = buffer
-        _text_listeners.setdefault(buffer.buffer_id(), []).append(self)
+        _text_listeners.setdefault(buffer.id(), []).append(self)
 
     def detach(self):
-        _text_listeners.get(self.buffer.buffer_id(), []).remove(self)
+        _text_listeners.get(self.buffer.id(), []).remove(self)
         self.buffer = None
 
     def is_attached(self):
@@ -183,9 +183,15 @@ class _CommandInput:
         on_change = None
         if type(handler).preview is not CommandInputHandler.preview:
             on_change = lambda value: self._preview(handler, value)
-        self.window.show_input_panel(
+        panel = self.window.show_input_panel(
             caption, text, lambda value: self._answer(handler, value), on_change, handler.cancel,
         )
+        initial_selection = getattr(handler, "initial_selection", None)
+        if panel is not None and initial_selection is not None:
+            regions = initial_selection() or []
+            if regions:
+                panel.sel().clear()
+                panel.sel().add_all(regions)
 
     def _ask_list(self, handler):
         items = handler.list_items()
@@ -265,13 +271,13 @@ _BASES = (Command, ApplicationCommand, WindowCommand, TextCommand)
 # The view events the editor sends; each also has an ``_async`` variant run on the async thread.
 VIEW_EVENTS = (
     "on_new", "on_load", "on_activated", "on_deactivated", "on_pre_save", "on_post_save",
-    "on_pre_close", "on_close", "on_modified", "on_selection_modified", "on_revert", "on_reload",
+    "on_pre_close", "on_close", "on_modified", "on_selection_modified", "on_revert", "on_reload", "on_clone",
 )
 # Methods the editor asks (``query``): the first listener's answer wins; the ``on_post_*`` ones
 # answer nothing, every listener hears them.
 QUERY_EVENTS = (
     "on_query_context", "on_text_command", "on_window_command", "on_post_text_command", "on_post_window_command",
-    "on_init", "on_exit",
+    "on_init", "on_exit", "on_hover", "on_query_completions", "on_new_window", "on_pre_close_window",
 )
 # What the editor asks about commands, and the ``Command`` methods that make it worth asking.
 COMMAND_QUERIES = {
@@ -314,23 +320,27 @@ def register_listeners(module):
             _view_listener_classes.append(value)
             for view_id, listeners in _view_listeners.items():
                 view = sublime.View(view_id)
-                if value.is_applicable(view.settings()):
+                if _applies(value, view):
                     listeners.append(value(view))
         elif issubclass(value, TextChangeListener) and value is not TextChangeListener:
             _text_listener_classes.append(value)
             for buffer_id in list(_text_listeners):
-                buffer = sublime.View(buffer_id).buffer()
+                buffer = sublime.Buffer(buffer_id)
                 if value.is_applicable(buffer):
                     value().attach(buffer)
 
 
 def set_commands(modules):
     """The commands are those defined in (or imported into) the plugin modules, in load order: a
-    later one replaces a command of the same name. Objects of classes that are gone are dropped."""
+    later one replaces a command of the same name. Objects of classes that are gone are dropped.
+    Classes of our ``Default`` modules (``Default.exec.ExecCommand``, imported by build plugins to
+    subclass it) are not commands: the editor's own ``exec`` stays."""
     commands.clear()
     for module in modules:
         for value in list(vars(module).values()):
             if not isinstance(value, type) or value in _BASES or not issubclass(value, Command):
+                continue
+            if (value.__module__ or "").startswith("Default."):
                 continue
             for base, kind in KINDS:
                 if issubclass(value, base):
@@ -363,14 +373,96 @@ def unregister_package(name):
                 del callbacks[tag]
 
 
+# Set by the plugin host: called with a module ``unload_module`` dropped or ``load_module`` added,
+# so the package keeps track of its modules and the editor learns the commands there are now.
+_module_unloaded = None
+_module_loaded = None
+
+
+def unload_module(module):
+    """Sublime's ``unload_module``: calls the module's ``plugin_unloaded()`` and forgets its
+    commands, listeners and ``add_on_change`` callbacks."""
+    unloaded = getattr(module, "plugin_unloaded", None)
+    if callable(unloaded):
+        try:
+            unloaded()
+        except Exception:
+            traceback.print_exc()
+    unregister_package(module.__name__)
+    if _module_unloaded is not None:
+        _module_unloaded(module)
+
+
+def load_module(module):
+    """Sublime's ``load_module``: registers the module's commands and listeners (attached to the
+    open views), calls its ``plugin_loaded()`` and tells its new listeners ``on_init``."""
+    register_listeners(module)
+    if _module_loaded is not None:
+        _module_loaded(module)
+    loaded = getattr(module, "plugin_loaded", None)
+    if callable(loaded):
+        try:
+            loaded()
+        except Exception:
+            traceback.print_exc()
+    pending = list(_pending_init)
+    del _pending_init[:]
+    if pending:
+        views = [view for window in sublime.windows() for view in window.views()]
+        for listener in pending:
+            _call(listener, "on_init", [views])
+
+
+def reload_plugin(modulename):
+    """Sublime's ``reload_plugin``: unloads the module, if it was loaded, imports it again from
+    its file and loads it (AutomaticPackageReloader, PackageDev call it)."""
+    import importlib
+    import sys
+
+    print("reloading plugin", modulename)
+    module = sys.modules.get(modulename)
+    if module is not None:
+        unload_module(module)
+        # ``reload`` runs the file in the old namespace: what the file no longer defines (a
+        # renamed command) must not stay.
+        for name in [n for n in vars(module) if not n.startswith("__")]:
+            delattr(module, name)
+        module = importlib.reload(module)
+    else:
+        module = importlib.import_module(modulename)
+    load_module(module)
+
+
+def unload_plugin(modulename):
+    """Unloads a plugin module by name (its commands and listeners go)."""
+    import sys
+
+    module = sys.modules.get(modulename)
+    if module is not None:
+        unload_module(module)
+
+
 def events():
     """The event names some listener has a method for, and the command queries some command has
     a method for (the editor sends only those)."""
     listeners = _event_listeners + _view_listener_classes
     names = [n for e in VIEW_EVENTS for n in (e, e + "_async")] + list(QUERY_EVENTS)
     found = [n for n in names if any(callable(getattr(listener, n, None)) for listener in listeners)]
+    # A post-command or window listener may define only the `_async` form of its method: the
+    # host queues it after the sync one, so the editor still has to be told to ask.
+    for event, wanted in (
+        ("on_post_text_command", listeners),
+        ("on_post_window_command", listeners),
+        ("on_new_window", _event_listeners),
+        ("on_pre_close_window", _event_listeners),
+    ):
+        if event not in found and any(callable(getattr(listener, event + "_async", None)) for listener in wanted):
+            found.append(event)
     if _text_listener_classes:
         found.append("on_text_changed")
+    # View and text listeners need to know which views are clones.
+    if (_view_listener_classes or _text_listener_classes) and "on_clone" not in found:
+        found.append("on_clone")
     classes = [cls for _, cls in commands.values()]
     for query_name, methods in COMMAND_QUERIES.items():
         if any(getattr(cls, m) is not getattr(Command, m) for cls in classes for m in methods):
@@ -378,9 +470,26 @@ def events():
     return found
 
 
+# The clones (``clone_file``) the editor told about with ``on_clone``, and their buffers: the
+# others are primary views of their own buffers, which needs no call to find out.
+_clone_buffers = {}
+
+
+def _buffer_id_of(view):
+    return _clone_buffers.get(view.view_id, view.view_id)
+
+
+def _applies(cls, view):
+    """A ``ViewEventListener`` class listens to a view when it says so, and to clones only when it
+    does not apply to primary views only (Sublime's default)."""
+    if not cls.is_applicable(view.settings()):
+        return False
+    return not cls.applies_to_primary_view_only() or view.view_id not in _clone_buffers
+
+
 def _listeners_of(view, create):
     if view.view_id not in _view_listeners and create:
-        _view_listeners[view.view_id] = [c(view) for c in _view_listener_classes if c.is_applicable(view.settings())]
+        _view_listeners[view.view_id] = [c(view) for c in _view_listener_classes if _applies(c, view)]
     return _view_listeners.get(view.view_id, [])
 
 
@@ -414,6 +523,13 @@ def query(name, view_id, window_id, args):
         for listener in _event_listeners:
             _call(listener, name, [])
         return None
+    if name in ("on_new_window", "on_pre_close_window"):
+        window = sublime.Window(args[0])
+        for listener in _event_listeners:
+            _call(listener, name, [window])
+        for listener in _event_listeners:
+            _call_async(listener, name + "_async", [window])
+        return None
     if name == "on_init":
         # Only the listeners loaded since the last one: a reload keeps the others.
         views = [sublime.View(view) for view in args[0]]
@@ -422,6 +538,8 @@ def query(name, view_id, window_id, args):
         for listener in pending:
             _call(listener, name, [views])
         return None
+    if name == "on_query_completions":
+        return query_completions(sublime.View(view_id), args[0], args[1])
     if name in ("on_window_command", "on_post_window_command"):
         window = sublime.Window(window_id)
         calls = [(listener, [window] + args) for listener in _event_listeners]
@@ -441,6 +559,34 @@ def query(name, view_id, window_id, args):
     return None
 
 
+def query_completions(view, prefix, locations):
+    """``on_query_completions`` of every listener, merged: ``{"items", "flags", "pending"}``, where
+    ``pending`` are the ``CompletionList``s still to be filled (``set_completions`` sends them). A
+    listener answers a list, a ``(list, flags)`` tuple or a ``CompletionList``."""
+    calls = [(listener, [view, prefix, locations]) for listener in _event_listeners]
+    calls += [(listener, [prefix, locations]) for listener in _listeners_of(view, create=bool(_view_listener_classes))]
+    items, flags, pending = [], 0, []
+    for listener, call_args in calls:
+        result = _call(listener, "on_query_completions", call_args)
+        if result is None:
+            continue
+        if isinstance(result, sublime.CompletionList):
+            list_id = result._wait()
+            if list_id is not None:
+                pending.append(list_id)
+                continue
+            completions, result_flags = result.completions, result.flags
+        elif isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], int) and not isinstance(result[1], bool):
+            completions, result_flags = result
+        else:
+            completions, result_flags = result, 0
+        items += sublime._completions_json(completions)
+        flags |= int(result_flags or 0)
+    if not items and not pending and not flags:
+        return None
+    return {"items": items, "flags": flags, "pending": pending}
+
+
 def _call_async(listener, name, args):
     if callable(getattr(listener, name, None)):
         sublime.set_timeout_async(lambda: _call(listener, name, args))
@@ -448,13 +594,13 @@ def _call_async(listener, name, args):
 
 def _buffer_listeners(view):
     """The listeners attached to a view's buffer, attaching the applicable classes the first time."""
-    buffer = view.buffer()
-    if buffer.buffer_id() not in _text_listeners:
-        _text_listeners[buffer.buffer_id()] = []
+    buffer = sublime.Buffer(_buffer_id_of(view))
+    if buffer.id() not in _text_listeners:
+        _text_listeners[buffer.id()] = []
         for cls in _text_listener_classes:
             if cls.is_applicable(buffer):
                 cls().attach(buffer)
-    return list(_text_listeners[buffer.buffer_id()])
+    return list(_text_listeners[buffer.id()])
 
 
 def _text_changed(view, changes):
@@ -508,6 +654,10 @@ def start_input(name, args, view_id, window_id):
 def dispatch(name, view_id):
     """Runs the listeners of a view event, then queues their ``_async`` variants."""
     view = sublime.View(view_id)
+    if name == "on_clone":
+        _clone_buffers[view_id] = view.buffer_id()
+    if name == "on_close":
+        _clone_buffers.pop(view_id, None)
     view_listeners = _listeners_of(view, create=bool(_view_listener_classes) and name != "on_close")
     calls = [(listener, (view,)) for listener in _event_listeners]
     calls += [(listener, ()) for listener in view_listeners]

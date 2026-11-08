@@ -83,7 +83,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | `Main.sublime-menu` | Yes, merged by `id` |
 | `.sublime-commands` | Yes |
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, `open_url`, …) |
-| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (needs Python 3). Event listeners, timers, quick / input panels, dialogs, resources, output panels, statuses and regions work; Package Control installs from Tools > Install Package Control… (needs `curl`) and the packages it installs load by themselves — see [docs/plugins.md](docs/plugins.md) |
+| Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (a Python 3.13 comes inside the installers: no download). Event listeners, timers, quick / input panels, dialogs, resources, output panels, build systems, projects, completions, popups, phantoms, regions, statuses, split layouts and windows work; Package Control installs from Tools > Install Package Control… (needs `curl`) and manages the whole package lifecycle — see [docs/plugins.md](docs/plugins.md) |
 | Build systems (`.sublime-build`) | `build`, `exec`, variants, `cancel_build`, results (`next_result`) |
 | `.sublime-package` archives | Yes: unpacked to a cache and read like folders; loose files override them. Of the packages Sublime ships, syntaxes are left out (syntect has its own) |
 
@@ -115,7 +115,7 @@ Override them in Preferences > Key Bindings, exactly like in Sublime Text.
 
 ## Getting started
 
-Requires a recent stable Rust toolchain (edition 2021). Python 3 is optional (only for plugins).
+Requires a recent stable Rust toolchain (edition 2021). Python is only for plugins: `sh packaging/python/fetch_python.sh target/debug/python` puts the Python 3.13 the installers bring where a development build finds it (else an installed Python 3 is used).
 
 ```bash
 git clone https://github.com/oscarchacon/codelibre_text.git
@@ -167,29 +167,26 @@ also needs it where it shows installed applications:
 
 ### Release installers
 
-A release starts with a tag `open-release/<version>`: `.github/workflows/open-release.yml` creates
-the branch `release/<version>` from the last `release/<version>` branch whose release has the
-installers of every platform, and opens a pull request from `develop` into it:
+Releases follow [Branches, tags and releases](docs/release-flow.md), with diagrams of the whole
+flow. In short: changes go into `develop` by pull request; a tag `open-release/<version>` creates the
+branch `release/<version>` from `main` and opens a pull request from `develop` into it, whose
+description is written from the commits; merging it builds the Windows setup and portable `.zip`
+(x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux `.deb`, `.rpm` and portable
+`.tar.xz` (x64 and ARM64), uploaded to a draft GitHub Release to review and publish by hand:
 
 ```bash
 git tag open-release/0.1.1-alpha develop && git push origin open-release/0.1.1-alpha
 ```
 
-Merging that pull request (or pushing a branch `release/<version>`) (for example `release/0.1.0-alpha`) runs
-`.github/workflows/release.yml`, which takes the version from the branch name and builds the Windows
-setup and portable `.zip` (x64 and ARM64), the macOS `.dmg` (Apple Silicon only) and the Linux
-`.deb`, `.rpm` and portable `.tar.xz` (x64 and ARM64). They are uploaded to a draft GitHub Release to review and publish
-by hand; pushing again replaces its files. The `.deb`, `.rpm` and a `SHA256SUMS` of every file are
-signed with the release GPG key (secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has
-a build provenance attestation; the Windows and macOS installers are not signed yet. See the
-[Code signing policy](docs/code-signing.md). When every build of a final version succeeds, a pull
-request takes the branch to `main` with its version in `Cargo.toml` and is merged at once
-(`.github/workflows/to-main.yml`). A pre-release (`-alpha`, `-beta`, `-rc`…) stays out of `main` until
-a tag `to-main/<version>` (or `main/<version>`) exists. Pushed before the build, it goes to `main`
-when the build ends; pushed after it, at once. A build that fails never reaches `main`:
+The `.deb`, `.rpm` and a `SHA256SUMS` of every file are signed with the release GPG key (secrets
+`GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`), and every file has a build provenance attestation; the
+Windows and macOS installers are not signed yet. See the [Code signing policy](docs/code-signing.md).
+Once every installer is built, final versions and release candidates (and, for now, alpha and beta
+versions) go from `release/<version>` straight into `main`; any version does with a tag
+`to-main/<version>`, pushed at any time. A build that fails never reaches `main`:
 
 ```bash
-git tag to-main/0.1.0-alpha && git push origin to-main/0.1.0-alpha
+git tag to-main/0.1.0-alpha develop && git push origin to-main/0.1.0-alpha
 ```
 
 This needs a token that can write contents, pull requests and workflows in the `RELEASE_PUSH_TOKEN` secret.
@@ -208,19 +205,20 @@ CodeLibre Text grows feature by feature. Next up, roughly in this order:
 
 - [ ] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
 - [ ] Find panel toggles and Find in Files
-- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`), real `set_timeout` / `set_timeout_async`, `show_quick_panel`, `show_input_panel`, dialogs, `find_resources` / `load_resource`, scratch views, output panels, `set_status`, `add_regions`
-- [ ] Python plugins phase B rest: output panel results, build systems
-- [x] Python plugins phase C: installing Package Control from the editor
-- [ ] Package Control, the whole package lifecycle (details in [docs/plugins.md](docs/plugins.md), phase C):
-  - [ ] Follow `ignored_packages` changes without Reload Packages (Disable / Enable Package, and the disabling around Upgrade / Remove)
-  - [ ] Load only the packages that changed, without restarting the plugin host (now a reload stops Package Control's threads mid-install)
-  - [ ] Verify installing a package with plugins and libraries, Upgrade, Remove and Satisfy Libraries end to end
-  - [ ] Package settings opened by Package Control > Settings show their defaults (`edit_settings` only knows Preferences and keymaps)
-  - [ ] `$packages` (without braces) in command arguments, used by Package Control's own `open_file` entries
-  - [ ] Package Control 3 dependencies (`dependencies.json`) for old packages, and more shims for Pythons newer than 3.8
-- [ ] Split layouts (groups)
-- [ ] Minimap, code folding, auto-complete, bookmarks
-- [ ] Build systems
+- [x] Python plugins phase A: the plugin host and its API
+- [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`, `TextChangeListener`), real `set_timeout` / `set_timeout_async`, quick / input panels, dialogs, resources, output panels and build systems, projects, command input handlers, command metadata, completions, popups, phantoms, regions and annotations, statuses, split layouts (groups), clones and windows
+- [ ] Python plugins phase B rest (details in [docs/plugins.md](docs/plugins.md)):
+  - [ ] `save` / `close`, `select_all`, the widget's undo / clipboard and the panel / build commands at once inside an event (they wait for the next frame)
+  - [ ] A `left_delete` / `move` bound in a keymap inside the widget's undo
+  - [ ] Build variants in the Build System menu
+  - [ ] Output panel syntax highlighting and selections, more built-in commands, the console as a panel
+  - [ ] Input handlers inside the palette (breadcrumb, Backspace to the previous handler, `want_event`, HTML previews)
+  - [ ] Region icon files, `on_hover` over annotations
+- [x] Python plugins phase C: installing Package Control from the editor, and the whole package lifecycle: `ignored_packages` followed without Reload Packages, reloads that load only the changed packages, packages with plugins and libraries installed / upgraded / removed, package settings with their defaults (`edit_settings`), `$packages` without braces, Package Control 3 dependencies and their migration, local channels and repositories
+- [x] Python plugins compatibility: a Python 3.8 is preferred when installed, and `compat.py` / `shims/` restore the modules and names newer Pythons removed (`collections` ABCs, `inspect.getargspec`, `ssl.wrap_socket`, `entry_points`, `cgi`, `imghdr`, `pipes`, `uu`…)
+- [x] Python 3.13 inside every installer (x64 and ARM64, offline; Sublime's current plugin host Python), so compiled libraries Package Control installs load
+- [ ] Python plugins phase C rest: a Python 3.3 host, Sublime's exact scope values, `find_by_selector` / `extract_scope` without whole-file scans
+- [ ] Minimap, code folding, bookmarks
 - [ ] Faster layout for very large files (highlighting is currently skipped above 4 MB)
 
 The full list of Sublime Text commands and settings still missing is in
@@ -283,7 +281,8 @@ organized.
 ## Contributing
 
 Pull requests are welcome, and so are translations: no Rust is needed to translate the
-interface ([docs/translating.md](docs/translating.md)). Please run these before sending a pull request:
+interface ([docs/translating.md](docs/translating.md)). Branch from `develop` and send the pull request
+into it ([branches, tags and releases](docs/release-flow.md)). Please run these before sending a pull request:
 
 ```bash
 cargo test --workspace

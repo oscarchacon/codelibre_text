@@ -410,6 +410,16 @@ fn delete_at_selections_removes_selected_text_or_one_char() {
 }
 
 #[test]
+fn delete_word_at_selections_removes_to_word_boundaries() {
+    let mut text = "one two three".to_string();
+    let carets = delete_word_at_selections(&mut text, &[caret(7), caret(13)], false);
+    assert_eq!((text.as_str(), carets), ("one  ", vec![caret(4), caret(5)]));
+    let mut text = "one two three".to_string();
+    let carets = delete_word_at_selections(&mut text, &[caret(4)], true);
+    assert_eq!((text.as_str(), carets), ("one three", vec![caret(4)]));
+}
+
+#[test]
 fn deleting_at_adjacent_carets_does_not_remove_a_char_twice() {
     let mut text = "abc".to_string();
     let carets = delete_at_selections(&mut text, &[caret(0), caret(1)], true);
@@ -631,6 +641,65 @@ fn move_to_extends_from_the_anchor() {
     assert_eq!(move_to("abc", Selection::new(1, 2), "eof", false), Some(Selection::caret(3)));
 }
 
+/// `move` with only `by`, `forward` and `extend` (pages of 2 lines).
+fn move_by(text: &str, selection: Selection, by: &str, forward: bool, extend: bool) -> Option<Selection> {
+    let how = MoveBy { by: by.into(), forward, extend, page_lines: 2, ..MoveBy::default() };
+    entities::text_commands::move_by(text, selection, &how)
+}
+
+#[test]
+fn move_to_brackets_jumps_between_matching_brackets() {
+    let text = "f(a, [b], c)";
+    let to = |at: usize| move_to(text, Selection::caret(at), "brackets", false).map(|s| s.head);
+    assert_eq!(to(3), Some(11), "inside: the closing bracket");
+    assert_eq!(to(11), Some(2), "from the closing bracket: just inside the opening one");
+    assert_eq!(to(2), Some(11), "and back");
+    assert_eq!(to(1), Some(12), "before the opening bracket: after the closing one");
+    assert_eq!(to(12), Some(1), "and back");
+    assert_eq!(to(6), Some(7), "the innermost pair");
+    assert_eq!(move_to("plain", Selection::caret(2), "brackets", false), None);
+    assert_eq!(move_to(text, Selection::caret(3), "brackets", true), Some(Selection::new(3, 11)));
+}
+
+#[test]
+fn moving_by_pages_moves_the_lines_of_a_page() {
+    let text = "a\nb\nc\nd\ne";
+    assert_eq!(move_by(text, Selection::caret(0), "pages", true, false), Some(Selection::caret(4)));
+    assert_eq!(move_by(text, Selection::caret(8), "pages", false, true), Some(Selection::new(8, 4)));
+}
+
+#[test]
+fn moving_by_stops_stops_where_its_arguments_say() {
+    let text = "fooBar_baz, x\n\nend";
+    let go = |at: usize, forward: bool, stops: Stops| {
+        let how = MoveBy { by: "stops".into(), forward, stops, ..MoveBy::default() };
+        entities::text_commands::move_by(text, Selection::caret(at), &how).unwrap().head
+    };
+    let words = Stops { word_begin: true, ..Stops::default() };
+    assert_eq!(go(0, true, words), 12, "the next word");
+    assert_eq!(go(12, false, words), 0);
+    let ends = Stops { word_end: true, punct_end: true, ..Stops::default() };
+    assert_eq!(go(0, true, ends), 10, "the end of the word");
+    assert_eq!(go(10, true, ends), 11, "the end of the comma");
+    let subwords = Stops { sub_word_begin: true, ..Stops::default() };
+    assert_eq!(go(0, true, subwords), 3, "Bar");
+    assert_eq!(go(3, true, subwords), 7, "baz, past the underscore");
+    let empty = Stops { empty_line: true, ..Stops::default() };
+    assert_eq!(go(0, true, empty), 14);
+    assert_eq!(go(14, true, empty), 18, "none after: the end");
+}
+
+#[test]
+fn moving_by_subwords_stops_inside_words() {
+    let text = "getHTTPValue my_name";
+    let by = |at: usize, unit: &str, forward: bool| move_by(text, Selection::caret(at), unit, forward, false).unwrap().head;
+    assert_eq!(by(0, "subwords", true), 3);
+    assert_eq!(by(12, "subwords", false), 3, "back to the start of the run");
+    assert_eq!(by(0, "subword_ends", true), 3);
+    assert_eq!(by(13, "subwords", true), 16, "past the underscore");
+    assert_eq!(by(13, "subword_ends", true), 15, "before the underscore");
+}
+
 #[test]
 fn moving_by_characters_collapses_a_selection_first() {
     let selection = Selection::new(1, 3);
@@ -669,5 +738,5 @@ fn moving_by_words_stops_at_starts_and_ends() {
 
 #[test]
 fn moving_by_an_unknown_unit_is_refused() {
-    assert_eq!(move_by("a", Selection::caret(0), "pages", true, false), None);
+    assert_eq!(move_by("a", Selection::caret(0), "paragraphs", true, false), None);
 }

@@ -4,9 +4,12 @@
 # and uploads them to a draft GitHub Release, with a SHA256SUMS signed by the release GPG key (which
 # also signs the .deb and .rpm) and build provenance attestations. The tests (ci.yml, macOS
 # included) run first: nothing is built if they fail. Publishing the draft stays a manual step, and
-# pushing to the branch again replaces its files. If all of that works, a final version (no -alpha,
-# -beta, -rc...) is merged into main (to-main.yml); a pre-release only when a tag to-main/<version>
-# or main/<version> exists, pushed before this build or after it.
+# pushing to the branch again replaces its files. If all of that works, the version is merged into
+# main (to-main.yml) when .github/scripts/goes-to-main.sh says so: final versions and release
+# candidates; alpha and beta too while its PRERELEASES_TO_MAIN is true (TODO: only by tag later); any
+# version with a tag to-main/<version> or main/<version>, pushed before this build or after it.
+# Creating the branch (open-release.yml, or by hand on the web) builds nothing: the merge of its
+# pull request from develop, or a later push, does.
 name: Release
 
 on:
@@ -19,6 +22,8 @@ permissions:
 
 jobs:
   tests:
+    # A push that creates the branch: nothing to release yet. Every other job needs this one.
+    if: github.event.created == false
     uses: ./.github/workflows/ci.yml
     with:
       macos: true
@@ -41,26 +46,21 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      # A final version goes to main; a pre-release when a tag to-main/<version> or main/<version>
-      # exists (pushed before the build, or after it: then to-main.yml merges it).
+      # The rules are in .github/scripts/goes-to-main.sh (also used for the pull request's
+      # description). A tag pushed after the build: to-main.yml merges it then.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
       - id: main
         name: Decide if this version goes to main
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.branch.outputs.version }}
         run: |
-          to_main=false
-          if [[ "$VERSION" != *-* ]]; then
-            to_main=true
-          else
-            for tag in "to-main/$VERSION" "main/$VERSION"; do
-              if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2> /dev/null; then
-                echo "tag $tag: this pre-release goes to main"
-                to_main=true
-              fi
-            done
-          fi
-          echo "to_main=$to_main" >> "$GITHUB_OUTPUT"
+          decision=$(bash .github/scripts/goes-to-main.sh "$VERSION")
+          echo "$decision"
+          echo "$decision" >> "$GITHUB_OUTPUT"
 
   # Built natively on x64 and arm64 runners. The oldest supported Ubuntu: the binary needs the glibc
   # it was built against, or newer.
@@ -96,6 +96,9 @@ jobs:
           key: release-linux-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
+      # Python for the plugins, inside the packages (in /usr/lib/codelibre-text/python).
+      - name: Download Python
+        run: sh packaging/python/fetch_python.sh target/release/python
       - name: Install nfpm
         run: |
           curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_${{ matrix.nfpm_arch }}.tar.gz" \
@@ -118,6 +121,7 @@ jobs:
           name="codelibre-text-$VERSION-linux-${{ matrix.arch }}"
           mkdir -p "$RUNNER_TEMP/$name"
           cp target/release/codelibre_text LICENSE assets/icons/codelibre_text.png packaging/linux/codelibre_text.desktop "$RUNNER_TEMP/$name/"
+          cp -R target/release/python "$RUNNER_TEMP/$name/python"
           tar -C "$RUNNER_TEMP" -cJf "dist/$name.tar.xz" "$name"
       - uses: actions/upload-artifact@v4
         with:
@@ -156,6 +160,10 @@ jobs:
           key: release-windows-${{ matrix.arch }}
       - name: Build
         run: cargo build --release
+      # Python for the plugins (native x64 or ARM64), next to the .exe: inside the installer, so
+      # it installs offline.
+      - name: Download Python
+        run: sh packaging/python/fetch_python.sh "target/$CARGO_BUILD_TARGET/release/python" "$CARGO_BUILD_TARGET"
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
       - name: Create the installer
@@ -168,6 +176,7 @@ jobs:
           name="codelibre-text-$VERSION-windows-$ARCH"
           mkdir -p "$RUNNER_TEMP/$name"
           cp "target/$CARGO_BUILD_TARGET/release/codelibre_text.exe" "$RUNNER_TEMP/$name/"
+          cp -R "target/$CARGO_BUILD_TARGET/release/python" "$RUNNER_TEMP/$name/python"
           cp LICENSE "$RUNNER_TEMP/$name/LICENSE.txt"
           (cd "$RUNNER_TEMP" && 7z a -tzip "$name.zip" "$name")
           mv "$RUNNER_TEMP/$name.zip" dist/
@@ -267,8 +276,8 @@ jobs:
       - name: Upload the installers
         run: gh release upload "$TAG" dist/* --clobber
 
-  # Once every installer is uploaded, a final version goes to main (to-main.yml). A pre-release
-  # (-alpha, -beta, -rc...) stays out until a tag to-main/<version> or main/<version> asks for it.
+  # Once every installer is uploaded, the version goes to main (to-main.yml) when goes-to-main.sh
+  # said so; otherwise it stays out until a tag to-main/<version> or main/<version> asks for it.
   main:
     needs: [version, release]
     if: needs.version.outputs.to_main == 'true'

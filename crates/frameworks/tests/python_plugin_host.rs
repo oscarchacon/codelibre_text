@@ -13,7 +13,7 @@ use codelibre_text::gateways::{
     child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
     syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
 };
-use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
+use codelibre_text::gateways::python_plugin_host::{bundled_interpreter, find_interpreter, PythonPluginHost};
 use codelibre_text::syntax_engine::SyntaxEngine;
 use entities::command::Command;
 use interface_adapters::controllers::command_controller;
@@ -22,6 +22,7 @@ use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use interface_adapters::view_state::ViewState;
 use serde_json::{json, Value};
 use use_cases::gateways::{PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, PluginPackage};
+use use_cases::plugin_popups::HoverZone;
 use use_cases::{Editor, Gateways};
 
 /// A host with the plugins of `files` (name, contents) loaded from a package called `MyPkg`.
@@ -39,6 +40,7 @@ fn host_with(dir: &Path, files: &[(&str, &str)]) -> Option<(PythonPluginHost, Pl
     let mut host = PythonPluginHost::new(dir.join("Lib").join("python"));
     host.load(&PluginLoad {
         packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
         packages_path: dir.join("Packages"),
         archives: Vec::new(),
         shipped_packages: None,
@@ -81,6 +83,13 @@ fn next_idle(host: &mut PythonPluginHost, log: &mut String) -> PluginMessage {
 
 /// An editor with the real plugin host and `plugin` in the package `MyPkg`; `None` without Python.
 fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
+    let editor = editor_with_load_errors(dir, plugin)?;
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    Some(editor)
+}
+
+/// [`editor_with`], when the plugin is expected to fail to load.
+fn editor_with_load_errors(dir: &Path, plugin: &str) -> Option<Editor> {
     if let Err(e) = find_interpreter(None) {
         eprintln!("skipped: {e}");
         return None;
@@ -106,7 +115,6 @@ fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
     });
     editor.set_event_command_runner(command_controller::run_during_event);
     editor.start(Vec::new());
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
     Some(editor)
 }
 
@@ -245,6 +253,7 @@ print(deep.VALUE)
     let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
     host.load(&PluginLoad {
         packages: vec![PluginPackage { name: "Zipped".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
         packages_path: dir.path().join("Packages"),
         archives: vec![(unpacked, archives.clone())],
         shipped_packages: None,
@@ -263,6 +272,83 @@ print(deep.VALUE)
     assert_eq!(lines[2], root.join("lib").join("deep").join("__init__.py").display().to_string());
     assert_eq!(lines[3], "inner");
     assert!(dir.path().join("Lib").join("Packages").is_dir(), "next to the executable plugins are told about");
+    host.stop();
+}
+
+/// Package Control prefixes paths with `\\?\` on Windows, after which `/` is no separator.
+#[test]
+fn plugins_get_paths_with_the_platforms_separators() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("Packages").join("MyPkg");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(package.join("plugin.py"), "import sublime\nprint(sublime.packages_path())\nprint(sublime.installed_packages_path())\n").unwrap();
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    let slashed = std::path::PathBuf::from(dir.path().join("Packages").display().to_string().replace('\\', "/"));
+    host.load(&PluginLoad {
+        packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        dependencies: Vec::new(),
+        packages_path: slashed,
+        archives: Vec::new(),
+        shipped_packages: None,
+        interpreter: None,
+    })
+    .unwrap();
+    let mut log = String::new();
+    assert!(matches!(next(&mut host, &mut log), PluginMessage::Loaded { .. }));
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines[0], dir.path().join("Packages").display().to_string());
+    assert_eq!(lines[1], dir.path().join("Installed Packages").display().to_string());
+    host.stop();
+}
+
+#[test]
+fn plugins_import_package_control_3_dependencies_from_the_variant_for_this_python() {
+    if find_interpreter(None).is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let packages = dir.path().join("Packages");
+    let write = |path: &str, contents: &str| {
+        let path = packages.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    };
+    write("oldlib/dependency-metadata.json", "{}");
+    write("oldlib/all/oldlib.py", "WHERE = 'all'\n");
+    write("oldlib/st3/oldlib.py", "WHERE = 'st3'\n");
+    write("oldlib/st3_windows_x64/oldlib.py", "WHERE = 'compiled for 3.3'\n");
+    write("pure/.sublime-dependency", "");
+    write("pure/all/pure/__init__.py", "WHERE = 'all'\n");
+    write("Uses/plugin.py", "import oldlib, pure\nprint(oldlib.WHERE, pure.WHERE)\n");
+    let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
+    let mut load = |dependencies: Vec<std::path::PathBuf>| {
+        host.load(&PluginLoad {
+            packages: vec![PluginPackage { name: "Uses".into(), dirs: vec![packages.join("Uses")] }],
+            dependencies,
+            packages_path: packages.clone(),
+            archives: Vec::new(),
+            shipped_packages: None,
+            interpreter: None,
+        })
+        .unwrap();
+        let mut log = String::new();
+        let PluginMessage::Loaded { errors, .. } = next(&mut host, &mut log) else {
+            panic!("expected Loaded; console:\n{log}");
+        };
+        (errors, log)
+    };
+    let (errors, log) = load(vec![packages.join("oldlib"), packages.join("pure")]);
+    assert_eq!(errors, Vec::<String>::new());
+    assert_eq!(log.trim(), "st3 all");
+
+    // Gone from the next load: off the path (the plugin changed, so it runs again).
+    write("Uses/plugin.py", "import os, sys\nprint(sorted(os.path.basename(os.path.dirname(p)) for p in sys.path if os.sep + 'Packages' + os.sep in p))\n");
+    let (errors, log) = load(vec![packages.join("oldlib")]);
+    assert_eq!(errors, Vec::<String>::new());
+    assert_eq!(log.trim(), "['oldlib']");
     host.stop();
 }
 
@@ -349,6 +435,267 @@ class ShoutCommand(sublime_plugin.TextCommand):
     assert_eq!(editor.active_document().unwrap().text, "HELLO world");
 }
 
+/// `sublime_plugin.reload_plugin` imports a changed plugin file again: the editor hears its new
+/// commands at once, the old ones go, `plugin_unloaded` / `plugin_loaded` run.
+#[test]
+fn reload_plugin_loads_a_changed_plugin_and_the_editor_hears_its_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import os
+import sublime
+import sublime_plugin
+
+def plugin_loaded():
+    print("loaded first")
+
+def plugin_unloaded():
+    print("unloaded first")
+
+class FirstCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        sublime.status_message("first")
+
+class ReloadIt(sublime_plugin.WindowCommand):
+    def run(self):
+        path = os.path.join(os.path.dirname(__file__), "plugin.py")
+        with open(path) as f:
+            source = f.read()
+        with open(path, "w") as f:
+            f.write(source.replace("First", "Second").replace("first", "second"))
+        sublime_plugin.reload_plugin("MyPkg.plugin")
+"#
+    .replace("class ReloadIt", "class ReloadItCommand");
+    let Some(mut editor) = editor_with(dir.path(), &plugin) else {
+        return;
+    };
+    assert!(editor.is_plugin_command("first"));
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("reload_it"));
+    let console = editor.state().console.clone();
+    assert!(editor.is_plugin_command("second"), "console:\n{console}");
+    assert!(!editor.is_plugin_command("first"), "the old command is gone");
+    assert!(console.contains("unloaded first") && console.contains("loaded second"), "console:\n{console}");
+    command_controller::run(&mut editor, &mut view, &Command::new("second"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("second"));
+}
+
+/// `Default.paste_from_history` is the editor's history, and the modules newer Pythons removed
+/// (`asyncore`, `asynchat`, `distutils.*`) import.
+#[test]
+fn the_clipboard_history_and_removed_modules_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+from Default.paste_from_history import g_clipboard_history
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        import asyncore, asynchat
+        from distutils.util import strtobool
+        from distutils.spawn import find_executable
+        from distutils.dir_util import mkpath
+        g_clipboard_history.push_text("copied in Terminus")
+        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on"), asynchat.async_chat.__name__))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "copied in Terminus 1 async_chat", "console:\n{}", editor.state().console);
+    assert_eq!(editor.clipboard_history(), ["copied in Terminus"]);
+}
+
+/// `Default.indentation` (Alignment), `Default.history_list` (Anaconda) and `Default.side_bar`
+/// (FileManager subclasses `RenamePathCommand`): imported as packages do, and they work.
+#[test]
+fn default_indentation_history_list_and_side_bar_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("old.txt");
+    std::fs::write(&old, "x").unwrap();
+    let plugin = r#"
+import os
+
+import sublime
+import sublime_plugin
+from Default.indentation import line_and_normed_pt
+from Default.history_list import get_jump_history_for_view
+from Default.side_bar import RenamePathCommand
+
+
+class HiddenRenamePathCommand(RenamePathCommand):
+    def is_visible(self):
+        return False
+
+
+class ProbeCommand(sublime_plugin.TextCommand):
+    def run(self, edit, old):
+        self.view.settings().set("tab_size", 4)
+        self.view.insert(edit, 0, "\tab = 1\nsecond line")
+        row_col = line_and_normed_pt(self.view, 3)
+        history = get_jump_history_for_view(self.view)
+        self.view.sel().clear()
+        self.view.sel().add(sublime.Region(1))
+        history.push_selection(self.view)
+        self.view.sel().clear()
+        self.view.sel().add(sublime.Region(12))
+        went_back = history.back(self.view)
+        RenamePathCommand(self.view.window()).on_done(old, os.path.dirname(old), "new.txt")
+        sublime.status_message("%s %s %s" % (row_col, went_back, self.view.sel()[0].a))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    let probe = Command::with_args("probe", serde_json::json!({ "old": old.to_string_lossy() }));
+    command_controller::run(&mut editor, &mut view, &probe);
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "(0, 6) True 1", "console:\n{}", editor.state().console);
+    assert!(dir.path().join("new.txt").is_file() && !old.exists());
+    assert!(editor.is_plugin_command("hidden_rename_path"));
+}
+
+/// `certifi`, which Sublime ships for every plugin host and `lsp_utils` imports without declaring
+/// it: its bundle is a file `ssl` loads.
+#[test]
+fn certifi_is_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import os
+import ssl
+
+import certifi
+import sublime
+import sublime_plugin
+
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        context = ssl.create_default_context(cafile=certifi.where())
+        authorities = context.cert_store_stats()["x509_ca"]
+        sublime.status_message("%s %s" % (os.path.isfile(certifi.where()), authorities > 100))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("True True"), "console:\n{}", editor.state().console);
+}
+
+/// A package that imports one not installed yet (LSP-json before LSP: Package Control installs
+/// them one at a time) loads once that one arrives, without changing itself.
+#[test]
+fn a_package_that_could_not_import_another_loads_once_it_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+from Base.core import GREETING
+
+
+class HelperCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        sublime.status_message(GREETING)
+"#;
+    let Some(mut editor) = editor_with_load_errors(dir.path(), plugin) else {
+        return;
+    };
+    assert!(!editor.is_plugin_command("helper"));
+    assert!(editor.state().load_errors.iter().any(|e| e.contains("No module named 'Base'")), "{:?}", editor.state().load_errors);
+
+    let base = dir.path().join("Packages").join("Base");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(base.join("core.py"), "GREETING = 'from Base'\n").unwrap();
+    editor.load_plugins();
+    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("helper"));
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("from Base"));
+}
+
+/// The modules newer Pythons removed entirely (`cgi`, `imghdr`, `pipes`, `uu`) and the names
+/// they dropped (the `collections` ABCs, `inspect.getargspec`, `ssl.wrap_socket`…) are there for
+/// plugins and the libraries Package Control installs (`compat.py` and `shims/`).
+#[test]
+fn removed_modules_and_standard_library_names_are_there_for_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import io
+
+import sublime
+import sublime_plugin
+
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        import cgi
+        import collections
+        import collections.abc
+        import configparser
+        import imghdr
+        import inspect
+        import pkgutil
+        import pipes
+        import ssl
+        import threading
+        import time
+        import typing
+        import unittest
+        import uu
+
+        assert issubclass(dict, collections.Mapping)
+        spec = inspect.getargspec(lambda a, b=1: None)
+        assert spec.args == ["a", "b"] and spec.defaults == (1,), spec
+        assert inspect.formatargspec(["a", "b"], defaults=(1,)) == "(a, b=1)"
+        assert hasattr(unittest.TestCase, "assertEquals")
+        unittest.TestCase("assertEquals").assertEquals(1, 1)
+        assert issubclass(configparser.SafeConfigParser, configparser.ConfigParser)
+        assert hasattr(configparser.ConfigParser, "readfp")
+
+        assert callable(ssl.wrap_socket) and callable(ssl.match_hostname)
+        cert = {"subjectAltName": (("DNS", "*.example.com"),)}
+        ssl.match_hostname(cert, "a.example.com")
+        try:
+            ssl.match_hostname(cert, "a.b.example.com")
+            raise AssertionError("a wildcard matched two labels")
+        except ssl.CertificateError:
+            pass
+
+        assert hasattr(typing, "ByteString")
+        assert callable(threading.currentThread) and callable(threading.Thread.isAlive)
+        assert time.clock() >= 0
+        assert pkgutil.ImpImporter is not None and pkgutil.get_loader("json") is not None
+        import importlib.metadata
+        assert hasattr(importlib.metadata.entry_points(), "get")
+
+        assert cgi.escape("<a>") == "&lt;a&gt;"
+        assert cgi.parse_header('text/html; charset="utf-8"') == ("text/html", {"charset": "utf-8"})
+        assert cgi.parse_qs("a=1&a=2") == {"a": ["1", "2"]}
+        assert imghdr.what(None, b"\x89PNG\r\n\x1a\n" + b"\0" * 24) == "png"
+        assert imghdr.what(None, b"GIF89a" + b"\0" * 26) == "gif"
+        assert pipes.quote("a b") == "'a b'"
+
+        data = b"hello uu\n" * 20
+        encoded = io.BytesIO()
+        uu.encode(io.BytesIO(data), encoded, name="x.txt", mode=0o644)
+        encoded.seek(0)
+        decoded = io.BytesIO()
+        uu.decode(encoded, decoded, quiet=True)
+        assert decoded.getvalue() == data
+        sublime.status_message("shims ok")
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "shims ok", "console:\n{}", editor.state().console);
+}
+
 #[test]
 fn a_build_like_command_writes_to_an_output_panel_from_a_thread() {
     let dir = tempfile::tempdir().unwrap();
@@ -387,10 +734,147 @@ class FakeBuildCommand(sublime_plugin.WindowCommand):
     assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
 }
 
+/// Build plugins subclass `Default.exec.ExecCommand`; the editor's own `exec` stays.
+#[test]
+fn a_subclass_of_default_exec_runs_a_process_into_the_exec_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+from Default.exec import ExecCommand, AsyncProcess, ProcessListener
+
+class MyBuildCommand(ExecCommand):
+    def on_finished(self, proc):
+        super().on_finished(proc)
+        print("exit", proc.exit_code(), sorted(self.errs_by_file))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    assert!(editor.plugin_command_kind("exec").is_none(), "Default's ExecCommand is not a command");
+    let mut view = ViewState::default();
+    let args = json!({
+        "shell_cmd": "echo a.py:3: oops",
+        "file_regex": "^(.+):(\\d+): ",
+        "working_dir": dir.path().display().to_string(),
+    });
+    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", args));
+    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !editor.state().console.contains("exit ") && Instant::now() < deadline {
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let console = editor.state().console.clone();
+    assert!(console.contains("Running echo a.py:3: oops"), "{console}");
+    assert!(console.contains("exit 0 ['a.py']"), "{console}");
+    let text = editor.shown_output_panel().unwrap().document.text.clone();
+    assert!(text.starts_with("a.py:3: oops\n[Finished in "), "{text:?}");
+    assert_eq!(editor_status(&editor), "Build finished with 1 errors");
+}
+
+#[test]
+fn hover_popups_and_phantom_sets_work_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Hover(sublime_plugin.EventListener):
+    def on_hover(self, view, point, zone):
+        view.show_popup('<a href="go">go %d %d</a>' % (point, zone), location=point,
+                        on_navigate=lambda href: print("navigate", href), on_hide=lambda: print("hidden"))
+
+class PhantomsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        global SET
+        SET = sublime.PhantomSet(self.view, "p")
+        SET.update([sublime.Phantom(sublime.Region(0, 1), "<b>a</b>", sublime.LAYOUT_BELOW, lambda h: print("phantom", h)),
+                    sublime.Phantom(sublime.Region(2, 3), "b", sublime.LAYOUT_INLINE)])
+        print("ids", [p.id for p in SET.phantoms])
+
+class PhantomsAgainCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        SET.update([sublime.Phantom(sublime.Region(0, 1), "<b>a</b>", sublime.LAYOUT_BELOW)])
+        print("ids again", [p.id for p in SET.phantoms], self.view.query_phantoms([p.id for p in SET.phantoms]))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    editor.insert_at_selections("hello");
+    let v = editor.active_document().unwrap().id;
+    assert!(editor.plugins_hear_hover());
+
+    editor.plugin_hover(v, 2, HoverZone::Text);
+    let popup = editor.plugin_popup().unwrap_or_else(|| panic!("no popup; console:\n{}", editor.state().console));
+    assert_eq!((popup.location, popup.content.as_str()), (2, r#"<a href="go">go 2 1</a>"#));
+    command_controller::navigate_plugin_popup(&mut editor, &mut view, "go");
+    editor.hide_plugin_popup();
+    command_controller::poll_plugins(&mut editor, &mut view);
+    let console = editor.state().console.clone();
+    assert!(console.contains("navigate go") && console.contains("hidden"), "{console}");
+
+    command_controller::run(&mut editor, &mut view, &Command::new("phantoms"));
+    let ids: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    assert_eq!(ids.len(), 2, "console:\n{}", editor.state().console);
+    command_controller::navigate_plugin_phantom(&mut editor, &mut view, ids[0], "fix");
+    command_controller::run(&mut editor, &mut view, &Command::new("phantoms_again"));
+    let console = editor.state().console.clone();
+    assert!(console.contains("phantom fix"), "{console}");
+    assert!(console.contains(&format!("ids again [{}] [Region(0, 1)]", ids[0])), "the equal phantom keeps its id\n{console}");
+    let left: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    assert_eq!(left, vec![ids[0]]);
+}
+
+#[test]
+fn plugins_completions_reach_the_auto_complete_list_also_later() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Now(sublime_plugin.EventListener):
+    def on_query_completions(self, view, prefix, locations):
+        print("asked", prefix, locations, view.is_auto_complete_visible())
+        item = sublime.CompletionItem("zeta_fn", "fn", "zeta_fn($1)", sublime.COMPLETION_FORMAT_SNIPPET,
+                                      sublime.KIND_FUNCTION, "<b>details</b>")
+        return ([item, ["zeta_pair\tpair", "PAIR"], "zeta_str"], sublime.INHIBIT_WORD_COMPLETIONS)
+
+class Later(sublime_plugin.ViewEventListener):
+    def on_query_completions(self, prefix, locations):
+        completions = sublime.CompletionList()
+        sublime.set_timeout_async(lambda: completions.set_completions(["zeta_later"]), 50)
+        return completions
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    editor.insert_at_selections("zeta_word ze");
+    command_controller::run(&mut editor, &mut view, &Command::new("auto_complete"));
+    let triggers = |editor: &Editor| editor.auto_complete().map(|l| l.shown.iter().map(|s| s.completion.trigger.clone()).collect::<Vec<_>>());
+    let now = triggers(&editor).unwrap_or_else(|| panic!("no list; console:\n{}", editor.state().console));
+    assert_eq!(now.len(), 3, "no words (INHIBIT_WORD_COMPLETIONS): {now:?}");
+    assert!(editor.state().console.contains("asked ze [12] False"), "{}", editor.state().console);
+    let item = &editor.auto_complete().unwrap().shown.iter().find(|s| s.completion.trigger == "zeta_fn").unwrap().completion;
+    assert_eq!((item.annotation.as_str(), item.kind.letter.as_str(), item.details.as_str()), ("fn", "f", "<b>details</b>"));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !triggers(&editor).unwrap_or_default().contains(&"zeta_later".to_string()) {
+        assert!(Instant::now() < deadline, "set_completions never arrived; console:\n{}", editor.state().console);
+        command_controller::poll_plugins(&mut editor, &mut view);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pair = triggers(&editor).unwrap().iter().position(|t| t == "zeta_pair").unwrap();
+    editor.commit_completion(Some(pair));
+    assert_eq!(editor.active_document().unwrap().text, "zeta_word PAIR");
+}
+
 #[test]
 fn regions_statuses_and_show_reach_the_editor() {
     let dir = tempfile::tempdir().unwrap();
-    let plugin = r#"
+    let plugin = r##"
 import sublime
 import sublime_plugin
 
@@ -399,13 +883,14 @@ class MarkCommand(sublime_plugin.TextCommand):
         self.view.insert(edit, 0, "alpha beta\ngamma")
         self.view.add_regions("words", [sublime.Region(6, 10), 0], "region.redish", "dot",
                               sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE | sublime.DRAW_SQUIGGLY_UNDERLINE,
-                              annotations=["unused"])
+                              annotations=["<a href='why'>why</a>"], annotation_color="#ff0000",
+                              on_navigate=lambda href: print("annotation link", href))
         self.view.set_status("count", "2 marks")
         self.view.sel().clear()
         self.view.sel().add(sublime.Region(11, 12))
         self.view.show_at_center(self.view.sel())
         sublime.status_message("%s %s" % (self.view.get_regions("words"), self.view.get_status("count")))
-"#;
+"##;
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
@@ -419,8 +904,13 @@ class MarkCommand(sublime_plugin.TextCommand):
     );
     let doc = editor.active_document().unwrap();
     assert_eq!(doc.region_sets()[0].flags, 32 | 256 | 2048);
+    assert_eq!(doc.region_sets()[0].annotations, ["<a href='why'>why</a>"]);
+    assert_eq!(doc.region_sets()[0].annotation_color, "#ff0000");
     assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 11, center: true }));
     assert_eq!(editor.plugin_statuses(doc.id), ["2 marks"]);
+    let id = doc.id;
+    command_controller::navigate_plugin_annotation(&mut editor, &mut view, id, "words", "why");
+    assert!(editor.state().console.contains("annotation link why"), "console:\n{}", editor.state().console);
 }
 
 #[test]
@@ -510,10 +1000,7 @@ fn plugins_find_the_api_enums_and_default_modules() {
                   assert sublime.RegionFlags.DRAW_NO_FILL | sublime.RegionFlags.HIDDEN == sublime.DRAW_NO_FILL | sublime.HIDDEN\n\
                   assert sublime.PopupFlags.HIDE_ON_MOUSE_MOVE_AWAY == sublime.HIDE_ON_MOUSE_MOVE_AWAY\n\
                   assert sublime.KindId.COLOR_LIGHT == 18 and sublime.QueryOperator.EQUAL == sublime.OP_EQUAL\n\
-                  history = ClipboardHistory()\n\
-                  for text in ['one', '  two\\nlines', 'one', '']:\n    history.push_text(text)\n\
-                  assert history.get() == [('one', 'one'), ('twolines', '  two\\nlines')], history.get()\n\
-                  assert g_clipboard_history.empty()\n\
+                  assert ClipboardHistory().caption('  two\\nlines') == 'twolines' and g_clipboard_history.LIST_LIMIT == 15\n\
                   import sys\n\
                   expected = '4203' if sys.version_info >= (3, 14) else '4201' if sys.version_info >= (3, 13) else '4200'\n\
                   assert sublime.version() == expected and sublime.arch() in ('x64', 'x32', 'arm64')\n\
@@ -621,7 +1108,8 @@ fn event_listeners_hear_the_events_they_define() {
     let PluginMessage::Loaded { events, .. } = loaded else {
         panic!("expected Loaded, got {loaded:?}");
     };
-    assert_eq!(events, ["on_post_save_async", "on_modified"]);
+    // `on_clone` too: view listeners must know the clones (they listen to primary views only).
+    assert_eq!(events, ["on_post_save_async", "on_modified", "on_clone"]);
 
     // The first event of a view asks each ViewEventListener class whether it applies.
     let mut log = String::new();
@@ -639,6 +1127,39 @@ fn event_listeners_hear_the_events_they_define() {
     match next_idle(&mut host, &mut log) {
         PluginMessage::Call { function, args } => assert_eq!((function.as_str(), args), ("view_set_name", vec![json!(3), json!("saved")])),
         other => panic!("expected view_set_name, got {other:?}"),
+    }
+    host.reply(Ok(Value::Null)).unwrap();
+}
+
+/// A listener that defines only the `_async` form of a post-command method is still advertised to
+/// the editor (it asks for the sync name), and the host queues that form after the command.
+#[test]
+fn an_async_only_post_command_listener_hears_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class Listener(sublime_plugin.EventListener):
+    def on_post_text_command_async(self, view, name, args):
+        sublime.status_message("after " + name)
+"#;
+    let Some((mut host, loaded)) = host_with(dir.path(), &[("listener.py", plugin)]) else {
+        return;
+    };
+    let PluginMessage::Loaded { events, .. } = loaded else {
+        panic!("expected Loaded, got {loaded:?}");
+    };
+    assert!(events.iter().any(|e| e == "on_post_text_command"), "events: {events:?}");
+    let mut log = String::new();
+    host.query("on_post_text_command", Some(1), &json!(["shout", {}])).unwrap();
+    assert_eq!(next(&mut host, &mut log), PluginMessage::Answer(Value::Null));
+    match next_idle(&mut host, &mut log) {
+        PluginMessage::Call { function, args } => {
+            assert_eq!(function, "status_message");
+            assert_eq!(args, vec![json!("after shout")]);
+        }
+        other => panic!("expected status_message, got {other:?}"),
     }
     host.reply(Ok(Value::Null)).unwrap();
 }
@@ -732,6 +1253,8 @@ class AskCommand(sublime_plugin.WindowCommand):
             json!("Which?"),
             json!(1),
             json!(false),
+            // The window the call is about.
+            json!({ "__window__": 1 }),
         ]
     );
     host.reply(Ok(Value::Null)).unwrap();
@@ -745,7 +1268,7 @@ class AskCommand(sublime_plugin.WindowCommand):
 
     host.run(PluginCommandKind::Window, "ask", &Value::Null, None).unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_input_panel");
-    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false)]);
+    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false), json!({ "__window__": 1 })]);
     host.reply(Ok(Value::Null)).unwrap();
     assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
     host.callback(2, "done", &json!(["alice"])).unwrap();
@@ -997,6 +1520,28 @@ fn a_missing_interpreter_is_reported() {
     assert!(error.contains("python_interpreter"), "{error}");
 }
 
+/// The Python an installer puts next to the editor is found from the executable's path:
+/// beside it (Windows, portable archives), in the macOS app's `Resources`, in `lib` on Linux.
+#[test]
+fn the_bundled_python_is_found_next_to_the_executable() {
+    let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
+    for (executable, python) in [
+        ("codelibre_text", "python"),
+        ("CodeLibre Text.app/Contents/MacOS/codelibre_text", "CodeLibre Text.app/Contents/Resources/python"),
+        ("usr/bin/codelibre_text", "usr/lib/codelibre-text/python"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join(executable);
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        assert_eq!(bundled_interpreter(&executable), None);
+        let python = dir.path().join(python).join(program);
+        fs::create_dir_all(python.parent().unwrap()).unwrap();
+        fs::write(&python, "").unwrap();
+        let found = bundled_interpreter(&executable).expect("bundled python");
+        assert_eq!(fs::canonicalize(found).unwrap(), fs::canonicalize(&python).unwrap());
+    }
+}
+
 #[test]
 fn text_change_listeners_hear_the_edits() {
     let dir = tempfile::tempdir().unwrap();
@@ -1223,6 +1768,7 @@ fn load_packages(host: &mut PythonPluginHost, dir: &Path, names: &[&str]) -> (bo
                 .iter()
                 .map(|name| PluginPackage { name: (*name).into(), dirs: vec![dir.join("Packages").join(name)] })
                 .collect(),
+            dependencies: Vec::new(),
             packages_path: dir.join("Packages"),
             archives: Vec::new(),
             shipped_packages: None,
@@ -1279,4 +1825,80 @@ fn reloading_loads_only_the_packages_that_changed() {
     assert_eq!(commands, vec!["changed_count", "kept_count"]);
     assert_eq!(log, "unloaded Added\n");
     host.stop();
+}
+
+#[test]
+fn plugins_split_the_window_and_move_views_between_groups() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class SplitCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        w = self.window
+        first = w.active_view()
+        second = w.new_file()
+        w.set_layout({"cols": [0.0, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
+        w.set_view_index(second, 1, 0)
+        print("groups", w.num_groups(), w.active_group(), w.get_view_index(second), second.sheet().group())
+        print("in group 0", [v.id() for v in w.views_in_group(0)] == [first.id()])
+        w.focus_group(0)
+        print("active", w.active_view_in_group(0).id() == first.id(), w.active_group())
+        w.move_sheets_to_group([first.sheet()], 1)
+        print("empty", w.views_in_group(0), w.active_view_in_group(0), w.get_layout()["cells"])
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    command_controller::run(&mut editor, &mut ViewState::default(), &Command::new("split"));
+    let console = &editor.state().console;
+    assert!(console.contains("groups 2 1 (1, 0) 1"), "{console}");
+    assert!(console.contains("in group 0 True"), "{console}");
+    assert!(console.contains("active True 0"), "{console}");
+    assert!(console.contains("empty [] None [[0, 0, 1, 1], [1, 0, 2, 1]]"), "{console}");
+    assert_eq!(editor.active_group(), 1, "the moved view took the focus along");
+}
+
+/// Typing is a command for the plugins: `on_text_command` sees `insert`, may replace the
+/// characters, and `on_post_text_command` is told once the widget typed them.
+#[test]
+fn a_plugin_hears_typing_and_may_replace_the_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class PairCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        self.view.insert(edit, self.view.sel()[0].b, "()")
+
+class TypingListener(sublime_plugin.EventListener):
+    def on_text_command(self, view, command_name, args):
+        if command_name == "insert" and args.get("characters") == "(":
+            return ("pair", None)
+        return None
+
+    def on_post_text_command(self, view, command_name, args):
+        sublime.status_message("after " + command_name)
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+
+    // The listener replaces the typed character with a command of its own.
+    let typed = Command::with_args("insert", json!({ "characters": "(" }));
+    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, interface_adapters::view_state::WidgetEdit::Insert("(".into())));
+    assert_eq!(editor.active_document().unwrap().text, "()");
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after pair");
+
+    // Nobody replaces this one: the widget types it, and the listener hears the end afterwards.
+    let typed = Command::with_args("insert", json!({ "characters": "x" }));
+    let replay = interface_adapters::view_state::WidgetEdit::Insert("x".into());
+    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, replay.clone()));
+    assert_eq!(view.take_requests(), [interface_adapters::view_state::ViewRequest::WidgetEdit(replay)]);
+    command_controller::poll_plugins(&mut editor, &mut view);
+    command_controller::poll_plugins(&mut editor, &mut view);
+    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after insert");
 }

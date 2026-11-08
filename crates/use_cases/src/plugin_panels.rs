@@ -4,7 +4,7 @@
 //! The panels are drawn by the outer circles: a plugin's request is kept here until the command
 //! controller takes it ([`Editor::take_plugin_panel_request`]) and shows it.
 
-use entities::document::{Document, LineEnding};
+use entities::document::{Document, DocumentId, LineEnding};
 use entities::selection::Selection;
 use serde_json::{json, Value};
 
@@ -45,6 +45,9 @@ pub struct PluginInputPanel {
     pub caption: String,
     pub document: Document,
     wants_changes: bool,
+    /// The output panel this field types into (`create_io_panel`): Enter calls `on_input` and keeps
+    /// it open. `None` for `show_input_panel`.
+    pub io: Option<String>,
 }
 
 /// Which panel a plugin has just asked for.
@@ -68,6 +71,14 @@ impl PluginPanels {
 
     pub(crate) fn input_document_mut(&mut self) -> Option<&mut Document> {
         self.input_panel.as_mut().map(|p| &mut p.document)
+    }
+
+    /// Closes the field typing into the output panel `name` (its panel is gone).
+    pub(crate) fn close_io_panel(&mut self, name: &str) -> Option<DocumentId> {
+        if self.input_panel.as_ref().is_some_and(|p| p.io.as_deref() == Some(name)) {
+            return self.input_panel.take().map(|p| p.document.id);
+        }
+        None
     }
 }
 
@@ -120,15 +131,50 @@ impl Editor {
             caption: text(1),
             document,
             wants_changes: args.get(4).and_then(Value::as_bool).unwrap_or(false),
+            io: None,
         });
         self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
         Ok(json!(id))
+    }
+
+    /// `window.create_io_panel(name, on_input)`: the output panel `name` and, when the plugin
+    /// passed a callback, the field that types into its process (Enter calls `on_input`, Esc
+    /// closes it). Answers `(output, input)`.
+    pub(crate) fn plugin_create_io_panel(&mut self, name: &str, callback: Option<u64>, unlisted: bool) -> (DocumentId, Option<DocumentId>) {
+        let output = self.create_output_panel(name, unlisted);
+        let Some(callback) = callback else {
+            return (output, None);
+        };
+        self.state.plugin_panels.input_panel = None;
+        let id = self.next_document_id();
+        let mut document = Document::new_untitled(id, LineEnding::Unix);
+        document.scratch = true;
+        self.state.plugin_panels.input_panel = Some(PluginInputPanel {
+            callback,
+            caption: String::new(),
+            document,
+            wants_changes: false,
+            io: Some(name.to_string()),
+        });
+        (output, Some(id))
+    }
+
+    /// The field typing into the output panel `name`, if it is open.
+    pub fn io_input_panel(&self, name: &str) -> Option<DocumentId> {
+        self.plugin_input_panel().filter(|p| p.io.as_deref() == Some(name)).map(|p| p.document.id)
     }
 
     /// The next panel a plugin asked for, for the controller to show.
     pub fn take_plugin_panel_request(&mut self) -> Option<PluginPanelRequest> {
         let requests = &mut self.state.plugin_panels.requests;
         (!requests.is_empty()).then(|| requests.remove(0))
+    }
+
+    /// Shows the plugin's text field again (a view that is not a tab cannot be focused directly).
+    pub(crate) fn request_plugin_input_panel(&mut self) {
+        if !self.state.plugin_panels.requests.contains(&PluginPanelRequest::InputPanel) {
+            self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
+        }
     }
 
     pub fn plugin_quick_panel(&self) -> Option<&PluginQuickPanel> {
@@ -158,8 +204,23 @@ impl Editor {
         }
     }
 
-    /// The user pressed Enter in the plugin's input panel (`done`), or closed it.
+    /// The user pressed Enter in the plugin's input panel (`done`), or closed it. An io panel
+    /// (`create_io_panel`) calls `on_input` and stays open; Esc closes it without a call.
     pub fn finish_plugin_input_panel(&mut self, done: bool, run_command: &mut CommandRunner) {
+        if let Some(panel) = &self.state.plugin_panels.input_panel {
+            if panel.io.is_some() {
+                if !done {
+                    self.state.plugin_panels.input_panel = None;
+                    return;
+                }
+                let Some(panel) = self.state.plugin_panels.input_panel.as_mut() else { return };
+                let callback = panel.callback;
+                let text = std::mem::take(&mut panel.document.text);
+                panel.document.note_text_changed();
+                self.plugin_callback(callback, "input", json!([text]), run_command);
+                return;
+            }
+        }
         if let Some(panel) = self.state.plugin_panels.input_panel.take() {
             self.state.plugins.view_settings.remove(&panel.document.id);
             if done {

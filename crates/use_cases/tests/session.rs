@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use entities::selection::Selection;
+use entities::document::RegionSet;
 use serde_json::json;
 use test_support::{open, World};
 use use_cases::editing::TextCommand;
@@ -99,6 +100,8 @@ fn session_document(path: Option<&str>, unsaved: Option<&str>, selection: Select
         unsaved_text: unsaved.map(String::from),
         syntax: "Python".into(),
         selection,
+        group: 0,
+        regions: Vec::new(),
     }
 }
 
@@ -114,6 +117,7 @@ fn startup_restores_the_previous_session() {
         ],
         active: 3,
         layout: layout(),
+        ..Default::default()
     });
     let editor = world.editor();
     let state = editor.state();
@@ -130,8 +134,20 @@ fn startup_restores_the_previous_session() {
 }
 
 #[test]
-fn the_session_is_not_restored_without_hot_exit() {
-    let world = World::new()
+fn persistent_regions_come_back_with_the_session() {
+    let mut document = session_document(Some("/p/a.py"), None, Selection::caret(0));
+    document.regions.push(RegionSet { key: "lint".into(), regions: vec![(1, 2)], flags: 16, ..RegionSet::default() });
+    let world = World::new().with_file("/p/a.py", "abc").with_session(Session {
+        folders: vec![PathBuf::from("/p")],
+        documents: vec![document],
+        ..Default::default()
+    });
+    let editor = world.editor();
+    assert_eq!(editor.active_document().unwrap().regions("lint"), vec![(1, 2)]);
+}
+
+#[test]
+fn the_session_is_not_restored_without_hot_exit() {    let world = World::new()
         .with_preferences(json!({ "hot_exit": false }))
         .with_session(Session { documents: vec![session_document(None, Some("old"), Selection::caret(0))], ..Default::default() });
     let editor = world.editor();
@@ -160,12 +176,15 @@ fn listeners_hear_on_load_for_the_files_of_the_session() {
         unsaved_text: unsaved.map(String::from),
         syntax: "Plain Text".into(),
         selection: Selection::caret(0),
+        group: 0,
+        regions: Vec::new(),
     };
     let session = Session {
         folders: vec![],
         documents: vec![document(Some("/p/a.txt".into()), None), document(None, Some("x"))],
         active: 0,
         layout: vec![],
+        ..Default::default()
     };
     let world = World::new().with_file("/p/a.txt", "a").with_session(session).with_plugins(&[], &["on_load"]);
     world.plugins.then([PluginMessage::Done { error: None }]);

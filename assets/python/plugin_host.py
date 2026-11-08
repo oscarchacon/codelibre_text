@@ -3,7 +3,7 @@
 The editor starts it as ``python -I -u plugin_host.py`` and talks to it over stdin/stdout, one
 JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
 
-    editor -> host   {"op": "load", "packages": [{"name": ..., "dirs": [...]}], "paths": {...}}
+    editor -> host   {"op": "load", "packages": [{"name": ..., "dirs": [...]}], "dependencies": [...], "paths": {...}}
     host -> editor   {"op": "loaded", "commands": [[name, kind], ...], "events": [...], "errors": [...]}
     editor -> host   {"op": "run", "kind": ..., "name": ..., "args": {...}, "view": id, "window": id}
     editor -> host   {"op": "event", "name": "on_modified", "view": id}
@@ -30,6 +30,12 @@ import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# The shims from the start, last so a standard library that still has a module wins: ``compat``
+# uses them too, for the modules a newer Python dropped entirely.
+_shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
+if _shims not in sys.path:
+    sys.path.append(_shims)
+
 # Not in the console, as in Sublime: deprecations show only for ``__main__``, which this host is
 # and Sublime's plugins are not; and Python 3.12's invalid escapes in old plugins' strings.
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -39,7 +45,14 @@ import codelibre_rpc  # noqa: E402
 
 codelibre_rpc.setup()
 
+# Before any plugin: what newer Pythons removed from the standard library, and what the libraries
+# Package Control installs expect (Sublime's plugin hosts are Python 3.8).
+import compat  # noqa: E402
+
+compat.apply()
+
 import sublime  # noqa: E402
+import sublime_api  # noqa: E402
 import sublime_plugin  # noqa: E402
 
 # The loaded packages by name, in load order (see ``LoadedPackage``).
@@ -111,66 +124,6 @@ class ArchiveFinder:
 
 
 sys.meta_path.insert(0, ArchiveFinder)
-
-
-def allow_post_handshake_auth():
-    """Apple's ``/usr/bin/python3`` is built with LibreSSL: its ``SSLContext`` has
-    ``post_handshake_auth`` but refuses to set it, and Package Control sets it before every
-    download. Contexts made from then on ignore it (it only matters with client certificates)."""
-    import ssl
-
-    try:
-        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).post_handshake_auth = True
-    except AttributeError:
-        ssl.SSLContext.post_handshake_auth = property(lambda self: False, lambda self, value: None)
-    except Exception:
-        pass
-
-
-allow_post_handshake_auth()
-
-
-def restore_entry_points_by_group():
-    """Python 3.12 dropped the dict that ``importlib.metadata.entry_points()`` gave Python 3.8,
-    the plugins' Python (Markdown, a library Package Control installs, asks it
-    ``.get("markdown.extensions", ())``). Without arguments it answers groups again too."""
-    import importlib.metadata as metadata
-
-    if hasattr(metadata.entry_points(), "get"):
-        return
-
-    class EntryPointsByGroup(metadata.EntryPoints):
-        def get(self, group, default=None):
-            found = self.select(group=group)
-            return found if found else default
-
-        def keys(self):
-            return self.groups
-
-        def values(self):
-            return [self.select(group=group) for group in self.groups]
-
-        def items(self):
-            return [(group, self.select(group=group)) for group in self.groups]
-
-        def __getitem__(self, name):
-            try:
-                return super().__getitem__(name)
-            except KeyError:
-                if name in self.groups:
-                    return self.select(group=name)
-                raise
-
-    entry_points = metadata.entry_points
-
-    def entry_points_by_group(**params):
-        found = entry_points(**params)
-        return found if params else EntryPointsByGroup(found)
-
-    metadata.entry_points = entry_points_by_group
-
-
-restore_entry_points_by_group()
 
 
 def visible_path(directory, archives):
@@ -269,8 +222,46 @@ def add_library_folders():
             sys.path.append(folder)
     # Last, so the standard library wins where it still has them (``imp``, ``distutils``).
     shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
-    if shims not in sys.path:
-        sys.path.append(shims)
+    if shims in sys.path:
+        sys.path.remove(shims)
+    sys.path.append(shims)
+
+
+def dependency_folder(dependency):
+    """The folder of a Package Control 3 dependency to import from, picked as Package Control 4
+    picks it when it migrates one to a library: compiled builds only for the Python we run, then
+    pure Python ones. ``st3_<platform>`` builds are compiled for Python 3.3 and left out."""
+    py = "%d%d" % sys.version_info[:2]
+    platform, arch = sublime.platform(), sublime.arch()
+    for name in ("st4_py%s_%s_%s" % (py, platform, arch), "st4_py%s_%s" % (py, platform), "st4_py38", "st4", "st3", "all"):
+        folder = os.path.join(dependency, name)
+        if os.path.isdir(folder):
+            return folder
+    return None
+
+
+# The dependency folders ``set_dependency_folders`` put on ``sys.path``.
+_dependency_folders = []
+
+
+def set_dependency_folders(dependencies):
+    """Package Control 3's dependencies (``Packages/<dep>/all``…, a profile it never migrated)
+    go on ``sys.path`` after the libraries, which are newer, as its ``0_package_control_loader``
+    did; those of a previous load that are gone come off."""
+    for folder in _dependency_folders:
+        if folder in sys.path:
+            sys.path.remove(folder)
+    _dependency_folders[:] = [f for f in map(dependency_folder, dependencies) if f]
+    shims = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shims")
+    at = sys.path.index(shims) if shims in sys.path else len(sys.path)
+    sys.path[at:at] = _dependency_folders
+
+
+def failed_import(error):
+    """Whether a load error is a module that could not be imported (not one of ``plugin_loaded``,
+    whose module did import: running it again would start its threads again)."""
+    last = error.rstrip().splitlines()[-1] if error.strip() else ""
+    return " plugin_loaded():\n" not in error and last.startswith(("ModuleNotFoundError", "ImportError"))
 
 
 def load(message):
@@ -278,8 +269,11 @@ def load(message):
     files changed are unloaded, the new ones loaded, and the others keep running (with their
     threads: Package Control may be installing more packages). ``errors`` are those of every
     loaded package."""
-    sublime._paths.update(message.get("paths") or {})
+    # With the platform's separators, as Sublime gives them: Package Control prefixes them with
+    # ``\\?\`` on Windows, after which ``/`` is not a separator.
+    sublime._paths.update({key: os.path.normpath(path) if path else path for key, path in (message.get("paths") or {}).items()})
     add_library_folders()
+    set_dependency_folders(message.get("dependencies") or [])
     wanted = [(package["name"], package["dirs"]) for package in message.get("packages", [])]
     signatures = {name: package_signature(dirs) for name, dirs in wanted}
     for name in reversed(list(_packages)):
@@ -291,6 +285,17 @@ def load(message):
         if name not in _packages:
             _packages[name] = load_package(name, dirs, message.get("archives") or [], signatures[name])
             new.append(_packages[name])
+    # A package that could not import another one (LSP-json before LSP, a SublimeLinter linter
+    # before SublimeLinter: Package Control installs them one by one) tries again once new
+    # packages are there, rather than staying broken until the next start.
+    if new:
+        for name, dirs in wanted:
+            package = _packages.get(name)
+            if package is not None and package not in new and any(failed_import(e) for e in package.errors):
+                unload_package(name)
+                importlib.invalidate_caches()
+                _packages[name] = load_package(name, dirs, message.get("archives") or [], signatures[name])
+                new.append(_packages[name])
     order = [name for name, _ in wanted]
     for name in sorted(_packages, key=order.index):
         _packages[name] = _packages.pop(name)
@@ -307,6 +312,42 @@ def load(message):
     commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
     errors = [error for package in _packages.values() for error in package.errors]
     return {"op": "loaded", "commands": commands, "events": sublime_plugin.events(), "errors": errors}
+
+
+def plugin_modules():
+    return [module for package in _packages.values() for module in package.modules]
+
+
+def tell_commands_changed():
+    """After ``sublime_plugin.reload_plugin`` / ``load_module`` / ``unload_module``: the
+    commands are those of the modules there are now, and the editor hears which."""
+    sublime_plugin.set_commands(plugin_modules())
+    commands = [[name, kind] for name, (kind, _) in sorted(sublime_plugin.commands.items())]
+    sublime_api.plugins_changed(commands, sublime_plugin.events())
+
+
+def module_unloaded(module):
+    for package in _packages.values():
+        package.modules = [m for m in package.modules if m.__name__ != module.__name__]
+    tell_commands_changed()
+
+
+def module_loaded(module):
+    """A module ``load_module`` loads joins its package (the first part of its name), in place of
+    an older one of that name; a module of no loaded package still gives its commands."""
+    package = _packages.get(module.__name__.partition(".")[0])
+    if package is None:
+        package = _packages.setdefault(module.__name__, LoadedPackage(None))
+    names = [m.__name__ for m in package.modules]
+    if module.__name__ in names:
+        package.modules[names.index(module.__name__)] = module
+    else:
+        package.modules.append(module)
+    tell_commands_changed()
+
+
+sublime_plugin._module_unloaded = module_unloaded
+sublime_plugin._module_loaded = module_loaded
 
 
 def run(message):

@@ -5,9 +5,11 @@
 //! `assets/Default/` (keymap, menu, command palette). Names without an arm go to the Python plugins.
 
 use entities::command::Command;
-use entities::document::LineEnding;
+use entities::document::{DocumentId, LineEnding};
+use entities::layout::Layout;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
+use use_cases::completions::AutoCompleteOptions;
 use use_cases::editing::{Expansion, TextCommand};
 use use_cases::gateways::PluginCommandKind;
 use use_cases::plugin_hooks::CommandTarget;
@@ -53,7 +55,10 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                 }
                 view.input_panel = Some(InputPanelState { focus_requested: true });
                 view.find_panel.visible = false;
-                editor.hide_output_panel();
+                // An io panel types next to the output it belongs to; a one-shot one replaces it.
+                if editor.plugin_input_panel().is_some_and(|p| p.io.is_none()) {
+                    editor.hide_output_panel();
+                }
             }
         }
     }
@@ -88,6 +93,24 @@ pub fn answer_plugin_quick_panel(editor: &mut Editor, view: &mut ViewState, item
     show_plugin_panels(editor, view);
 }
 
+/// A link clicked in a plugin's popup: its `on_navigate`.
+pub fn navigate_plugin_popup(editor: &mut Editor, view: &mut ViewState, href: &str) {
+    editor.navigate_plugin_popup(href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
+/// A link clicked in a plugin's phantom: its `on_navigate`.
+pub fn navigate_plugin_phantom(editor: &mut Editor, view: &mut ViewState, phantom: u64, href: &str) {
+    editor.navigate_plugin_phantom(phantom, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
+/// A link clicked in an annotation of a plugin's regions: its `on_navigate`.
+pub fn navigate_plugin_annotation(editor: &mut Editor, view: &mut ViewState, document: DocumentId, key: &str, href: &str) {
+    editor.navigate_plugin_annotation(document, key, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+}
+
 pub fn highlight_plugin_item(editor: &mut Editor, view: &mut ViewState, item: usize) {
     editor.highlight_plugin_quick_panel_item(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
 }
@@ -98,11 +121,17 @@ pub fn change_plugin_input(editor: &mut Editor, view: &mut ViewState, text: &str
 
 /// Enter (`done`) or Esc in a plugin's input panel.
 pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool) {
+    // An io panel (`create_io_panel`) stays open after Enter, with the focus.
+    let stays = done && editor.plugin_input_panel().is_some_and(|p| p.io.is_some());
     if view.input_panel.take().is_none() {
         return;
     }
     editor.finish_plugin_input_panel(done, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
-    view.focus_editor = true;
+    if stays {
+        view.input_panel = Some(InputPanelState { focus_requested: true });
+    } else {
+        view.focus_editor = true;
+    }
     show_plugin_panels(editor, view);
 }
 
@@ -121,12 +150,15 @@ pub fn run_from_palette(editor: &mut Editor, view: &mut ViewState, command: Comm
 const WINDOW_COMMANDS: &[&str] = &[
     "new_file", "prompt_open_file", "prompt_open_folder", "prompt_add_folder", "open_file", "open_dir", "save_all",
     "close", "close_file", "close_all", "close_window", "exit", "reopen_last_file", "close_folder_list",
+    "prompt_open_project", "prompt_open_project_or_workspace", "open_project", "open_project_or_workspace",
+    "close_project",
     "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
     "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
     "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
     "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
-    "prev_result",
+    "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
+    "new_pane", "close_pane", "set_max_columns", "new_window", "clone_file",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
@@ -134,7 +166,7 @@ const EDITING_COMMANDS: &[&str] = &[
     "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
     "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
     "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert", "insert_snippet", "goto_line",
-    "move", "move_to", "left_delete", "right_delete",
+    "move", "move_to", "left_delete", "right_delete", "delete_word",
 ];
 
 /// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
@@ -145,8 +177,15 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         Some(target) => editor.plugin_rewrite_command(command, target),
         None => command.clone(),
     };
+    run_rewritten(editor, view, command);
+}
+
+/// Runs a command the hooks already answered for: a listener's replacement, or what the text
+/// widget is about to do on its own. It is not asked about again.
+fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
     run_command(editor, view, &command);
+    view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;
     };
@@ -156,6 +195,46 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     } else {
         editor.plugin_command_ran(&command, target);
     }
+}
+
+/// Asks `on_text_command` about what the text widget is about to do by itself — typing,
+/// deleting or moving the caret — and takes the input when a listener exists. `command` is the
+/// command the hooks hear; `replay` is the input the widget gets when nobody replaces it (so
+/// undo, IME and the completion list still work). Returns whether the input was taken.
+///
+/// With several selections the widget only knows the primary one, so the use case does the whole
+/// edit instead of replaying it.
+pub fn hooked_widget_input(editor: &mut Editor, view: &mut ViewState, command: Command, replay: WidgetEdit) -> bool {
+    if !editor.plugins_hear_text_commands() {
+        return false;
+    }
+    let rewritten = editor.plugin_rewrite_command(&command, CommandTarget::View);
+    let several = editor.active_document().is_some_and(|doc| !doc.extra_selections().is_empty());
+    if several {
+        run_rewritten(editor, view, rewritten);
+    } else if rewritten.name == "insert" && command.name == "insert" {
+        // Typing, Enter or Tab: the widget types the listener's characters, if it changed them.
+        // Unchanged, the key itself goes back, so auto-indent and tab expansion still apply.
+        let characters = rewritten.str_arg("characters");
+        let replay = if characters == command.str_arg("characters") {
+            replay
+        } else {
+            WidgetEdit::Insert(characters.to_string())
+        };
+        view.request(ViewRequest::WidgetEdit(replay));
+        view.widget_edits_in_progress.push(WidgetEditInProgress {
+            command: rewritten,
+            target: CommandTarget::View,
+            applied_next_frame: true,
+        });
+    } else if rewritten.same_as(&command) {
+        // What the widget was going to do: give it back the same input, one frame later.
+        view.request(ViewRequest::WidgetEdit(replay));
+        view.widget_edits_in_progress.push(WidgetEditInProgress { command, target: CommandTarget::View, applied_next_frame: true });
+    } else {
+        run_rewritten(editor, view, rewritten);
+    }
+    true
 }
 
 /// Which hooks hear about a command: plugin commands by their kind (application commands have
@@ -193,9 +272,21 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "revert" => editor.revert_active_document(),
         "close" | "close_file" => editor.close_active_document(),
         "close_all" => editor.close_all_documents(),
-        "close_window" | "exit" => view.request(ViewRequest::CloseWindow),
+        "close_window" => view.request(ViewRequest::CloseWindow),
+        "exit" => view.request(ViewRequest::Exit),
+        "new_window" => {
+            editor.new_window();
+        }
+        "clone_file" => {
+            editor.clone_active_document();
+        }
         "reopen_last_file" => editor.reopen_closed_file(),
         "close_folder_list" => editor.close_all_folders(),
+        "prompt_open_project" | "prompt_open_project_or_workspace" => editor.prompt_open_project(),
+        "open_project" | "open_project_or_workspace" => {
+            editor.open_project(std::path::Path::new(&command.str_arg("file")));
+        }
+        "close_project" => editor.close_project(),
         "refresh_folder_list" => {
             view.forget_folder_listings();
             editor.refresh_file_index();
@@ -316,14 +407,26 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.use_selection_as_query(true);
             find_next(editor, view, command.name == "find_under");
         }
-        "slurp_find_string" => editor.use_selection_as_query(false),
-        "find_under_expand" => editor.select_word_or_next_occurrence(),
-        "find_all_under" => editor.select_all_occurrences(),
-        "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
-        "split_selection_into_lines" => editor.split_selection_into_lines(),
-        "single_selection" => editor.single_selection(),
         "replace_next" => editor.replace_next(),
         "replace_all" => editor.replace_all(),
+
+        // ----- auto-complete -------------------------------------------------------------------
+        "auto_complete" => editor.show_auto_complete(AutoCompleteOptions {
+            api_only: command.bool_arg("api_completions_only", false),
+            snippets_only: command.bool_arg("snippets_only", false),
+            commit_single: command.bool_arg("commit_single", false),
+        }),
+        "hide_auto_complete" => editor.hide_auto_complete(),
+        "commit_completion" => editor.commit_completion(None),
+        "insert_best_completion" => {
+            if !editor.insert_best_completion(command.bool_arg("exact", false)) {
+                match command.str_arg("default") {
+                    "\t" => insert_tab(editor),
+                    "" => {}
+                    other => editor.run_text_command(TextCommand::Insert(other.to_string())),
+                }
+            }
+        }
 
         // ----- view ----------------------------------------------------------------------------
         "toggle_side_bar" => view.show_side_bar = !view.show_side_bar,
@@ -332,33 +435,76 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             view.fullscreen = !view.fullscreen;
             view.request(ViewRequest::SetFullscreen(view.fullscreen));
         }
-        "increase_font_size" => editor.change_font_size(1.0),
-        "decrease_font_size" => editor.change_font_size(-1.0),
-        "reset_font_size" => editor.reset_font_size(),
-        "toggle_setting" => editor.toggle_setting(command.str_arg("setting")),
-        "set_setting" => {
-            let value = command.args.get("value").cloned().unwrap_or_default();
-            editor.set_setting(command.str_arg("setting"), value);
-        }
         "next_view" => editor.cycle_documents(true),
         "prev_view" => editor.cycle_documents(false),
         "next_view_in_stack" => editor.cycle_recent_documents(true),
         "prev_view_in_stack" => editor.cycle_recent_documents(false),
-        "select_by_index" => editor.activate(command.usize_arg("index", 0)),
-        "set_file_type" => editor.set_syntax(command.str_arg("syntax")),
-        "set_line_ending" => {
-            let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };
-            editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
-        }
+        "select_by_index" => editor.activate_in_group(command.usize_arg("index", 0)),
 
+        // ----- groups --------------------------------------------------------------------------
+        "set_layout" => match Layout::from_json(&command.args) {
+            Some(layout) => {
+                editor.set_layout(layout);
+                view.focus_editor = true;
+            }
+            None => {
+                let message = editor.tr("set_layout needs cols, rows and cells").to_string();
+                editor.notify(message);
+            }
+        },
+        "focus_group" => {
+            editor.focus_group(command.usize_arg("group", 0));
+            view.focus_editor = true;
+        }
+        "move_to_group" => {
+            editor.move_active_to_group(command.usize_arg("group", 0));
+            view.focus_editor = true;
+        }
+        "focus_neighboring_group" => {
+            editor.focus_neighboring_group(command.bool_arg("forward", true));
+            view.focus_editor = true;
+        }
+        "move_to_neighboring_group" => {
+            editor.move_active_to_neighboring_group(command.bool_arg("forward", true));
+            view.focus_editor = true;
+        }
+        "new_pane" => {
+            editor.new_pane(command.bool_arg("move", true));
+            view.focus_editor = true;
+        }
+        "close_pane" => {
+            let group = command.args.get("group").and_then(serde_json::Value::as_i64).filter(|g| *g >= 0).map(|g| g as usize);
+            editor.close_pane(group);
+            view.focus_editor = true;
+        }
+        "set_max_columns" => editor.set_max_columns(command.usize_arg("columns", 4)),
         // ----- done by the text widget itself --------------------------------------------------
         "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
         "redo" | "redo_or_repeat" | "soft_redo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo)),
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
         // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
         "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
-        "copy" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy)),
-        "cut" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut)),
+        "copy" => {
+            editor.remember_copied_selections();
+            view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy));
+        }
+        "cut" => {
+            editor.remember_copied_selections();
+            view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut));
+        }
+        // With an index (the entry chosen in its panel): pastes that entry; without, lists them.
+        "paste_from_history" => match command.args.get("index").and_then(serde_json::Value::as_u64) {
+            Some(index) => {
+                if let Some(text) = editor.take_clipboard_history_entry(index as usize) {
+                    view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));
+                }
+            }
+            None if editor.clipboard_history().is_empty() => {}
+            None => {
+                cancel_quick_panel(editor, view);
+                view.quick_panel = Some(QuickPanel::new(SearchKind::ClipboardHistory, String::new()));
+            }
+        },
         "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
         "paste" | "paste_and_indent" => {
             if let Some(text) = editor.clipboard_text() {
@@ -378,6 +524,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 
         // ----- Python plugins: they can run other commands, which come back here ---------------
         name if EDITING_COMMANDS.contains(&name) => run_editing_command(editor, command),
+        name if EDITOR_COMMANDS.contains(&name) => run_editor_command(editor, command),
         other => {
             if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
                 editor.notify(editor.tr_args("Command not available: {name}", &[("name", &other)]));
@@ -436,26 +583,84 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
         "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
         "insert_snippet" => editor.run_text_command(TextCommand::InsertSnippet(command.str_arg("contents").to_string())),
         "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
-        "move" | "move_to" | "left_delete" | "right_delete" => editor.run_view_command_on_active(command),
+        "move" | "move_to" | "left_delete" | "right_delete" | "delete_word" => editor.run_view_command_on_active(command),
         other => unreachable!("{other} is not in EDITING_COMMANDS"),
     }
 }
 
-/// Runs a built-in command a listener asked for during an event, at once when it only edits text:
-/// a formatter's command in `on_pre_save` must reach the file being saved. The others need the
-/// view state, which use cases do not have: false, and they wait for the next frame.
+/// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
+/// settings and need no view state, so they too run at once inside an event.
+const EDITOR_COMMANDS: &[&str] = &[
+    "slurp_find_string", "find_under_expand", "find_all_under", "select_lines", "split_selection_into_lines",
+    "single_selection", "increase_font_size", "decrease_font_size", "reset_font_size", "toggle_setting", "set_setting",
+    "set_file_type", "set_line_ending", "next_field", "prev_field", "clear_fields", "replace_completion_with_next_completion",
+];
+
+fn run_editor_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "slurp_find_string" => editor.use_selection_as_query(false),
+        "find_under_expand" => editor.select_word_or_next_occurrence(),
+        "find_all_under" => editor.select_all_occurrences(),
+        "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
+        "split_selection_into_lines" => editor.split_selection_into_lines(),
+        "single_selection" => editor.single_selection(),
+        "increase_font_size" => editor.change_font_size(1.0),
+        "decrease_font_size" => editor.change_font_size(-1.0),
+        "reset_font_size" => editor.reset_font_size(),
+        "toggle_setting" => editor.toggle_setting(command.str_arg("setting")),
+        "set_setting" => {
+            let value = command.args.get("value").cloned().unwrap_or_default();
+            editor.set_setting(command.str_arg("setting"), value);
+        }
+        "set_file_type" => editor.set_syntax(command.str_arg("syntax")),
+        "next_field" => editor.move_to_snippet_field(true),
+        "prev_field" => editor.move_to_snippet_field(false),
+        "clear_fields" => editor.clear_snippet_fields(),
+        "replace_completion_with_next_completion" => editor.replace_completion_with_next(),
+        "set_line_ending" => {
+            let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };
+            editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
+        }
+        other => unreachable!("{other} is not in EDITOR_COMMANDS"),
+    }
+}
+
+/// Whether a built-in command can run in the middle of a use case (it needs no view state).
+fn runs_during_event(name: &str) -> bool {
+    EDITING_COMMANDS.contains(&name) || EDITOR_COMMANDS.contains(&name)
+}
+
+/// Runs a built-in command a listener asked for during an event, at once when it needs no view
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. The others
+/// (panels, the widget's undo and clipboard, saving and closing, which would change the views
+/// under the use case that fired the event) answer false and wait for the next frame, which runs
+/// them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
-    if !EDITING_COMMANDS.contains(&command.name.as_str()) {
+    if !runs_during_event(&command.name) {
         return false;
     }
-    let rewritten = editor.plugin_rewrite_command(command, CommandTarget::View);
-    if !EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
+    let target = hook_target(editor, &command.name).unwrap_or(CommandTarget::View);
+    let rewritten = editor.plugin_rewrite_command(command, target);
+    if !runs_during_event(&rewritten.name) {
         editor.queue_plugin_command(rewritten);
         return true;
     }
-    run_editing_command(editor, &rewritten);
-    editor.plugin_command_ran(&rewritten, CommandTarget::View);
+    if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
+        run_editing_command(editor, &rewritten);
+    } else {
+        run_editor_command(editor, &rewritten);
+    }
+    editor.plugin_command_ran(&rewritten, hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View));
     true
+}
+
+/// What Tab does in the text: a tab (or spaces, or indentation) at every selection.
+pub fn insert_tab(editor: &mut Editor) {
+    if editor.active_document().is_some_and(|d| !d.extra_selections().is_empty()) {
+        editor.insert_at_selections("\t");
+    } else {
+        editor.run_text_command(TextCommand::InsertTab);
+    }
 }
 
 /// Closes the quick panel and gives the focus back to the text.
@@ -488,6 +693,12 @@ fn find_next(editor: &mut Editor, view: &mut ViewState, forward: bool) {
 /// Sublime's built-in line macros (`res://Packages/Default/<Name>.sublime-macro`).
 fn run_macro(editor: &mut Editor, file: &str) {
     let name = file.rsplit('/').next().unwrap_or("").trim_end_matches(".sublime-macro");
+    // Backspace between an auto-paired `(` and `)` (or quotes): both go, at every caret.
+    if name == "Delete Left Right" {
+        editor.run_view_command_on_active(&Command::new("left_delete"));
+        editor.run_view_command_on_active(&Command::new("right_delete"));
+        return;
+    }
     let command = match name {
         "Delete Line" => TextCommand::DeleteLine,
         "Add Line" => TextCommand::AddLine { before: false },

@@ -1,3 +1,4 @@
+use entities::command::Command;
 use entities::menu::MenuItem;
 use entities::settings::Settings;
 use use_cases::Editor;
@@ -19,18 +20,57 @@ pub fn present(editor: &Editor) -> Vec<MenuEntryViewModel> {
         .collect()
 }
 
+/// A menu's entries; `{"command": "$build_systems"}` becomes one entry per build system.
+fn entries(items: &[MenuItem], editor: &Editor, settings: &Settings) -> Vec<MenuEntryViewModel> {
+    let mut entries = Vec::new();
+    for item in items {
+        if item.command.as_ref().is_some_and(|c| c.name == "$build_systems") {
+            entries.extend(build_system_entries(editor));
+        } else {
+            entries.extend(entry(item, editor, settings));
+        }
+    }
+    tidy(entries)
+}
+
+/// Tools > Build System: `set_build_system` with each build system, the one set checked.
+fn build_system_entries(editor: &Editor) -> Vec<MenuEntryViewModel> {
+    let set = editor.build_system_set();
+    let state = editor.state();
+    editor
+        .menu_build_systems()
+        .iter()
+        .map(|build| {
+            let command = Command::with_args("set_build_system", serde_json::json!({ "file": build.resource }));
+            MenuEntryViewModel {
+                caption: build.caption.clone(),
+                id: None,
+                separator: false,
+                shortcut: state.keymap.binding_for(&command),
+                key: state.keymap.key_for(&command).cloned(),
+                checked: Some(set == Some(build.resource.as_str())),
+                enabled: true,
+                command: Some(command),
+                children: Vec::new(),
+            }
+        })
+        .collect()
+}
+
 fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEntryViewModel> {
     let state = editor.state();
     let plugin = item.command.as_ref().and_then(|c| editor.plugin_command_state(c));
     if plugin.is_some_and(|p| !p.visible) {
         return None;
     }
-    let checked = item.checkbox.then(|| match plugin {
-        Some(plugin) => plugin.checked,
-        None => item.command.as_ref().map(|c| c.str_arg("setting")).is_some_and(|setting| settings.bool(setting, false)),
+    let checked = item.checkbox.then(|| match (plugin, &item.command) {
+        (Some(plugin), _) => plugin.checked,
+        (None, Some(c)) if c.name == "set_build_system" => editor.build_system_set().unwrap_or_default() == c.str_arg("file"),
+        (None, Some(c)) if c.name == "set_max_columns" => editor.max_columns() == c.usize_arg("columns", 0),
+        (None, command) => command.as_ref().map(|c| c.str_arg("setting")).is_some_and(|setting| settings.bool(setting, false)),
     });
     let caption = plugin.and_then(|p| p.description.clone()).filter(|_| item.caption.is_empty());
-    let children = tidy(item.children.iter().filter_map(|child| entry(child, editor, settings)).collect());
+    let children = entries(&item.children, editor, settings);
     if item.command.is_none() && !item.is_separator() && children.is_empty() {
         return None;
     }
