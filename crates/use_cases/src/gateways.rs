@@ -35,8 +35,8 @@ pub struct ArchiveFolder {
     pub unpacked: PathBuf,
     /// It belongs to Sublime Text, so it follows `import_sublime_packages`.
     pub sublime: bool,
-    /// The packages that come with Sublime Text. Their syntaxes use features the syntax engine
-    /// lacks (it has its own for those languages), so they are left out.
+    /// The packages that come with Sublime Text. Their tests are left out; their syntaxes are
+    /// only parents for the packages' `extends`, the engine has its own for those languages.
     pub shipped: bool,
 }
 
@@ -291,6 +291,10 @@ pub trait SyntaxGateway {
     fn syntax_infos(&self) -> Vec<SyntaxInfo>;
     /// The document was closed; cached data about it can go.
     fn forget(&self, document: DocumentId);
+    /// Highlighting that failed since the last call (syntect panicked and the text went plain), for the error log.
+    fn take_failures(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// A color scheme's global colors (`foreground`, `background`, `caret`, `selection`…), as
     /// `"#rrggbb"` (or `"#rrggbbaa"` when not opaque): Sublime's `view.style()`.
     fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, Value>;
@@ -298,6 +302,12 @@ pub trait SyntaxGateway {
     /// `foreground` (the scheme's if no rule sets it), `background` when a rule sets it, and
     /// `bold` / `italic` / `underline` when true: Sublime's `view.style_for_scope()`.
     fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, Value>;
+    /// The palette Sublime derives from a color scheme (`ui_info()["color_scheme"]["palette"]`):
+    /// its global colors and `redish`, `orangish`…, the closest color it defines for each hue.
+    fn scheme_palette(&self, scheme: &str) -> serde_json::Map<String, Value> {
+        let _ = scheme;
+        serde_json::Map::new()
+    }
 }
 
 /// Hot-exit storage.

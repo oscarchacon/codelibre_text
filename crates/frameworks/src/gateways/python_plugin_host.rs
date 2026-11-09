@@ -342,24 +342,25 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
 /// A Python 3 interpreter, as a program and its first arguments: the `python_interpreter`
 /// setting, else the Python 3.13 the installers bring ([`bundled_interpreter`]), else the first of
 /// `py -3.13`, `python3.13` (also in the usual folders a Mac app's `PATH` lacks), `py -3`,
-/// `python3`, `python` and `uv python find` that works.
+/// `python3`, `python` and `uv python find` that is 3.8 or newer.
 ///
 /// 3.13 is the Python of Sublime's current plugin host (build 4201 on), and Package Control
 /// installs the libraries built for the host's Python: an installed 3.13 is used when there is
-/// one, even if another `python3` comes first in `PATH`.
+/// one, even if another `python3` comes first in `PATH`. 3.8 is the oldest the support modules
+/// run on (`importlib.metadata`, which `compat.py` patches).
 pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
     if let Some(path) = setting {
         let python = vec![path.to_string()];
-        return if is_python3(&python) {
+        return if is_supported_python(&python) {
             Ok(python)
         } else {
-            Err(format!("\"python_interpreter\": {path} is not a Python 3 interpreter"))
+            Err(format!("\"python_interpreter\": {path} is not a Python 3.8 or newer interpreter"))
         };
     }
     let bundled = std::env::current_exe().ok().and_then(|exe| bundled_interpreter(&exe));
     if let Some(python) = bundled {
         let python = vec![python.display().to_string()];
-        if is_python3(&python) {
+        if is_supported_python(&python) {
             return Ok(python);
         }
     }
@@ -368,7 +369,7 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
     candidates.extend(PYTHON_FOLDERS.iter().map(|folder| vec![format!("{folder}/python3.13")]));
     candidates.extend([words(&["py", "-3"]), words(&["python3"]), words(&["python"])]);
     for python in candidates {
-        if is_python3(&python) {
+        if is_supported_python(&python) {
             return Ok(python);
         }
     }
@@ -380,11 +381,11 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|path| !path.is_empty());
     if let Some(path) = found_by_uv {
-        if is_python3(std::slice::from_ref(&path)) {
+        if is_supported_python(std::slice::from_ref(&path)) {
             return Ok(vec![path]);
         }
     }
-    Err("no Python 3 interpreter found: install Python 3 or set \"python_interpreter\" in Preferences".into())
+    Err("no Python 3.8 or newer interpreter found: install Python 3 or set \"python_interpreter\" in Preferences".into())
 }
 
 /// Where a Python 3.13 installed by hand lives when it is not in `PATH`: an app opened from the
@@ -408,13 +409,24 @@ pub fn bundled_interpreter(executable: &Path) -> Option<PathBuf> {
     places.into_iter().map(|place| folder.join(place).join(program)).find(|python| python.is_file())
 }
 
-/// Runs the interpreter once. (The Windows Store's `python.exe` placeholder fails here.)
-fn is_python3(python: &[String]) -> bool {
-    command(python)
-        .args(["-c", "import sys; print(sys.version_info[0])"])
+/// Runs the interpreter once for its version. (The Windows Store's `python.exe` placeholder
+/// fails here.)
+fn python_version(python: &[String]) -> Option<(u32, u32)> {
+    let output = command(python)
+        .args(["-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
         .stdin(Stdio::null())
         .output()
-        .is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "3")
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (major, minor) = text.trim().split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn is_supported_python(python: &[String]) -> bool {
+    python_version(python).is_some_and(|(major, minor)| major == 3 && minor >= 8)
 }
 
 fn command(program_and_args: &[String]) -> Command {

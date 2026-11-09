@@ -12,6 +12,7 @@
 pub mod app;
 pub mod gateways;
 pub mod input;
+pub mod sublime_syntax;
 pub mod syntax_engine;
 pub mod views;
 

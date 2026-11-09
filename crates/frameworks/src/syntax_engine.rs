@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -23,6 +23,7 @@ use syntect::highlighting::{
     Theme, ThemeItem, ThemeSet, ThemeSettings,
 };
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxDefinition, SyntaxReference, SyntaxSet};
+use crate::sublime_syntax::SyntaxFiles;
 use use_cases::gateways::{ContextFrame, PackagePaths, ScopeSpan, SyntaxInfo};
 
 pub type SharedSyntaxEngine = Rc<RefCell<SyntaxEngine>>;
@@ -46,6 +47,8 @@ pub struct SyntaxEngine {
     /// The names of each syntax's contexts, by syntect's context index (see [`context_names`]);
     /// worked out the first time a backtrace needs them when the packages were not loaded.
     context_names: Option<Vec<Vec<String>>>,
+    /// Highlighting that panicked (see [`guard`]), for the editor's error log, taken once a frame.
+    failures: Vec<String>,
 }
 
 /// syntect's `ContextId`s are (index of the syntax in the set, index of the context among the
@@ -93,6 +96,18 @@ fn region_color(scope: &str) -> Option<Color32> {
     })
 }
 
+/// Runs `work`, and turns a panic into its message. syntect panics when a regex it cannot compile
+/// turns up while highlighting; that must not close the editor, the text is then shown plain.
+pub fn guard<T>(work: impl FnOnce() -> T) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|payload| {
+        payload
+            .downcast_ref::<&str>()
+            .map(|message| message.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string())
+    })
+}
+
 impl SyntaxEngine {
     /// Starts with syntect's built-in syntaxes and our built-in color schemes;
     /// `reload` adds the ones from packages.
@@ -106,6 +121,7 @@ impl SyntaxEngine {
             scope_colors: HashMap::new(),
             syntax_paths: HashMap::new(),
             context_names: None,
+            failures: Vec::new(),
         };
         engine.load_builtin_schemes(&mut Vec::new());
         engine
@@ -126,15 +142,36 @@ impl SyntaxEngine {
     pub fn reload(&mut self, include_sublime: bool, errors: &mut Vec<String>) {
         let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
         self.syntax_paths.clear();
+        // Sublime's shipped syntaxes are only parents of the packages' (`extends`): syntect has
+        // its own for those languages, which need no branches.
+        let shipped: Vec<PathBuf> = self.paths.archive_folders.iter().filter(|f| f.shipped).map(|f| f.unpacked.clone()).collect();
+        let mut files = SyntaxFiles::new();
+        let mut to_load = Vec::new();
         for path in package_files::find_resources(&self.paths, include_sublime, |n| n.ends_with(".sublime-syntax")) {
-            let definition = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| {
-                let fallback_name = path.file_stem().and_then(|s| s.to_str());
+            let resource = package_files::resource_name(&self.paths, include_sublime, &path).unwrap_or_else(|| path.display().to_string());
+            match std::fs::read_to_string(&path) {
+                Ok(text) => files.add(&resource, text),
+                Err(e) => {
+                    errors.push(format!("{}: {e}", path.display()));
+                    continue;
+                }
+            }
+            if !shipped.iter().any(|root| path.starts_with(root)) {
+                to_load.push((resource, path));
+            }
+        }
+        for (resource, path) in to_load {
+            let fallback_name = path.file_stem().and_then(|s| s.to_str());
+            let definition = files.for_syntect(&resource).and_then(|rewritten| {
+                let text = match rewritten {
+                    Some(text) => text,
+                    None => std::fs::read_to_string(&path).map_err(|e| e.to_string())?,
+                };
                 SyntaxDefinition::load_from_str(&text, true, fallback_name).map_err(|e| e.to_string())
             });
             match definition {
                 Ok(definition) => {
-                    let resource = package_files::resource_name(&self.paths, include_sublime, &path);
-                    self.syntax_paths.insert(definition.name.clone(), resource.unwrap_or_else(|| path.display().to_string()));
+                    self.syntax_paths.insert(definition.name.clone(), resource);
                     builder.add(definition);
                 }
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
@@ -149,18 +186,25 @@ impl SyntaxEngine {
             n.ends_with(".tmTheme") || n.ends_with(".sublime-color-scheme")
         }) {
             let name = file_stem(&path);
-            let theme = if path.extension().is_some_and(|e| e == "tmTheme") {
-                ThemeSet::get_theme(&path).map_err(|e| e.to_string())
-            } else {
+            let json = !path.extension().is_some_and(|e| e == "tmTheme");
+            let theme = if json {
                 std::fs::read_to_string(&path)
                     .map_err(|e| e.to_string())
                     .and_then(|source| color_scheme_file::parse(&source, &name))
                     .map(|definition| to_syntect_theme(&definition))
+            } else {
+                ThemeSet::get_theme(&path).map_err(|e| e.to_string())
             };
             match theme {
-                Ok(theme) => {
-                    self.schemes.insert(name, theme);
-                }
+                // Sublime names a color scheme by its file name, and a second file with that name
+                // patches the first (MarkdownEditing's and LSP's Monokai, a user's Monokai): its
+                // globals override and its rules are appended. A `.tmTheme` replaces instead.
+                Ok(theme) => match self.schemes.get_mut(&name) {
+                    Some(base) if json => merge_theme(base, theme),
+                    _ => {
+                        self.schemes.insert(name, theme);
+                    }
+                },
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
             }
         }
@@ -220,6 +264,10 @@ impl SyntaxEngine {
         self.syntaxes.syntaxes().iter().filter(|s| !s.hidden).map(|s| s.name.clone()).collect()
     }
 
+    pub fn take_failures(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.failures)
+    }
+
     pub fn forget(&mut self, document: DocumentId) {
         self.caches.remove(&document);
     }
@@ -275,6 +323,43 @@ impl SyntaxEngine {
         colors.into_iter().filter_map(|(name, color)| Some((name.to_string(), Value::String(hex(color?))))).collect()
     }
 
+    /// The palette Sublime derives from a color scheme (`ui_info()["color_scheme"]["palette"]`):
+    /// its global colors, then `redish`, `orangish`… — the closest color the scheme defines for
+    /// each hue (themes and plugins use them for terminal colors, diagnostics…).
+    pub fn scheme_palette(&self, scheme: &str) -> Map<String, Value> {
+        let theme = find_scheme(&self.schemes, scheme);
+        let settings = &theme.settings;
+        let mut candidates: Vec<Color> = [
+            settings.foreground,
+            settings.background,
+            settings.caret,
+            settings.accent,
+            settings.selection,
+            settings.line_highlight,
+            settings.gutter_foreground,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        candidates.extend(theme.scopes.iter().filter_map(|item| item.style.foreground));
+        let mut palette = self.scheme_style(scheme);
+        for (name, hue) in [
+            ("redish", 0.0),
+            ("orangish", 30.0),
+            ("yellowish", 60.0),
+            ("greenish", 120.0),
+            ("cyanish", 180.0),
+            ("bluish", 220.0),
+            ("purplish", 280.0),
+            ("pinkish", 320.0),
+        ] {
+            if let Some(color) = closest_hue(&candidates, hue) {
+                palette.insert(name.to_string(), Value::String(hex(color)));
+            }
+        }
+        palette
+    }
+
     /// What a color scheme gives a stack of scopes (`view.style_for_scope()`).
     pub fn scope_style(&self, scheme: &str, scope: &str) -> Map<String, Value> {
         let theme = find_scheme(&self.schemes, scheme);
@@ -303,7 +388,7 @@ impl SyntaxEngine {
         let syntax = self.syntax(syntax).clone();
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
-        cache.update(text, &self.syntaxes, &syntax, &theme);
+        cache.update(text, &self.syntaxes, &syntax, &theme, &mut self.failures);
         cache.symbols()
     }
 
@@ -319,7 +404,7 @@ impl SyntaxEngine {
         }
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
-        cache.update(text, &self.syntaxes, &syntax, &theme);
+        cache.update(text, &self.syntaxes, &syntax, &theme, &mut self.failures);
         cache.lines.get(line).map(|l| l.scopes.clone()).unwrap_or_default()
     }
 
@@ -332,7 +417,7 @@ impl SyntaxEngine {
         }
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
-        cache.update(text, &self.syntaxes, &syntax, &theme);
+        cache.update(text, &self.syntaxes, &syntax, &theme, &mut self.failures);
         cache.lines.iter().map(|l| l.scopes.clone()).collect()
     }
 
@@ -345,15 +430,22 @@ impl SyntaxEngine {
         }
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
-        cache.update(text, &self.syntaxes, &syntax, &theme);
+        cache.update(text, &self.syntaxes, &syntax, &theme, &mut self.failures);
         let Some(cached) = cache.lines.get(line) else { return Vec::new() };
         let mut state = cached.state_before.0.clone();
         let mut end = column.min(cached.text.len());
         while !cached.text.is_char_boundary(end) {
             end -= 1;
         }
-        if end > 0 && state.parse_line(&cached.text[..end], &self.syntaxes).is_err() {
-            return Vec::new();
+        if end > 0 {
+            match guard(|| state.parse_line(&cached.text[..end], &self.syntaxes).is_err()) {
+                Ok(false) => {}
+                Ok(true) => return Vec::new(),
+                Err(message) => {
+                    self.failures.push(format!("{}: backtrace of line {} failed: {message}", syntax.name, line + 1));
+                    return Vec::new();
+                }
+            }
         }
         let names = self.context_names.get_or_insert_with(|| context_names(&self.syntaxes.clone().into_builder()));
         let syntaxes = self.syntaxes.syntaxes();
@@ -414,7 +506,7 @@ impl SyntaxEngine {
         }
 
         let cache = self.caches.entry(document).or_default();
-        cache.update(text, &self.syntaxes, syntax, theme);
+        cache.update(text, &self.syntaxes, syntax, theme, &mut self.failures);
         let mut job = LayoutJob { text: text.to_string(), ..Default::default() };
         let mut offset = 0;
         for line in &cache.lines {
@@ -475,7 +567,7 @@ impl HighlightCache {
             .collect()
     }
 
-    fn update(&mut self, text: &str, syntaxes: &SyntaxSet, syntax: &SyntaxReference, theme: &Theme) {
+    fn update(&mut self, text: &str, syntaxes: &SyntaxSet, syntax: &SyntaxReference, theme: &Theme, failures: &mut Vec<String>) {
         let key = (syntax.name.clone(), theme.name.clone().unwrap_or_default());
         if key != self.key {
             self.lines.clear();
@@ -491,13 +583,21 @@ impl HighlightCache {
         let highlighter = Highlighter::new(theme);
         let old = std::mem::take(&mut self.lines);
         let mut lines: Vec<CachedLine> = old[..unchanged].to_vec();
+        // Once syntect panics, its state is not trusted: the rest of the text is shown plain.
+        let mut failed = false;
         let mut state = match (old.get(unchanged), unchanged.checked_sub(1).and_then(|i| old.get(i))) {
             (Some(line), _) => line.state_before.clone(),
             (None, Some(previous)) => {
                 // Appending after the last cached line: continue from its end state.
                 let mut s = previous.state_before.clone();
-                highlight_line(&previous.text, &mut s, syntaxes, &highlighter);
-                s
+                match guard(|| highlight_line(&previous.text, &mut s, syntaxes, &highlighter)) {
+                    Ok(_) => s,
+                    Err(message) => {
+                        failed = true;
+                        failures.push(format!("{}: highlighting stopped at line {}: {message}", syntax.name, unchanged));
+                        s
+                    }
+                }
             }
             (None, None) => (
                 ParseState::new(syntax),
@@ -509,7 +609,7 @@ impl HighlightCache {
         let shift = new_lines.len() as isize - old.len() as isize;
         for (i, &line_text) in new_lines.iter().enumerate().skip(unchanged) {
             let old_index = i as isize - shift;
-            if old_index >= unchanged as isize {
+            if !failed && old_index >= unchanged as isize {
                 if let Some(old_line) = old.get(old_index as usize) {
                     if old_line.text == line_text && old_line.state_before == state {
                         lines.extend_from_slice(&old[old_index as usize..]);
@@ -518,7 +618,18 @@ impl HighlightCache {
                 }
             }
             let state_before = state.clone();
-            let (spans, symbol, scopes) = highlight_line(line_text, &mut state, syntaxes, &highlighter);
+            let (spans, symbol, scopes) = if failed {
+                plain_line(line_text, syntax)
+            } else {
+                match guard(|| highlight_line(line_text, &mut state, syntaxes, &highlighter)) {
+                    Ok(highlighted) => highlighted,
+                    Err(message) => {
+                        failed = true;
+                        failures.push(format!("{}: highlighting stopped at line {}: {message}", syntax.name, i + 1));
+                        plain_line(line_text, syntax)
+                    }
+                }
+            };
             lines.push(CachedLine {
                 text: line_text.to_string(),
                 state_before,
@@ -529,6 +640,11 @@ impl HighlightCache {
         }
         self.lines = lines;
     }
+}
+
+/// A line shown as the syntax's base scope, with no colors: what a line that cannot be highlighted gets.
+fn plain_line(line: &str, syntax: &SyntaxReference) -> Highlighted {
+    (Vec::new(), None, vec![ScopeSpan { range: 0..line.len(), scope: syntax.scope.to_string() }])
 }
 
 fn highlight_line(
@@ -604,17 +720,25 @@ fn to_syntect_theme(scheme: &ColorSchemeDefinition) -> Theme {
         background: global("background"),
         caret: global("caret"),
         line_highlight: global("line_highlight"),
+        misspelling: global("misspelling"),
+        minimap_border: global("minimap_border"),
+        accent: global("accent"),
+        bracket_contents_foreground: global("bracket_contents_foreground"),
+        brackets_foreground: global("brackets_foreground"),
+        brackets_background: global("brackets_background"),
+        tags_foreground: global("tags_foreground"),
         selection: global("selection"),
         selection_foreground: global("selection_foreground"),
         selection_border: global("selection_border"),
         inactive_selection: global("inactive_selection"),
+        inactive_selection_foreground: global("inactive_selection_foreground"),
         gutter: global("gutter"),
         gutter_foreground: global("gutter_foreground"),
         find_highlight: global("find_highlight"),
         find_highlight_foreground: global("find_highlight_foreground"),
         guide: global("guide"),
         active_guide: global("active_guide"),
-        accent: global("accent"),
+        stack_guide: global("stack_guide"),
         highlight: global("highlight"),
         shadow: global("shadow"),
         ..Default::default()
@@ -657,6 +781,89 @@ fn builtin_syntax_path(name: &str) -> String {
         "Plain Text" => "Packages/Text/Plain text.tmLanguage".into(),
         name => format!("Packages/{name}/{name}.sublime-syntax"),
     }
+}
+
+/// Patches `base` with another color scheme of the same file name: the globals it sets override
+/// the base's, and its rules go last (so they win ties, as Sublime's appended patches do).
+fn merge_theme(base: &mut Theme, patch: Theme) {
+    merge_settings(&mut base.settings, patch.settings);
+    base.scopes.extend(patch.scopes);
+}
+
+fn merge_settings(base: &mut ThemeSettings, patch: ThemeSettings) {
+    macro_rules! override_set {
+        ($($field:ident),* $(,)?) => {
+            $(if patch.$field.is_some() {
+                base.$field = patch.$field;
+            })*
+        };
+    }
+    override_set!(
+        foreground,
+        background,
+        caret,
+        line_highlight,
+        misspelling,
+        minimap_border,
+        accent,
+        popup_css,
+        phantom_css,
+        bracket_contents_foreground,
+        bracket_contents_options,
+        brackets_foreground,
+        brackets_background,
+        brackets_options,
+        tags_foreground,
+        tags_options,
+        highlight,
+        find_highlight,
+        find_highlight_foreground,
+        gutter,
+        gutter_foreground,
+        selection,
+        selection_foreground,
+        selection_border,
+        inactive_selection,
+        inactive_selection_foreground,
+        guide,
+        active_guide,
+        stack_guide,
+        shadow,
+    );
+}
+
+/// A color's hue and saturation (0–1), for [`scheme_palette`](SyntaxEngine::scheme_palette).
+fn hue_saturation(color: Color) -> (f32, f32) {
+    let [r, g, b] = [color.r, color.g, color.b].map(|channel| channel as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let chroma = max - min;
+    let hue = if chroma == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / chroma).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / chroma + 2.0)
+    } else {
+        60.0 * ((r - g) / chroma + 4.0)
+    };
+    let lightness = (max + min) / 2.0;
+    let saturation = if chroma == 0.0 { 0.0 } else { chroma / (1.0 - (2.0 * lightness - 1.0).abs()) };
+    (hue.rem_euclid(360.0), saturation)
+}
+
+/// The color of `candidates` closest to `target` degrees of hue, greys counting less.
+fn closest_hue(candidates: &[Color], target: f32) -> Option<Color> {
+    let distance = |color: &Color| {
+        let (hue, saturation) = hue_saturation(*color);
+        let gap = (hue - target).abs();
+        gap.min(360.0 - gap) + (1.0 - saturation.clamp(0.0, 1.0)) * 30.0
+    };
+    candidates
+        .iter()
+        .copied()
+        .filter(|color| color.a > 0)
+        .min_by(|a, b| distance(a).partial_cmp(&distance(b)).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 fn find_scheme<'a>(schemes: &'a BTreeMap<String, Theme>, name: &str) -> &'a Theme {

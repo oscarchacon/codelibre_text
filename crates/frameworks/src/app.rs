@@ -551,6 +551,7 @@ impl eframe::App for App {
         }
         self.editor.poll_builds();
         self.editor.poll_downloads();
+        self.editor.poll_syntax_failures();
         self.editor.check_external_changes();
         self.follow_windows();
 

@@ -169,7 +169,7 @@ fn ignored_packages_are_not_found_and_vintage_is_ignored_by_default() {
 }
 
 #[test]
-fn shipped_packages_leave_out_their_syntaxes_and_tests() {
+fn shipped_packages_leave_out_their_tests_but_keep_their_syntaxes() {
     let dir = tempfile::tempdir().unwrap();
     let mut paths = paths(dir.path());
     paths.archive_folders[0].shipped = true;
@@ -177,5 +177,9 @@ fn shipped_packages_leave_out_their_syntaxes_and_tests() {
     write_zip(&dir.path().join("Sublime/Installed Packages/P.sublime-package"), &files);
     write_zip(&dir.path().join("Own/Installed Packages/Q.sublime-package"), &files);
     unpack_all(&paths, true, &mut Vec::new());
-    assert_eq!(names(&find_resources(&paths, true, |n| n.starts_with('P'))), ["P.sublime-build", "P.sublime-build", "P.sublime-syntax"]);
+    assert_eq!(
+        names(&find_resources(&paths, true, |n| n.starts_with('P'))),
+        ["P.sublime-build", "P.sublime-syntax", "P.sublime-build", "P.sublime-syntax"]
+    );
+    assert_eq!(names(&find_resources(&paths, true, |n| n.ends_with(".py"))), ["t.py"], "only the user's package keeps its tests");
 }

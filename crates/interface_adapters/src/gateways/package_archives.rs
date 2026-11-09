@@ -66,9 +66,10 @@ fn stamp_of(archive: &Path) -> io::Result<String> {
     Ok(format!("{} {modified}", metadata.len()))
 }
 
-/// What is of no use from a package Sublime Text ships (see `ArchiveFolder::shipped`).
+/// What is of no use from a package Sublime Text ships (see `ArchiveFolder::shipped`). Its
+/// syntaxes stay: packages `extends` them, and the engine reads them without loading them.
 fn left_out_of_shipped(path: &Path) -> bool {
-    path.starts_with("tests") || path.extension().is_some_and(|e| e == "sublime-syntax")
+    path.starts_with("tests")
 }
 
 fn unpack(archive: &Path, target: &Path, shipped: bool) -> zip::result::ZipResult<()> {

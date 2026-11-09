@@ -101,7 +101,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   is also read unless `import_sublime_packages` is false (its `Default` package is skipped).
 - `.sublime-package` zips (ours in `data\Installed Packages`, Sublime's installed and shipped ones) are unpacked to
   `data\Cache\Packages`, then read as plain folders (`package_archives.rs`, `PackagePaths::roots`); loose files win. Of what
-  Sublime ships, syntaxes are left out. `ignored_packages` defaults to `Vintage`. Plugins see paths inside the archive
+  Sublime ships, syntaxes are only parents for `extends`. `ignored_packages` defaults to `Vintage`. Plugins see paths inside the archive
   (`ArchiveFinder` in `plugin_host.py`): Package Control depends on them and on `executable_path()` (see `docs/plugins.md`).
 - Session (hot exit): `%APPDATA%\codelibre_text\data\Local\Session.sublime_session`, written on window close.
 - Error log: `…\data\Local\Errors.log` (`FileErrorLog`; Help > Error Log). Errors the user is told about go through

@@ -652,6 +652,41 @@ class ProbeCommand(sublime_plugin.WindowCommand):
         assert inspect.formatargspec(["a", "b"], defaults=(1,)) == "(a, b=1)"
         assert hasattr(unittest.TestCase, "assertEquals")
         unittest.TestCase("assertEquals").assertEquals(1, 1)
+        case = unittest.TestCase("assertDictContainsSubset")
+        case.assertDictContainsSubset({"a": 1}, {"a": 1, "b": 2})
+        try:
+            case.assertDictContainsSubset({"a": 1}, {"a": 2, "b": 2})
+            raise LookupError("a subset with a different value passed")
+        except AssertionError:
+            pass
+
+        class OldTests(unittest.TestCase):
+            def test_one(self):
+                pass
+
+            def test_two(self):
+                pass
+
+        assert unittest.makeSuite(OldTests).countTestCases() == 2
+        assert unittest.getTestCaseNames(OldTests, "test") == ["test_one", "test_two"]
+        import types
+        assert unittest.findTestCases(types.ModuleType("empty")).countTestCases() == 0
+
+        import asyncio
+        import fractions
+
+        @asyncio.coroutine
+        def old_style():
+            yield
+
+        assert asyncio.iscoroutinefunction(old_style)
+        loop = asyncio.new_event_loop()
+        try:
+            assert asyncio.all_tasks(loop) == set()
+            assert asyncio.current_task(loop) is None
+        finally:
+            loop.close()
+        assert fractions.gcd(6, 8) == 2
         assert issubclass(configparser.SafeConfigParser, configparser.ConfigParser)
         assert hasattr(configparser.ConfigParser, "readfp")
 
@@ -940,7 +975,7 @@ class FancyCommand(sublime_plugin.TextCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("fancy"));
-    assert_eq!(editor_status(&editor), "True (0, 4) 0 1 'text.plain ' True", "console:\n{}", editor.state().console);
+    assert_eq!(editor_status(&editor), "True (0, 4) 0 8 'text.plain ' True", "console:\n{}", editor.state().console);
 }
 
 /// Package Control installs libraries in `Lib/python38`, and in `Lib/python33` for packages of
@@ -1521,6 +1556,21 @@ def plugin_loaded():
 fn a_missing_interpreter_is_reported() {
     let error = find_interpreter(Some("/no/such/python")).unwrap_err();
     assert!(error.contains("python_interpreter"), "{error}");
+}
+
+/// The support modules need `importlib.metadata`, so a `python3` older than 3.8 is turned away
+/// with a message instead of failing later inside the host.
+#[cfg(unix)]
+#[test]
+fn an_interpreter_older_than_python_3_8_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let python = dir.path().join("python3");
+    fs::write(&python, "#!/bin/sh\necho 3.7\n").unwrap();
+    fs::set_permissions(&python, fs::Permissions::from_mode(0o755)).unwrap();
+    let error = find_interpreter(Some(python.to_str().unwrap())).unwrap_err();
+    assert!(error.contains("3.8"), "{error}");
 }
 
 /// The Python an installer puts next to the editor is found from the executable's path:

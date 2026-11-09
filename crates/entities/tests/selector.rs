@@ -30,6 +30,22 @@ fn alternatives_and_exclusions() {
 }
 
 #[test]
+fn scores_are_sublimes_own_values() {
+    // The values Sublime gives (sublimehq/sublime_text#2152 and the forum): 8 per first scope, 8³ per depth.
+    assert_eq!(score_selector("a", "a"), 8);
+    assert_eq!(score_selector("x a", "a"), 64);
+    assert_eq!(score_selector("a b", "b"), 64);
+    assert_eq!(score_selector("a b c", "c"), 512);
+    assert_eq!(score_selector("a b c d", "d"), 4096);
+    assert_eq!(score_selector("a b b a a", "a"), 8, "the first match ends the selector");
+    assert_eq!(score_selector("s a b a b a", "a"), 64);
+    assert_eq!(score_selector("s a b a b a", "b"), 512);
+    assert_eq!(score_selector("source.python", "source.python"), 16, "two dotted parts");
+    assert_eq!(score_selector("source.python", "source"), 8);
+    assert_eq!(score_selector("a", "a.b"), 0, "more parts than the scope has");
+}
+
+#[test]
 fn deeper_and_longer_matches_score_more() {
     assert_eq!(score_selector(STRING, "comment"), 0);
     assert!(score_selector(STRING, "string") > score_selector(STRING, "source"));

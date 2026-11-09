@@ -455,6 +455,14 @@ impl SyntaxGateway for FakeSyntaxes {
         style.as_object().cloned().unwrap_or_default()
     }
 
+    /// The globals above plus a red for `redish`. The scheme asked for under `scheme`.
+    fn scheme_palette(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        let palette = serde_json::json!({
+            "background": "#000000", "foreground": "#ffffff", "redish": "#ff0000", "scheme": scheme,
+        });
+        palette.as_object().cloned().unwrap_or_default()
+    }
+
     /// Strings are red and bold; the rest white. The scheme and scopes asked for under `scheme` / `scope`.
     fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, serde_json::Value> {
         let style = if scope.split_whitespace().any(|s| s.starts_with("string")) {

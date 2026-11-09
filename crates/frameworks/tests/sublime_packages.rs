@@ -39,8 +39,12 @@ fn install_dir() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
-/// Sublime Text's data folder (the parent of its `Packages` and `Installed Packages`).
+/// Sublime Text's data folder (the parent of its `Packages` and `Installed Packages`);
+/// `CODELIBRE_TEST_SUBLIME_DATA` names another one, so no test writes to the real profile.
 fn sublime_data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CODELIBRE_TEST_SUBLIME_DATA") {
+        return Some(PathBuf::from(dir));
+    }
     let base = directories::BaseDirs::new()?;
     Some(if cfg!(target_os = "windows") {
         base.config_dir().join("Sublime Text")
@@ -90,6 +94,31 @@ fn the_packages_sublime_ships_load() {
     }
     assert!(engine.syntax_names().iter().any(|s| s == "Python"));
     assert!(!ui.keymap.bindings.iter().any(|b| b.command.name.starts_with("vi_")), "Vintage is ignored");
+    assert_eq!(errors, Vec::<String>::new());
+}
+
+/// A checkout of `sublimehq/Packages` (its packages at the top level) as loose packages: every
+/// syntax must load, `extends` and `branch_point` included. `CODELIBRE_TEST_SYNTAX_PACKAGES` is that folder.
+#[test]
+#[ignore = "reads the folder named by CODELIBRE_TEST_SYNTAX_PACKAGES"]
+fn the_official_syntaxes_load() {
+    let Some(dir) = std::env::var_os("CODELIBRE_TEST_SYNTAX_PACKAGES").map(PathBuf::from) else {
+        eprintln!("skipped: no CODELIBRE_TEST_SYNTAX_PACKAGES");
+        return;
+    };
+    // syntect's global table of scope names (16 bits per name) is full with its own syntaxes plus
+    // this one: a limit of syntect 5.3, the same without `extends` (Sublime ships it, so the app
+    // only reads it as a parent, never as a syntax).
+    const SYNTECT_SCOPE_LIMIT: &[&str] = &["ActionScript/ActionScript.sublime-syntax"];
+    let paths = PackagePaths { packages: dir, sublime_packages: None, archive_folders: Vec::new() };
+    let mut engine = SyntaxEngine::new(paths);
+    let mut errors = Vec::new();
+    engine.reload(false, &mut errors);
+    errors.retain(|e| !SYNTECT_SCOPE_LIMIT.iter().any(|known| e.contains(known)));
+    println!("{} syntaxes, {} errors", engine.syntax_names().len(), errors.len());
+    for error in errors.iter().take(60) {
+        println!("  {}", error.chars().take(200).collect::<String>());
+    }
     assert_eq!(errors, Vec::<String>::new());
 }
 
@@ -513,9 +542,7 @@ fn package_control_installs_the_listed_packages_at_start() {
     }
     println!("ignored: {:?}", editor.global_settings().get("ignored_packages"));
     assert!(all, "not every package was installed");
-    // Syntaxes syntect cannot read (Sublime Text 4's `extends`…) are a limit of syntect, not of plugins.
-    let plugin_errors = errors.iter().filter(|e| !e.lines().next().unwrap_or_default().contains(".sublime-syntax")).count();
-    assert_eq!(plugin_errors, 0, "{plugin_errors} plugin load errors");
+    assert_eq!(errors.len(), 0, "{} load errors, syntaxes included", errors.len());
 }
 
 /// `upgrade_all_packages` when Package Control and another package are out of date: it upgrades
