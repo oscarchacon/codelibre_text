@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding};
 use entities::find::FindOptions;
+use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text_commands::CaretMotion;
 use use_cases::editing::TextCommand;
@@ -23,6 +24,9 @@ pub enum UiEvent {
     RunCommand(Command),
     /// Every frame: whether a menu of the main menu is open.
     MenuOpen(bool),
+    /// Every frame: what the open context menu was opened on (a view pushes it while its menu is
+    /// open; the window pushes `None` when no menu is).
+    ContextMenu(Option<ContextMenuTarget>),
 
     ActivateTab(usize),
     CloseTab(usize),
@@ -42,7 +46,6 @@ pub enum UiEvent {
     OpenFile(PathBuf),
     /// A file clicked once in the side bar: a preview (a double click opens it for good).
     PreviewFile(PathBuf),
-    RemoveFolder(PathBuf),
 
     QuickPanelQueryChanged(String),
     QuickPanelHighlighted(usize),
@@ -113,6 +116,14 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
             view.menu_open = open;
         }
+        UiEvent::ContextMenu(target) => {
+            if view.context_menu != target {
+                if let Some(target) = &target {
+                    editor.open_context_menu(target);
+                }
+                view.context_menu = target;
+            }
+        }
 
         UiEvent::ActivateTab(index) => {
             editor.activate(index);
@@ -161,7 +172,6 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 editor.activate(index);
             }
         }
-        UiEvent::RemoveFolder(folder) => editor.remove_folder(&folder),
 
         UiEvent::QuickPanelQueryChanged(query) => {
             if let Some(panel) = &mut view.quick_panel {

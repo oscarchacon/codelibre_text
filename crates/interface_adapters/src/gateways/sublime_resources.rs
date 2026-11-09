@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo, Keymap};
 use entities::localization::{normalize_language_code, Catalog, Language};
-use entities::menu::{merge_menu, MenuItem, PaletteCommand};
+use entities::menu::{merge_menu, ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
@@ -105,14 +105,24 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
 
-        let mut main_menu = Vec::new();
-        for (origin, text) in self.sources(include_sublime, builtin_resources::MAIN_MENU, |n| n == "Main.sublime-menu") {
-            match sublime_json::parse(&text) {
-                Ok(Value::Array(items)) => merge_menu(&mut main_menu, items.iter().filter_map(parse_menu_item).collect()),
-                Ok(_) => {}
-                Err(e) => errors.push(format!("{origin}: {e}")),
+        let mut menu = |builtin: &str, file: &str| {
+            let mut menu = Vec::new();
+            for (origin, text) in self.sources(include_sublime, builtin, |n| n == file) {
+                match sublime_json::parse(&text) {
+                    Ok(Value::Array(items)) => merge_menu(&mut menu, items.iter().filter_map(parse_menu_item).collect()),
+                    Ok(_) => {}
+                    Err(e) => errors.push(format!("{origin}: {e}")),
+                }
             }
-        }
+            menu
+        };
+        let main_menu = menu(builtin_resources::MAIN_MENU, "Main.sublime-menu");
+        let context_menus = ContextMenus {
+            text: menu(builtin_resources::CONTEXT_MENU, "Context.sublime-menu"),
+            side_bar: menu(builtin_resources::SIDE_BAR_MENU, "Side Bar.sublime-menu"),
+            mount_point: menu(builtin_resources::MOUNT_POINT_MENU, "Side Bar Mount Point.sublime-menu"),
+            tab: menu(builtin_resources::TAB_CONTEXT_MENU, "Tab Context.sublime-menu"),
+        };
 
         let mut palette = Vec::new();
         for (origin, text) in self.sources(include_sublime, builtin_resources::PALETTE_COMMANDS, |n| {
@@ -125,7 +135,7 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
 
-        UiResources { keymap, main_menu, palette }
+        UiResources { keymap, main_menu, context_menus, palette }
     }
 
     fn read_user_settings(&self) -> Map<String, Value> {

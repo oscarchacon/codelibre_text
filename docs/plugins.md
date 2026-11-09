@@ -295,7 +295,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       (the color scheme's rule, or a built-in color for `region.<color>ish`): filled and outlined unless
       `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar,
       `DRAW_EMPTY_AS_OVERWRITE` as a block, `HIDDEN` not drawn; `dot` / `circle` / `bookmark` icons in the gutter
-      (any other icon is a dot). `PERSISTENT` sets go to the session (`SessionDocument::regions`) and come back with
+      (any other name is a dot). An icon that is a resource (`Packages/GitGutter/icons/inserted.png`, also without
+      `.png`; its `@2x` picture first) is read once (`Editor::region_icon`, also inside zipped packages) and drawn at
+      0.8 of the line's height, tinted with the region's color (white icons take it: SublimeLinter's `colorize`
+      gutter themes, GitGutter's scopes). The gutter grows a column for icons while some region set has one. `PERSISTENT` sets go to the session (`SessionDocument::regions`) and come back with
       the file.
 - [x] Regions move with every edit, also the widget's: `add_regions` keeps a copy of the text, compared in
       `Document::note_text_changed`. An edit with several selections is one change from the first caret to the
@@ -305,7 +308,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
       lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
-- [ ] Regions, still missing: icon files, the minimap.
+- [ ] Regions, still missing: the minimap. Icons are tinted with the color scheme's foreground when their scope
+      has no color (Sublime's exact rule for untinted icons was not checked).
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
       a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are unpacked, above.
@@ -478,6 +482,19 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       it, the syntax's resource (`SyntaxGateway::syntax_path`; built-in ones get Sublime's path, `Packages/Text/Plain
       text.tmLanguage`), so plugins can take its file name; setting it changes the view's syntax. Without it Pretty
       JSON formatted and then failed (`os.path.basename(None)`).
+- [x] **Context menus** (2026-11-09): `Context.sublime-menu` (right click on the text), `Side Bar.sublime-menu` (a
+      file or folder; a top folder adds `Side Bar Mount Point.sublime-menu`) and `Tab Context.sublime-menu` (a tab, or
+      an open file of the side bar), merged across packages like the main menu (`ContextMenus`, built-in ones in
+      `assets/Default/`). The arguments a menu gives are filled as in Sublime (`ContextMenuTarget::fill`): `files`,
+      `dirs`, `paths` in the side bar, `group` / `index` in a tab. When one opens (`UiEvent::ContextMenu`, kept in
+      `ViewState::context_menu`) its plugin commands are asked about with those arguments (`is_visible(paths)`…), and
+      a text command whose `want_event()` is true gets `event` (`{"x", "y", "modifier_keys"}`, the clicked char in the
+      8×16 layout `window_to_text` reads). A right click on another group's text focuses it; the caret does not
+      move. Built-in commands for them: `close_by_index`, `close_others_by_index`, `close_to_right_by_index`,
+      `remove_folder {"dirs"}`, `open_containing_folder {"files"|"paths"}`. Missing: `Widget Context`, the menus of
+      the find / output panels and the gutter, `modifier_keys` (always empty), Sublime's side bar commands
+      (`new_file_at`, `rename_path`, `delete_file`, `new_folder`, `delete_folder`, `find_in_folder`: plugins
+      that define them, like SideBarEnhancements, work), several selected side bar entries.
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).

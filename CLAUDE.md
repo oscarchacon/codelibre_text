@@ -11,7 +11,7 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
   syntect engine, OS/library gateways) + thin `main.rs` (CLI + window).
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
-- `assets/Default/` — built-in keymap, menu, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
+- `assets/Default/` — built-in keymap, main and context menus, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
   gettext `.po` per interface language, parsed by `gateways/po_file.rs`) (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
 - `assets/python/` — the Python plugin host, our own `sublime` / `sublime_plugin` modules and `Default/` (the modules
   of Sublime's `Default` packages import; Sublime's is not loaded) (`include_str!` in
@@ -125,5 +125,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
 phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`,
-region icon files, a Python 3.3 host), minimap, folding, find in files.
+a Python 3.3 host), minimap, folding, find in files.
 Highlighting is skipped above 4 MB.

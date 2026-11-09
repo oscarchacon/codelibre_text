@@ -1409,6 +1409,9 @@ class FancyCommand(sublime_plugin.WindowCommand):
     def description(self, on=False):
         return "Fancy %s" % on
 
+    def want_event(self):
+        return True
+
 class BrokenCommand(sublime_plugin.WindowCommand):
     def run(self):
         pass
@@ -1428,13 +1431,13 @@ class BrokenCommand(sublime_plugin.WindowCommand):
     let mut log = String::new();
     let asked = json!([[["plain", null], ["fancy", {"on": true}], ["fancy", null], ["broken", null]]]);
     host.query("command_states", None, &asked).unwrap();
-    let default = json!({"visible": true, "enabled": true, "checked": false, "description": null});
+    let default = json!({"visible": true, "enabled": true, "checked": false, "description": null, "want_event": false});
     assert_eq!(
         next(&mut host, &mut log),
         PluginMessage::Answer(json!([
             default,
-            {"visible": true, "enabled": false, "checked": true, "description": "Fancy True"},
-            {"visible": false, "enabled": false, "checked": true, "description": "Fancy False"},
+            {"visible": true, "enabled": false, "checked": true, "description": "Fancy True", "want_event": true},
+            {"visible": false, "enabled": false, "checked": true, "description": "Fancy False", "want_event": true},
             default,
         ]))
     );

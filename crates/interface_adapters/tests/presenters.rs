@@ -544,12 +544,14 @@ fn the_output_panel_shows_the_end_of_its_text() {
 }
 #[test]
 fn plugin_regions_and_statuses_are_presented() {
-    let world = World::new().with_plugin_commands(&[("lint", use_cases::gateways::PluginCommandKind::Text)]);
+    let world = World::new()
+        .with_plugin_commands(&[("lint", use_cases::gateways::PluginCommandKind::Text)])
+        .with_resource("Packages/Lint/added.png", "png bytes");
     let mut editor = editor_with_text(&world, "one two three", Selection::caret(0));
     let v = editor.active_document().unwrap().id;
     let call = |function: &str, args: serde_json::Value| test_support::plugin_call(function, args);
     world.plugins.then([
-        call("view_add_regions", json!([v, "plain", [[8, 13], [0, 3]], "region.bluish", "", 0])),
+        call("view_add_regions", json!([v, "plain", [[8, 13], [0, 3]], "region.bluish", "Packages/Lint/added.png", 0])),
         call("view_add_regions", json!([v, "squiggly", [[4, 7], [5, 5]], "invalid", "dot", 32 | 256 | 2048 | 1])),
         call("view_add_regions", json!([v, "hidden", [[0, 1]], "", "", 128])),
         call("view_set_status", json!([v, "lint", "1 warning"])),
@@ -563,7 +565,9 @@ fn plugin_regions_and_statuses_are_presented() {
     let plain = &model.regions[0];
     assert_eq!(plain.ranges, vec![0..3, 8..13], "sorted");
     assert!(plain.fill && plain.outline && plain.underline.is_none() && !plain.draw_empty);
+    assert_eq!(plain.icon_image.as_deref().map(Vec::as_slice), Some(&b"png bytes"[..]), "a resource icon comes with its picture");
     let squiggly = &model.regions[1];
+    assert!(squiggly.icon_image.is_none(), "a dot is drawn");
     assert_eq!((squiggly.scope.as_str(), squiggly.icon.as_str()), ("invalid", "dot"));
     assert!(!squiggly.fill && !squiggly.outline && squiggly.draw_empty);
     assert_eq!(squiggly.underline, Some(interface_adapters::view_models::Underline::Squiggly));

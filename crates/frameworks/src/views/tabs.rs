@@ -5,8 +5,10 @@
 
 use egui::{Align2, FontId, Rect, Sense, Ui};
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::TabViewModel;
+use entities::menu::ContextMenuTarget;
+use interface_adapters::view_models::{ContextMenuViewModel, TabViewModel};
 
+use super::context_menu;
 use super::theme::Chrome;
 
 const HEIGHT: f32 = 30.0;
@@ -17,7 +19,15 @@ pub struct DraggedTab(pub usize);
 
 /// The tabs of `group`. A tab dragged onto another tab goes before it; onto the empty strip, last
 /// (`app.rs` takes it onto a group's text too).
-pub fn show(ui: &mut Ui, chrome: &Chrome, group: usize, focused: bool, tabs: &[TabViewModel], events: &mut Vec<UiEvent>) {
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    group: usize,
+    focused: bool,
+    tabs: &[TabViewModel],
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
     egui::ScrollArea::horizontal()
         .id_salt(("tab_bar", group))
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -27,6 +37,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, group: usize, focused: bool, tabs: &[T
                 for (position, tab) in tabs.iter().enumerate() {
                     let (event, response) = tab_button(ui, chrome, tab, focused);
                     events.extend(event);
+                    context_menu::attach(&response, ContextMenuTarget::Tab { group, index: position }, menu, events);
                     if let Some(dragged) = response.dnd_release_payload::<DraggedTab>() {
                         events.push(UiEvent::TabDropped { tab: dragged.0, group, index: position });
                     } else if response.dnd_hover_payload::<DraggedTab>().is_some() {

@@ -1198,3 +1198,19 @@ msgstr "{name} n'est pas un projet : il doit être un objet"
 #: crates/use_cases/src/project.rs
 msgid "Could not save {name}: {error}"
 msgstr "Impossible d'enregistrer {name} : {error}"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Open Containing Folder…"
+msgstr "Ouvrir le dossier parent…"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close"
+msgstr "Fermer"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Others"
+msgstr "Fermer les autres"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Tabs to the Right"
+msgstr "Fermer les onglets à droite"

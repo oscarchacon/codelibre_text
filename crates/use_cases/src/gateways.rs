@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use entities::document::DocumentId;
 use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
-use entities::menu::{MenuItem, PaletteCommand};
+use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
@@ -189,6 +189,8 @@ pub trait ErrorLogGateway {
 pub struct UiResources {
     pub keymap: Keymap,
     pub main_menu: Vec<MenuItem>,
+    /// The right-click menus (`Context`, `Side Bar`, `Side Bar Mount Point`, `Tab Context`).
+    pub context_menus: ContextMenus,
     pub palette: Vec<PaletteCommand>,
 }
 

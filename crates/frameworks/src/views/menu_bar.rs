@@ -17,7 +17,7 @@ pub fn show(ui: &mut egui::Ui, menu: &[MenuEntryViewModel], events: &mut Vec<UiE
     events.push(UiEvent::MenuOpen(open));
 }
 
-fn entries(ui: &mut egui::Ui, items: &[MenuEntryViewModel], events: &mut Vec<UiEvent>) {
+pub fn entries(ui: &mut egui::Ui, items: &[MenuEntryViewModel], events: &mut Vec<UiEvent>) {
     for entry in items {
         if entry.separator {
             ui.separator();

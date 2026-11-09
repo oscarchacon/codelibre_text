@@ -255,6 +255,23 @@ fn package_menus_merge_into_existing_menus_by_id() {
 }
 
 #[test]
+fn context_menus_come_after_the_built_in_ones() {
+    let packages = Packages::new();
+    packages.file("MyPackage", "Context.sublime-menu", r#"[{ "caption": "Mine", "command": "mine", "args": { "x": 1 } }]"#);
+    packages.file("MyPackage", "Side Bar.sublime-menu", r#"[{ "caption": "Delete", "command": "delete", "args": { "paths": [] } }]"#);
+    packages.file("MyPackage", "Tab Context.sublime-menu", r#"[{ "caption": "Pin", "command": "pin" }]"#);
+    let (resources, _) = ui(&packages.gateway(), false);
+    let menus = &resources.context_menus;
+    let commands = |items: &[entities::menu::MenuItem]| -> Vec<String> {
+        items.iter().filter_map(|i| i.command.as_ref().map(|c| c.name.clone())).collect()
+    };
+    assert_eq!(commands(&menus.text), ["cut", "copy", "paste", "select_all", "mine"]);
+    assert_eq!(commands(&menus.side_bar).last().unwrap(), "delete");
+    assert_eq!(commands(&menus.mount_point), ["remove_folder"]);
+    assert_eq!(commands(&menus.tab).last().unwrap(), "pin");
+}
+
+#[test]
 fn palette_entries_from_every_package_are_added() {
     let packages = Packages::new();
     packages.file(

@@ -10,6 +10,7 @@ msgid "File"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Tab Context.sublime-menu
 #: crates/interface_adapters/src/presenters/editor.rs
 msgid "New File"
 msgstr ""
@@ -23,6 +24,7 @@ msgid "New View into File"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Tab Context.sublime-menu
 msgid "Open File…"
 msgstr ""
 
@@ -93,14 +95,17 @@ msgid "Redo"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Context.sublime-menu
 msgid "Cut"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Context.sublime-menu
 msgid "Copy"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Context.sublime-menu
 msgid "Paste"
 msgstr ""
 
@@ -216,6 +221,7 @@ msgid "Single Selection"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Context.sublime-menu
 msgid "Select All"
 msgstr ""
 
@@ -828,6 +834,26 @@ msgstr ""
 msgid "Help: About CodeLibre Text"
 msgstr ""
 
+#: assets/Default/Side Bar.sublime-menu
+msgid "Open Containing Folder…"
+msgstr ""
+
+#: assets/Default/Side Bar Mount Point.sublime-menu
+msgid "Remove Folder from Project"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Others"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Tabs to the Right"
+msgstr ""
+
 #: crates/use_cases/src/builds.rs
 msgid "No build system for this file"
 msgstr ""
@@ -1221,10 +1247,6 @@ msgstr ""
 
 #: crates/frameworks/src/views/side_bar.rs
 msgid "FOLDERS"
-msgstr ""
-
-#: crates/frameworks/src/views/side_bar.rs
-msgid "Remove Folder from Project"
 msgstr ""
 
 #: crates/frameworks/src/views/status_bar.rs

@@ -6,9 +6,8 @@ use serde_json::Value;
 
 #[test]
 fn every_builtin_json_resource_is_valid() {
-    for (name, source) in builtin_resources::KEYMAPS.iter().copied().chain([
+    for (name, source) in builtin_resources::KEYMAPS.iter().chain(builtin_resources::MENUS).copied().chain([
         ("Default.sublime-commands", builtin_resources::PALETTE_COMMANDS),
-        ("Main.sublime-menu", builtin_resources::MAIN_MENU),
         ("Preferences.sublime-settings", builtin_resources::PREFERENCES),
     ]) {
         sublime_json::parse(source).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -145,10 +144,11 @@ fn translatable_messages() -> Vec<Message> {
         }
     }
     let mut messages = Vec::new();
-    for (origin, source) in [
-        ("assets/Default/Main.sublime-menu", builtin_resources::MAIN_MENU),
-        ("assets/Default/Default.sublime-commands", builtin_resources::PALETTE_COMMANDS),
-    ] {
+    // The main menu, the palette, then the context menus (the order of `messages.pot`).
+    let (main_menu, context_menus) = builtin_resources::MENUS.split_at(1);
+    let palette = [("Default.sublime-commands", builtin_resources::PALETTE_COMMANDS)];
+    for &(origin, source) in main_menu.iter().chain(&palette).chain(context_menus) {
+        let origin = &format!("assets/Default/{origin}");
         let mut found = Vec::new();
         captions(&sublime_json::parse(source).unwrap(), &mut found);
         for caption in found {

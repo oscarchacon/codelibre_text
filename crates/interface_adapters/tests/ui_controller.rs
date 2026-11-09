@@ -81,8 +81,41 @@ fn side_bar_events() {
     handle(&mut editor, &mut view, UiEvent::OpenFile(PathBuf::from("/p/a.txt")));
     assert_eq!(active_text(&editor), "a");
 
-    handle(&mut editor, &mut view, UiEvent::RemoveFolder(folder));
-    assert!(editor.state().folders.is_empty());
+}
+
+#[test]
+fn a_context_menu_asks_the_plugins_once_when_it_opens_and_shows_its_filled_entries() {
+    use entities::menu::{ContextMenuTarget, ContextMenus, MenuItem};
+    use interface_adapters::presenters::menu::present_context_menu;
+    let entry = |command: &str, args| MenuItem {
+        caption: command.into(),
+        id: None,
+        command: Some(Command::with_args(command, args)),
+        checkbox: false,
+        children: vec![],
+    };
+    let world = World::new()
+        .with_context_menus(ContextMenus {
+            tab: vec![entry("pin", json!({ "group": -1, "index": -1 })), entry("close_by_index", json!({ "group": -1, "index": -1 }))],
+            ..ContextMenus::default()
+        })
+        .with_plugins(&[("pin", PluginCommandKind::Window)], &["command_states"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let target = ContextMenuTarget::Tab { group: 0, index: 3 };
+
+    world.plugins.then([PluginMessage::Answer(json!([{ "visible": false }]))]);
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(Some(target.clone())));
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(Some(target.clone())));
+    assert_eq!(world.plugins.queries.borrow().len(), 1, "asked once, when it opened");
+
+    let menu = present_context_menu(&editor, &view).unwrap();
+    assert_eq!(menu.target, target);
+    let commands: Vec<Command> = menu.entries.iter().filter_map(|e| e.command.clone()).collect();
+    assert_eq!(commands, [Command::with_args("close_by_index", json!({ "group": 0, "index": 3 }))], "pin is hidden");
+
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(None));
+    assert!(present_context_menu(&editor, &view).is_none());
 }
 
 // ----- quick panel ---------------------------------------------------------------------------------

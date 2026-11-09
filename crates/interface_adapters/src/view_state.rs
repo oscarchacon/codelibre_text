@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use entities::command::Command;
+use entities::menu::ContextMenuTarget;
 use use_cases::plugin_hooks::CommandTarget;
 use use_cases::search::{Candidate, SearchKind};
 
@@ -110,6 +111,8 @@ pub struct ViewState {
     pub exit_confirmed: bool,
     /// A menu of the main menu is open (plugin commands are asked about when it opens).
     pub(crate) menu_open: bool,
+    /// What the open context menu (a right click) was opened on.
+    pub(crate) context_menu: Option<ContextMenuTarget>,
     /// Side bar folder contents, read once per folder (cleared by "Refresh Folders").
     pub(crate) folder_listings: HashMap<PathBuf, Vec<(PathBuf, bool)>>,
     pub(crate) commands: VecDeque<Command>,
@@ -143,6 +146,7 @@ impl Default for ViewState {
             text_has_focus: false,
             exit_confirmed: false,
             menu_open: false,
+            context_menu: None,
             folder_listings: HashMap::new(),
             commands: VecDeque::new(),
             requests: Vec::new(),

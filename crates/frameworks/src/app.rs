@@ -14,7 +14,7 @@ use interface_adapters::controllers::keyboard_controller::{self, KeyHandling};
 use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::presenters;
-use interface_adapters::view_models::GroupViewModel;
+use interface_adapters::view_models::{ContextMenuViewModel, GroupViewModel};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::json;
 use use_cases::windows::WindowId;
@@ -28,7 +28,7 @@ use crate::views::theme::Chrome;
 use crate::views::menu_bar;
 #[cfg(target_os = "macos")]
 use crate::views::native_menu::{Activation, NativeMenu};
-use crate::views::{dialogs, find_panel, input_panel, output_panel, quick_panel, side_bar, status_bar, tabs};
+use crate::views::{context_menu, dialogs, find_panel, input_panel, output_panel, quick_panel, side_bar, status_bar, tabs};
 
 /// What one window shows on screen beyond the editor's state: its panels, side bar, the carets
 /// its text widgets applied, the widget edits waiting for its next frame.
@@ -462,13 +462,15 @@ impl App {
                 .show(ctx, |ui| find_panel::show(ui, chrome, &translations, &find, &mut events));
         }
 
+        let open_menu = presenters::menu::present_context_menu(&self.editor, view);
         if view.show_side_bar {
             let side = presenters::side_bar::present(&self.editor, view);
+            let menu = open_menu.as_ref();
             egui::SidePanel::left("side_bar")
                 .default_width(230.0)
                 .width_range(120.0..=600.0)
                 .frame(egui::Frame::new().fill(chrome.panel_bg))
-                .show(ctx, |ui| side_bar::show(ui, chrome, &translations, &side, &mut events));
+                .show(ctx, |ui| side_bar::show(ui, chrome, &translations, &side, menu, &mut events));
         }
 
         let groups = presenters::groups::present(&mut self.editor, view);
@@ -484,7 +486,7 @@ impl App {
                     let rect = egui::Rect::from_min_max(at(left, top), at(right, bottom));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(("group", group.group)));
                     child.set_clip_rect(rect.intersect(ui.clip_rect()));
-                    show_group(&mut child, &mut self.editor, &self.engine, selection_sync, chrome, group, &hints, &mut events);
+                    show_group(&mut child, &mut self.editor, &self.engine, selection_sync, chrome, group, &hints, open_menu.as_ref(), &mut events);
                     // A tab dropped on a group's text goes to the end of its tabs.
                     drop_tab_on_group(ui, rect, group.group, chrome, &mut events);
                     // A line between groups.
@@ -498,6 +500,7 @@ impl App {
                 }
                 drag_layout_boundaries(ui, area, self.editor.layout(), &mut events);
             });
+        context_menu::report_closed(&mut events);
 
         let view = &mut window.view;
         if let Some(panel) = presenters::quick_panel::present(&self.editor, view) {
@@ -633,6 +636,7 @@ fn show_group(
     chrome: &Chrome,
     group: &GroupViewModel,
     hints: &[String],
+    menu: Option<&ContextMenuViewModel>,
     events: &mut Vec<UiEvent>,
 ) {
     egui::Frame::new()
@@ -640,7 +644,7 @@ fn show_group(
         .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 0 })
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            tabs::show(ui, chrome, group.group, group.active, &group.tabs, events);
+            tabs::show(ui, chrome, group.group, group.active, &group.tabs, menu, events);
         });
 
     let Some(model) = &group.editor else {
@@ -662,7 +666,7 @@ fn show_group(
     };
     egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
-        editor_view::show(ui, model, text, engine, selection_sync, events);
+        editor_view::show(ui, model, text, engine, selection_sync, menu, events);
     });
 }
 

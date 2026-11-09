@@ -30,6 +30,7 @@ impl Editor {
         let resources = self.gateways.resources.load_ui_resources(include_sublime, &mut errors);
         self.state.keymap = resources.keymap;
         self.state.main_menu = resources.main_menu;
+        self.state.context_menus = resources.context_menus;
         self.state.palette = resources.palette;
         self.state.completion_sets = None;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);

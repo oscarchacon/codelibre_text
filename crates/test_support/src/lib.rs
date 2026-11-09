@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use entities::document::DocumentId;
 use entities::keymap::{Binding, Keymap};
 use entities::localization::{Catalog, Language};
-use entities::menu::{MenuItem, PaletteCommand};
+use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
@@ -262,6 +262,8 @@ pub struct Resources {
     pub user_settings_files: RefCell<BTreeMap<String, Map<String, Value>>>,
     pub bindings: RefCell<Vec<Binding>>,
     pub menu: RefCell<Vec<MenuItem>>,
+    /// The right-click menus.
+    pub context_menus: RefCell<ContextMenus>,
     pub palette: RefCell<Vec<PaletteCommand>>,
     /// Interface languages and their translations (`Localization/<language>.po`).
     pub translations: RefCell<Vec<(Language, Catalog)>>,
@@ -310,6 +312,7 @@ impl ResourceGateway for FakeResources {
         UiResources {
             keymap,
             main_menu: self.0.menu.borrow().clone(),
+            context_menus: self.0.context_menus.borrow().clone(),
             palette: self.0.palette.borrow().clone(),
         }
     }
@@ -791,6 +794,7 @@ impl World {
                 user_settings_files: RefCell::default(),
                 bindings: RefCell::default(),
                 menu: RefCell::default(),
+                context_menus: RefCell::default(),
                 palette: RefCell::default(),
                 translations: RefCell::default(),
                 system_language: RefCell::default(),
@@ -893,6 +897,12 @@ impl World {
 
     pub fn with_menu(self, item: MenuItem) -> Self {
         self.resources.menu.borrow_mut().push(item);
+        self
+    }
+
+    /// The right-click menus the packages "have".
+    pub fn with_context_menus(self, menus: ContextMenus) -> Self {
+        *self.resources.context_menus.borrow_mut() = menus;
         self
     }
 

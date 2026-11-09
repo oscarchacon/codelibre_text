@@ -9,7 +9,7 @@ use entities::find::FindOptions;
 use entities::keymap::Keymap;
 use entities::layout::Layout;
 use entities::localization::Translations;
-use entities::menu::{MenuItem, PaletteCommand};
+use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::project::Project;
 use entities::settings::{Settings, SettingsLayers};
@@ -85,6 +85,8 @@ pub struct EditorState {
     pub settings: SettingsLayers,
     pub keymap: Keymap,
     pub main_menu: Vec<MenuItem>,
+    /// The right-click menus (see [`crate::context_menus`]).
+    pub context_menus: ContextMenus,
     pub palette: Vec<PaletteCommand>,
     /// Problems found while loading packages.
     pub load_errors: Vec<String>,
@@ -170,6 +172,7 @@ impl Editor {
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
                 main_menu: Vec::new(),
+                context_menus: ContextMenus::default(),
                 palette: Vec::new(),
                 load_errors: Vec::new(),
                 translations: Rc::default(),
