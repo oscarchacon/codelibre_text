@@ -914,6 +914,10 @@ msgid "No indentation rules for {syntax}"
 msgstr ""
 
 #: crates/use_cases/src/editor.rs
+msgid "Unpacking the installed packages…"
+msgstr ""
+
+#: crates/use_cases/src/editor.rs
 #: crates/use_cases/src/packages.rs
 msgid "{count} package resource failed to load (Help > Package Load Errors)"
 msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"

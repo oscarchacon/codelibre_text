@@ -278,6 +278,10 @@ pub struct Resources {
     pub package_files: RefCell<BTreeMap<String, Vec<u8>>>,
     /// `include_sublime_packages` of every `unpack_packages` call.
     pub unpacks: RefCell<Vec<bool>>,
+    /// `start_unpacking` unpacks in the background: until `unpacked` has its answer.
+    pub background_unpacking: Cell<bool>,
+    /// What `poll_unpacking` answers, once: whether the packages are to be loaded again.
+    pub unpacked: Cell<Option<bool>>,
     /// The packages' `.tmPreferences`.
     pub meta_preferences: RefCell<Vec<MetaPreference>>,
 }
@@ -370,6 +374,14 @@ impl ResourceGateway for FakeResources {
 
     fn unpack_packages(&self, include_sublime: bool, _errors: &mut Vec<String>) {
         self.0.unpacks.borrow_mut().push(include_sublime);
+    }
+
+    fn start_unpacking(&self, _include_sublime: bool) -> bool {
+        self.0.background_unpacking.get()
+    }
+
+    fn poll_unpacking(&self) -> Option<bool> {
+        self.0.unpacked.take()
     }
 
     fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
@@ -811,6 +823,8 @@ impl World {
                 ui_loads: RefCell::default(),
                 package_files: RefCell::default(),
                 unpacks: RefCell::default(),
+                background_unpacking: Cell::new(false),
+                unpacked: Cell::new(None),
                 meta_preferences: RefCell::default(),
             }),
             syntaxes: Rc::default(),

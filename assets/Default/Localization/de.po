@@ -649,6 +649,10 @@ msgid "Clipboard unavailable: {error}"
 msgstr "Zwischenablage nicht verfügbar: {error}"
 
 #: crates/use_cases/src/editor.rs
+msgid "Unpacking the installed packages…"
+msgstr "Installierte Pakete werden entpackt…"
+
+#: crates/use_cases/src/editor.rs
 msgid "{count} package resource failed to load (Help > Package Load Errors)"
 msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"
 msgstr[0] "{count} Paketressource konnte nicht geladen werden (Hilfe > Fehler beim Laden der Pakete)"

@@ -649,6 +649,10 @@ msgid "Clipboard unavailable: {error}"
 msgstr "Presse-papiers indisponible : {error}"
 
 #: crates/use_cases/src/editor.rs
+msgid "Unpacking the installed packages…"
+msgstr "Décompression des paquets installés…"
+
+#: crates/use_cases/src/editor.rs
 msgid "{count} package resource failed to load (Help > Package Load Errors)"
 msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"
 msgstr[0] "{count} ressource de paquet n'a pas pu être chargée (Aide > Erreurs de chargement des paquets)"

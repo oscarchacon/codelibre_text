@@ -649,6 +649,10 @@ msgid "Clipboard unavailable: {error}"
 msgstr "Área de transferência indisponível: {error}"
 
 #: crates/use_cases/src/editor.rs
+msgid "Unpacking the installed packages…"
+msgstr "Descompactando os pacotes instalados…"
+
+#: crates/use_cases/src/editor.rs
 msgid "{count} package resource failed to load (Help > Package Load Errors)"
 msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"
 msgstr[0] "{count} recurso de pacote não pôde ser carregado (Ajuda > Erros ao carregar pacotes)"

@@ -152,6 +152,11 @@ pub struct EditorState {
     /// The `ignored_packages` setting when packages were last loaded (see
     /// [`Editor::check_ignored_packages`]).
     pub(crate) ignored_packages: Option<Value>,
+    /// The `.sublime-package` files are being unpacked in the background (see
+    /// [`Editor::poll_unpacking`]); loading the packages does not unpack them meanwhile.
+    pub(crate) unpacking: bool,
+    /// The packages were loaded during that unpacking: they are loaded again when it ends.
+    pub(crate) loaded_while_unpacking: bool,
 }
 
 pub struct Editor {
@@ -211,6 +216,8 @@ impl Editor {
                 installed_packages: Vec::new(),
                 installed_packages_changed: None,
                 ignored_packages: None,
+                unpacking: false,
+                loaded_while_unpacking: false,
             },
             gateways,
         }
@@ -220,7 +227,9 @@ impl Editor {
     /// the plugins. As in Sublime, the window has its views when `plugin_loaded` runs (Color
     /// Highlight asks for `active_window().active_view()` there); `on_init` gets them all.
     pub fn start(&mut self, paths: Vec<PathBuf>) {
+        self.start_unpacking();
         self.load_packages();
+        self.state.loaded_while_unpacking = false; // that load is the one the unpacking follows
         if self.global_settings().bool("hot_exit", true) {
             self.restore_session();
         }
@@ -236,6 +245,10 @@ impl Editor {
         }
         self.load_plugins(); // and `on_init` with those views
         self.plugin_startup_events();
+        self.poll_unpacking();
+        if self.state.unpacking {
+            self.notify(self.tr("Unpacking the installed packages…").to_string());
+        }
         if !self.state.load_errors.is_empty() {
             self.notify(self.tr_n(
                 "{count} package resource failed to load (Help > Package Load Errors)",

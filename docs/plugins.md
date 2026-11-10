@@ -336,7 +336,19 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       own `Installed Packages`). Names that climb out of the package are not written.
 - [x] Of what Sublime ships, `tests/` are left out (`ArchiveFolder::shipped`). Its syntaxes are unpacked but not loaded:
       they are the parents of the packages' `extends` (syntect has its own for those languages). Packages the user
-      installed do load their syntaxes. The first start unpacks them (about 11 s in a debug build, in the window's thread).
+      installed do load their syntaxes. The first start unpacks them (about 11 s in a debug build).
+- [x] **Unpacking at startup does not block the window** (2026-11-10; tests and clippy pass, the manual run with an
+      empty `Cache/Packages` is still to do): `Editor::start` asks the gateway to unpack in a thread (`ResourceGateway::start_unpacking`,
+      `SublimeResourceGateway::with_background_unpacking` in `compose()`), loads the packages from what the cache has
+      and says "Unpacking the installed packages…"; `Editor::poll_unpacking` (every frame in `app.rs`) loads them again
+      when the thread unpacked or removed something. A normal start changes nothing and loads once. While it runs,
+      `load_packages` leaves the archives alone (two unpackings would write the same folders) and the packages are
+      loaded again at the end. Later reloads unpack in the window's thread as before (one package: milliseconds; only
+      turning `import_sublime_packages` on in a running editor unpacks everything there). Each package is unpacked to
+      `Cache/Packages/<kind>.staging/<name>` and renamed into place, so nobody reads half a package. Without a waker
+      (the tests' gateways) `start_unpacking` answers false and everything is synchronous, as before. Tests:
+      `use_cases/tests/packages.rs` (three, with `World`'s `background_unpacking` / `unpacked`) and
+      `interface_adapters/tests/package_archives.rs` (`unpack_all`'s answer, the thread and its waker).
 - [x] **`.sublime-syntax` version 2** (`sublime_syntax.rs`, 2026-11-09): syntect reads version 1 only, so before it reads
       a package's syntax, `extends` (one parent or a list, merged: a child's context replaces the parent's of the same
       name, `meta_prepend` / `meta_append` add to it), `branch_point` / `branch` (the first alternative is pushed; syntect

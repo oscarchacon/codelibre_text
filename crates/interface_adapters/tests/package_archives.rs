@@ -3,10 +3,14 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use interface_adapters::gateways::package_archives::unpack_all;
 use interface_adapters::gateways::package_files::{find_resources, ignored_packages, resource_path};
-use use_cases::gateways::{ArchiveFolder, PackagePaths};
+use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
+use use_cases::gateways::{ArchiveFolder, PackagePaths, ResourceGateway};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
@@ -120,6 +124,46 @@ fn an_archive_is_unpacked_again_only_when_it_changes() {
 
     write_zip(&archive, &[("b.txt", "two, longer")]);
     assert_eq!(unpacked(dir.path()), ["b.txt"], "nothing of the old version stays");
+}
+
+#[test]
+fn unpacking_says_whether_it_changed_something_and_leaves_no_staging_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("Own/Installed Packages/Pkg.sublime-package");
+    write_zip(&archive, &[("a.txt", "one")]);
+    let paths = paths(dir.path());
+    let unpack = || unpack_all(&paths, true, &mut Vec::new());
+    assert!(unpack(), "unpacked");
+    assert!(!unpack(), "the same archive");
+    write_zip(&archive, &[("a.txt", "two, longer")]);
+    assert!(unpack(), "another version");
+    fs::remove_file(&archive).unwrap();
+    assert!(unpack(), "removed");
+    assert!(!unpack());
+    let cache: Vec<_> = fs::read_dir(dir.path().join("Cache")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(cache, ["Own"], "packages are unpacked next to their folder and moved there whole");
+}
+
+#[test]
+fn the_gateway_unpacks_in_a_thread_when_it_has_a_waker() {
+    let dir = tempfile::tempdir().unwrap();
+    write_zip(&dir.path().join("Own/Installed Packages/Pkg.sublime-package"), &[("a.txt", "A")]);
+    let gateway = SublimeResourceGateway::new(paths(dir.path()));
+    assert!(!gateway.start_unpacking(true), "without a waker the caller unpacks");
+    assert_eq!(gateway.poll_unpacking(), None);
+
+    let (woken, wakes) = channel();
+    let woken = Mutex::new(woken);
+    let gateway = gateway.with_background_unpacking(Arc::new(move || woken.lock().unwrap().send(()).unwrap()));
+    assert!(gateway.start_unpacking(true));
+    wakes.recv_timeout(Duration::from_secs(30)).expect("the window is woken when it ends");
+    assert_eq!(gateway.poll_unpacking(), Some(true), "a package was unpacked");
+    assert_eq!(gateway.poll_unpacking(), None, "told once");
+    assert_eq!(fs::read_to_string(dir.path().join("Cache/Own/Pkg/a.txt")).unwrap(), "A");
+
+    assert!(gateway.start_unpacking(true));
+    wakes.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(gateway.poll_unpacking(), Some(false), "nothing changed");
 }
 
 #[test]

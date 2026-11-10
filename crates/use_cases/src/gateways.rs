@@ -225,6 +225,14 @@ pub trait ResourceGateway {
     fn load_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Vec<u8>, String>;
     /// Unpacks the `.sublime-package` files that changed. Problems are appended to `errors`.
     fn unpack_packages(&self, include_sublime_packages: bool, errors: &mut Vec<String>);
+    /// The same, without waiting for it (the first start unpacks everything Sublime Text ships,
+    /// which takes seconds). False when the gateway does not do that: the caller then unpacks
+    /// with [`ResourceGateway::unpack_packages`].
+    fn start_unpacking(&self, include_sublime_packages: bool) -> bool;
+    /// `None` while the unpacking [`ResourceGateway::start_unpacking`] began goes on; once when
+    /// it ends, whether the packages are to be loaded again (some were unpacked or removed, or
+    /// one failed, which loading reports).
+    fn poll_unpacking(&self) -> Option<bool>;
     /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
     fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
     /// The packages' `.tmPreferences` (TextMate metadata: `shellVariables`, symbol lists…), in
