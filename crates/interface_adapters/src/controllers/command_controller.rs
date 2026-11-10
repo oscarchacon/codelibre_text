@@ -159,6 +159,7 @@ const WINDOW_COMMANDS: &[&str] = &[
     "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
     "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
     "new_pane", "close_pane", "set_max_columns", "new_window", "clone_file",
+    "close_by_index", "close_others_by_index", "close_to_right_by_index", "remove_folder", "open_containing_folder",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
@@ -262,6 +263,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "open_file" => editor.open_package_file(command.str_arg("file"), command.bool_arg("encoded_position", false)),
         "open_dir" => editor.open_package_folder(command.str_arg("dir")),
+        "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => editor.close_by_index(command),
+        "remove_folder" => editor.remove_folders(command),
+        "open_containing_folder" => editor.open_containing_folder(command),
         "save" => {
             editor.save_active(false);
         }

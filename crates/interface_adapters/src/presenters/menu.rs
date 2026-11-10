@@ -3,7 +3,8 @@ use entities::menu::MenuItem;
 use entities::settings::Settings;
 use use_cases::Editor;
 
-use crate::view_models::{MacMenuViewModel, MenuEntryViewModel};
+use crate::view_models::{ContextMenuViewModel, MacMenuViewModel, MenuEntryViewModel};
+use crate::view_state::ViewState;
 
 /// The main menu, in the interface language, with key bindings next to each command and check
 /// marks for toggles. Plugin commands decide whether they show, are enabled and are checked.
@@ -18,6 +19,14 @@ pub fn present(editor: &Editor) -> Vec<MenuEntryViewModel> {
         .filter(|item| !item.children.is_empty())
         .filter_map(|item| entry(item, editor, &settings))
         .collect()
+}
+
+/// The context menu open in this window, with its arguments filled for what it was opened on.
+/// Entries hidden by their plugin are left out, as in the main menu.
+pub fn present_context_menu(editor: &Editor, view: &ViewState) -> Option<ContextMenuViewModel> {
+    let target = view.context_menu.clone()?;
+    let entries = entries(&editor.context_menu_items(&target), editor, &editor.global_settings());
+    Some(ContextMenuViewModel { target, entries })
 }
 
 /// A menu's entries; `{"command": "$build_systems"}` becomes one entry per build system.

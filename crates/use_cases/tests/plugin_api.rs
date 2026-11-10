@@ -119,6 +119,21 @@ fn styles_come_from_the_color_scheme_in_use() {
 }
 
 #[test]
+fn ui_info_gives_the_ui_style_and_the_color_scheme_palette() {
+    let world = plugin_world().with_preferences(json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}));
+    let mut editor = editor_with(&world, "x");
+    assert_eq!(
+        call(&world, &mut editor, "ui_info", json!([])),
+        Ok(json!({
+            "theme": {"style": "dark"},
+            "color_scheme": {"palette": {
+                "background": "#000000", "foreground": "#ffffff", "redish": "#ff0000", "scheme": "Mariana",
+            }},
+        }))
+    );
+}
+
+#[test]
 fn lines_and_words() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "one two\nthree\nfour");

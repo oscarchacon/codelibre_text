@@ -2,14 +2,23 @@
 
 use egui::{RichText, Sense, Ui};
 use entities::localization::Translations;
+use entities::menu::ContextMenuTarget;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::{SideBarViewModel, TreeRowKind};
+use interface_adapters::view_models::{ContextMenuViewModel, SideBarViewModel, TreeRowKind};
 
+use super::context_menu;
 use super::theme::{mix, Chrome};
 
 const ROW_HEIGHT: f32 = 22.0;
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBarViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    text: &Translations,
+    side_bar: &SideBarViewModel,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.add_space(6.0);
@@ -39,6 +48,8 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBa
                 if response.middle_clicked() {
                     events.push(UiEvent::CloseTab(file.index));
                 }
+                // An open file has its tab's menu, as in Sublime.
+                context_menu::attach(&response, ContextMenuTarget::Tab { group: file.group, index: file.tab }, menu, events);
             }
             ui.add_space(8.0);
         }
@@ -62,14 +73,12 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, side_bar: &SideBa
                         TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
                     });
                 }
-                if let TreeRowKind::Folder { is_root: true, .. } = entry.kind {
-                    response.context_menu(|ui| {
-                        if ui.button(text.tr("Remove Folder from Project")).clicked() {
-                            events.push(UiEvent::RemoveFolder(entry.path.clone()));
-                            ui.close_menu();
-                        }
-                    });
-                }
+                let (is_dir, root) = match entry.kind {
+                    TreeRowKind::Folder { is_root, .. } => (true, is_root),
+                    TreeRowKind::File => (false, false),
+                };
+                let target = ContextMenuTarget::SideBar { path: entry.path.clone(), is_dir, root };
+                context_menu::attach(&response, target, menu, events);
             }
         }
     });

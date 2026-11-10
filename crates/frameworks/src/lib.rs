@@ -12,6 +12,7 @@
 pub mod app;
 pub mod gateways;
 pub mod input;
+pub mod sublime_syntax;
 pub mod syntax_engine;
 pub mod views;
 
@@ -49,7 +50,11 @@ pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, S
         file_system: Box::new(StdFileSystem),
         dialogs: Box::new(NativeDialogs),
         clipboard: Box::new(SystemClipboard),
-        resources: Box::new(SublimeResourceGateway::new(package_paths).with_system_language(sys_locale::get_locale())),
+        resources: Box::new(
+            SublimeResourceGateway::new(package_paths)
+                .with_system_language(sys_locale::get_locale())
+                .with_background_unpacking(waker.clone()),
+        ),
         syntaxes: Box::new(SyntectSyntaxes(engine.clone())),
         sessions: Box::new(SessionFileGateway::new(session_file)),
         file_index: Box::new(FolderIndex::default()),

@@ -115,3 +115,21 @@ fn on_hover_reaches_the_listeners_that_want_it() {
     let queries = world.plugins.queries.borrow();
     assert_eq!(queries.last(), Some(&("on_hover".to_string(), Some(v), json!([3, 1]))));
 }
+
+// ----- region icons ---------------------------------------------------------------------------------
+
+#[test]
+fn a_region_icon_is_a_resource_its_2x_picture_first() {
+    let world = World::new()
+        .with_resource("Packages/Gutter/icons/added.png", "1x")
+        .with_resource("Packages/Gutter/icons/added@2x.png", "2x")
+        .with_resource("Packages/Gutter/icons/removed.png", "removed");
+    let editor = world.editor();
+    let bytes = |icon: &str| editor.region_icon(icon).map(|b| String::from_utf8(b.to_vec()).unwrap());
+    assert_eq!(bytes("Packages/Gutter/icons/added.png").as_deref(), Some("2x"));
+    assert_eq!(bytes("Packages/Gutter/icons/removed").as_deref(), Some("removed"), "without its .png");
+    assert_eq!(bytes("Packages/Gutter/icons/missing.png"), None);
+    for built_in in ["dot", "circle", "bookmark", ""] {
+        assert_eq!(bytes(built_in), None, "{built_in} is drawn, not read");
+    }
+}

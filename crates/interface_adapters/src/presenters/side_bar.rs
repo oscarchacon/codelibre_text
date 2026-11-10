@@ -10,10 +10,11 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
     let state = editor.state();
     let groups = editor.group_count();
     let open_files = (0..groups)
-        .flat_map(|group| editor.group_indexes(group))
-        .map(|index| {
+        .flat_map(|group| editor.group_indexes(group).into_iter().enumerate())
+        .map(|(tab, index)| {
             let doc = &state.documents[index];
-            OpenFileViewModel { index, group: doc.group, name: editor.document_name(doc), dirty: doc.is_dirty(), active: index == state.active }
+            let name = editor.document_name(doc);
+            OpenFileViewModel { index, group: doc.group, tab, name, dirty: doc.is_dirty(), active: index == state.active }
         })
         .collect();
 

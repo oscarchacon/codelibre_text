@@ -64,6 +64,60 @@ fn reload_packages_reads_everything_again_and_reports_counts() {
     assert_eq!(status(&editor), "Packages reloaded: 6 syntaxes, 3 color schemes, 2 key bindings, 0 plugin commands");
 }
 
+/// The first start unpacks everything Sublime Text ships: the window does not wait for it.
+#[test]
+fn startup_unpacks_in_the_background_and_loads_the_packages_again_when_it_changed_them() {
+    let world = World::new();
+    world.resources.background_unpacking.set(true);
+    let mut editor = world.editor();
+    assert!(world.resources.unpacks.borrow().is_empty(), "nothing is unpacked while starting");
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "the packages load from what was unpacked before");
+    assert_eq!(status(&editor), "Unpacking the installed packages…");
+
+    editor.poll_unpacking();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "still unpacking");
+
+    world.resources.unpacked.set(Some(true));
+    editor.poll_unpacking();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2);
+    assert!(status(&editor).starts_with("Packages reloaded"), "{}", status(&editor));
+    assert_eq!(world.resources.unpacks.borrow().len(), 1, "loading unpacks again once the background is done");
+
+    world.resources.unpacked.set(Some(true));
+    editor.poll_unpacking();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2, "nothing is being unpacked any more");
+}
+
+/// Every start but the first, and the one after Sublime Text or a package changed.
+#[test]
+fn an_unpacking_that_changed_nothing_does_not_load_the_packages_again() {
+    let world = World::new();
+    world.resources.background_unpacking.set(true);
+    world.resources.unpacked.set(Some(false));
+    let mut editor = world.editor();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 1);
+    assert_ne!(status(&editor), "Unpacking the installed packages…", "it ended while starting");
+    editor.reload_packages();
+    assert_eq!(world.resources.unpacks.borrow().len(), 1, "loading unpacks again");
+}
+
+/// Two unpackings must not write the same folders: a load during the background one leaves the
+/// archives alone, and is done again at the end (an archive that arrived since was missed).
+#[test]
+fn packages_loaded_while_unpacking_are_loaded_again_when_it_ends() {
+    let world = World::new();
+    world.resources.background_unpacking.set(true);
+    let mut editor = world.editor();
+    editor.reload_packages();
+    assert!(world.resources.unpacks.borrow().is_empty());
+    assert_eq!(world.resources.ui_loads.borrow().len(), 2);
+
+    world.resources.unpacked.set(Some(false));
+    editor.poll_unpacking();
+    assert_eq!(world.resources.ui_loads.borrow().len(), 3);
+    assert_eq!(world.resources.unpacks.borrow().len(), 1);
+}
+
 #[test]
 fn reload_settings_only_reads_the_settings() {
     let world = World::new();

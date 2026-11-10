@@ -13,7 +13,11 @@ the rules they share in [`.github/scripts`](../.github/scripts).
 | `release/<version>` | `main` | `main` (automatic) | One version being built: its name is the version. |
 | `main` | — | (source of every `release/<version>`) | The released versions. |
 
-A version is `X.Y.Z` (final) or `X.Y.Z-<pre>`: `-alpha.N`, `-beta.N`, `-rc.N`.
+A version is `X.Y.Z` (final) or `X.Y.Z-<pre>`: `-alpha.N`, `-beta.N`, `-rc.N`. More parts may follow
+`X.Y.Z` (`0.1.3.1-alpha`, `0.1.3.1.hotfix`): installers, tags and the release keep that name, while
+`Cargo.toml`, which takes three numbers only, gets them as build metadata (`0.1.3-alpha+1`; the About
+dialog and the `.deb` / `.rpm` show that one). [`version.sh`](../.github/scripts/version.sh) checks and
+converts them.
 
 ## The whole flow
 

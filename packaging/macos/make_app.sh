@@ -22,7 +22,7 @@ cp -R "$release/python" "$app/Contents/Resources/python"
 # Each Mach-O file signed ad hoc, so that the app's own signature (release.yml) covers them.
 find "$app/Contents/Resources/python" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) \
     -exec codesign --force --sign - {} + 2> /dev/null || true
-# Bundle versions are numbers only: 0.1.0-alpha is 0.1.0 here.
-sed "s/@VERSION@/${version%%-*}/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
+# Bundle versions are numbers only: 0.1.0-alpha and 0.1.3-alpha+1 are 0.1.0 and 0.1.3 here.
+sed "s/@VERSION@/${version%%[-+]*}/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 
 echo "Created $app"

@@ -204,6 +204,7 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         ranges,
         scope: set.scope.clone(),
         icon: set.icon.clone(),
+        icon_image: editor.region_icon(&set.icon),
         fill: !has(DRAW_NO_FILL),
         outline: !has(DRAW_NO_OUTLINE),
         underline,

@@ -176,7 +176,9 @@ def _inspect_aliases():
 
 def _unittest_aliases():
     """``unittest``'s old CamelCase names, removed in Python 3.12: test suites of plugins
-    (``assertRaisesRegexp`` and friends) still use them."""
+    (``assertRaisesRegexp`` and friends) still use them. ``assertDictContainsSubset`` (3.12),
+    ``assertItemsEqual`` (3.9), ``getTestCaseNames`` / ``makeSuite`` / ``findTestCases`` (3.13)
+    and the loader functions went at different times, so each is checked on its own."""
     import unittest
 
     for old, new in {
@@ -187,6 +189,7 @@ def _unittest_aliases():
         "assertRegexpMatches": "assertRegex",
         "assertNotRegexpMatches": "assertNotRegex",
         "assertRaisesRegexp": "assertRaisesRegex",
+        "assertItemsEqual": "assertCountEqual",
         "assert_": "assertTrue",
         "failUnless": "assertTrue",
         "failIf": "assertFalse",
@@ -198,6 +201,65 @@ def _unittest_aliases():
     }.items():
         if not hasattr(unittest.TestCase, old) and hasattr(unittest.TestCase, new):
             setattr(unittest.TestCase, old, getattr(unittest.TestCase, new))
+
+    if not hasattr(unittest.TestCase, "assertDictContainsSubset"):
+        def assertDictContainsSubset(self, subset, dictionary, msg=None):
+            """Whether ``dictionary`` contains every key and value of ``subset``."""
+            missing = []
+            mismatched = []
+            for key, value in subset.items():
+                if key not in dictionary:
+                    missing.append(key)
+                elif value != dictionary[key]:
+                    mismatched.append("%s, expected: %s, actual: %s"
+                                      % (repr(key), repr(value), repr(dictionary[key])))
+            if not (missing or mismatched):
+                return
+            standard = ""
+            if missing:
+                standard = "Missing: %s" % ",".join(repr(key) for key in missing)
+            if mismatched:
+                if standard:
+                    standard += "; "
+                standard += "Mismatched values: %s" % ",".join(mismatched)
+            self.fail(self._formatMessage(msg, standard))
+
+        unittest.TestCase.assertDictContainsSubset = assertDictContainsSubset
+
+    if not hasattr(unittest, "makeSuite"):
+        def makeSuite(testCaseClass, prefix="test", sortUsing=None, suiteClass=None):
+            loader = unittest.TestLoader()
+            loader.testMethodPrefix = prefix
+            if sortUsing is not None:
+                loader.sortTestMethodsUsing = sortUsing
+            if suiteClass is not None:
+                loader.suiteClass = suiteClass
+            return loader.loadTestsFromTestCase(testCaseClass)
+
+        unittest.makeSuite = makeSuite
+
+    if not hasattr(unittest, "findTestCases"):
+        def findTestCases(module, prefix="test", sortUsing=None, suiteClass=None):
+            loader = unittest.TestLoader()
+            loader.testMethodPrefix = prefix
+            if sortUsing is not None:
+                loader.sortTestMethodsUsing = sortUsing
+            if suiteClass is not None:
+                loader.suiteClass = suiteClass
+            return loader.loadTestsFromModule(module)
+
+        unittest.findTestCases = findTestCases
+
+    if not hasattr(unittest, "getTestCaseNames"):
+        def getTestCaseNames(testCaseClass, prefix, sortUsing=None, testNamePatterns=None):
+            loader = unittest.TestLoader()
+            loader.testMethodPrefix = prefix
+            if sortUsing is not None:
+                loader.sortTestMethodsUsing = sortUsing
+            loader.testNamePatterns = testNamePatterns
+            return loader.getTestCaseNames(testCaseClass)
+
+        unittest.getTestCaseNames = getTestCaseNames
 
 
 def _cgi_aliases():
@@ -431,6 +493,37 @@ def _asyncio_get_event_loop():
     asyncio.get_event_loop = get_event_loop
 
 
+def _asyncio_aliases():
+    """The ``@coroutine`` decorator, removed in Python 3.11: old libraries Package Control
+    installs still spell their generator-based coroutines this way. (``Task.all_tasks`` and
+    ``Task.current_task`` are gone from the same versions, but ``Task`` is the immutable C type,
+    so they cannot be put back; use ``asyncio.all_tasks`` / ``asyncio.current_task``.)"""
+    import asyncio
+    import asyncio.coroutines
+    import types
+
+    if not hasattr(asyncio, "coroutine"):
+        marker = getattr(asyncio.coroutines, "_is_coroutine", object())
+
+        def coroutine(func):
+            wrapped = types.coroutine(func)
+            # What ``asyncio.iscoroutinefunction`` looks for on a 3.8 generator coroutine.
+            wrapped._is_coroutine = marker
+            return wrapped
+
+        asyncio.coroutine = coroutine
+
+
+def _fractions_gcd():
+    """``fractions.gcd``, removed in Python 3.9 for ``math.gcd``: old plugins compute
+    reduced fractions or aspect ratios with it."""
+    import fractions
+    import math
+
+    if not hasattr(fractions, "gcd"):
+        fractions.gcd = math.gcd
+
+
 def apply():
     """Patches the standard library once, before any plugin is imported."""
     allow_post_handshake_auth()
@@ -445,4 +538,6 @@ def apply():
     _threading_aliases()
     _time_clock()
     _pkgutil_aliases()
+    _asyncio_aliases()
+    _fractions_gcd()
     _asyncio_get_event_loop()

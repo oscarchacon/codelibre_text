@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::keymap::KeyCombo;
+use entities::menu::ContextMenuTarget;
 use entities::minihtml;
 use entities::selection::Selection;
 
@@ -25,6 +26,8 @@ pub struct OpenFileViewModel {
     pub index: usize,
     /// The group it is in (the side bar lists them by group when there are several).
     pub group: usize,
+    /// Its index among the group's tabs (for the tab's context menu).
+    pub tab: usize,
     pub name: String,
     pub dirty: bool,
     pub active: bool,
@@ -80,6 +83,13 @@ pub struct MenuEntryViewModel {
     pub enabled: bool,
     pub command: Option<Command>,
     pub children: Vec<MenuEntryViewModel>,
+}
+
+/// The open context menu: what it was opened on (a view draws it only over that) and its entries.
+#[derive(Clone, PartialEq)]
+pub struct ContextMenuViewModel {
+    pub target: ContextMenuTarget,
+    pub entries: Vec<MenuEntryViewModel>,
 }
 
 /// The menu bar of macOS: the application menu first (About, Preferences, the system's Services /
@@ -293,6 +303,8 @@ pub struct RegionViewModel {
     pub scope: String,
     /// Gutter icon on each region's first line: `dot`, `circle`, `bookmark`… (any other name is drawn as a dot).
     pub icon: String,
+    /// The picture of an icon that is a resource (`Packages/…/x.png`), tinted with the region's color.
+    pub icon_image: Option<std::rc::Rc<Vec<u8>>>,
     pub fill: bool,
     pub outline: bool,
     pub underline: Option<Underline>,

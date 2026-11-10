@@ -14,16 +14,18 @@ use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
 use egui::{Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, Shape, Stroke, TextEdit, Vec2};
 use entities::document::DocumentId;
+use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{
-    AutoCompleteViewModel, CompletionViewModel, EditorViewModel, PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, Underline,
+    AutoCompleteViewModel, ContextMenuViewModel, CompletionViewModel, EditorViewModel, PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, Underline,
 };
 use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
+use crate::views::context_menu;
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
@@ -52,6 +54,7 @@ pub fn show(
     text: EditorText,
     engine: &SharedSyntaxEngine,
     sync: &mut SelectionSync,
+    menu: Option<&ContextMenuViewModel>,
     events: &mut Vec<UiEvent>,
 ) {
     let id = widget_id(model.document);
@@ -131,6 +134,8 @@ pub fn show(
     } else {
         char_width
     };
+    // A column for the regions' icons, left of the line numbers, while some region set has one.
+    let gutter_width = gutter_width + if has_icons(model) { icon_size(row_height) } else { 0.0 };
 
     egui::ScrollArea::both()
         .id_salt(("editor_scroll", model.document))
@@ -204,6 +209,20 @@ pub fn show(
 
                 let galley = &output.galley;
                 let origin = output.galley_pos;
+                // A right click: the menu of the char clicked (its view takes the focus first).
+                let menu_point = Id::new(("context_menu_point", model.document));
+                if output.response.secondary_clicked() {
+                    if !model.active {
+                        events.push(UiEvent::FocusGroup(model.group));
+                    }
+                    if let Some(pointer) = output.response.interact_pointer_pos() {
+                        let point = galley.cursor_from_pos(pointer - origin).ccursor.index;
+                        ctx.data_mut(|d| d.insert_temp(menu_point, point));
+                    }
+                }
+                let point = ctx.data(|d| d.get_temp::<usize>(menu_point)).unwrap_or(selection.head);
+                let target = ContextMenuTarget::Text { document: model.document, point };
+                context_menu::attach(&output.response, target, menu, events);
                 let caret = galley.pos_from_ccursor(CCursor::new(selection.head)).translate(origin.to_vec2());
 
                 let mut shapes = Vec::new();
@@ -442,7 +461,16 @@ fn underline_shapes(underline: Underline, rect: Rect, stroke: Stroke) -> Vec<Sha
     }
 }
 
-/// Gutter icons of plugins' regions (`dot`, `circle`, `bookmark`; other icons are drawn as dots),
+fn has_icons(model: &EditorViewModel) -> bool {
+    model.regions.iter().any(|r| !r.icon.is_empty() && !r.ranges.is_empty())
+}
+
+/// The side of a gutter icon: a bit less than a line, as Sublime's 16 px icons in 19 px lines.
+fn icon_size(row_height: f32) -> f32 {
+    (row_height * 0.8).round().max(8.0)
+}
+
+/// Gutter icons of plugins' regions (`dot`, `circle`, `bookmark`, pictures of resources; other icons are drawn as dots),
 /// on the line where each region starts.
 #[allow(clippy::too_many_arguments)]
 fn paint_region_icons(
@@ -459,15 +487,24 @@ fn paint_region_icons(
     let gutter = Rect::from_min_max(viewport.left_top(), egui::pos2(viewport.left() + gutter_width, viewport.bottom()));
     let painter = ui.painter().with_clip_rect(gutter);
     let visible = visible_chars(galley, origin, viewport);
-    let x = gutter.left() + char_width * 0.8;
+    let size = icon_size(row_height);
+    let x = gutter.left() + char_width * 0.3 + size / 2.0;
     let radius = (row_height * 0.22).max(2.0);
     for (regions, &color) in model.regions.iter().zip(region_colors) {
         if regions.icon.is_empty() {
             continue;
         }
-            for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
+        // A picture is tinted with the region's color, as Sublime does (white icons take it).
+        let texture = regions.icon_image.as_ref().and_then(|bytes| minihtml_view::texture(ui.ctx(), &regions.icon, bytes));
+        for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
             let y = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2()).center().y;
             let center = egui::pos2(x, y);
+            if let Some(texture) = &texture {
+                let rect = Rect::from_center_size(center, Vec2::splat(size));
+                let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                painter.image(texture.id(), rect, uv, color.to_opaque());
+                continue;
+            }
             match regions.icon.as_str() {
                 "circle" => {
                     painter.circle_stroke(center, radius, Stroke::new(1.5_f32, color));

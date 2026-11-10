@@ -44,3 +44,8 @@ strip = true
 # syntect's regex engine is very slow unoptimized; keep dependencies fast in debug builds
 [profile.dev.package."*"]
 opt-level = 2
+
+# syntect 5.3.0 with a fix for empty backreferences under a quantifier (MarkdownEditing's code fences
+# panicked the editor): see vendor/syntect/PATCHES.md
+[patch.crates-io]
+syntect = { path = "vendor/syntect" }
