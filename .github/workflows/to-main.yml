@@ -1,11 +1,13 @@
-# Takes a release/<version> branch to main: commits its version in Cargo.toml to the branch, then a
-# pull request merges it into main at once (if it cannot be merged, a conflict, it stays open to
-# solve by hand).
-# release/<version> goes straight into main: develop never does.
+# Takes a release/<version> branch to main: commits its version in Cargo.toml to the branch, then
+# merges it into main and pushes main, without a pull request (if it cannot be merged, a conflict,
+# the job fails and it is solved by hand).
+# release/<version> goes straight into main: develop never does. main takes no pull requests and no
+# pushes from people: its ruleset lets only this workflow's identity in (docs/release-flow.md), the
+# GitHub App of RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY when they are set, else RELEASE_PUSH_TOKEN.
 # - The release workflow calls it once every installer is uploaded, for the versions
-#   .github/scripts/goes-to-main.sh takes to main (final, rc, and for now alpha and beta).
-# - Any version goes to main when asked: push a tag to-main/<version> or main/<version>, on develop
-#   or on release/<version>, at any time (git tag to-main/0.1.0-alpha develop && git push origin
+#   .github/scripts/goes-to-main.sh takes to main (final versions; any other only with a tag).
+# - Any version goes to main when asked: push a tag to-main/<version> or main/<version>, on develop,
+#   staging or release/<version>, at any time (git tag to-main/0.1.0-alpha develop && git push origin
 #   to-main/0.1.0-alpha). Main never gets a version whose builds failed: pushed before the build,
 #   the tag only tells the release workflow, which calls this when every installer is uploaded;
 #   pushed after it, this merges at once. The tag also refreshes the description of the open pull
@@ -46,13 +48,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     env:
-      # This secret holds a token that can write contents, pull requests and workflows: by default
-      # github.token cannot create pull requests, nor change workflow files in main.
-      GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
       GH_REPO: ${{ github.repository }}
+      HAS_APP: ${{ vars.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
     steps:
+      # The identity main's ruleset lets in: a GitHub App installed on this repository only, so
+      # that nobody else (its owner included) can write to main.
+      - id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # Without the App, RELEASE_PUSH_TOKEN: a token that can write contents and workflows (by
+      # default github.token cannot change workflow files in main, and its pushes start no workflow).
+      - name: Choose the token
+        env:
+          TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_PUSH_TOKEN || github.token }}
+        run: echo "GH_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           sparse-checkout: .github/scripts
@@ -100,19 +113,18 @@ jobs:
             git commit --all --message "chore: release $VERSION [skip ci]"
             git push origin "HEAD:release/$VERSION"
           fi
-      - name: Merge the pull request
+      # Straight into main, no pull request: main's ruleset takes nothing else.
+      - name: Merge into main
         if: steps.version.outputs.ready == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          branch="release/$VERSION"
           if [ "$(git rev-list --count origin/main..HEAD)" = 0 ]; then
             echo "main already has this branch"
             exit 0
           fi
-          number=$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number')
-          if [ -z "$number" ]; then
-            gh pr create --head "$branch" --base main --title "Release $VERSION" \
-              --body "Installers built and uploaded to the release v$VERSION."
-          fi
-          gh pr merge "$branch" --merge
+          release=$(git rev-parse HEAD)
+          git checkout -B main origin/main
+          git merge --no-ff "$release" -m "Merge release/$VERSION into main" \
+            -m "Installers built and uploaded to the release v$VERSION."
+          git push origin main

@@ -36,9 +36,11 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `release-pr.yml` writes that pull request's description from its commits and PRs (`.github/scripts/release-pr-body.sh`),
   on open and every push; text outside `<!-- auto:start -->` / `<!-- auto:end -->` is kept.
 - Releases (`release.yml`, on a push to `release/**` other than its creation) go to `main` (`to-main.yml`, `release/<version>`
-  straight in) by `.github/scripts/goes-to-main.sh`: final and `-rc`, `-alpha` / `-beta` while its `PRERELEASES_TO_MAIN`
-  is true (TODO), any version with a tag `to-main/<version>` or `main/<version>` on develop or the release branch
-  (pushed before the build: merged when it ends; after: at once).
+  merged and pushed, no pull request) by `.github/scripts/goes-to-main.sh`: final versions always, any other only with a tag
+  `to-main/<version>` or `main/<version>` on develop, staging or the release branch (pushed before the build: merged
+  when it ends; after: at once). Versions may have more parts (`0.1.3.1-alpha`; `.github/scripts/version.sh`, which
+  gives `Cargo.toml` `0.1.3-alpha+1`). Rulesets: `develop`, `staging`, `release/**` take pull requests only; `main`
+  takes only `to-main.yml`'s identity (a GitHub App, `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, else `RELEASE_PUSH_TOKEN`).
   The whole flow, with diagrams, for contributors: `docs/release-flow.md` (keep it in step with the workflows).
 - Tests live in each crate's `tests/` folder, one file per tested module (no `#[cfg(test)]` in `src/`).
   Use `test_support::World` for use case / adapter tests and `tempfile` for real file-system tests.

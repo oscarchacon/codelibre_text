@@ -5,9 +5,9 @@
 # also signs the .deb and .rpm) and build provenance attestations. The tests (ci.yml, macOS
 # included) run first: nothing is built if they fail. Publishing the draft stays a manual step, and
 # pushing to the branch again replaces its files. If all of that works, the version is merged into
-# main (to-main.yml) when .github/scripts/goes-to-main.sh says so: final versions and release
-# candidates; alpha and beta too while its PRERELEASES_TO_MAIN is true (TODO: only by tag later); any
-# version with a tag to-main/<version> or main/<version>, pushed before this build or after it.
+# main (to-main.yml) when .github/scripts/goes-to-main.sh says so: final versions always, any other
+# version (-rc, -alpha, -beta) only with a tag to-main/<version> or main/<version>, pushed before
+# this build or after it.
 # Creating the branch (open-release.yml, or by hand on the web) builds nothing: the merge of its
 # pull request from develop, or a later push, does.
 name: Release
