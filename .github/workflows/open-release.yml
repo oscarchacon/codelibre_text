@@ -36,6 +36,10 @@ jobs:
       GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      # X.Y.Z, X.Y.Z-alpha.1, X.Y.Z.W-alpha...: the rules are in .github/scripts/version.sh.
       - id: version
         name: Read the version
         env:
@@ -43,10 +47,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           version="${INPUT:-${TAG#open-release/}}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::'$version' is not a version: use a tag like open-release/0.1.1-alpha"
-            exit 1
-          fi
+          bash .github/scripts/version.sh check "$version"
           if gh api "repos/$GH_REPO/branches/release/$version" --silent 2> /dev/null; then
             echo "::error::release/$version exists already"
             exit 1
