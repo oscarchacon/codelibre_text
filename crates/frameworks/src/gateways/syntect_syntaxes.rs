@@ -62,11 +62,19 @@ impl SyntaxGateway for SyntectSyntaxes {
         self.0.borrow_mut().forget(document);
     }
 
+    fn take_failures(&self) -> Vec<String> {
+        self.0.borrow_mut().take_failures()
+    }
+
     fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
         self.0.borrow().scheme_style(scheme)
     }
 
     fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, serde_json::Value> {
         self.0.borrow().scope_style(scheme, scope)
+    }
+
+    fn scheme_palette(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        self.0.borrow().scheme_palette(scheme)
     }
 }

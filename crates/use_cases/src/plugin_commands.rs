@@ -19,6 +19,8 @@ pub struct PluginCommandState {
     pub enabled: bool,
     pub checked: bool,
     pub description: Option<String>,
+    /// `want_event()`: from a context menu, the command gets the click as its `event` argument.
+    pub want_event: bool,
 }
 
 impl PluginCommandState {
@@ -29,12 +31,29 @@ impl PluginCommandState {
             enabled: flag("enabled", true),
             checked: flag("checked", false),
             description: answer.get("description").and_then(Value::as_str).map(String::from),
+            want_event: flag("want_event", false),
         }
     }
 }
 
+/// Every command of a menu, its submenus' too.
+pub(crate) fn menu_commands(items: &[entities::menu::MenuItem], commands: &mut Vec<Command>) {
+    for item in items {
+        commands.extend(item.command.clone());
+        menu_commands(&item.children, commands);
+    }
+}
+
+/// A command and its arguments, but `event` (a context menu adds it to the commands that want it).
 fn state_key(command: &Command) -> String {
-    format!("{} {}", command.name, command.args)
+    match &command.args {
+        Value::Object(args) if args.contains_key("event") => {
+            let mut args = args.clone();
+            args.remove("event");
+            format!("{} {}", command.name, Value::Object(args))
+        }
+        args => format!("{} {args}", command.name),
+    }
 }
 
 impl Editor {
@@ -44,29 +63,32 @@ impl Editor {
         if !self.wants_plugin_event("command_states") {
             return;
         }
-        fn menu_commands(items: &[entities::menu::MenuItem], commands: &mut Vec<Command>) {
-            for item in items {
-                commands.extend(item.command.clone());
-                menu_commands(&item.children, commands);
-            }
-        }
         let mut commands = Vec::new();
         menu_commands(&self.state.main_menu, &mut commands);
         commands.extend(self.state.palette.iter().map(|entry| entry.command.clone()));
+        if let Some(states) = self.ask_plugin_command_states(commands) {
+            self.state.plugins.command_states = states;
+        }
+    }
+
+    /// The plugins' answers about the plugin commands among `commands`, in one query; `None` when
+    /// nothing was asked or the host did not answer.
+    pub(crate) fn ask_plugin_command_states(&mut self, mut commands: Vec<Command>) -> Option<HashMap<String, PluginCommandState>> {
+        if !self.wants_plugin_event("command_states") {
+            return None;
+        }
         commands.retain(|c| self.is_plugin_command(&c.name));
         let mut keys = std::collections::HashSet::new();
         commands.retain(|c| keys.insert(state_key(c)));
         if commands.is_empty() {
-            return;
+            return None;
         }
         let view = self.active_document().map(|d| d.id);
         let asked: Vec<Value> = commands.iter().map(|c| json!([c.name, c.args])).collect();
         let Some(Value::Array(answers)) = self.plugin_query("command_states", view, json!([asked])) else {
-            return;
+            return None;
         };
-        let states: HashMap<String, PluginCommandState> =
-            commands.iter().zip(&answers).map(|(c, answer)| (state_key(c), PluginCommandState::from_answer(answer))).collect();
-        self.state.plugins.command_states = states;
+        Some(commands.iter().zip(&answers).map(|(c, answer)| (state_key(c), PluginCommandState::from_answer(answer))).collect())
     }
 
     /// The last answers about a command; `None` for commands the plugins were not asked about.

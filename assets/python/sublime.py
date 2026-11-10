@@ -688,8 +688,10 @@ def get_macro():
 
 def ui_info():
     preferences = load_settings("Preferences.sublime-settings")
-    return {"theme": {"resolved_value": preferences.get("theme", "")},
-            "color_scheme": {"resolved_value": preferences.get("color_scheme", "")}}
+    info = sublime_api.ui_info()
+    info.setdefault("theme", {})["resolved_value"] = preferences.get("theme", "")
+    info.setdefault("color_scheme", {})["resolved_value"] = preferences.get("color_scheme", "")
+    return info
 
 
 def command_url(cmd, args=None):

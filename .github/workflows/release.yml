@@ -33,24 +33,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.branch.outputs.version }}
+      # The same in Cargo.toml, which takes three numbers only (.github/scripts/version.sh).
+      cargo_version: ${{ steps.branch.outputs.cargo_version }}
       to_main: ${{ steps.main.outputs.to_main }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      # X.Y.Z, X.Y.Z-alpha.1, X.Y.Z.W-alpha...: the rules are in .github/scripts/version.sh.
       - id: branch
         name: Read the version from the branch name
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
           version="${BRANCH#release/}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::'$version' is not a version: use a branch like release/0.1.0-alpha"
-            exit 1
-          fi
+          bash .github/scripts/version.sh check "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "cargo_version=$(bash .github/scripts/version.sh cargo "$version")" >> "$GITHUB_OUTPUT"
       # The rules are in .github/scripts/goes-to-main.sh (also used for the pull request's
       # description). A tag pushed after the build: to-main.yml merges it then.
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/scripts
       - id: main
         name: Decide if this version goes to main
         env:
@@ -80,12 +81,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CARGO_VERSION: ${{ needs.version.outputs.cargo_version }}
       ARCH: ${{ matrix.package_arch }}
       NFPM_VERSION: 2.48.0
     steps:
       - uses: actions/checkout@v4
       - name: Set the version
-        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+        run: perl -pi -e "s/^version = \".*\"/version = \"$CARGO_VERSION\"/" Cargo.toml
       - name: Install the system libraries
         run: sudo apt-get update && sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev
       - name: Install Rust
@@ -104,11 +106,13 @@ jobs:
           curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_${{ matrix.nfpm_arch }}.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP" nfpm
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      # Signed with the release GPG key (see packaging/linux/nfpm.yaml).
+      # Signed with the release GPG key (see packaging/linux/nfpm.yaml). With the SemVer version:
+      # .deb and .rpm order versions by it (0.1.3-alpha+1 is 0.1.3~alpha+1, newer than 0.1.3~alpha).
       - name: Create the .deb and .rpm
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           NFPM_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          VERSION: ${{ needs.version.outputs.cargo_version }}
         run: |
           mkdir -p dist
           export GPG_KEY_FILE="$RUNNER_TEMP/release-key.asc"
@@ -142,6 +146,7 @@ jobs:
             arch: arm64
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CARGO_VERSION: ${{ needs.version.outputs.cargo_version }}
       CARGO_BUILD_TARGET: ${{ matrix.target }}
       ARCH: ${{ matrix.arch }}
     defaults:
@@ -150,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set the version
-        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+        run: perl -pi -e "s/^version = \".*\"/version = \"$CARGO_VERSION\"/" Cargo.toml
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal --target "$CARGO_BUILD_TARGET"
@@ -192,13 +197,14 @@ jobs:
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CARGO_VERSION: ${{ needs.version.outputs.cargo_version }}
       CARGO_BUILD_TARGET: aarch64-apple-darwin
       APP: target/aarch64-apple-darwin/release/CodeLibre Text.app
       DMG: dist/codelibre-text-${{ needs.version.outputs.version }}-macos-arm64.dmg
     steps:
       - uses: actions/checkout@v4
       - name: Set the version
-        run: perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+        run: perl -pi -e "s/^version = \".*\"/version = \"$CARGO_VERSION\"/" Cargo.toml
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal --target "$CARGO_BUILD_TARGET"

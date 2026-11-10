@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use entities::document::DocumentId;
 use entities::keymap::{Binding, Keymap};
 use entities::localization::{Catalog, Language};
-use entities::menu::{MenuItem, PaletteCommand};
+use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
@@ -262,6 +262,8 @@ pub struct Resources {
     pub user_settings_files: RefCell<BTreeMap<String, Map<String, Value>>>,
     pub bindings: RefCell<Vec<Binding>>,
     pub menu: RefCell<Vec<MenuItem>>,
+    /// The right-click menus.
+    pub context_menus: RefCell<ContextMenus>,
     pub palette: RefCell<Vec<PaletteCommand>>,
     /// Interface languages and their translations (`Localization/<language>.po`).
     pub translations: RefCell<Vec<(Language, Catalog)>>,
@@ -276,6 +278,10 @@ pub struct Resources {
     pub package_files: RefCell<BTreeMap<String, Vec<u8>>>,
     /// `include_sublime_packages` of every `unpack_packages` call.
     pub unpacks: RefCell<Vec<bool>>,
+    /// `start_unpacking` unpacks in the background: until `unpacked` has its answer.
+    pub background_unpacking: Cell<bool>,
+    /// What `poll_unpacking` answers, once: whether the packages are to be loaded again.
+    pub unpacked: Cell<Option<bool>>,
     /// The packages' `.tmPreferences`.
     pub meta_preferences: RefCell<Vec<MetaPreference>>,
 }
@@ -310,6 +316,7 @@ impl ResourceGateway for FakeResources {
         UiResources {
             keymap,
             main_menu: self.0.menu.borrow().clone(),
+            context_menus: self.0.context_menus.borrow().clone(),
             palette: self.0.palette.borrow().clone(),
         }
     }
@@ -367,6 +374,14 @@ impl ResourceGateway for FakeResources {
 
     fn unpack_packages(&self, include_sublime: bool, _errors: &mut Vec<String>) {
         self.0.unpacks.borrow_mut().push(include_sublime);
+    }
+
+    fn start_unpacking(&self, _include_sublime: bool) -> bool {
+        self.0.background_unpacking.get()
+    }
+
+    fn poll_unpacking(&self) -> Option<bool> {
+        self.0.unpacked.take()
     }
 
     fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {
@@ -450,6 +465,14 @@ impl SyntaxGateway for FakeSyntaxes {
     fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
         let style = serde_json::json!({ "foreground": "#ffffff", "background": "#000000", "scheme": scheme });
         style.as_object().cloned().unwrap_or_default()
+    }
+
+    /// The globals above plus a red for `redish`. The scheme asked for under `scheme`.
+    fn scheme_palette(&self, scheme: &str) -> serde_json::Map<String, serde_json::Value> {
+        let palette = serde_json::json!({
+            "background": "#000000", "foreground": "#ffffff", "redish": "#ff0000", "scheme": scheme,
+        });
+        palette.as_object().cloned().unwrap_or_default()
     }
 
     /// Strings are red and bold; the rest white. The scheme and scopes asked for under `scheme` / `scope`.
@@ -791,6 +814,7 @@ impl World {
                 user_settings_files: RefCell::default(),
                 bindings: RefCell::default(),
                 menu: RefCell::default(),
+                context_menus: RefCell::default(),
                 palette: RefCell::default(),
                 translations: RefCell::default(),
                 system_language: RefCell::default(),
@@ -799,6 +823,8 @@ impl World {
                 ui_loads: RefCell::default(),
                 package_files: RefCell::default(),
                 unpacks: RefCell::default(),
+                background_unpacking: Cell::new(false),
+                unpacked: Cell::new(None),
                 meta_preferences: RefCell::default(),
             }),
             syntaxes: Rc::default(),
@@ -893,6 +919,12 @@ impl World {
 
     pub fn with_menu(self, item: MenuItem) -> Self {
         self.resources.menu.borrow_mut().push(item);
+        self
+    }
+
+    /// The right-click menus the packages "have".
+    pub fn with_context_menus(self, menus: ContextMenus) -> Self {
+        *self.resources.context_menus.borrow_mut() = menus;
         self
     }
 

@@ -281,7 +281,7 @@ QUERY_EVENTS = (
 )
 # What the editor asks about commands, and the ``Command`` methods that make it worth asking.
 COMMAND_QUERIES = {
-    "command_states": ("is_visible", "is_enabled", "is_checked", "description"),
+    "command_states": ("is_visible", "is_enabled", "is_checked", "description", "want_event"),
     "command_input": ("input",),
 }
 # Key binding context operators, as the keymap writes them -> ``sublime.OP_*``.
@@ -621,7 +621,7 @@ def _text_changed(view, changes):
 
 def command_state(name, args, view_id, window_id):
     """What a command says about itself in menus and the palette; the defaults if it fails."""
-    state = {"visible": True, "enabled": True, "checked": False, "description": None}
+    state = {"visible": True, "enabled": True, "checked": False, "description": None, "want_event": False}
     try:
         _, command = command_object(name, view_id, window_id)
         state["visible"] = bool(call_with_args(command.is_visible, args))
@@ -629,6 +629,7 @@ def command_state(name, args, view_id, window_id):
         state["checked"] = bool(call_with_args(command.is_checked, args))
         description = call_with_args(command.description, args)
         state["description"] = None if description is None else str(description)
+        state["want_event"] = bool(command.want_event())
     except Exception:
         traceback.print_exc()
     return state

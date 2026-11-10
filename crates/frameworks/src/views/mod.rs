@@ -4,6 +4,7 @@
 //! [`editor_view`]). Fixed labels come from the read-only
 //! [`Translations`](entities::localization::Translations) they receive, in the interface language.
 
+pub mod context_menu;
 pub mod dialogs;
 pub mod editor_view;
 pub mod find_panel;

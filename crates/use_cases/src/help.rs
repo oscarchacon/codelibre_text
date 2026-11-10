@@ -35,6 +35,12 @@ impl Editor {
         self.open_file(&path);
     }
 
+    /// Highlighting that failed since the last frame goes to the error log (cheap to call every frame).
+    pub fn poll_syntax_failures(&mut self) {
+        let failures = self.gateways.syntaxes.take_failures();
+        self.record_errors(&failures);
+    }
+
     /// Writes errors the user is told about to the error log, and keeps them for the report.
     pub(crate) fn record_errors(&mut self, errors: &[String]) {
         if errors.is_empty() {

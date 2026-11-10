@@ -456,6 +456,15 @@ impl Editor {
                 Ok(json!(found.collect::<Vec<_>>()))
             }
             "view_style" => Ok(Value::Object(self.gateways.syntaxes.scheme_style(&self.color_scheme_name()))),
+            "ui_info" => {
+                let scheme = self.color_scheme_name();
+                let style = self.gateways.syntaxes.scheme_style(&scheme);
+                let dark = style.get("background").and_then(Value::as_str).map(is_dark_color).unwrap_or(true);
+                Ok(json!({
+                    "theme": {"style": if dark { "dark" } else { "light" }},
+                    "color_scheme": {"palette": self.gateways.syntaxes.scheme_palette(&scheme)},
+                }))
+            }
             "view_style_for_scope" => {
                 let mut style = self.gateways.syntaxes.scope_style(&self.color_scheme_name(), a.str(1)?);
                 for (key, value) in [("source_line", json!(0)), ("source_column", json!(0)), ("source_file", json!(""))] {
@@ -894,4 +903,11 @@ impl Editor {
         }
         self.state.plugins.settings_files.get_mut(name).expect("inserted above")
     }
+}
+
+/// Whether a `#rrggbb` color is dark: its relative luminance is below the midpoint.
+fn is_dark_color(hex: &str) -> bool {
+    let digits = hex.trim_start_matches('#');
+    let channel = |at: usize| u8::from_str_radix(digits.get(at..at + 2).unwrap_or("ff"), 16).unwrap_or(0xff) as f32 / 255.0;
+    (0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)) < 0.5
 }

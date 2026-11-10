@@ -39,6 +39,7 @@ pub mod builds;
 pub mod clipboard_history;
 pub mod clones;
 pub mod completions;
+pub mod context_menus;
 pub mod documents;
 pub mod editing;
 pub mod editor;

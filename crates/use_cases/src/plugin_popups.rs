@@ -41,6 +41,28 @@ impl Editor {
         self.state.html_images.borrow_mut().insert(src.to_string(), bytes.clone());
         bytes
     }
+
+    /// The picture of a region set's gutter icon (`add_regions(icon=…)`): a resource,
+    /// `Packages/<package>/<path>`, with or without its `.png`; its `@2x` version first, as on a
+    /// high-density screen (it is drawn at the line's height either way). `None` for the built-in
+    /// shapes (`dot`, `circle`, `bookmark`), no icon, or one that cannot be read. Read once.
+    pub fn region_icon(&self, icon: &str) -> Option<Rc<Vec<u8>>> {
+        if !icon.starts_with("Packages/") {
+            return None;
+        }
+        let key = format!("icon:{icon}");
+        if let Some(cached) = self.state.html_images.borrow().get(&key) {
+            return cached.clone();
+        }
+        let stem = icon.strip_suffix(".png").unwrap_or(icon);
+        let include = self.global_settings().bool("import_sublime_packages", true);
+        let bytes = [format!("{stem}@2x.png"), format!("{stem}.png"), icon.to_string()]
+            .iter()
+            .find_map(|name| self.gateways.resources.load_resource(name, include).ok())
+            .map(Rc::new);
+        self.state.html_images.borrow_mut().insert(key, bytes.clone());
+        bytes
+    }
 }
 
 /// Sublime's `HIDE_ON_MOUSE_MOVE`, `HIDE_ON_MOUSE_MOVE_AWAY`, `KEEP_ON_SELECTION_MODIFIED`.

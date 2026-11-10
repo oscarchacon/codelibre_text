@@ -142,8 +142,8 @@ fn show_image(ui: &mut egui::Ui, image: &entities::minihtml::Image, html: &HtmlV
     Some(ui.add(egui::Image::new(&texture).fit_to_exact_size(size).sense(Sense::CLICK)))
 }
 
-/// The texture of an image, decoded once (kept in egui's memory by `src`).
-fn texture(ctx: &egui::Context, src: &str, bytes: &[u8]) -> Option<TextureHandle> {
+/// The texture of an image, decoded once (kept in egui's memory by `src`). Also the gutter's icons.
+pub fn texture(ctx: &egui::Context, src: &str, bytes: &[u8]) -> Option<TextureHandle> {
     let id = egui::Id::new(("minihtml_image", src));
     if let Some(cached) = ctx.data(|d| d.get_temp::<Option<TextureHandle>>(id)) {
         return cached;

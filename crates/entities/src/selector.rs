@@ -3,7 +3,10 @@
 
 /// How well `selector` matches `scope` (space-separated scope names, outermost first): 0 when it
 /// does not. `,` or `|` separate alternatives, ` - ` excludes, a space means a scope inside the
-/// previous one. Deeper and longer matches score more. An empty selector matches everything.
+/// previous one. The score is Sublime's (reverse-engineered from sublimehq/sublime_text#2152): each
+/// selector element adds, at the 3-bit slot of the scope element it matched, the number of its
+/// dotted parts that matched (at most 7). So `a` on `a` is 8, `a` on `x a` is 64. An empty
+/// selector matches everything with 1.
 pub fn score_selector(scope: &str, selector: &str) -> u64 {
     let scopes: Vec<&str> = scope.split_whitespace().collect();
     let selector = selector.replace(['(', ')'], " ");
@@ -30,21 +33,40 @@ pub fn matches_selector(scope: &str, selector: &str) -> bool {
     score_selector(scope, selector) > 0
 }
 
-/// Every element of `path` matches a scope after the one the previous element matched.
+/// Every element of `path` matches a scope after the one the previous element matched, each one
+/// at the leftmost scope that matches it (Sublime does not backtrack). The score is 64 bits: the
+/// slot of a scope element is its 1-based position, which Sublime caps at 20.
 fn path_score(scopes: &[&str], path: &str) -> u64 {
-    let mut score = 0u64;
-    let mut position = 0;
     let mut elements = path.split_whitespace().peekable();
     if elements.peek().is_none() {
         return 1;
     }
+    let mut score = 0u64;
+    let mut position = 0;
     for element in elements {
-        let found = scopes[position..].iter().position(|s| *s == element || s.strip_prefix(element).is_some_and(|r| r.starts_with('.')));
-        let Some(offset) = found else { return 0 };
+        let found = scopes[position..].iter().enumerate().find_map(|(offset, scope)| match element_score(scope, element) {
+            0 => None,
+            matched => Some((offset, matched)),
+        });
+        let Some((offset, matched)) = found else { return 0 };
         position += offset;
-        let depth = element.matches('.').count() as u64 + 1;
-        score = score.saturating_add(depth << (3 * position.min(20)));
+        score = score.wrapping_add(matched << (3 * (position + 1).min(20)));
         position += 1;
     }
     score
+}
+
+/// How many of the dotted parts of `element` match the start of `scope` (`source.python` on
+/// `source.python.x` is 2), at most 7; 0 when the first part differs or `element` has more parts
+/// than `scope`.
+fn element_score(scope: &str, element: &str) -> u64 {
+    let mut scope_parts = scope.split('.');
+    let mut matched = 0;
+    for part in element.split('.') {
+        if scope_parts.next() != Some(part) {
+            return 0;
+        }
+        matched += 1;
+    }
+    matched.min(7)
 }

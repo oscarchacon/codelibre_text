@@ -85,7 +85,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | Sublime command names | Built-in subset (`save`, `show_overlay`, `toggle_comment`, `run_macro_file`, `open_url`, …) |
 | Python plugins (`.py`) | Partial: `TextCommand`, `WindowCommand` and `ApplicationCommand` run in a separate plugin host (a Python 3.13 comes inside the installers: no download). Event listeners, timers, quick / input panels, dialogs, resources, output panels, build systems, projects, completions, popups, phantoms, regions, statuses, split layouts and windows work; Package Control installs from Tools > Install Package Control… (needs `curl`) and manages the whole package lifecycle — see [docs/plugins.md](docs/plugins.md) |
 | Build systems (`.sublime-build`) | `build`, `exec`, variants, `cancel_build`, results (`next_result`) |
-| `.sublime-package` archives | Yes: unpacked to a cache and read like folders; loose files override them. Of the packages Sublime ships, syntaxes are left out (syntect has its own) |
+| `.sublime-package` archives | Yes: unpacked to a cache and read like folders; loose files override them. Of the packages Sublime ships, their syntaxes are only parents for `extends` (syntect has its own) |
 
 ### Keyboard shortcuts (Sublime Text defaults)
 | Shortcut | Action |

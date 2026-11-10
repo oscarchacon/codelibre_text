@@ -12,7 +12,7 @@ auto-complete and plugins' completions, groups and layouts; 2026-11-06 local cha
 packages and `revert_package` tried, event commands on the view that asked, `move` by pages / stops / sub-words and
 `move_to brackets`, Tools > Build System, region annotations). 2026-11-06: the checkboxes and "missing" lists were
 checked against the code (clones, windows, completions, phantoms, groups and `reload_plugin` are done; scopes only lack
-exact score values and whole-file scans); the rest of B and phase C below are the pending work, in order. Also on
+`extract_scope`'s exact extent and whole-file scans; `score_selector` values are Sublime's since 2026-11-09); the rest of B and phase C below are the pending work, in order. Also on
 2026-11-06: projects (`project_data`, `$project*`, project builds), `create_io_panel` with its `on_input` field,
 `window.symbol_locations` and the `lookup_*` functions, `PERSISTENT` regions in the session, `set_overwrite_status`,
 `new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`; `compat.py` (the
@@ -117,7 +117,8 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
 - Plugins load from every package folder with top-level `.py` files (ours and, with `import_sublime_packages`,
   Sublime's, except its `Default`), each package imported as a Python package so relative imports work.
 - Settings: `python_plugins` (default true), `python_interpreter` (default: the Python 3.13 bundled with the editor,
-  else `py -3.13`, `python3.13`, `py -3`, `python3`, `python`, `uv python find`).
+  else `py -3.13`, `python3.13`, `py -3`, `python3`, `python`, `uv python find`; 3.8 or newer, and the host says so
+  when an older one is set).
 - Output and tracebacks go to the console (`Ctrl+\``, View > Show Console); load errors also go to Help > Package Load Errors.
   Load errors, plugin command failures, a dead host and Package Control install failures are also written, with
   their UTC time, to the error log (`data\Local\Errors.log`, Help > Error Log; `Editor::record_errors`), and
@@ -295,7 +296,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       (the color scheme's rule, or a built-in color for `region.<color>ish`): filled and outlined unless
       `DRAW_NO_FILL` / `DRAW_NO_OUTLINE`, solid / stippled / squiggly underlines, `DRAW_EMPTY` as a bar,
       `DRAW_EMPTY_AS_OVERWRITE` as a block, `HIDDEN` not drawn; `dot` / `circle` / `bookmark` icons in the gutter
-      (any other icon is a dot). `PERSISTENT` sets go to the session (`SessionDocument::regions`) and come back with
+      (any other name is a dot). An icon that is a resource (`Packages/GitGutter/icons/inserted.png`, also without
+      `.png`; its `@2x` picture first) is read once (`Editor::region_icon`, also inside zipped packages) and drawn at
+      0.8 of the line's height, tinted with the region's color (white icons take it: SublimeLinter's `colorize`
+      gutter themes, GitGutter's scopes). The gutter grows a column for icons while some region set has one. `PERSISTENT` sets go to the session (`SessionDocument::regions`) and come back with
       the file.
 - [x] Regions move with every edit, also the widget's: `add_regions` keeps a copy of the text, compared in
       `Document::note_text_changed`. An edit with several selections is one change from the first caret to the
@@ -305,7 +309,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
       lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
-- [ ] Regions, still missing: icon files, the minimap.
+- [ ] Regions, still missing: the minimap. Icons are tinted with the color scheme's foreground when their scope
+      has no color (Sublime's exact rule for untinted icons was not checked).
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
       a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are unpacked, above.
@@ -329,9 +334,50 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       install `Packages`, Sublime's `Installed Packages`, our `Installed Packages`. Sublime's `Default` and `Package
       Control` are not imported (the first targets its core; the second uses the network at load: it runs only from our
       own `Installed Packages`). Names that climb out of the package are not written.
-- [x] Of what Sublime ships, syntaxes and `tests/` are left out (`ArchiveFolder::shipped`): syntect cannot load most of
-      them (`extends`, `branch_point`: 124 errors) and has its own for those languages. Packages the user installed
-      do load their syntaxes. The first start unpacks them (about 11 s in a debug build, in the window's thread).
+- [x] Of what Sublime ships, `tests/` are left out (`ArchiveFolder::shipped`). Its syntaxes are unpacked but not loaded:
+      they are the parents of the packages' `extends` (syntect has its own for those languages). Packages the user
+      installed do load their syntaxes. The first start unpacks them (about 11 s in a debug build).
+- [x] **Unpacking at startup does not block the window** (2026-11-10; tests and clippy pass, the manual run with an
+      empty `Cache/Packages` is still to do): `Editor::start` asks the gateway to unpack in a thread (`ResourceGateway::start_unpacking`,
+      `SublimeResourceGateway::with_background_unpacking` in `compose()`), loads the packages from what the cache has
+      and says "Unpacking the installed packages…"; `Editor::poll_unpacking` (every frame in `app.rs`) loads them again
+      when the thread unpacked or removed something. A normal start changes nothing and loads once. While it runs,
+      `load_packages` leaves the archives alone (two unpackings would write the same folders) and the packages are
+      loaded again at the end. Later reloads unpack in the window's thread as before (one package: milliseconds; only
+      turning `import_sublime_packages` on in a running editor unpacks everything there). Each package is unpacked to
+      `Cache/Packages/<kind>.staging/<name>` and renamed into place, so nobody reads half a package. Without a waker
+      (the tests' gateways) `start_unpacking` answers false and everything is synchronous, as before. Tests:
+      `use_cases/tests/packages.rs` (three, with `World`'s `background_unpacking` / `unpacked`) and
+      `interface_adapters/tests/package_archives.rs` (`unpack_all`'s answer, the thread and its waker).
+- [x] **`.sublime-syntax` version 2** (`sublime_syntax.rs`, 2026-11-09): syntect reads version 1 only, so before it reads
+      a package's syntax, `extends` (one parent or a list, merged: a child's context replaces the parent's of the same
+      name, `meta_prepend` / `meta_append` add to it), `branch_point` / `branch` (the first alternative is pushed; syntect
+      cannot go back in the text, so a later alternative is not tried) and `fail` (a pop) are rewritten, and the file is
+      written back in flow YAML. Syntaxes without those keys go to syntect untouched. A parent without a folder
+      (`extends: HTML (Plain).sublime-syntax`) is read next to the child, as Sublime does. Tests:
+      `extends_takes_the_parents_contexts_and_branches_take_their_first_alternative` and
+      `extends_without_a_folder_is_read_next_to_the_child` (`frameworks/tests/syntax_engine.rs`). Checked against
+      `sublimehq/Packages` (`the_official_syntaxes_load`, `CODELIBRE_TEST_SYNTAX_PACKAGES`): 168 of 169 load, the
+      other is ActionScript, whose scope names overflow syntect's 16-bit table (it has no `extends`).
+- [x] **syntect panicked on Markdown code fences** (found and fixed 2026-11-09, MarkdownEditing from Package Control): its
+      `fenced_code_block_end` repeats `(?:\2)*` and `\2` captures nothing for some fences; the expanded `(?:)*` is
+      rejected by the regex engine and syntect panicked ("regex string should be pre-tested"), in the window's thread.
+      Fixed by patching syntect: `vendor/syntect` (5.3.0 with one change, `[patch.crates-io]` in the workspace
+      `Cargo.toml`, see `vendor/syntect/PATCHES.md`). Tests: `a_backreference_to_an_empty_capture_can_be_repeated` and `a_code_fence_embeds_its_language_even_with_an_empty_capture_in_its_closing_pattern` (`frameworks/tests/syntax_engine.rs`).
+      `package_control_installs_the_listed_packages_at_start` passes (3 runs, 0 load errors).
+      Checked on the real MarkdownEditing: the code inside a fence gets `source.python` scopes, the closing fence is
+      recognized, and the text after it is a paragraph again. So no rewrite of that package's syntax is needed (it would
+      have been a workaround for one package, which the patch already covers for every package).
+- [x] **Protection against syntect panics** (2026-11-09, `syntax_engine.rs::guard`): every highlighted line runs under
+      `catch_unwind`. A panic leaves the rest of that document plain (base scope, no colors) instead of closing the
+      editor, and the message goes to the error log next poll (`SyntaxGateway::take_failures`, `Editor::poll_syntax_failures`
+      every frame, Help > Error Log). The backtrace of a line (`context_backtrace`) is guarded too. The panic message still
+      goes to stderr, from Rust's default hook. Tested through `guard` only: no real syntect panic is left to trigger it
+      (the one found is patched above).
+- [ ] syntect, still open: the scope-name table is 16 bits per name, so a process that loads many syntaxes can run out
+      (`Too many atoms`): ActionScript alone does it with syntect's own syntaxes loaded. Sublime ships it, so the app
+      only reads it as a parent, but a user copy of such a package would fail the same way. The fix is a wider `Scope`
+      in syntect (its packing into two `u64`), which is more than a patch of the parser.
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
       would take every key) and their plugins are not loaded. A change reloads the packages (Package Control's
       disabling, below).
@@ -368,10 +414,14 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       one Package Control installs comes first. To update it, replace `__init__.py`, `core.py`, `cacert.pem`
       and `LICENSE` with those of the latest wheel (`pip download certifi --no-deps`).
 - [x] **Removed names**: `assets/python/compat.py`, applied before any plugin is imported: the `collections` ABCs (3.10),
-      `inspect.getargspec` / `formatargspec` (3.11), `unittest`'s CamelCase methods, `configparser.SafeConfigParser` /
+      `inspect.getargspec` / `formatargspec` (3.11), `unittest`'s CamelCase methods, `assertDictContainsSubset`,
+      `assertItemsEqual`, `getTestCaseNames`, `makeSuite` / `findTestCases`, `configparser.SafeConfigParser` /
       `readfp` and `ssl.wrap_socket` / `match_hostname` (3.12), `cgi.escape` / `unescape` / `parse_qs` (3.8), `time.clock`
-      (3.8), `typing.ByteString` / `io` / `re` (3.13 / 3.14), `threading`'s old names (3.9) and `pkgutil.ImpImporter` /
-      `find_loader` / `get_loader` (3.12); `asyncio.get_event_loop()` makes a loop again as in 3.8 (3.14).
+      (3.8), `typing.ByteString` / `io` / `re` (3.13 / 3.14), `threading`'s old names (3.9), `pkgutil.ImpImporter` /
+      `find_loader` / `get_loader` (3.12), `asyncio.coroutine` (3.11) and `fractions.gcd` (3.9);
+      `asyncio.get_event_loop()` makes a loop again as in 3.8 (3.14). (`Task.all_tasks` /
+      `current_task`, gone in 3.9, are the C type's and cannot be added; the module functions
+      are the replacements.)
       `importlib.metadata.entry_points()` answers by group again (`.get`, `[group]`, `keys`), as 3.8's dict did, and takes
       `group=` on 3.9: Markdown needs both.
 - [x] **Python 3.13 bundled** (2026-11-06): every installer carries its Python, so plugins and Package Control work
@@ -391,7 +441,9 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       first (also in the Mac folders a Finder-opened app's `PATH` lacks), then `python3`; `sublime.version()` reports the
       build whose host runs that Python (4203 for 3.14+, 4201 for 3.13, else 4200) and `compat.py` covers Apple's
       `/usr/bin/python3` (3.9 with LibreSSL: `allow_post_handshake_auth`).
-- [ ] Python 3.3 / 3.8 hosts: not bundled; every package runs on the one Python. `.python-version` is not read;
+- [ ] Python 3.3 / 3.8 hosts: not bundled; every package runs on the one Python (3.13 when the bundled one is
+      found, else 3.8 or newer: `compat.py` fills in the standard library names those versions had, so code written
+      for 3.8 runs unchanged). `.python-version` is not read;
       `"disable_plugin_host_3.3": true` makes Package Control install every package's libraries for it.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
@@ -478,6 +530,19 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       it, the syntax's resource (`SyntaxGateway::syntax_path`; built-in ones get Sublime's path, `Packages/Text/Plain
       text.tmLanguage`), so plugins can take its file name; setting it changes the view's syntax. Without it Pretty
       JSON formatted and then failed (`os.path.basename(None)`).
+- [x] **Context menus** (2026-11-09): `Context.sublime-menu` (right click on the text), `Side Bar.sublime-menu` (a
+      file or folder; a top folder adds `Side Bar Mount Point.sublime-menu`) and `Tab Context.sublime-menu` (a tab, or
+      an open file of the side bar), merged across packages like the main menu (`ContextMenus`, built-in ones in
+      `assets/Default/`). The arguments a menu gives are filled as in Sublime (`ContextMenuTarget::fill`): `files`,
+      `dirs`, `paths` in the side bar, `group` / `index` in a tab. When one opens (`UiEvent::ContextMenu`, kept in
+      `ViewState::context_menu`) its plugin commands are asked about with those arguments (`is_visible(paths)`…), and
+      a text command whose `want_event()` is true gets `event` (`{"x", "y", "modifier_keys"}`, the clicked char in the
+      8×16 layout `window_to_text` reads). A right click on another group's text focuses it; the caret does not
+      move. Built-in commands for them: `close_by_index`, `close_others_by_index`, `close_to_right_by_index`,
+      `remove_folder {"dirs"}`, `open_containing_folder {"files"|"paths"}`. Missing: `Widget Context`, the menus of
+      the find / output panels and the gutter, `modifier_keys` (always empty), Sublime's side bar commands
+      (`new_file_at`, `rename_path`, `delete_file`, `new_folder`, `delete_folder`, `find_in_folder`: plugins
+      that define them, like SideBarEnhancements, work), several selected side bar entries.
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).
@@ -495,6 +560,14 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `scope_style`, `SyntaxEngine`: syntect's `style_mod_for_stack` on the whole scope stack): globals and a scope's
       `foreground`, `background` (when a rule sets one), `bold` / `italic` / `underline`, as `#rrggbb` or `#rrggbbaa`.
       The `source_*` keys are empty; the global `color_scheme`, not a view's own.
+- [x] **`sublime.ui_info()`**: the UI style (`dark` / `light`, from the color scheme's background) and
+      `color_scheme.palette` (`SyntaxGateway::scheme_palette`: the scheme's globals plus `redish`, `orangish`…, the
+      closest color it defines for each hue). Terminus' `adaptive` theme reads both.
+- [x] **Color scheme patches**: a `.sublime-color-scheme` whose file name matches one already loaded
+      (MarkdownEditing's and LSP's `Monokai`, a customization in `Packages/User`) merges into it: its globals override
+      and its rules are appended, as Sublime does (`SyntaxEngine::merge_theme`). A `.tmTheme` with the same name replaces
+      instead. Gap: overriding a variable of the base scheme does not recolor the base's rules, since each file's colors
+      are resolved on their own.
 - [x] **`view.export_to_html`** (`use_cases/src/html_export.rs`): the regions asked for (or the whole view) as HTML,
       each run in a `<span>` with the scheme's color, background and bold / italic / underline; a `<pre>` keeps the
       lines and spaces; `enclosing_tags` adds the `<div>` with the background color (and `font_size` / `font_family`);
@@ -504,7 +577,13 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       deprecated `lookup_symbol_in_index` / `_in_open_files`, `lookup_references_in_index` / `_in_open_files`) search
       the open files (`use_cases/src/scopes.rs::symbol_locations`); the index on disk is not kept, so `INDEX` answers
       the saved open files.
-- [ ] Scopes, still missing: Sublime's exact `extract_scope` and score values; `find_by_selector` and `extract_scope`
+- [x] **`score_selector` values** (2026-11-09, `entities/src/selector.rs`): Sublime's algorithm, as reverse-engineered in
+      sublimehq/sublime_text#2152 (leftmost match per selector element, 3 bits per scope position, at most 7 dotted parts
+      per element, 64 bits). `score_selector('a', 'a') == 8`, `('x a', 'a') == 64`, `('s a b a b a', 'b') == 512`, all
+      checked in `entities/tests/selector.rs`. It is a reconstruction, not Sublime's source: the parentheses are still
+      ignored, not grouped. This changes which `.tmPreferences` entry wins among several (`meta_info`).
+- [ ] Scopes, still missing: Sublime's exact `extract_scope`: no specification found (Sublime's own issue #2674 reports
+      it off by one in some cases), so it stays as a close approximation. `find_by_selector` and `extract_scope` still
       parse the whole file every call.
 - [x] **Completions** (`use_cases/src/completions.rs`, `entities/src/completion.rs`, drawn by `editor_view.rs`): the
       auto-complete list opens while typing a word where `auto_complete_selector` matches (or a character of
@@ -575,7 +654,10 @@ opens Preferences > Package Settings > Package Control > Settings. `package_cont
 (same file, `-- --ignored`, needs the network, runs third-party code) installs MarkdownPreview, runs its command, upgrades
 and removes it; `CODELIBRE_TEST_PACKAGE`, `CODELIBRE_TEST_COMMAND` and `CODELIBRE_TEST_ARGS` try another package.
 `package_control_installs_the_listed_packages_at_start` installs 18 popular packages (or `CODELIBRE_TEST_PACKAGES`,
-comma-separated) and fails on any plugin load error: the way to find what the next package needs.
+comma-separated) and fails on any load error, syntaxes included: the way to find what the next package needs. It needs
+`Package Control.sublime-package` in the Sublime data folder, or in `CODELIBRE_TEST_SUBLIME_DATA` (a folder of your own,
+so no test writes to the real profile); the packages of the Package Control run need the network. A panic from
+syntect in that run is the open Markdown item above.
 `package_control_upgrades_itself_then_the_other_packages` checks `upgrade_all_packages`.
 `package_control_installs_from_local_repositories_and_channels` (no network) checks `add_repository`, `add_channel`,
 unpacked packages and `revert_package`. `package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,

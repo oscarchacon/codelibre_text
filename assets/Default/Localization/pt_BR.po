@@ -649,6 +649,10 @@ msgid "Clipboard unavailable: {error}"
 msgstr "Área de transferência indisponível: {error}"
 
 #: crates/use_cases/src/editor.rs
+msgid "Unpacking the installed packages…"
+msgstr "Descompactando os pacotes instalados…"
+
+#: crates/use_cases/src/editor.rs
 msgid "{count} package resource failed to load (Help > Package Load Errors)"
 msgid_plural "{count} package resources failed to load (Help > Package Load Errors)"
 msgstr[0] "{count} recurso de pacote não pôde ser carregado (Ajuda > Erros ao carregar pacotes)"
@@ -1198,3 +1202,19 @@ msgstr "{name} não é um projeto: precisa ser um objeto"
 #: crates/use_cases/src/project.rs
 msgid "Could not save {name}: {error}"
 msgstr "Não foi possível salvar {name}: {error}"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Open Containing Folder…"
+msgstr "Abrir pasta de origem…"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close"
+msgstr "Fechar"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Others"
+msgstr "Fechar as outras"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Tabs to the Right"
+msgstr "Fechar abas à direita"

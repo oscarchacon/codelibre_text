@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use entities::document::DocumentId;
 use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
-use entities::menu::{MenuItem, PaletteCommand};
+use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
@@ -35,8 +35,8 @@ pub struct ArchiveFolder {
     pub unpacked: PathBuf,
     /// It belongs to Sublime Text, so it follows `import_sublime_packages`.
     pub sublime: bool,
-    /// The packages that come with Sublime Text. Their syntaxes use features the syntax engine
-    /// lacks (it has its own for those languages), so they are left out.
+    /// The packages that come with Sublime Text. Their tests are left out; their syntaxes are
+    /// only parents for the packages' `extends`, the engine has its own for those languages.
     pub shipped: bool,
 }
 
@@ -189,6 +189,8 @@ pub trait ErrorLogGateway {
 pub struct UiResources {
     pub keymap: Keymap,
     pub main_menu: Vec<MenuItem>,
+    /// The right-click menus (`Context`, `Side Bar`, `Side Bar Mount Point`, `Tab Context`).
+    pub context_menus: ContextMenus,
     pub palette: Vec<PaletteCommand>,
 }
 
@@ -223,6 +225,14 @@ pub trait ResourceGateway {
     fn load_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Vec<u8>, String>;
     /// Unpacks the `.sublime-package` files that changed. Problems are appended to `errors`.
     fn unpack_packages(&self, include_sublime_packages: bool, errors: &mut Vec<String>);
+    /// The same, without waiting for it (the first start unpacks everything Sublime Text ships,
+    /// which takes seconds). False when the gateway does not do that: the caller then unpacks
+    /// with [`ResourceGateway::unpack_packages`].
+    fn start_unpacking(&self, include_sublime_packages: bool) -> bool;
+    /// `None` while the unpacking [`ResourceGateway::start_unpacking`] began goes on; once when
+    /// it ends, whether the packages are to be loaded again (some were unpacked or removed, or
+    /// one failed, which loading reports).
+    fn poll_unpacking(&self) -> Option<bool>;
     /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
     fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
     /// The packages' `.tmPreferences` (TextMate metadata: `shellVariables`, symbol lists…), in
@@ -289,6 +299,10 @@ pub trait SyntaxGateway {
     fn syntax_infos(&self) -> Vec<SyntaxInfo>;
     /// The document was closed; cached data about it can go.
     fn forget(&self, document: DocumentId);
+    /// Highlighting that failed since the last call (syntect panicked and the text went plain), for the error log.
+    fn take_failures(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// A color scheme's global colors (`foreground`, `background`, `caret`, `selection`…), as
     /// `"#rrggbb"` (or `"#rrggbbaa"` when not opaque): Sublime's `view.style()`.
     fn scheme_style(&self, scheme: &str) -> serde_json::Map<String, Value>;
@@ -296,6 +310,12 @@ pub trait SyntaxGateway {
     /// `foreground` (the scheme's if no rule sets it), `background` when a rule sets it, and
     /// `bold` / `italic` / `underline` when true: Sublime's `view.style_for_scope()`.
     fn scope_style(&self, scheme: &str, scope: &str) -> serde_json::Map<String, Value>;
+    /// The palette Sublime derives from a color scheme (`ui_info()["color_scheme"]["palette"]`):
+    /// its global colors and `redish`, `orangish`…, the closest color it defines for each hue.
+    fn scheme_palette(&self, scheme: &str) -> serde_json::Map<String, Value> {
+        let _ = scheme;
+        serde_json::Map::new()
+    }
 }
 
 /// Hot-exit storage.

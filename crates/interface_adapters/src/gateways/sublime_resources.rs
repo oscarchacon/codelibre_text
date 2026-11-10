@@ -1,11 +1,14 @@
 //! [`ResourceGateway`] for Sublime Text's settings, key bindings, menus and command palette files.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::Arc;
 
 use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo, Keymap};
 use entities::localization::{normalize_language_code, Catalog, Language};
-use entities::menu::{merge_menu, MenuItem, PaletteCommand};
+use entities::menu::{merge_menu, ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
@@ -17,15 +20,27 @@ use super::{builtin_resources, package_archives, plist, po_file, sublime_json};
 
 const PREFERENCES: &str = "Preferences.sublime-settings";
 
+type Waker = Arc<dyn Fn() + Send + Sync>;
+
 pub struct SublimeResourceGateway {
     paths: PackagePaths,
     system_language: Option<String>,
+    waker: Option<Waker>,
+    /// Answers once when the thread of `start_unpacking` ends.
+    unpacking: RefCell<Option<Receiver<bool>>>,
 }
 
 impl SublimeResourceGateway {
     pub fn new(paths: PackagePaths) -> Self {
         let _ = std::fs::create_dir_all(paths.user_dir());
-        Self { paths, system_language: None }
+        Self { paths, system_language: None, waker: None, unpacking: RefCell::new(None) }
+    }
+
+    /// Makes `start_unpacking` unpack in a thread, which runs `waker` when it ends so the
+    /// window loads the packages at once. Without it the packages are unpacked when loaded.
+    pub fn with_background_unpacking(mut self, waker: Waker) -> Self {
+        self.waker = Some(waker);
+        self
     }
 
     /// The operating system's language, read by the caller (it is not a file).
@@ -105,14 +120,24 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
 
-        let mut main_menu = Vec::new();
-        for (origin, text) in self.sources(include_sublime, builtin_resources::MAIN_MENU, |n| n == "Main.sublime-menu") {
-            match sublime_json::parse(&text) {
-                Ok(Value::Array(items)) => merge_menu(&mut main_menu, items.iter().filter_map(parse_menu_item).collect()),
-                Ok(_) => {}
-                Err(e) => errors.push(format!("{origin}: {e}")),
+        let mut menu = |builtin: &str, file: &str| {
+            let mut menu = Vec::new();
+            for (origin, text) in self.sources(include_sublime, builtin, |n| n == file) {
+                match sublime_json::parse(&text) {
+                    Ok(Value::Array(items)) => merge_menu(&mut menu, items.iter().filter_map(parse_menu_item).collect()),
+                    Ok(_) => {}
+                    Err(e) => errors.push(format!("{origin}: {e}")),
+                }
             }
-        }
+            menu
+        };
+        let main_menu = menu(builtin_resources::MAIN_MENU, "Main.sublime-menu");
+        let context_menus = ContextMenus {
+            text: menu(builtin_resources::CONTEXT_MENU, "Context.sublime-menu"),
+            side_bar: menu(builtin_resources::SIDE_BAR_MENU, "Side Bar.sublime-menu"),
+            mount_point: menu(builtin_resources::MOUNT_POINT_MENU, "Side Bar Mount Point.sublime-menu"),
+            tab: menu(builtin_resources::TAB_CONTEXT_MENU, "Tab Context.sublime-menu"),
+        };
 
         let mut palette = Vec::new();
         for (origin, text) in self.sources(include_sublime, builtin_resources::PALETTE_COMMANDS, |n| {
@@ -125,7 +150,7 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
 
-        UiResources { keymap, main_menu, palette }
+        UiResources { keymap, main_menu, context_menus, palette }
     }
 
     fn read_user_settings(&self) -> Map<String, Value> {
@@ -252,6 +277,34 @@ impl ResourceGateway for SublimeResourceGateway {
 
     fn unpack_packages(&self, include_sublime: bool, errors: &mut Vec<String>) {
         package_archives::unpack_all(&self.paths, include_sublime, errors);
+    }
+
+    fn start_unpacking(&self, include_sublime: bool) -> bool {
+        let Some(waker) = self.waker.clone() else {
+            return false;
+        };
+        let (sender, finished) = channel();
+        let paths = self.paths.clone();
+        std::thread::spawn(move || {
+            let mut errors = Vec::new();
+            let changed = package_archives::unpack_all(&paths, include_sublime, &mut errors);
+            let _ = sender.send(changed || !errors.is_empty());
+            waker();
+        });
+        *self.unpacking.borrow_mut() = Some(finished);
+        true
+    }
+
+    fn poll_unpacking(&self) -> Option<bool> {
+        let mut unpacking = self.unpacking.borrow_mut();
+        let reload = match unpacking.as_ref()?.try_recv() {
+            Ok(reload) => reload,
+            Err(TryRecvError::Empty) => return None,
+            // The thread is gone without an answer: loading unpacks what it left.
+            Err(TryRecvError::Disconnected) => true,
+        };
+        *unpacking = None;
+        Some(reload)
     }
 
     fn load_json_resource(&self, name: &str, include_sublime: bool) -> Result<Value, String> {

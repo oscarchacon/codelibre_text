@@ -22,14 +22,18 @@ impl Editor {
     pub fn load_packages(&mut self) {
         let mut errors = Vec::new();
         // First, since unpacked packages have settings too.
-        let import_sublime = self.gateways.resources.read_user_settings().get("import_sublime_packages").and_then(|v| v.as_bool());
-        self.gateways.resources.unpack_packages(import_sublime.unwrap_or(true), &mut errors);
+        if self.state.unpacking {
+            self.state.loaded_while_unpacking = true;
+        } else {
+            self.gateways.resources.unpack_packages(self.unpacks_sublime_packages(), &mut errors);
+        }
         self.state.settings = self.gateways.resources.load_settings(&mut errors);
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
 
         let resources = self.gateways.resources.load_ui_resources(include_sublime, &mut errors);
         self.state.keymap = resources.keymap;
         self.state.main_menu = resources.main_menu;
+        self.state.context_menus = resources.context_menus;
         self.state.palette = resources.palette;
         self.state.completion_sets = None;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
@@ -47,6 +51,37 @@ impl Editor {
         self.state.installed_packages = self.installed_packages_stamp();
         self.state.installed_packages_changed = None;
         self.state.ignored_packages = self.global_settings().get("ignored_packages").cloned();
+    }
+
+    /// `import_sublime_packages` as the user set it: the settings of the packages are not
+    /// loaded before they are unpacked.
+    fn unpacks_sublime_packages(&self) -> bool {
+        let setting = self.gateways.resources.read_user_settings().get("import_sublime_packages").and_then(|v| v.as_bool());
+        setting.unwrap_or(true)
+    }
+
+    /// Startup: the `.sublime-package` files are unpacked in the background when the gateway
+    /// can (the first start unpacks everything Sublime Text ships, which takes seconds), and
+    /// the packages load meanwhile from what was unpacked before;
+    /// [`Editor::poll_unpacking`] loads them again when it ends, if something changed.
+    pub(crate) fn start_unpacking(&mut self) {
+        self.state.unpacking = self.gateways.resources.start_unpacking(self.unpacks_sublime_packages());
+    }
+
+    /// Picks up the end of the unpacking the startup began (cheap to call every frame), and
+    /// loads the packages again when it unpacked or removed some, or when they were loaded
+    /// meanwhile for another reason (an archive that arrived since may have been missed).
+    pub fn poll_unpacking(&mut self) {
+        if !self.state.unpacking {
+            return;
+        }
+        let Some(changed) = self.gateways.resources.poll_unpacking() else {
+            return;
+        };
+        self.state.unpacking = false;
+        if std::mem::take(&mut self.state.loaded_while_unpacking) || changed {
+            self.reload_packages();
+        }
     }
 
     /// Package Control disables and enables packages (Disable / Enable Package, and around an
