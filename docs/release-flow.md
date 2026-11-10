@@ -11,7 +11,8 @@ the rules they share in [`.github/scripts`](../.github/scripts).
 | `feat/<name>`, `fix/<name>`… | `develop` | `develop` (pull request) | One change. |
 | `develop` | — | `release/<version>` (pull request) | The next release, always buildable. |
 | `release/<version>` | `main` | `main` (automatic) | One version being built: its name is the version. |
-| `main` | — | (source of every `release/<version>`) | The released versions. |
+| `staging` | — | (pull requests only) | QA: tests a release before it reaches `main`. Its tag `to-main/<version>` takes that version to `main`. |
+| `main` | — | (source of every `release/<version>`) | The released versions. Only `to-main.yml` writes to it. |
 
 A version is `X.Y.Z` (final) or `X.Y.Z-<pre>`: `-alpha.N`, `-beta.N`, `-rc.N`. More parts may follow
 `X.Y.Z` (`0.1.3.1-alpha`, `0.1.3.1.hotfix`): installers, tags and the release keep that name, while
@@ -64,8 +65,9 @@ gitGraph
    uploads them to a **draft** GitHub Release `v<version>`. Pushing again to `release/<version>` (a fix
    merged into it) rebuilds and replaces the files.
 5. **To `main`.** When every installer is uploaded and the version goes to `main` (below), `to-main.yml`
-   commits the version to `Cargo.toml` (`chore: release <version>`) and merges `release/<version>`
-   straight into `main`. `develop` never goes into `main`. A build that fails never reaches `main`.
+   commits the version to `Cargo.toml` (`chore: release <version>`), merges `release/<version>` into
+   `main` and pushes it, without a pull request: nothing else can write to `main` (see Rulesets).
+   `develop` never goes into `main`. A build that fails never reaches `main`.
 6. **Publish** the draft release by hand on GitHub (Releases), which creates the tag `v<version>`.
 
 *(TODO: merge `main` back into `develop` after a release, so the `chore: release` commits of
@@ -78,17 +80,15 @@ request's description:
 
 | Version | Goes to `main` |
 |---|---|
-| Final (`0.2.0`) | Yes |
-| Release candidate (`0.2.0-rc.1`) | Yes |
-| Alpha / beta (`0.2.0-alpha.1`, `0.2.0-beta.2`) | Yes for now, while `PRERELEASES_TO_MAIN` is `true` *(TODO: `false`, then only with a tag)* |
-| Any version with a tag `to-main/<version>` or `main/<version>` | Yes |
+| Final (`0.2.0`, `0.2.0.1`) | Yes, always |
+| Release candidate, alpha, beta (`0.2.0-rc.1`, `0.2.0-alpha.1`, `0.2.0-beta.2`) | Only with a tag `to-main/<version>` or `main/<version>` |
 
 ## Tags
 
 | Tag | Push it on | What it does |
 |---|---|---|
 | `open-release/<version>` | `develop` | Creates `release/<version>` from `main` and the pull request from `develop` into it. |
-| `to-main/<version>` (or `main/<version>`) | `develop` or `release/<version>` | Takes that version to `main`, whatever its kind. Any time: before the pull request, while it is open (its description then says *main*), before the build (merged when it ends) or after it (merged at once). |
+| `to-main/<version>` (or `main/<version>`) | `develop`, `staging` or `release/<version>` | Takes that version to `main`, whatever its kind. Any time: before the pull request, while it is open (its description then says *main*), before the build (merged when it ends) or after it (merged at once). |
 | `macos-test` (or `macos-test-<anything>`) | the commit pushed | Adds macOS to that push's CI run. Push the branch and the tag together. |
 | `v<version>` | — | Made by GitHub when the draft release is published. Do not push it. |
 
@@ -123,9 +123,29 @@ flowchart TD
   TMW --> DESC
 ```
 
+## Rulesets
+
+Settings → Rules → Rulesets on GitHub:
+
+| Ruleset | Branches | Rules | Bypass |
+|---|---|---|---|
+| Pull requests | `develop`, `staging` | Pull request (0 approvals), checks `test (ubuntu-22.04)` and `test (windows-latest)`, no force push, no deletion | Nobody |
+| Release branches | `release/**` | Pull request (0 approvals), no force push, no deletion | The release identity (`to-main.yml` commits `chore: release` there) |
+| Main | `main` | No updates at all, no force push, no deletion | The release identity only |
+
+No status checks on `main` or `release/**`: the `chore: release` commit is `[skip ci]`, and `release.yml`
+runs the tests before it builds. Branch creation stays open (`open-release.yml` creates the branches).
+
+**The release identity** is a GitHub App installed on this repository only (permissions: Contents and
+Workflows, read and write), so that nobody, the repository's owner included, writes to `main` by hand:
+its id in the variable `RELEASE_APP_ID`, its private key in the secret `RELEASE_APP_PRIVATE_KEY`.
+Without them `to-main.yml` uses `RELEASE_PUSH_TOKEN`, whose owner must then be the bypass instead.
+
 ## Secrets
 
+- `RELEASE_APP_PRIVATE_KEY` (and the variable `RELEASE_APP_ID`): the release identity, above.
 - `RELEASE_PUSH_TOKEN`: a token that can write contents, pull requests and workflows (the default
   token cannot create pull requests nor change workflow files in `main`, and its pushes start no workflow).
+  `open-release.yml` and `release-pr.yml` use it; `to-main.yml` only without the App.
 - `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`: the release key, see [Code signing policy](code-signing.md).
 - *(TODO)* `SONAR_TOKEN`, `SONAR_HOST_URL` for SonarQube.

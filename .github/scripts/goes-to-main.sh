@@ -8,30 +8,19 @@
 #
 # The rules, in order:
 # - a final version (no -alpha, -beta, -rc...) goes to main;
-# - a release candidate (-rc...) goes to main;
-# - other pre-releases (-alpha, -beta...) go to main while PRERELEASES_TO_MAIN is true;
-# - any version goes to main when a tag to-main/<version> or main/<version> exists. It can point at
-#   any commit (develop or release/<version>) and be pushed at any time: before the pull request,
-#   while it is open or after the build (then to-main.yml merges at once).
+# - any other version (-rc, -alpha, -beta...) goes to main only when a tag to-main/<version> or
+#   main/<version> exists. It can point at any commit (develop, staging or release/<version>) and be
+#   pushed at any time: before the pull request, while it is open or after the build (then
+#   to-main.yml merges at once).
 set -euo pipefail
 
 version="${1:?usage: goes-to-main.sh <version>}"
-
-# TODO: set to false once only final versions and release candidates go to main; alpha and beta
-# versions will then need a tag to-main/<version>.
-PRERELEASES_TO_MAIN="${PRERELEASES_TO_MAIN:-true}"
 
 to_main=false
 reason="pre-release: push a tag to-main/$version to take it to main"
 if [[ "$version" != *-* ]]; then
   to_main=true
   reason="final version"
-elif [[ "$version" == *-rc* ]]; then
-  to_main=true
-  reason="release candidate"
-elif [[ "$PRERELEASES_TO_MAIN" == true ]]; then
-  to_main=true
-  reason="pre-release, while PRERELEASES_TO_MAIN is true"
 fi
 
 for tag in "to-main/$version" "main/$version"; do
