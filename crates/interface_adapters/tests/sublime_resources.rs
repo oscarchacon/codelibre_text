@@ -70,6 +70,27 @@ fn bound_command(resources: &UiResources, key: &str) -> Option<String> {
 // ----- settings ------------------------------------------------------------------------------------
 
 #[test]
+fn package_controls_settings_of_sublimes_profile_are_not_adopted() {
+    let packages = Packages::new();
+    packages
+        .sublime_file("User", "Package Control.sublime-settings", r#"{ "installed_packages": ["Emmet"] }"#)
+        .sublime_file("User", "Emmet.sublime-settings", r#"{ "a": 1 }"#)
+        .sublime_file("Package Control", "Package Control.sublime-settings", r#"{ "channels": ["c"] }"#);
+    let gateway = packages.gateway();
+    let mut errors = Vec::new();
+    let settings = gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    assert_eq!(settings.get("installed_packages"), None, "what Sublime has installed is not what we have");
+    assert_eq!(settings.get("channels"), Some(&json!(["c"])), "a package's defaults are read");
+    assert_eq!(gateway.load_settings_file("Emmet.sublime-settings", true, &mut errors).get("a"), Some(&json!(1)), "other packages' are");
+
+    // Ours are read as always.
+    packages.file("User", "Package Control.sublime-settings", r#"{ "installed_packages": ["A"] }"#);
+    let settings = gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    assert_eq!(settings.get("installed_packages"), Some(&json!(["A"])));
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn creating_the_gateway_creates_the_user_package() {
     let packages = Packages::new();
     packages.gateway();

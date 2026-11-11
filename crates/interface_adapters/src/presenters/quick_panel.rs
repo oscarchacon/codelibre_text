@@ -1,3 +1,4 @@
+use entities::minihtml::Span;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
@@ -33,14 +34,21 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewMo
         items: panel
             .results
             .iter()
-            .map(|c| QuickPanelItemViewModel {
-                caption: c.caption.clone(),
-                detail: c.detail.clone(),
-                hint: c.hint.clone(),
-                kind: match (&c.target, plugin_panel) {
-                    (CandidateTarget::PluginItem(item), Some(plugin)) => plugin.items[*item].kind.clone(),
-                    _ => String::new(),
-                },
+            .map(|c| {
+                let plugin_item = match (&c.target, plugin_panel) {
+                    (CandidateTarget::PluginItem(item), Some(plugin)) => plugin.items.get(*item),
+                    _ => None,
+                };
+                QuickPanelItemViewModel {
+                    caption: c.caption.clone(),
+                    details: match plugin_item {
+                        Some(item) => item.details.clone(),
+                        None if c.detail.is_empty() => Vec::new(),
+                        None => vec![vec![Span { text: c.detail.clone(), ..Default::default() }]],
+                    },
+                    hint: c.hint.clone(),
+                    kind: plugin_item.map(|item| item.kind.clone()).unwrap_or_default(),
+                }
             })
             .collect(),
     })

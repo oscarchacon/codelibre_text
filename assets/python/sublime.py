@@ -587,18 +587,18 @@ def _html_text(text):
 
 
 def _quick_panel_item(item):
-    """A quick panel row as ``[caption, detail, hint]``: from a string, a list of strings (the
-    caption, then detail lines), a QuickPanelItem or a ListInputItem."""
+    """A quick panel row as ``[caption, detail lines, hint, kind letter, details are minihtml]``:
+    from a string, a list of strings (the caption, then detail lines of plain text), a
+    QuickPanelItem or a ListInputItem (their details are minihtml, which the editor reads)."""
     if isinstance(item, ListInputItem):
         item = QuickPanelItem(item.text, item.details, item.annotation, item.kind)
     if isinstance(item, QuickPanelItem):
         details = item.details if isinstance(item.details, (list, tuple)) else [item.details]
         letter = item.kind[1] if isinstance(item.kind, (list, tuple)) and len(item.kind) > 1 else ""
-        details = (_html_text(d) for d in details if d)
-        return [str(item.trigger), " · ".join(d for d in details if d), _html_text(item.annotation or ""), letter]
+        return [str(item.trigger), [str(d) for d in details if d], _html_text(item.annotation or ""), letter, True]
     if isinstance(item, (list, tuple)):
-        return [str(item[0]) if item else "", " · ".join(str(d) for d in item[1:] if d), ""]
-    return [str(item), "", ""]
+        return [str(item[0]) if item else "", [str(d) for d in item[1:] if d], "", "", False]
+    return [str(item), [], "", "", False]
 
 
 def active_window():

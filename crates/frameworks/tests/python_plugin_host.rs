@@ -1282,7 +1282,11 @@ class AskCommand(sublime_plugin.WindowCommand):
         args,
         vec![
             json!(1),
-            json!([["plain", "", ""], ["caption", "detail one · detail two", ""], ["item", "a · b", "note", ""]]),
+            json!([
+                ["plain", [], "", "", false],
+                ["caption", ["detail one", "detail two"], "", "", false],
+                ["item", ["a", "b"], "note", "", true]
+            ]),
             json!(4),
             json!(2),
             json!("Which?"),
@@ -1643,12 +1647,12 @@ class PickCommand(sublime_plugin.WindowCommand):
     let mut log = String::new();
     host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
-    assert_eq!(args[1], json!([["one", "", "note", "f"]]));
+    assert_eq!(args[1], json!([["one", [], "note", "f", true]]));
     assert_eq!(args[2], json!(2));
 }
 
 #[test]
-fn quick_panel_item_details_and_annotations_are_minihtml_shown_as_text() {
+fn quick_panel_item_details_are_sent_as_minihtml_and_annotations_as_text() {
     let dir = tempfile::tempdir().unwrap();
     // As Package Control 4 lists packages.
     let plugin = r#"
@@ -1673,8 +1677,17 @@ class PickCommand(sublime_plugin.WindowCommand):
     assert_eq!(
         args[1],
         json!([
-            ["1337", "1337 - A & B for 'Sublime' · install v2.0.0 github.com/x/y more", "Updated on Wed Jul 04, 2018", ""],
-            ["caption", "<b>kept</b> as written", ""],
+            [
+                "1337",
+                [
+                    "<em>1337 - A &amp; B for &#x27;Sublime&#x27;</em>",
+                    "<em>install v2.0.0</em> <a href=\"https://github.com/x/y\">github.com/x/y</a><br>more"
+                ],
+                "Updated on Wed Jul 04, 2018",
+                "",
+                true
+            ],
+            ["caption", ["<b>kept</b> as written"], "", "", false],
         ])
     );
 }

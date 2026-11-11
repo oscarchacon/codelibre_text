@@ -156,8 +156,21 @@ fn the_packages_variable_also_expands_without_braces() {
 fn open_package_folder_opens_the_file_manager() {
     let world = World::new();
     let mut editor = world.editor();
-    editor.open_package_folder("${packages}");
+    editor.open_package_folder("${packages}", "");
     assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/packages")]);
+}
+
+#[test]
+fn open_package_folder_selects_the_file_it_is_given() {
+    let world = World::new().with_file("/installed/Emmet.sublime-package", "");
+    let mut editor = world.editor();
+    editor.open_package_folder("/installed", "Emmet.sublime-package");
+    assert_eq!(*world.selected_files.borrow(), vec![PathBuf::from("/installed/Emmet.sublime-package")]);
+    assert!(world.opened_folders.borrow().is_empty());
+
+    // A file that is not there: the folder alone.
+    editor.open_package_folder("/installed", "Gone.sublime-package");
+    assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/installed")]);
 }
 
 fn package_control_file() -> PathBuf {

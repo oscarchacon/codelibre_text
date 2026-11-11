@@ -150,6 +150,8 @@ pub struct DialogScript {
     pub save_path: RefCell<Option<PathBuf>>,
     /// File names suggested in "Save As" dialogs.
     pub save_requests: RefCell<Vec<String>>,
+    /// Start folder of the last "Save As" dialog.
+    pub last_save_dir: RefCell<Option<PathBuf>>,
     /// Start folder of the last "Open File" dialog.
     pub last_open_dir: RefCell<Option<PathBuf>>,
     /// Start folder of the last "Open Folder" dialog.
@@ -179,7 +181,8 @@ impl DialogGateway for FakeDialogs {
         self.0.folders_to_open.borrow().clone()
     }
 
-    fn pick_save_path(&self, _start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+        *self.0.last_save_dir.borrow_mut() = start_dir.map(Path::to_path_buf);
         *self.0.last_filters.borrow_mut() = filters.to_vec();
         self.0.save_requests.borrow_mut().push(file_name.to_string());
         self.0.save_path.borrow().clone()
@@ -206,12 +209,17 @@ impl ClipboardGateway for FakeClipboard {
 
 struct FakeShell {
     folders: Rc<RefCell<Vec<PathBuf>>>,
+    selected: Rc<RefCell<Vec<PathBuf>>>,
     urls: Rc<RefCell<Vec<String>>>,
 }
 
 impl ShellGateway for FakeShell {
     fn open_in_file_manager(&self, path: &Path) {
         self.folders.borrow_mut().push(path.to_path_buf());
+    }
+
+    fn select_in_file_manager(&self, file: &Path) {
+        self.selected.borrow_mut().push(file.to_path_buf());
     }
 
     fn open_url(&self, url: &str) {
@@ -769,6 +777,8 @@ pub struct World {
     pub file_index: Rc<FileIndex>,
     /// Folders opened in the file manager.
     pub opened_folders: Rc<RefCell<Vec<PathBuf>>>,
+    /// Files shown selected in the file manager.
+    pub selected_files: Rc<RefCell<Vec<PathBuf>>>,
     /// Links opened in the browser.
     pub opened_urls: Rc<RefCell<Vec<String>>>,
     pub plugins: Rc<PluginScript>,
@@ -831,6 +841,7 @@ impl World {
             session: Rc::default(),
             file_index: Rc::default(),
             opened_folders: Rc::default(),
+            selected_files: Rc::default(),
             opened_urls: Rc::default(),
             plugins: Rc::default(),
             processes: Rc::default(),
@@ -972,6 +983,7 @@ impl World {
             }),
             shell: Box::new(FakeShell {
                 folders: self.opened_folders.clone(),
+                selected: self.selected_files.clone(),
                 urls: self.opened_urls.clone(),
             }),
             plugins: Box::new(FakePluginHost(self.plugins.clone())),
