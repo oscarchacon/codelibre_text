@@ -368,7 +368,8 @@ fn a_plugin_quick_panel_lists_its_items_and_answers_the_original_index() {
     let model = interface_adapters::presenters::quick_panel::present(&editor, &mut view).unwrap();
     assert_eq!((model.placeholder.as_str(), model.selected), ("Pick one", 1));
     assert_eq!(model.items.iter().map(|i| i.caption.as_str()).collect::<Vec<_>>(), ["alpha", "beta", "gamma"]);
-    assert_eq!(model.items[0].detail, "first");
+    assert_eq!(model.items[0].details.len(), 1);
+    assert_eq!(model.items[0].details[0][0].text, "first");
 
     // Filtering keeps the plugin's indices.
     handle(&mut editor, &mut view, UiEvent::QuickPanelQueryChanged("gam".into()));

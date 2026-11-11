@@ -403,6 +403,19 @@ fn scratch_views_close_without_asking() {
 }
 
 #[test]
+fn the_first_save_of_a_view_starts_in_its_default_dir_setting() {
+    let world = plugin_world().with_dir("/p");
+    let mut editor = world.editor();
+    editor.add_folder(std::path::PathBuf::from("/p"));
+    let target = json!(["view", view_id(&editor)]);
+    editor.save_active(false);
+    assert_eq!(world.dialogs.last_save_dir.borrow().as_deref(), Some(std::path::Path::new("/p")), "without it: the open folder");
+    call(&world, &mut editor, "settings_set", json!([target, "default_dir", "/packages/User"])).unwrap();
+    editor.save_active(false);
+    assert_eq!(world.dialogs.last_save_dir.borrow().as_deref(), Some(std::path::Path::new("/packages/User")));
+}
+
+#[test]
 fn view_settings_layer_on_top_of_the_syntax_settings() {
     let world = plugin_world();
     let mut editor = world.editor();
