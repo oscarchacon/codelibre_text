@@ -51,6 +51,8 @@ pub enum UiEvent {
     QuickPanelHighlighted(usize),
     QuickPanelAccepted(usize),
     QuickPanelDismissed,
+    /// A link in an item's details was clicked (its `href`): it opens in the browser.
+    QuickPanelLinkClicked(String),
 
     /// A plugin's input panel: the text changed, the caret moved, Enter was pressed.
     InputPanelChanged(String),
@@ -215,6 +217,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             }
         }
         UiEvent::QuickPanelDismissed => command_controller::close_quick_panel(editor, view),
+        UiEvent::QuickPanelLinkClicked(href) => editor.open_url(&href),
 
         UiEvent::InputPanelChanged(text) => {
             if view.input_panel.is_some() {

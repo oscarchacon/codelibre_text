@@ -689,6 +689,39 @@ fn a_plugins_quick_panel_shows_kinds_and_may_stay_open() {
 }
 
 #[test]
+fn a_plugins_quick_panel_keeps_each_detail_line_and_its_links() {
+    use interface_adapters::controllers::{command_controller, ui_controller};
+    use interface_adapters::presenters::quick_panel;
+    use interface_adapters::view_state::ViewState;
+    use test_support::plugin_call;
+    use use_cases::gateways::{PluginCommandKind, PluginMessage};
+
+    let world = World::new().with_plugin_commands(&[("pick", PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    // As Package Control lists a package, then a row of plain lines.
+    let package = json!(["1337", ["<em>A &amp; B</em>", "<em>install v2</em> <a href=\"https://x.test/y\">x.test/y</a>"], "", "", true]);
+    let plain = json!(["caption", ["<b>kept</b>", "second"], "", "", false]);
+    world.plugins.then([plugin_call("window_show_quick_panel", json!([1, [package, plain], 0, -1, "", 7, false])), PluginMessage::Done { error: None }]);
+    command_controller::run(&mut editor, &mut view, &Command::new("pick"));
+    let panel = quick_panel::present(&editor, &mut view).expect("the panel");
+
+    let details = &panel.items[0].details;
+    assert_eq!(details.len(), 2);
+    assert_eq!((details[0][0].text.as_str(), details[0][0].italic), ("A & B", true));
+    let link = details[1].iter().find(|s| s.link.is_some()).expect("a link");
+    assert_eq!((link.text.trim(), link.link.as_deref()), ("x.test/y", Some("https://x.test/y")));
+    let texts: Vec<&str> = panel.items[1].details.iter().map(|line| line[0].text.as_str()).collect();
+    assert_eq!(texts, ["<b>kept</b>", "second"], "a list's lines are plain text");
+
+    // The query matches the text of the details, and a link opens in the browser.
+    assert_eq!(editor.search(use_cases::search::SearchKind::PluginItems, "install").len(), 1);
+    ui_controller::handle(&mut editor, &mut view, ui_controller::UiEvent::QuickPanelLinkClicked("https://x.test/y".into()));
+    assert_eq!(*world.opened_urls.borrow(), ["https://x.test/y"]);
+    assert!(view.quick_panel.is_some(), "the panel stays open");
+}
+
+#[test]
 fn the_output_panel_marks_the_result_visited_relative_to_the_lines_it_shows() {
     let world = World::new().with_file("/p/a.py", "x\n");
     let mut editor = world.editor();

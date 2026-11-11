@@ -100,7 +100,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Runtime state (Windows)
 - Packages: `%APPDATA%\codelibre_text\data\Packages` (`User` inside); Sublime's `%APPDATA%\Sublime Text\Packages`
-  is also read unless `import_sublime_packages` is false (its `Default` package is skipped).
+  is also read unless `import_sublime_packages` is false (its `Default` package and its `User/Package Control*.sublime-settings`,
+  which list what Sublime has installed, are skipped).
 - `.sublime-package` zips (ours in `data\Installed Packages`, Sublime's installed and shipped ones) are unpacked to
   `data\Cache\Packages` (at startup in a thread: `Editor::poll_unpacking` loads the packages again if it changed them),
   then read as plain folders (`package_archives.rs`, `PackagePaths::roots`); loose files win. Of what

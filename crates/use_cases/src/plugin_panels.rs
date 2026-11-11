@@ -5,6 +5,7 @@
 //! controller takes it ([`Editor::take_plugin_panel_request`]) and shows it.
 
 use entities::document::{Document, DocumentId, LineEnding};
+use entities::minihtml;
 use entities::selection::Selection;
 use serde_json::{json, Value};
 
@@ -16,10 +17,31 @@ const MONOSPACE_FONT: u64 = 1;
 /// `sublime.KEEP_OPEN_ON_FOCUS_LOST`.
 const KEEP_OPEN_ON_FOCUS_LOST: u64 = 2;
 
+/// The detail lines of a row: a list of lines (or one string), each minihtml when `html`.
+fn detail_lines(value: Option<&Value>, html: bool) -> Vec<minihtml::Line> {
+    let texts: Vec<&str> = match value {
+        Some(Value::Array(lines)) => lines.iter().filter_map(Value::as_str).collect(),
+        Some(Value::String(line)) => vec![line.as_str()],
+        _ => Vec::new(),
+    };
+    let mut lines = Vec::new();
+    for text in texts.into_iter().filter(|t| !t.is_empty()) {
+        if html {
+            lines.extend(minihtml::parse(text).into_iter().filter(|line| !line.is_empty()));
+        } else {
+            lines.push(vec![minihtml::Span { text: text.to_string(), ..Default::default() }]);
+        }
+    }
+    lines
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginPanelItem {
     pub caption: String,
+    /// The text of `details`, its lines joined with ` · ` (what the query is matched against).
     pub detail: String,
+    /// The lines under the caption. Those of a `QuickPanelItem` are minihtml: styled, with links.
+    pub details: Vec<minihtml::Line>,
     pub hint: String,
     /// The letter of its `kind`, shown in a badge; empty for none.
     pub kind: String,
@@ -92,11 +114,16 @@ impl Editor {
             .and_then(Value::as_array)
             .ok_or("argument 2 must be a list of items")?
             .iter()
-            .map(|row| PluginPanelItem {
-                caption: text(row.get(0)),
-                detail: text(row.get(1)),
-                hint: text(row.get(2)),
-                kind: text(row.get(3)),
+            .map(|row| {
+                let details = detail_lines(row.get(1), row.get(4).and_then(Value::as_bool).unwrap_or(false));
+                let plain = |line: &minihtml::Line| line.iter().map(|s| s.text.as_str()).collect::<String>();
+                PluginPanelItem {
+                    caption: text(row.get(0)),
+                    detail: details.iter().map(plain).collect::<Vec<_>>().join(" · "),
+                    details,
+                    hint: text(row.get(2)),
+                    kind: text(row.get(3)),
+                }
             })
             .collect();
         let flags = args.get(2).and_then(Value::as_u64).unwrap_or(0);

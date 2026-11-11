@@ -165,8 +165,13 @@ impl ResourceGateway for SublimeResourceGateway {
         let stem = file_name.trim_end_matches(".sublime-settings");
         let platform_file = format!("{stem} ({}).sublime-settings", platform_name());
         let mut values = Map::new();
+        // Package Control's own settings say what is installed in a profile (`installed_packages`,
+        // which it installs again where missing): Sublime's are about Sublime's `Installed Packages`,
+        // not ours, so they are not adopted.
+        let sublime_user = self.paths.sublime_packages.as_ref().map(|p| p.join("User"));
+        let foreign = |path: &Path| stem.starts_with("Package Control") && sublime_user.as_ref().is_some_and(|user| path.starts_with(user));
         for path in find_resources(&self.paths, include_sublime, |n| n == file_name || n == platform_file) {
-            if is_in_default_package(&path) {
+            if is_in_default_package(&path) || foreign(&path) {
                 continue;
             }
             let parsed = std::fs::read_to_string(&path)

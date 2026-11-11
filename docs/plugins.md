@@ -207,8 +207,13 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [ ] Hooks, still missing: a `left_delete` / `move` the user binds in a keymap runs as a command (the use case, not the
       widget), so it is outside the widget's undo.
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
-      items are strings, lists (caption, detail lines) or `QuickPanelItem`s (detail lines joined with ` · `; the minihtml of details and annotations is shown as text,
-      annotation as the hint, `kind` ignored); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
+      items are strings, lists (caption, detail lines of plain text) or `QuickPanelItem`s (annotation as the hint, its
+      minihtml shown as text; the letter of `kind` in a badge); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
+      A row goes to the editor as `[caption, detail lines, hint, kind letter, details are minihtml]`. Each detail is a
+      line of its own under the caption (`PluginPanelItem::details`, read with `entities::minihtml`; the row grows
+      with them), cut to the row's width; a `QuickPanelItem`'s keep bold, italics, monospace and links: a click on
+      a link opens it in the browser (`UiEvent::QuickPanelLinkClicked`) and leaves the panel open, as Package Control's
+      package lists expect. The query matches the caption and the details' text.
       Python keeps the callbacks by id (`sublime._callbacks`); the editor answers `select` (index in the plugin's
       list, -1 when dismissed or replaced by another quick panel) and `highlight` (also for the first selection).
 - [x] **Input panel**: `window.show_input_panel(caption, initial, on_done, on_change, on_cancel)`, a one-line panel at
@@ -547,6 +552,19 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).
       Package Control moves its message view with them.
+- [x] **What Package Control still missed** (2026-11-11, from reading 4.2.8 against our API):
+  - A view's `default_dir` setting is where its first save dialog starts (`Editor::save_active`): New Channel /
+    Repository JSON set it to `Packages/User`, PackageDev to the package being edited.
+  - `open_dir {"dir", "file"}` opens the folder with `file` selected when it exists (`ShellGateway::select_in_file_manager`:
+    `explorer /select,`, `open -R`; on Linux only the folder opens, no command selects a file in every file manager).
+    List Packages uses it to show a `.sublime-package`.
+  - Sublime's `User/Package Control*.sublime-settings` are not adopted (`load_settings_file`), unlike every other
+    settings file of its `User` folder: `installed_packages` there is what *Sublime* has installed, and Package Control
+    would download all of it again into our `Installed Packages` at start (`satisfy_packages`). So the packages of
+    Sublime's profile load (with `import_sublime_packages`) but Package Control neither lists nor upgrades nor removes
+    them: it manages our profile only, and writes its own `installed_packages` from what it finds there. Custom
+    `channels` / `repositories` of Sublime's file have to be copied to ours by hand.
+  - Quick panel details in lines with links: see the quick panel above.
 - [x] **Scopes** from the syntax engine: `SyntaxGateway::line_scopes` parses one line again from the parser state the
       highlighting cache keeps for its start (`SyntaxEngine::line_scopes`); the use cases (`use_cases/src/scopes.rs`)
       turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,

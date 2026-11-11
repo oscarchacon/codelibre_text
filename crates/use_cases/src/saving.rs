@@ -19,6 +19,9 @@ impl Editor {
     /// Returns false if it was not saved.
     pub fn save_active(&mut self, save_as: bool) -> bool {
         let settings = self.view_settings();
+        // A view's `default_dir` setting is where its first save starts (plugins set it on the
+        // files they create: Package Control's new repository, PackageDev's new resources).
+        let default_dir = settings.get("default_dir").and_then(|v| v.as_str()).filter(|d| !d.is_empty()).map(std::path::PathBuf::from);
         let start_dir = self.current_directory();
         let Some(doc) = self.active_document() else {
             return false;
@@ -29,10 +32,13 @@ impl Editor {
         }
         let path = match (&doc.path, save_as) {
             (Some(path), false) => path.clone(),
-            _ => match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc), &[]) {
-                Some(path) => path,
-                None => return false,
-            },
+            _ => {
+                let start_dir = default_dir.filter(|_| doc.path.is_none()).or(start_dir);
+                match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc), &[]) {
+                    Some(path) => path,
+                    None => return false,
+                }
+            }
         };
 
         // Listeners may change the text before it is written (formatters on save).

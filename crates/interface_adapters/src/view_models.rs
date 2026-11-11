@@ -109,7 +109,8 @@ pub struct MacMenuViewModel {
 
 pub struct QuickPanelItemViewModel {
     pub caption: String,
-    pub detail: String,
+    /// The lines under the caption (a plugin's may be styled and have links).
+    pub details: Vec<minihtml::Line>,
     pub hint: String,
     /// A letter shown in a badge before the caption; empty for none.
     pub kind: String,
