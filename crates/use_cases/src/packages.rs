@@ -273,10 +273,15 @@ impl Editor {
         }
     }
 
-    /// `open_dir`, e.g. Preferences > Browse Packages.
-    pub fn open_package_folder(&mut self, dir: &str) {
+    /// `open_dir {"dir", "file"}`, e.g. Preferences > Browse Packages. With `file` (a name in
+    /// `dir`) that exists, the folder opens with it selected.
+    pub fn open_package_folder(&mut self, dir: &str, file: &str) {
         let path = self.gateways.resources.paths().expand(dir);
-        self.gateways.shell.open_in_file_manager(&path);
+        let selected = Some(path.join(file)).filter(|f| !file.is_empty() && self.gateways.file_system.exists(f));
+        match selected {
+            Some(file) => self.gateways.shell.select_in_file_manager(&file),
+            None => self.gateways.shell.open_in_file_manager(&path),
+        }
     }
 
     pub fn packages_location(&self) -> (std::path::PathBuf, Option<std::path::PathBuf>) {

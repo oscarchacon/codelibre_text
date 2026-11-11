@@ -171,6 +171,8 @@ pub trait ClipboardGateway {
 /// Opens folders in the operating system's file manager and links in the default browser.
 pub trait ShellGateway {
     fn open_in_file_manager(&self, path: &Path);
+    /// Opens the folder of `file` with it selected, where the file manager can.
+    fn select_in_file_manager(&self, file: &Path);
     fn open_url(&self, url: &str);
     /// The user's home folder, left out of bug reports (it holds their name).
     fn home_folder(&self) -> Option<PathBuf>;

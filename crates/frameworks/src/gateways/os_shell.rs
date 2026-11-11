@@ -35,6 +35,26 @@ impl ShellGateway for OsShell {
         }
     }
 
+    fn select_in_file_manager(&self, file: &Path) {
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("explorer");
+            command.arg(format!("/select,{}", file.display()));
+            command
+        } else if cfg!(target_os = "macos") {
+            let mut command = std::process::Command::new("open");
+            command.arg("-R").arg(file);
+            command
+        } else {
+            // No command selects a file in every Linux file manager: its folder is opened.
+            let mut command = std::process::Command::new("xdg-open");
+            command.arg(file.parent().unwrap_or(file));
+            command
+        };
+        if let Err(e) = command.spawn() {
+            tracing::warn!("could not show {}: {e}", file.display());
+        }
+    }
+
     fn open_url(&self, url: &str) {
         if let Err(e) = Self::open_url_command(url).spawn() {
             tracing::warn!("could not open {url}: {e}");

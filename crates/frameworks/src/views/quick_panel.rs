@@ -2,6 +2,7 @@
 
 use egui::text::{CCursor, CCursorRange};
 use egui::{Id, Key, Modifiers, RichText, Sense};
+use entities::minihtml::Span;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::QuickPanelViewModel;
 
@@ -88,6 +89,40 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
     }
 }
 
+/// The height a line of an item's details takes.
+const DETAIL_LINE_HEIGHT: f32 = 14.0;
+
+/// One line of an item's details, cut to the row's width. Returns the `href` of a link clicked
+/// (a click anywhere else is the row's: it accepts the item).
+fn detail_line(ui: &mut egui::Ui, chrome: &Chrome, line: &[Span]) -> Option<String> {
+    let mut clicked = None;
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), DETAIL_LINE_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for span in line.iter().filter(|s| !s.text.is_empty()) {
+            let mut text = RichText::new(&span.text).size(11.5).color(if span.link.is_some() { chrome.accent } else { chrome.fg_dim });
+            if span.bold {
+                text = text.strong();
+            }
+            if span.italic {
+                text = text.italics();
+            }
+            if span.monospace {
+                text = text.monospace();
+            }
+            let Some(href) = &span.link else {
+                ui.add(egui::Label::new(text).truncate());
+                continue;
+            };
+            let response = ui.add(egui::Label::new(text.underline()).truncate().sense(Sense::CLICK));
+            if response.clicked() {
+                clicked = Some(href.clone());
+            }
+            response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+    });
+    clicked
+}
+
 fn results(
     ui: &mut egui::Ui,
     chrome: &Chrome,
@@ -119,7 +154,7 @@ fn result_list(
             ui.spacing_mut().item_spacing.y = 0.0;
             for (index, item) in panel.items.iter().enumerate() {
                 let is_selected = index == selected;
-                let height = if item.detail.is_empty() { 28.0 } else { 42.0 };
+                let height = 28.0 + DETAIL_LINE_HEIGHT * item.details.len() as f32;
                 let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::CLICK);
                 if is_selected || response.hovered() {
                     let fill = if is_selected { chrome.hover_bg } else { chrome.hover_bg.gamma_multiply(0.5) };
@@ -144,8 +179,11 @@ fn result_list(
                             let color = if is_selected { chrome.accent } else { chrome.fg };
                             let caption = RichText::new(&item.caption).size(14.0).color(color);
                             ui.add(egui::Label::new(if panel.monospace { caption.monospace() } else { caption }).truncate());
-                            if !item.detail.is_empty() {
-                                ui.add(egui::Label::new(RichText::new(&item.detail).size(11.5).color(chrome.fg_dim)).truncate());
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for line in &item.details {
+                                if let Some(href) = detail_line(ui, chrome, line) {
+                                    events.push(UiEvent::QuickPanelLinkClicked(href));
+                                }
                             }
                         });
                     });

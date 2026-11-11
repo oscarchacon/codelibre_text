@@ -262,7 +262,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             }
         }
         "open_file" => editor.open_package_file(command.str_arg("file"), command.bool_arg("encoded_position", false)),
-        "open_dir" => editor.open_package_folder(command.str_arg("dir")),
+        "open_dir" => editor.open_package_folder(command.str_arg("dir"), command.str_arg("file")),
         "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => editor.close_by_index(command),
         "remove_folder" => editor.remove_folders(command),
         "open_containing_folder" => editor.open_containing_folder(command),

@@ -3,6 +3,7 @@
 use codelibre_text::views::theme::Chrome;
 use codelibre_text::views::{input_panel, output_panel, quick_panel};
 use egui::{CentralPanel, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+use entities::minihtml::{Line, Span};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{InputPanelViewModel, OutputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
 
@@ -92,6 +93,11 @@ fn one_click_opens_nothing() {
 }
 
 fn quick_panel_frame(ctx: &Context, detail: &str, events: Vec<Event>) -> Vec<UiEvent> {
+    let details = if detail.is_empty() { Vec::new() } else { vec![vec![Span { text: detail.into(), ..Default::default() }]] };
+    quick_panel_details_frame(ctx, &details, events)
+}
+
+fn quick_panel_details_frame(ctx: &Context, details: &[Line], events: Vec<Event>) -> Vec<UiEvent> {
     let panel = QuickPanelViewModel {
         placeholder: String::new(),
         keep_open: false,
@@ -100,7 +106,7 @@ fn quick_panel_frame(ctx: &Context, detail: &str, events: Vec<Event>) -> Vec<UiE
         selected: 0,
         items: vec![QuickPanelItemViewModel {
             caption: "Preferences: Select Interface Language".into(),
-            detail: detail.into(),
+            details: details.to_vec(),
             hint: String::new(),
             kind: String::new(),
         }],
@@ -150,6 +156,33 @@ fn one_click_on_the_caption_or_detail_of_a_two_line_item_accepts_it() {
         quick_panel_clicks(detail, &along(y), false);
         quick_panel_clicks(detail, &along(y), true);
     }
+}
+
+#[test]
+fn a_click_on_a_link_in_the_details_opens_it_and_anywhere_else_accepts_the_item() {
+    let text = |text: &str| Span { text: text.into(), ..Default::default() };
+    let link = Span { link: Some("https://github.com/x/y".into()), ..text("github.com/x/y") };
+    let details = vec![vec![text("A package")], vec![text("install v2.0.0 "), link]];
+    let mut links = 0;
+    // Down the two detail lines, from their start to past the link.
+    for (x, y) in (204..420).step_by(6).flat_map(|x| [(x, 112.0), (x, 126.0)]) {
+        let at = Pos2::new(x as f32, y);
+        let ctx = Context::default();
+        quick_panel_details_frame(&ctx, &details, Vec::new());
+        quick_panel_details_frame(&ctx, &details, Vec::new());
+        quick_panel_details_frame(&ctx, &details, vec![Event::PointerMoved(at)]);
+        let mut reported = quick_panel_details_frame(&ctx, &details, vec![button(at, true)]);
+        reported.extend(quick_panel_details_frame(&ctx, &details, vec![button(at, false)]));
+        match reported.as_slice() {
+            [UiEvent::QuickPanelLinkClicked(href)] => {
+                assert_eq!(href, "https://github.com/x/y");
+                links += 1;
+            }
+            [UiEvent::QuickPanelAccepted(0)] => {}
+            other => panic!("click at {at:?}: {other:?}"),
+        }
+    }
+    assert!(links > 3, "the link takes clicks: {links}");
 }
 
 #[test]
