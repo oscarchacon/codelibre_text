@@ -115,6 +115,8 @@ pub struct ViewState {
     pub(crate) context_menu: Option<ContextMenuTarget>,
     /// Side bar folder contents, read once per folder (cleared by "Refresh Folders").
     pub(crate) folder_listings: HashMap<PathBuf, Vec<(PathBuf, bool)>>,
+    /// The editor's `folders_revision` the listings were read at.
+    pub(crate) folder_listings_revision: u64,
     pub(crate) commands: VecDeque<Command>,
     pub(crate) requests: Vec<ViewRequest>,
     /// Commands done by the text widget whose `on_post_*_command` waits for the widget.
@@ -148,6 +150,7 @@ impl Default for ViewState {
             menu_open: false,
             context_menu: None,
             folder_listings: HashMap::new(),
+            folder_listings_revision: 0,
             commands: VecDeque::new(),
             requests: Vec::new(),
             widget_edits_in_progress: Vec::new(),

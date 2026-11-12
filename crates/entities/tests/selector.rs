@@ -30,6 +30,32 @@ fn alternatives_and_exclusions() {
 }
 
 #[test]
+fn parentheses_group_and_ampersand_asks_for_both() {
+    let comment = "source.python comment.line.number-sign.python";
+    assert!(!matches_selector(STRING, "source - (string | comment)"));
+    assert!(!matches_selector(comment, "source - (string | comment)"));
+    assert!(matches_selector("source.python meta.function", "source - (string | comment)"));
+    // Without the group the exclusion binds tighter: (source - string) | comment.
+    assert!(matches_selector(comment, "source - string | comment"));
+    assert!(matches_selector(STRING, "(source.js | source.python) & string"));
+    assert!(!matches_selector("source.js", "(source.js | source.python) & string"));
+    assert!(matches_selector(STRING, "source & -comment"));
+    assert!(!matches_selector(comment, "source & -comment"));
+    assert!(matches_selector(STRING, "((string))"));
+    assert!(matches_selector(STRING, "(string"), "an unclosed group still matches");
+    assert!(matches_selector(STRING, "comment) | string"), "a stray ) does not hide what follows");
+    assert_eq!(score_selector(STRING, "(string)"), score_selector(STRING, "string"));
+    assert_eq!(score_selector(STRING, "(comment | string) - meta.tag"), score_selector(STRING, "string"));
+}
+
+#[test]
+fn a_dash_inside_a_name_is_part_of_it() {
+    assert!(matches_selector("text.html.markdown-gfm", "text.html.markdown-gfm"));
+    assert!(!matches_selector("text.html.markdown", "text.html.markdown-gfm"));
+    assert!(matches_selector("source.python", "source -string"), "a dash after a space excludes");
+}
+
+#[test]
 fn scores_are_sublimes_own_values() {
     // The values Sublime gives (sublimehq/sublime_text#2152 and the forum): 8 per first scope, 8³ per depth.
     assert_eq!(score_selector("a", "a"), 8);

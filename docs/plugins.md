@@ -342,8 +342,11 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] Of what Sublime ships, `tests/` are left out (`ArchiveFolder::shipped`). Its syntaxes are unpacked but not loaded:
       they are the parents of the packages' `extends` (syntect has its own for those languages). Packages the user
       installed do load their syntaxes. The first start unpacks them (about 11 s in a debug build).
-- [x] **Unpacking at startup does not block the window** (2026-11-10; tests and clippy pass, the manual run with an
-      empty `Cache/Packages` is still to do): `Editor::start` asks the gateway to unpack in a thread (`ResourceGateway::start_unpacking`,
+- [x] **Unpacking at startup does not block the window** (2026-11-10; tried by hand 2026-11-12 with an empty
+      `Cache/Packages`: the window never stops answering in a release build. That run found the second load, at the end
+      of the unpacking, taking ~9 s in the window's thread: `package_files::find_resources` asked the file system
+      whether each entry was a folder, on every one of the ~15 searches of a load. It now takes the entry's type from
+      `read_dir` (links are still followed), and a load went from ~5.8 s to ~0.6 s): `Editor::start` asks the gateway to unpack in a thread (`ResourceGateway::start_unpacking`,
       `SublimeResourceGateway::with_background_unpacking` in `compose()`), loads the packages from what the cache has
       and says "Unpacking the installed packages…"; `Editor::poll_unpacking` (every frame in `app.rs`) loads them again
       when the thread unpacked or removed something. A normal start changes nothing and loads once. While it runs,
@@ -362,8 +365,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       (`extends: HTML (Plain).sublime-syntax`) is read next to the child, as Sublime does. Tests:
       `extends_takes_the_parents_contexts_and_branches_take_their_first_alternative` and
       `extends_without_a_folder_is_read_next_to_the_child` (`frameworks/tests/syntax_engine.rs`). Checked against
-      `sublimehq/Packages` (`the_official_syntaxes_load`, `CODELIBRE_TEST_SYNTAX_PACKAGES`): 168 of 169 load, the
-      other is ActionScript, whose scope names overflow syntect's 16-bit table (it has no `extends`).
+      `sublimehq/Packages` (`the_official_syntaxes_load`, `CODELIBRE_TEST_SYNTAX_PACKAGES`): all 169 load (ActionScript
+      too since 2026-11-12, below).
 - [x] **syntect panicked on Markdown code fences** (found and fixed 2026-11-09, MarkdownEditing from Package Control): its
       `fenced_code_block_end` repeats `(?:\2)*` and `\2` captures nothing for some fences; the expanded `(?:)*` is
       rejected by the regex engine and syntect panicked ("regex string should be pre-tested"), in the window's thread.
@@ -379,10 +382,13 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       every frame, Help > Error Log). The backtrace of a line (`context_backtrace`) is guarded too. The panic message still
       goes to stderr, from Rust's default hook. Tested through `guard` only: no real syntect panic is left to trigger it
       (the one found is patched above).
-- [ ] syntect, still open: the scope-name table is 16 bits per name, so a process that loads many syntaxes can run out
-      (`Too many atoms`): ActionScript alone does it with syntect's own syntaxes loaded. Sublime ships it, so the app
-      only reads it as a parent, but a user copy of such a package would fail the same way. The fix is a wider `Scope`
-      in syntect (its packing into two `u64`), which is more than a patch of the parser.
+- [x] **Scopes of more than 8 parts** (2026-11-12): syntect packs a scope into two `u64` of four 16-bit atoms, so it
+      refused `keyword.operator.assignment.augmented.bitwise.shift.left.signed.actionscript` (9 parts) and the whole
+      ActionScript syntax with it. It said `Too many atoms`, which read like a full table of names (65 533 distinct
+      ones, far from reached), but was the length. `vendor/syntect` now packs 16 atoms in four `u64`
+      (`vendor/syntect/PATCHES.md`, 3). Tests: `a_syntax_with_scopes_of_more_than_eight_parts_loads_and_highlights`
+      (`frameworks/tests/syntax_engine.rs`) and `the_official_syntaxes_load` against the 54 packages Sublime ships (169
+      syntaxes, no errors, no exception left for ActionScript).
 - [x] **`ignored_packages`**: such packages are not found (`package_files::ignored_packages`, default `["Vintage"]`, which
       would take every key) and their plugins are not loaded. A change reloads the packages (Package Control's
       disabling, below).
@@ -446,10 +452,21 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       first (also in the Mac folders a Finder-opened app's `PATH` lacks), then `python3`; `sublime.version()` reports the
       build whose host runs that Python (4203 for 3.14+, 4201 for 3.13, else 4200) and `compat.py` covers Apple's
       `/usr/bin/python3` (3.9 with LibreSSL: `allow_post_handshake_auth`).
-- [ ] Python 3.3 / 3.8 hosts: not bundled; every package runs on the one Python (3.13 when the bundled one is
-      found, else 3.8 or newer: `compat.py` fills in the standard library names those versions had, so code written
-      for 3.8 runs unchanged). `.python-version` is not read;
-      `"disable_plugin_host_3.3": true` makes Package Control install every package's libraries for it.
+- [x] **One host, Python 3.13, on every platform** (decided 2026-11-12): there is no 3.3 or 3.8 host and there will be
+      none. Sublime's 3.3 host has no build for arm64 (current Macs) in python-build-standalone, and 3.3 and 3.8 no
+      longer get fixes; Sublime's own newer host is 3.13 too (build 4201 on). So every package
+      runs on the bundled 3.13 (native x64 and arm64 on Windows, macOS and Linux; else an installed 3.8 or newer),
+      `.python-version` is not read (there is no host to choose), and `"disable_plugin_host_3.3": true` makes Package
+      Control install every package's libraries for it. What 3.3 / 3.8 plugins call and 3.13 removed is put back by
+      `compat.py` and `shims/` (above), and since 2026-11-12 also `plistlib`'s old API (`readPlist`, `writePlist`, their
+      `Bytes` forms and `Data`: plugins read `.tmTheme` / `.tmPreferences` with them), `base64.encodestring` /
+      `decodestring`, `HTMLParser.unescape` and `HTMLParseError`, `os.errno`, `tarfile.filemode`, `locale.format`,
+      `importlib.find_loader`, `gettext.lgettext` and friends, `sys.getcheckinterval` / `setcheckinterval` and
+      `platform.linux_distribution` / `dist` (`plugins_of_the_python_3_3_host_find_the_names_later_pythons_dropped`).
+      What cannot be put back, and needs the package updated: `async` / `await` used as names (keywords since 3.7, a
+      `SyntaxError` at import; no installed package here has one), and methods of C types (`Element.getchildren`,
+      `array.tostring`, `Task.current_task`). The modules 3.13 removed with no shim yet (`telnetlib`, `mailcap`, `cgitb`,
+      `smtpd`, `nntplib`, `xdrlib`, `chunk`, `sndhdr`, `crypt`, `lib2to3`…) get one when a package needs it.
 - [x] **Package Control runs** (4.2.8, copied by hand to `Installed Packages`): loads, lists the 4726 packages of the
       channel, installs a color scheme (`.sublime-package` + `installed_packages`), which shows after Reload Packages.
       It needed: the paths inside archives (above); `executable_path()` next to a `Packages` folder: Sublime's install,
@@ -544,10 +561,21 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       a text command whose `want_event()` is true gets `event` (`{"x", "y", "modifier_keys"}`, the clicked char in the
       8×16 layout `window_to_text` reads). A right click on another group's text focuses it; the caret does not
       move. Built-in commands for them: `close_by_index`, `close_others_by_index`, `close_to_right_by_index`,
-      `remove_folder {"dirs"}`, `open_containing_folder {"files"|"paths"}`. Missing: `Widget Context`, the menus of
-      the find / output panels and the gutter, `modifier_keys` (always empty), Sublime's side bar commands
-      (`new_file_at`, `rename_path`, `delete_file`, `new_folder`, `delete_folder`, `find_in_folder`: plugins
-      that define them, like SideBarEnhancements, work), several selected side bar entries.
+      `remove_folder {"dirs"}`, `open_containing_folder {"files"|"paths"}`, and since 2026-11-12 Sublime's side bar
+      commands (`use_cases/src/side_bar.rs`, in `Side Bar.sublime-menu` with its `folder_commands` and `end` ids):
+      `new_file_at {"dirs"}` (a new file whose first save starts there, `default_dir`), `new_folder {"dirs"}` and
+      `rename_path {"paths"}` (the name in the input panel, `Folder Name:` / `New Name:`, the name without its
+      extension selected; a built-in command may own the input panel, `BuiltinInput`; open files follow a rename, inside
+      a renamed folder too, and a renamed top folder stays in the window), `delete_file {"files", "prompt"}` and
+      `delete_folder {"dirs"}` (after a confirmation, to the system's trash, `FileSystemGateway::move_to_trash` with the
+      `trash` crate; a deleted file's views close, unless they have unsaved changes). Each shows only on what it acts
+      on, as Sublime's `is_visible` (`Editor::side_bar_command_visible`), the side bar reads its folders again after
+      them (`EditorState::folders_revision`), and a plugin that defines one of these names (SideBarEnhancements,
+      FileManager) runs instead. Tests: `use_cases/tests/side_bar.rs`, the side bar ones of
+      `interface_adapters/tests/command_controller.rs` and `presenters.rs`, `frameworks/tests/std_file_system.rs`
+      (not the trash: it would fill the tester's). Missing: `Widget Context`, the menus of the find / output panels and
+      the gutter, `modifier_keys` (always empty), `find_in_folder` (find in files is not implemented), several
+      selected side bar entries.
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).
@@ -570,10 +598,12 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       turn that into `view.scope_name` (with Sublime's trailing space), `match_selector`, `score_selector`,
       `extract_scope` (the run of text with the same scope, across lines), `find_by_selector`, `expand_to_scope`,
       `extract_tokens_with_scopes`. Selectors (`entities/src/selector.rs`, also `sublime.score_selector` and build
-      systems): `,` / `|`, ` - `, descendants, parentheses ignored. Plain text and files over 4 MB are the base scope.
+      systems): `,` / `|`, `&`, `-` (also alone: `-comment`), descendants and parentheses that group
+      (`source - (string | comment)`; 2026-11-12, a small parser in `selector.rs`). Plain text and files over 4 MB are the base scope.
 - [x] The **`selector` key binding context** (`keyboard_controller.rs`): it matches when the scope at some caret does.
       Language keymaps now apply when their other contexts are known (`insert_snippet` expands `$SELECTION` and puts the
-      caret on the first field: `text_commands::insert_snippet`); those with `preceding_text` / `following_text` still do not.
+      caret on the first field: `text_commands::insert_snippet`), `preceding_text` / `following_text` / `text` and
+      `eol_selector` included (`CaretContext`, `keyboard_controller.rs`).
 - [x] **`view.style()` / `style_for_scope()`** from the color scheme in use (`SyntaxGateway::scheme_style` /
       `scope_style`, `SyntaxEngine`: syntect's `style_mod_for_stack` on the whole scope stack): globals and a scope's
       `foreground`, `background` (when a rule sets one), `bold` / `italic` / `underline`, as `#rrggbb` or `#rrggbbaa`.
@@ -598,11 +628,18 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`score_selector` values** (2026-11-09, `entities/src/selector.rs`): Sublime's algorithm, as reverse-engineered in
       sublimehq/sublime_text#2152 (leftmost match per selector element, 3 bits per scope position, at most 7 dotted parts
       per element, 64 bits). `score_selector('a', 'a') == 8`, `('x a', 'a') == 64`, `('s a b a b a', 'b') == 512`, all
-      checked in `entities/tests/selector.rs`. It is a reconstruction, not Sublime's source: the parentheses are still
-      ignored, not grouped. This changes which `.tmPreferences` entry wins among several (`meta_info`).
+      checked in `entities/tests/selector.rs`. It is a reconstruction, not Sublime's source; a group or `&` scores as its best
+      matching part. This changes which `.tmPreferences` entry wins among several (`meta_info`).
+- [x] **Scopes read only the lines they need** (2026-11-12): nothing is parsed again (the highlighting cache keeps every
+      line's scopes), and `SyntaxGateway::lines_scopes` copies only the lines asked for: `scoped_ranges` (and
+      `extract_tokens_with_scopes`, `export_to_html` of a region) the lines of the region, `extract_scope` the
+      `EXTRACT_SCOPE_LINES` (32) lines on each side of the point, four times wider while the scope goes on past an
+      edge. `find_by_selector` and the symbol lists still read the whole file, which is what they answer.
+      Tests: `extract_scope_reads_only_the_lines_around_the_point`, `extract_scope_widens_its_window_while_the_scope_goes_on`,
+      `scoped_ranges_read_only_the_lines_of_the_region` (`use_cases/tests/scopes.rs`).
 - [ ] Scopes, still missing: Sublime's exact `extract_scope`: no specification found (Sublime's own issue #2674 reports
-      it off by one in some cases), so it stays as a close approximation. `find_by_selector` and `extract_scope` still
-      parse the whole file every call.
+      it off by one in some cases), so it stays as a close approximation (the neighbours with the same scope or one
+      inside it).
 - [x] **Completions** (`use_cases/src/completions.rs`, `entities/src/completion.rs`, drawn by `editor_view.rs`): the
       auto-complete list opens while typing a word where `auto_complete_selector` matches (or a character of
       `auto_complete_triggers` where its selector does; `auto_complete`, `auto_complete_size_limit`), or with the
@@ -640,7 +677,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
 - [x] **`on_hover(view, point, hover_zone)`**: the view reports where the mouse rested for 0.5 s (text, gutter or the
       margin after a line, not over a popup), once per place, only when a listener defines it (a query, so
       `ViewEventListener`s hear it too), also over phantoms.
-- [ ] `on_hover` still missing: over annotations (`add_regions`' `annotations`).
+- [x] `on_hover` over annotations (`add_regions`' `annotations`): the region's point, as `HOVER_MARGIN`
+      (`editor_view.rs::report_hover`, which finds the annotation by its area).
 - [x] **Groups and layouts** (`use_cases/src/groups.rs`, `entities/src/layout.rs`, drawn by `app.rs::show_group`): each
       document is in a group (`Document::group`), the tabs of a group are its documents in window order, and a group shows
       the one used last. `set_layout` (View > Layout, Alt+Shift+1…5/8/9), `focus_group` (Ctrl+1…9),
@@ -674,8 +712,8 @@ and removes it; `CODELIBRE_TEST_PACKAGE`, `CODELIBRE_TEST_COMMAND` and `CODELIBR
 `package_control_installs_the_listed_packages_at_start` installs 18 popular packages (or `CODELIBRE_TEST_PACKAGES`,
 comma-separated) and fails on any load error, syntaxes included: the way to find what the next package needs. It needs
 `Package Control.sublime-package` in the Sublime data folder, or in `CODELIBRE_TEST_SUBLIME_DATA` (a folder of your own,
-so no test writes to the real profile); the packages of the Package Control run need the network. A panic from
-syntect in that run is the open Markdown item above.
+so no test writes to the real profile); the packages of the Package Control run need the network. (A panic from
+syntect in that run was the Markdown item above, fixed.)
 `package_control_upgrades_itself_then_the_other_packages` checks `upgrade_all_packages`.
 `package_control_installs_from_local_repositories_and_channels` (no network) checks `add_repository`, `add_channel`,
 unpacked packages and `revert_package`. `package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,

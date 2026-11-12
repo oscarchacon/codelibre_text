@@ -70,6 +70,17 @@ pub struct PluginInputPanel {
     /// The output panel this field types into (`create_io_panel`): Enter calls `on_input` and keeps
     /// it open. `None` for `show_input_panel`.
     pub io: Option<String>,
+    /// A built-in command asked (`new_folder`, `rename_path`): it hears the answer, not a plugin.
+    pub(crate) builtin: Option<BuiltinInput>,
+}
+
+/// What a built-in command does with the text of the input panel it opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BuiltinInput {
+    /// `new_folder`: the folder to make the new one in.
+    NewFolder(std::path::PathBuf),
+    /// `rename_path`: the file or folder to rename.
+    RenamePath(std::path::PathBuf),
 }
 
 /// Which panel a plugin has just asked for.
@@ -159,9 +170,37 @@ impl Editor {
             document,
             wants_changes: args.get(4).and_then(Value::as_bool).unwrap_or(false),
             io: None,
+            builtin: None,
         });
         self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
         Ok(json!(id))
+    }
+
+    /// The input panel for a built-in command: `caption`, `initial` text with `selected` (chars)
+    /// selected, and what to do with the answer. Whatever panel was open is cancelled first.
+    pub(crate) fn show_builtin_input_panel(
+        &mut self,
+        caption: String,
+        initial: &str,
+        selected: std::ops::Range<usize>,
+        builtin: BuiltinInput,
+        run_command: &mut CommandRunner,
+    ) {
+        self.finish_plugin_input_panel(false, run_command);
+        let id = self.next_document_id();
+        let mut document = Document::new_untitled(id, LineEnding::Unix);
+        document.scratch = true;
+        document.replace_range(0, 0, initial);
+        document.set_selection(Selection::new(selected.start, selected.end));
+        self.state.plugin_panels.input_panel = Some(PluginInputPanel {
+            callback: 0,
+            caption,
+            document,
+            wants_changes: false,
+            io: None,
+            builtin: Some(builtin),
+        });
+        self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
     }
 
     /// `window.create_io_panel(name, on_input)`: the output panel `name` and, when the plugin
@@ -182,6 +221,7 @@ impl Editor {
             document,
             wants_changes: false,
             io: Some(name.to_string()),
+            builtin: None,
         });
         (output, Some(id))
     }
@@ -250,6 +290,12 @@ impl Editor {
         }
         if let Some(panel) = self.state.plugin_panels.input_panel.take() {
             self.state.plugins.view_settings.remove(&panel.document.id);
+            if let Some(builtin) = panel.builtin {
+                if done {
+                    self.finish_builtin_input(builtin, &panel.document.text);
+                }
+                return;
+            }
             if done {
                 self.plugin_callback(panel.callback, "done", json!([panel.document.text]), run_command);
             } else {

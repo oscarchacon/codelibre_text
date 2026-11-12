@@ -46,8 +46,8 @@ impl SyntaxGateway for SyntectSyntaxes {
         self.0.borrow_mut().line_scopes(document, text, syntax, line)
     }
 
-    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
-        self.0.borrow_mut().document_scopes(document, text, syntax)
+    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: std::ops::Range<usize>) -> Vec<Vec<ScopeSpan>> {
+        self.0.borrow_mut().lines_scopes(document, text, syntax, lines)
     }
 
     fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame> {

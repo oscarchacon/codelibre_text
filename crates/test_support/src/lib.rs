@@ -55,6 +55,8 @@ pub struct MemoryDisk {
     clock: Cell<u64>,
     /// When set, every write fails with this message.
     pub fail_writes: RefCell<Option<String>>,
+    /// What was moved to the trash, in order.
+    pub trashed: RefCell<Vec<PathBuf>>,
 }
 
 impl MemoryDisk {
@@ -79,6 +81,10 @@ impl MemoryDisk {
 
     pub fn mkdir(&self, path: impl AsRef<Path>) {
         self.dirs.borrow_mut().insert(path.as_ref().to_path_buf());
+    }
+
+    pub fn is_dir(&self, path: impl AsRef<Path>) -> bool {
+        self.dirs.borrow().contains(path.as_ref())
     }
 
     pub fn bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
@@ -133,6 +139,48 @@ impl FileSystemGateway for FakeFileSystem {
             .map(|p| DirectoryEntry { path: p.clone(), is_dir: true })
             .chain(files.keys().filter(children).map(|p| DirectoryEntry { path: p.clone(), is_dir: false }))
             .collect()
+    }
+
+    fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        if self.0.files.borrow().contains_key(path) {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "a file is there"));
+        }
+        let mut dir = Some(path);
+        while let Some(at) = dir.filter(|d| !d.as_os_str().is_empty()) {
+            self.0.dirs.borrow_mut().insert(at.to_path_buf());
+            dir = at.parent();
+        }
+        Ok(())
+    }
+
+    /// Moves the file, or the folder with everything in it.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        if !self.exists(from) {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found"));
+        }
+        let moved = |path: &PathBuf| to.join(path.strip_prefix(from).expect("under from"));
+        let mut files = self.0.files.borrow_mut();
+        let inside: Vec<PathBuf> = files.keys().filter(|p| p.starts_with(from)).cloned().collect();
+        for path in inside {
+            let entry = files.remove(&path).expect("listed");
+            files.insert(moved(&path), entry);
+        }
+        let mut dirs = self.0.dirs.borrow_mut();
+        let inside: Vec<PathBuf> = dirs.iter().filter(|p| p.starts_with(from)).cloned().collect();
+        for path in inside {
+            dirs.remove(&path);
+            dirs.insert(moved(&path));
+        }
+        Ok(())
+    }
+
+    fn move_to_trash(&self, path: &Path) -> std::io::Result<()> {
+        if !self.exists(path) {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found"));
+        }
+        self.0.remove_dir(path);
+        self.0.trashed.borrow_mut().push(path.to_path_buf());
+        Ok(())
     }
 }
 
@@ -411,6 +459,8 @@ pub struct Syntaxes {
     pub forgotten: RefCell<Vec<DocumentId>>,
     /// `include_sublime_packages` of every reload.
     pub reloads: RefCell<Vec<bool>>,
+    /// How many lines' scopes the use cases asked for, in all (`lines_scopes`).
+    pub lines_copied: Cell<usize>,
 }
 
 struct FakeSyntaxes(Rc<Syntaxes>);
@@ -518,8 +568,11 @@ impl SyntaxGateway for FakeSyntaxes {
         spans
     }
 
-    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
-        (0..text.split_inclusive('\n').count()).map(|line| self.line_scopes(document, text, syntax, line)).collect()
+    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: std::ops::Range<usize>) -> Vec<Vec<ScopeSpan>> {
+        let count = text.split_inclusive('\n').count();
+        let lines = lines.start.min(count)..lines.end.min(count);
+        self.0.lines_copied.set(self.0.lines_copied.get() + lines.len());
+        lines.map(|line| self.line_scopes(document, text, syntax, line)).collect()
     }
 
     /// `main`, and `string` inside double quotes, of `Packages/<syntax>/<syntax>.sublime-syntax`.

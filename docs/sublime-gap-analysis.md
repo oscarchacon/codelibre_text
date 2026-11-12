@@ -45,7 +45,7 @@ cannot be told apart by the string scan and are listed under native.
 | Git / modifications | `next_modification`, `prev_modification`, `revert_modification`, `revert_hunk`, `toggle_inline_diff` (needs `mini_diff`) | native |
 | Encoding | `set_encoding`, `reopen` with `encoding`, `detect_indentation` | native |
 | Spelling | `next_misspelling`, `prev_misspelling` | native |
-| Side bar | `new_file_at`, `new_folder`, `rename_path`, `delete_file`, `delete_folder`, `remove_folder`, `open_containing_folder`, `reveal_in_side_bar`, `focus_side_bar`, `copy_path`, `rename_file` | native / py |
+| Side bar | ~~`new_file_at`, `new_folder`, `rename_path`, `delete_file`, `delete_folder`, `remove_folder`, `open_containing_folder`~~ (done), `reveal_in_side_bar`, `focus_side_bar`, `copy_path`, `rename_file` | native / py |
 | Recent / projects | `open_recent_file`, `open_recent_folder`, `clear_recent_files`, `*project_or_workspace*`, `new_window`, `save_workspace_as`, `close_workspace` | native |
 | Build | `toggle_save_all_on_build` | native / py |
 | UI toggles | `toggle_minimap`, `toggle_menu`, `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |

@@ -731,6 +731,62 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     assert_eq!(status, "shims ok", "console:\n{}", editor.state().console);
 }
 
+/// Plugins written for Sublime's Python 3.3 host (no `.python-version`) run on the one Python we
+/// bring: the names Python 3.5–3.12 dropped from `plistlib`, `base64`, `html.parser`, `locale`…
+/// are back (`compat.py`).
+#[test]
+fn plugins_of_the_python_3_3_host_find_the_names_later_pythons_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import base64
+import gettext
+import html.parser
+import importlib
+import io
+import locale
+import os
+import platform
+import plistlib
+import sys
+import tarfile
+
+import sublime
+import sublime_plugin
+
+
+class ProbeCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        assert base64.decodestring(base64.encodestring(b"hi")) == b"hi"
+
+        theme = {"name": "Old", "settings": [{"scope": "string", "blob": plistlib.Data(b"\x00\x01")}]}
+        read = plistlib.readPlistFromBytes(plistlib.writePlistToBytes(theme))
+        assert read["name"] == "Old" and read["settings"][0]["blob"].data == b"\x00\x01", read
+        file = io.BytesIO()
+        plistlib.writePlist({"a": 1}, file)
+        file.seek(0)
+        assert plistlib.readPlist(file) == {"a": 1}
+
+        assert html.parser.HTMLParser().unescape("&lt;b&gt; &amp;") == "<b> &"
+        assert issubclass(html.parser.HTMLParseError, Exception)
+        assert os.errno.ENOENT == 2
+        assert tarfile.filemode(0o100644) == "-rw-r--r--"
+        assert locale.format("%d", 1234) == "1234"
+        assert importlib.find_loader("json") is not None
+        assert gettext.lgettext("x") == "x"
+        sys.setcheckinterval(50)
+        assert sys.getcheckinterval() == 50
+        assert len(platform.linux_distribution()) == 3 and len(platform.dist()) == 3
+        sublime.status_message("3.3 names ok")
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe"));
+    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    assert_eq!(status, "3.3 names ok", "console:\n{}", editor.state().console);
+}
+
 #[test]
 fn a_build_like_command_writes_to_an_output_panel_from_a_thread() {
     let dir = tempfile::tempdir().unwrap();

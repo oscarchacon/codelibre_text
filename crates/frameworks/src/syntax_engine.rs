@@ -410,15 +410,27 @@ impl SyntaxEngine {
 
     /// The scopes of every line (see [`Self::line_scopes`]).
     pub fn document_scopes(&mut self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
+        self.lines_scopes(document, text, syntax, 0..usize::MAX)
+    }
+
+    /// The scopes of the lines `lines` (the range stops at the last line): the cache is brought up
+    /// to date once and only those lines are copied.
+    pub fn lines_scopes(&mut self, document: DocumentId, text: &str, syntax: &str, lines: Range<usize>) -> Vec<Vec<ScopeSpan>> {
         let syntax = self.syntax(syntax).clone();
+        let take = lines.end.saturating_sub(lines.start);
         if text.len() > MAX_HIGHLIGHT_BYTES || syntax.name == "Plain Text" {
             let scope = syntax.scope.to_string();
-            return text.split_inclusive('\n').map(|line| vec![ScopeSpan { range: 0..line.len(), scope: scope.clone() }]).collect();
+            return text
+                .split_inclusive('\n')
+                .skip(lines.start)
+                .take(take)
+                .map(|line| vec![ScopeSpan { range: 0..line.len(), scope: scope.clone() }])
+                .collect();
         }
         let theme = self.scheme(&self.current_scheme).clone();
         let cache = self.caches.entry(document).or_default();
         cache.update(text, &self.syntaxes, &syntax, &theme, &mut self.failures);
-        cache.lines.iter().map(|l| l.scopes.clone()).collect()
+        cache.lines.iter().skip(lines.start).take(take).map(|l| l.scopes.clone()).collect()
     }
 
     /// The parser's contexts at byte `column` of `line`: the line's start state (from the cache)
