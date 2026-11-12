@@ -1218,3 +1218,52 @@ msgstr "Andere schließen"
 #: assets/Default/Tab Context.sublime-menu
 msgid "Close Tabs to the Right"
 msgstr "Tabs rechts schließen"
+
+msgid "Rename…"
+msgstr "Umbenennen…"
+
+msgid "Delete File"
+msgstr "Datei löschen"
+
+msgid "New Folder…"
+msgstr "Neuer Ordner…"
+
+msgid "Delete Folder"
+msgstr "Ordner löschen"
+
+msgid "Folder Name:"
+msgstr "Ordnername:"
+
+msgid "New Name:"
+msgstr "Neuer Name:"
+
+msgid "Delete File {path}?"
+msgstr "Datei {path} löschen?"
+
+msgid "Delete {count} File?"
+msgid_plural "Delete {count} Files?"
+msgstr[0] "{count} Datei löschen?"
+msgstr[1] "{count} Dateien löschen?"
+
+msgid "Delete Folder {path}?"
+msgstr "Ordner {path} löschen?"
+
+msgid "Delete {count} Folder?"
+msgid_plural "Delete {count} Folders?"
+msgstr[0] "{count} Ordner löschen?"
+msgstr[1] "{count} Ordner löschen?"
+
+msgid "Unable to create the folder: {error}"
+msgstr "Der Ordner konnte nicht erstellt werden: {error}"
+
+msgid "Unable to rename: {path} already exists"
+msgstr "Umbenennen nicht möglich: {path} existiert bereits"
+
+msgid "Unable to rename: {error}"
+msgstr "Umbenennen nicht möglich: {error}"
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "Unable to delete {path}: {error}"
+msgstr "{path} konnte nicht gelöscht werden: {error}"

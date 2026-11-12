@@ -72,6 +72,10 @@ fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEn
     if plugin.is_some_and(|p| !p.visible) {
         return None;
     }
+    // Sublime's side bar commands hide themselves without the files or folders they act on.
+    if plugin.is_none() && item.command.as_ref().is_some_and(|c| !editor.side_bar_command_visible(c)) {
+        return None;
+    }
     let checked = item.checkbox.then(|| match (plugin, &item.command) {
         (Some(plugin), _) => plugin.checked,
         (None, Some(c)) if c.name == "set_build_system" => editor.build_system_set().unwrap_or_default() == c.str_arg("file"),

@@ -121,13 +121,13 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
-  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows, completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done, and the scopes are down to exact values and whole-file scans. The items still unticked there are what remains, with the files to touch.
+  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows, completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done, and the scopes are down to `extract_scope`'s exact extent (no specification of Sublime's). The items still unticked there are what remains, with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
-phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`,
-a Python 3.3 host), minimap, folding, find in files.
+phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`;
+by design there is no Python 3.3 or 3.8 host: every plugin runs on the bundled 3.13), minimap, folding, find in files.
 Highlighting is skipped above 4 MB.

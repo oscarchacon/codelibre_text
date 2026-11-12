@@ -72,6 +72,47 @@ fn extract_scope_spans_the_token_around_the_point() {
     assert_eq!(editor.extract_scope(id(&editor), 5), Some((4, 8)));
 }
 
+/// A file of `lines` lines `n = 1`, with `x = "hi"` as line `quoted`.
+fn long_file(world: &World, lines: usize, quoted: usize) -> Editor {
+    let text: String = (0..lines).map(|line| if line == quoted { "x = \"hi\"\n".to_string() } else { "n = 1\n".to_string() }).collect();
+    world.disk.put("/p/long.py", text.as_str());
+    let mut editor = world.editor();
+    editor.open_file(Path::new("/p/long.py"));
+    editor
+}
+
+#[test]
+fn extract_scope_reads_only_the_lines_around_the_point() {
+    let world = World::new();
+    let editor = long_file(&world, 2000, 1000);
+    let string_start = 1000 * 6 + 4;
+    world.syntaxes.lines_copied.set(0);
+    assert_eq!(editor.extract_scope(id(&editor), string_start + 1), Some((string_start, string_start + 4)));
+    let copied = world.syntaxes.lines_copied.get();
+    assert!(copied <= 2 * use_cases::scopes::EXTRACT_SCOPE_LINES + 1, "{copied} lines read for one string");
+}
+
+#[test]
+fn extract_scope_widens_its_window_while_the_scope_goes_on() {
+    let world = World::new();
+    // The base scope covers every line but the quoted one, whose string is inside it: the whole file.
+    let editor = long_file(&world, 300, 150);
+    let len = 299 * 6 + 9;
+    assert_eq!(editor.extract_scope(id(&editor), 3), Some((0, len)));
+    assert_eq!(editor.extract_scope(id(&editor), len - 1), Some((0, len)));
+}
+
+#[test]
+fn scoped_ranges_read_only_the_lines_of_the_region() {
+    let world = World::new();
+    let editor = long_file(&world, 1000, 500);
+    world.syntaxes.lines_copied.set(0);
+    let ranges = editor.scoped_ranges(id(&editor), 500 * 6, 500 * 6 + 9);
+    assert_eq!(ranges.len(), 3, "{ranges:?}");
+    assert_eq!(ranges[1], ScopedRange { start: 3004, end: 3008, scope: "source.python string.quoted.double".to_string() });
+    assert_eq!(world.syntaxes.lines_copied.get(), 2, "the line and the next one, where the region ends");
+}
+
 #[test]
 fn scoped_ranges_are_clipped_to_the_region() {
     let world = World::new();

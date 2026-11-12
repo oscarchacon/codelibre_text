@@ -80,6 +80,9 @@ pub struct EditorState {
     /// The group with the focus.
     pub active_group: usize,
     pub folders: Vec<PathBuf>,
+    /// Goes up whenever the editor changes what is in the folders (a side bar command made, renamed or
+    /// deleted something): the side bar reads its folders again.
+    pub folders_revision: u64,
     /// The window's `.sublime-project` (its folders, build systems and `$project*`).
     pub project: Option<Project>,
     pub settings: SettingsLayers,
@@ -173,6 +176,7 @@ impl Editor {
                 layout: Layout::default(),
                 active_group: 0,
                 folders: Vec::new(),
+                folders_revision: 0,
                 project: None,
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
