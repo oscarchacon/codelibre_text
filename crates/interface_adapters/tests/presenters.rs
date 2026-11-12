@@ -107,6 +107,18 @@ fn expanded_folders_show_their_contents_indented() {
 }
 
 #[test]
+fn the_side_bar_reads_its_folders_again_after_a_side_bar_command() {
+    let world = World::new().with_dir("/proj").with_file("/proj/a.txt", "").with_file("/proj/b.txt", "");
+    let mut editor = world.editor_opening(&["/proj"]);
+    let mut view = ViewState::default();
+    view.expanded_folders.insert(PathBuf::from("/proj"));
+    assert_eq!(side_bar::present(&editor, &mut view).folders.len(), 3);
+    editor.delete_file(&Command::with_args("delete_file", json!({ "files": ["/proj/a.txt"], "prompt": false })));
+    let names: Vec<String> = side_bar::present(&editor, &mut view).folders.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, ["proj", "b.txt"]);
+}
+
+#[test]
 fn folder_contents_are_cached_until_refreshed() {
     let world = World::new().with_dir("/proj").with_file("/proj/a.txt", "");
     let editor = world.editor_opening(&["/proj"]);

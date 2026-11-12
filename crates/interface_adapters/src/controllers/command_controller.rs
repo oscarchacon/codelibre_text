@@ -15,6 +15,7 @@ use use_cases::gateways::PluginCommandKind;
 use use_cases::plugin_hooks::CommandTarget;
 use use_cases::plugin_panels::PluginPanelRequest;
 use use_cases::search::{CandidateTarget, SearchKind};
+use use_cases::side_bar;
 use use_cases::Editor;
 
 use crate::view_state::{InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetEditInProgress};
@@ -160,6 +161,7 @@ const WINDOW_COMMANDS: &[&str] = &[
     "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
     "new_pane", "close_pane", "set_max_columns", "new_window", "clone_file",
     "close_by_index", "close_others_by_index", "close_to_right_by_index", "remove_folder", "open_containing_folder",
+    "new_file_at", "new_folder", "rename_path", "delete_file", "delete_folder",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
@@ -266,6 +268,15 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => editor.close_by_index(command),
         "remove_folder" => editor.remove_folders(command),
         "open_containing_folder" => editor.open_containing_folder(command),
+        // Sublime's side bar commands, unless a plugin (SideBarEnhancements, FileManager) defines them.
+        name if side_bar::SIDE_BAR_COMMANDS.contains(&name) && editor.plugin_command_kind(name).is_some() => {
+            editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+        }
+        "new_file_at" => editor.new_file_at(command),
+        "new_folder" => editor.new_folder(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)),
+        "rename_path" => editor.rename_path(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)),
+        "delete_file" => editor.delete_file(command),
+        "delete_folder" => editor.delete_folder(command),
         "save" => {
             editor.save_active(false);
         }

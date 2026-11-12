@@ -8,6 +8,11 @@ use crate::view_state::ViewState;
 /// OPEN FILES plus the FOLDERS tree, flattened to the rows that are currently visible.
 pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
     let state = editor.state();
+    // A side bar command made, renamed or deleted something: read the folders again.
+    if view.folder_listings_revision != state.folders_revision {
+        view.folder_listings.clear();
+        view.folder_listings_revision = state.folders_revision;
+    }
     let groups = editor.group_count();
     let open_files = (0..groups)
         .flat_map(|group| editor.group_indexes(group).into_iter().enumerate())

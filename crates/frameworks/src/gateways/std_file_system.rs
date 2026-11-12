@@ -50,6 +50,18 @@ impl FileSystemGateway for StdFileSystem {
             })
             .unwrap_or_default()
     }
+
+    fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(path)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn move_to_trash(&self, path: &Path) -> std::io::Result<()> {
+        trash::delete(path).map_err(|error| std::io::Error::other(error.to_string()))
+    }
 }
 
 /// `canonicalize` on Windows returns `\\?\C:\…`; keep the familiar `C:\…`.

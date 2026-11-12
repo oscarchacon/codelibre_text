@@ -1218,3 +1218,52 @@ msgstr "Fechar as outras"
 #: assets/Default/Tab Context.sublime-menu
 msgid "Close Tabs to the Right"
 msgstr "Fechar abas à direita"
+
+msgid "Rename…"
+msgstr "Renomear…"
+
+msgid "Delete File"
+msgstr "Excluir arquivo"
+
+msgid "New Folder…"
+msgstr "Nova pasta…"
+
+msgid "Delete Folder"
+msgstr "Excluir pasta"
+
+msgid "Folder Name:"
+msgstr "Nome da pasta:"
+
+msgid "New Name:"
+msgstr "Novo nome:"
+
+msgid "Delete File {path}?"
+msgstr "Excluir o arquivo {path}?"
+
+msgid "Delete {count} File?"
+msgid_plural "Delete {count} Files?"
+msgstr[0] "Excluir {count} arquivo?"
+msgstr[1] "Excluir {count} arquivos?"
+
+msgid "Delete Folder {path}?"
+msgstr "Excluir a pasta {path}?"
+
+msgid "Delete {count} Folder?"
+msgid_plural "Delete {count} Folders?"
+msgstr[0] "Excluir {count} pasta?"
+msgstr[1] "Excluir {count} pastas?"
+
+msgid "Unable to create the folder: {error}"
+msgstr "Não foi possível criar a pasta: {error}"
+
+msgid "Unable to rename: {path} already exists"
+msgstr "Não foi possível renomear: {path} já existe"
+
+msgid "Unable to rename: {error}"
+msgstr "Não foi possível renomear: {error}"
+
+msgid "Delete"
+msgstr "Excluir"
+
+msgid "Unable to delete {path}: {error}"
+msgstr "Não foi possível excluir {path}: {error}"

@@ -1218,3 +1218,52 @@ msgstr "Fermer les autres"
 #: assets/Default/Tab Context.sublime-menu
 msgid "Close Tabs to the Right"
 msgstr "Fermer les onglets à droite"
+
+msgid "Rename…"
+msgstr "Renommer…"
+
+msgid "Delete File"
+msgstr "Supprimer le fichier"
+
+msgid "New Folder…"
+msgstr "Nouveau dossier…"
+
+msgid "Delete Folder"
+msgstr "Supprimer le dossier"
+
+msgid "Folder Name:"
+msgstr "Nom du dossier :"
+
+msgid "New Name:"
+msgstr "Nouveau nom :"
+
+msgid "Delete File {path}?"
+msgstr "Supprimer le fichier {path} ?"
+
+msgid "Delete {count} File?"
+msgid_plural "Delete {count} Files?"
+msgstr[0] "Supprimer {count} fichier ?"
+msgstr[1] "Supprimer {count} fichiers ?"
+
+msgid "Delete Folder {path}?"
+msgstr "Supprimer le dossier {path} ?"
+
+msgid "Delete {count} Folder?"
+msgid_plural "Delete {count} Folders?"
+msgstr[0] "Supprimer {count} dossier ?"
+msgstr[1] "Supprimer {count} dossiers ?"
+
+msgid "Unable to create the folder: {error}"
+msgstr "Impossible de créer le dossier : {error}"
+
+msgid "Unable to rename: {path} already exists"
+msgstr "Impossible de renommer : {path} existe déjà"
+
+msgid "Unable to rename: {error}"
+msgstr "Impossible de renommer : {error}"
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "Unable to delete {path}: {error}"
+msgstr "Impossible de supprimer {path} : {error}"

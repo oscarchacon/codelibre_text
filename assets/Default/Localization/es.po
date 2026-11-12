@@ -1218,3 +1218,52 @@ msgstr "Cerrar las demás"
 #: assets/Default/Tab Context.sublime-menu
 msgid "Close Tabs to the Right"
 msgstr "Cerrar pestañas a la derecha"
+
+msgid "Rename…"
+msgstr "Cambiar nombre…"
+
+msgid "Delete File"
+msgstr "Eliminar archivo"
+
+msgid "New Folder…"
+msgstr "Nueva carpeta…"
+
+msgid "Delete Folder"
+msgstr "Eliminar carpeta"
+
+msgid "Folder Name:"
+msgstr "Nombre de la carpeta:"
+
+msgid "New Name:"
+msgstr "Nuevo nombre:"
+
+msgid "Delete File {path}?"
+msgstr "¿Eliminar el archivo {path}?"
+
+msgid "Delete {count} File?"
+msgid_plural "Delete {count} Files?"
+msgstr[0] "¿Eliminar {count} archivo?"
+msgstr[1] "¿Eliminar {count} archivos?"
+
+msgid "Delete Folder {path}?"
+msgstr "¿Eliminar la carpeta {path}?"
+
+msgid "Delete {count} Folder?"
+msgid_plural "Delete {count} Folders?"
+msgstr[0] "¿Eliminar {count} carpeta?"
+msgstr[1] "¿Eliminar {count} carpetas?"
+
+msgid "Unable to create the folder: {error}"
+msgstr "No se pudo crear la carpeta: {error}"
+
+msgid "Unable to rename: {path} already exists"
+msgstr "No se pudo cambiar el nombre: {path} ya existe"
+
+msgid "Unable to rename: {error}"
+msgstr "No se pudo cambiar el nombre: {error}"
+
+msgid "Delete"
+msgstr "Eliminar"
+
+msgid "Unable to delete {path}: {error}"
+msgstr "No se pudo eliminar {path}: {error}"

@@ -10,6 +10,7 @@ msgid "File"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: assets/Default/Side Bar.sublime-menu
 #: assets/Default/Tab Context.sublime-menu
 #: crates/interface_adapters/src/presenters/editor.rs
 msgid "New File"
@@ -835,7 +836,25 @@ msgid "Help: About CodeLibre Text"
 msgstr ""
 
 #: assets/Default/Side Bar.sublime-menu
+msgid "Rename…"
+msgstr ""
+
+#: assets/Default/Side Bar.sublime-menu
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete File"
+msgstr ""
+
+#: assets/Default/Side Bar.sublime-menu
 msgid "Open Containing Folder…"
+msgstr ""
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "New Folder…"
+msgstr ""
+
+#: assets/Default/Side Bar.sublime-menu
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete Folder"
 msgstr ""
 
 #: assets/Default/Side Bar Mount Point.sublime-menu
@@ -972,6 +991,7 @@ msgstr ""
 
 #: crates/use_cases/src/packages.rs
 #: crates/use_cases/src/plugin_api.rs
+#: crates/use_cases/src/side_bar.rs
 #: crates/frameworks/src/views/dialogs.rs
 msgid "Cancel"
 msgstr ""
@@ -1066,6 +1086,54 @@ msgstr ""
 
 #: crates/use_cases/src/session.rs
 msgid "Could not save the session: {error}"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Folder Name:"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "New Name:"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete File {path}?"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete {count} File?"
+msgid_plural "Delete {count} Files?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete Folder {path}?"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete {count} Folder?"
+msgid_plural "Delete {count} Folders?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Unable to create the folder: {error}"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Unable to rename: {path} already exists"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Unable to rename: {error}"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Delete"
+msgstr ""
+
+#: crates/use_cases/src/side_bar.rs
+msgid "Unable to delete {path}: {error}"
 msgstr ""
 
 #: crates/interface_adapters/src/controllers/command_controller.rs

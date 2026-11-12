@@ -14,6 +14,9 @@ use crate::gateways::{ContextFrame, ScopeSpan};
 /// and labels.
 const DEFAULT_SYMBOL_SELECTOR: &str = "entity.name - entity.name.tag - entity.name.label";
 
+/// How many lines on each side of the point `extract_scope` reads first.
+pub const EXTRACT_SCOPE_LINES: usize = 32;
+
 /// A piece of the text with one scope, in chars of the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedRange {
@@ -155,36 +158,59 @@ impl Editor {
     /// The text around `point` in the scope of its char, across lines: the neighbours with that
     /// scope or one inside it (a string with its quotes, a comment). Close to Sublime's extent of
     /// the innermost scope.
+    ///
+    /// Only the lines around `point` are read: a window of [`EXTRACT_SCOPE_LINES`] lines on each
+    /// side, made four times wider while the scope goes on past one of its edges.
     pub fn extract_scope(&self, id: DocumentId, point: usize) -> Option<(usize, usize)> {
         let scope = self.scope_name(id, point)?;
-        let tokens = self.scoped_ranges(id, 0, usize::MAX);
-        let at = tokens.iter().position(|t| t.start <= point && point < t.end).or(tokens.len().checked_sub(1))?;
+        let doc = self.any_document(id)?;
+        let line = doc.text[..char_to_byte(&doc.text, point)].matches('\n').count();
+        let line_count = doc.text.split_inclusive('\n').count();
         let same = |t: &ScopedRange| t.scope == scope.trim_end() || t.scope.starts_with(scope.as_str());
-        let first = tokens[..at].iter().rposition(|t| !same(t)).map_or(0, |i| i + 1);
-        let last = tokens[at..].iter().position(|t| !same(t)).map_or(tokens.len(), |i| at + i);
-        Some(if first < last { (tokens[first].start, tokens[last - 1].end) } else { (point, point) })
+        let mut reach = EXTRACT_SCOPE_LINES;
+        loop {
+            let lines = line.saturating_sub(reach)..(line + reach + 1).min(line_count.max(1));
+            let tokens = self.line_tokens(doc, lines.clone());
+            let at = tokens.iter().position(|t| t.start <= point && point < t.end).or(tokens.len().checked_sub(1))?;
+            let first = tokens[..at].iter().rposition(|t| !same(t)).map_or(0, |i| i + 1);
+            let last = tokens[at..].iter().position(|t| !same(t)).map_or(tokens.len(), |i| at + i);
+            let cut_before = first == 0 && lines.start > 0;
+            let cut_after = last == tokens.len() && lines.end < line_count;
+            if !cut_before && !cut_after {
+                return Some(if first < last { (tokens[first].start, tokens[last - 1].end) } else { (point, point) });
+            }
+            reach = reach.saturating_mul(4);
+        }
     }
 
-    /// The pieces of the text between `start` and `end` (chars) and their scopes, in order. The
-    /// scopes of every line come from the highlighting cache at once (nothing is parsed again).
+    /// The pieces of the text between `start` and `end` (chars) and their scopes, in order. Only
+    /// the lines of that range are read from the highlighting cache (nothing is parsed again).
     pub fn scoped_ranges(&self, id: DocumentId, start: usize, end: usize) -> Vec<ScopedRange> {
         let Some(doc) = self.any_document(id) else { return Vec::new() };
         let first_line = doc.text[..char_to_byte(&doc.text, start)].matches('\n').count();
-        let all = self.gateways.syntaxes.document_scopes(doc.id, &doc.text, &doc.syntax);
-        let (mut line_char, mut tokens) = (0, Vec::new());
-        for ((line, line_text), spans) in doc.text.split_inclusive('\n').enumerate().zip(all) {
-            if line_char >= end {
-                break;
-            }
-            if line >= first_line {
-                for span in spans {
-                    let Some(text) = line_text.get(..span.range.end) else { continue };
-                    let a = line_char + line_text[..span.range.start].chars().count();
-                    let b = line_char + text.chars().count();
-                    if b > start && a < end {
-                        tokens.push(ScopedRange { start: a.max(start), end: b.min(end), scope: span.scope });
-                    }
-                }
+        let last_line = doc.text[..char_to_byte(&doc.text, end)].matches('\n').count();
+        self.line_tokens(doc, first_line..last_line + 1)
+            .into_iter()
+            .filter(|t| t.end > start && t.start < end)
+            .map(|t| ScopedRange { start: t.start.max(start), end: t.end.min(end), scope: t.scope })
+            .collect()
+    }
+
+    /// The pieces of the lines `lines` and their scopes, in chars of the whole document.
+    fn line_tokens(&self, doc: &Document, lines: std::ops::Range<usize>) -> Vec<ScopedRange> {
+        let first_byte = if lines.start == 0 {
+            0
+        } else {
+            doc.text.match_indices('\n').nth(lines.start - 1).map_or(doc.text.len(), |(at, _)| at + 1)
+        };
+        let scopes = self.gateways.syntaxes.lines_scopes(doc.id, &doc.text, &doc.syntax, lines);
+        let (mut line_char, mut tokens) = (byte_to_char(&doc.text, first_byte), Vec::new());
+        for (line_text, spans) in doc.text[first_byte..].split_inclusive('\n').zip(scopes) {
+            for span in spans {
+                let Some(text) = line_text.get(..span.range.end) else { continue };
+                let a = line_char + line_text[..span.range.start].chars().count();
+                let b = line_char + text.chars().count();
+                tokens.push(ScopedRange { start: a, end: b, scope: span.scope });
             }
             line_char += line_text.chars().count();
         }

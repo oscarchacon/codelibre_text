@@ -57,24 +57,32 @@ pub(crate) fn lock_global_scope_repo() -> MutexGuard<'static, ScopeRepository> {
 /// `meta.function.parameters.rust`
 ///
 /// `syntect` uses an optimized format for storing these that allows super fast comparison and
-/// determining if one scope is a prefix of another. It also always takes 16 bytes of space. It
+/// determining if one scope is a prefix of another. It also always takes 32 bytes of space. It
 /// accomplishes this by using a global repository to store string values and using bit-packed 16
 /// bit numbers to represent and compare atoms. Like "atoms" or "symbols" in other languages. This
 /// means that while comparing and prefix are fast, extracting a string is relatively slower but
 /// ideally should be very rare.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Default, Hash)]
 pub struct Scope {
-    a: u64,
-    b: u64,
+    // codelibre_text patch: four words (16 atoms) instead of `a` and `b` (8 atoms), since Sublime's
+    // own syntaxes have longer scopes (ActionScript's
+    // `keyword.operator.assignment.augmented.bitwise.shift.left.signed.actionscript`).
+    atoms: [u64; WORDS],
 }
+
+/// How many atoms a scope can have (codelibre_text patch: 16, it was 8).
+pub const MAX_ATOMS: usize = 16;
+/// Atoms per `u64` word of a [`Scope`].
+const ATOMS_PER_WORD: usize = 4;
+const WORDS: usize = MAX_ATOMS / ATOMS_PER_WORD;
 
 /// Not all strings are valid scopes
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ParseScopeError {
     /// Due to a limitation of the current optimized internal representation
-    /// scopes can be at most 8 atoms long
-    #[error("Too long scope. Scopes can be at most 8 atoms long.")]
+    /// scopes can be at most 16 atoms long (codelibre_text patch: it was 8)
+    #[error("Too long scope. Scopes can be at most 16 atoms long.")]
     TooLong,
     /// The internal representation uses 16 bits per atom, so if all scopes ever
     /// used by the program have more than 2^16-2 atoms, things break
@@ -151,7 +159,7 @@ pub enum BasicScopeStackOp {
 }
 
 fn pack_as_u16s(atoms: &[usize]) -> Result<Scope, ParseScopeError> {
-    let mut res = Scope { a: 0, b: 0 };
+    let mut res = Scope::default();
 
     for (i, &n) in atoms.iter().enumerate() {
         if n >= (u16::MAX as usize) - 2 {
@@ -159,13 +167,8 @@ fn pack_as_u16s(atoms: &[usize]) -> Result<Scope, ParseScopeError> {
         }
         let small = (n + 1) as u64; // +1 since we reserve 0 for unused
 
-        if i < 4 {
-            let shift = (3 - i) * 16;
-            res.a |= small << shift;
-        } else {
-            let shift = (7 - i) * 16;
-            res.b |= small << shift;
-        }
+        let shift = (ATOMS_PER_WORD - 1 - i % ATOMS_PER_WORD) * 16;
+        res.atoms[i / ATOMS_PER_WORD] |= small << shift;
     }
     Ok(res)
 }
@@ -180,22 +183,23 @@ impl ScopeRepository {
 
     pub fn build(&mut self, s: &str) -> Result<Scope, ParseScopeError> {
         if s.is_empty() {
-            return Ok(Scope { a: 0, b: 0 });
+            return Ok(Scope::default());
         }
         let parts: Vec<usize> = s
             .trim_end_matches('.')
             .split('.')
             .map(|a| self.atom_to_index(a))
             .collect();
-        if parts.len() > 8 {
-            return Err(ParseScopeError::TooManyAtoms);
+        // codelibre_text patch: `TooLong` (it answered `TooManyAtoms`, the error of a full repository).
+        if parts.len() > MAX_ATOMS {
+            return Err(ParseScopeError::TooLong);
         }
         pack_as_u16s(&parts[..])
     }
 
     pub fn to_string(&self, scope: Scope) -> String {
         let mut s = String::new();
-        for i in 0..8 {
+        for i in 0..MAX_ATOMS {
             let atom_number = scope.atom_at(i);
             // println!("atom {} of {:x}-{:x} = {:x}",
             //     i, scope.a, scope.b, atom_number);
@@ -246,30 +250,30 @@ impl Scope {
     pub fn atom_at(self, index: usize) -> u16 {
         #[allow(clippy::panic)]
         // The below panic is too much of an edge-case for it to be worth propagating
-        let shifted = if index < 4 {
-            self.a >> ((3 - index) * 16)
-        } else if index < 8 {
-            self.b >> ((7 - index) * 16)
-        } else {
+        if index >= MAX_ATOMS {
             panic!("atom index out of bounds {:?}", index);
-        };
+        }
+        let shifted = self.atoms[index / ATOMS_PER_WORD] >> ((ATOMS_PER_WORD - 1 - index % ATOMS_PER_WORD) * 16);
         (shifted & 0xFFFF) as u16
     }
 
     #[inline]
     fn missing_atoms(self) -> u32 {
-        let trail = if self.b == 0 {
-            self.a.trailing_zeros() + 64
-        } else {
-            self.b.trailing_zeros()
-        };
+        let mut trail = 0;
+        for word in self.atoms.iter().rev() {
+            if *word != 0 {
+                trail += word.trailing_zeros();
+                break;
+            }
+            trail += 64;
+        }
         trail / 16
     }
 
     /// Returns the number of atoms in the scope
     #[inline(always)]
     pub fn len(self) -> u32 {
-        8 - self.missing_atoms()
+        MAX_ATOMS as u32 - self.missing_atoms()
     }
 
     pub fn is_empty(self) -> bool {
@@ -308,26 +312,19 @@ impl Scope {
     ///         .is_prefix_of(Scope::new("source.php.wow").unwrap()));
     /// ```
     pub fn is_prefix_of(self, s: Scope) -> bool {
-        let pref_missing = self.missing_atoms();
-
-        // TODO: test optimization - use checked shl and then mult carry flag as int by -1
-        let mask: (u64, u64) = if pref_missing == 8 {
-            (0, 0)
-        } else if pref_missing == 4 {
-            (u64::MAX, 0)
-        } else if pref_missing > 4 {
-            (u64::MAX << ((pref_missing - 4) * 16), 0)
-        } else {
-            (u64::MAX, u64::MAX << (pref_missing * 16))
-        };
-
-        // xor to find the difference
-        let ax = (self.a ^ s.a) & mask.0;
-        let bx = (self.b ^ s.b) & mask.1;
-        // println!("{:x}-{:x} is_pref {:x}-{:x}: missing {} mask {:x}-{:x} xor {:x}-{:x}",
-        //     self.a, self.b, s.a, s.b, pref_missing, mask.0, mask.1, ax, bx);
-
-        ax == 0 && bx == 0
+        // codelibre_text patch: one mask per word (there were two words, `a` and `b`).
+        let prefix_len = self.len() as usize;
+        self.atoms.iter().zip(s.atoms).enumerate().all(|(word, (&mine, theirs))| {
+            // The prefix's atoms in this word; the others are not compared.
+            let held = prefix_len.saturating_sub(word * ATOMS_PER_WORD).min(ATOMS_PER_WORD);
+            let mask = match held {
+                0 => 0,
+                ATOMS_PER_WORD => u64::MAX,
+                held => u64::MAX << ((ATOMS_PER_WORD - held) * 16),
+            };
+            // xor to find the difference
+            (mine ^ theirs) & mask == 0
+        })
     }
 }
 
@@ -634,7 +631,13 @@ mod tests {
             Scope::new("source.php").unwrap()
         );
         assert!(Scope::from_str("1.2.3.4.5.6.7.8").is_ok());
-        assert!(Scope::from_str("1.2.3.4.5.6.7.8.9").is_err());
+        // codelibre_text patch: up to 16 atoms.
+        assert!(Scope::from_str("1.2.3.4.5.6.7.8.9").is_ok());
+        assert!(Scope::from_str("1.2.3.4.5.6.7.8.9.10.11.12.13.14.15.16").is_ok());
+        assert!(matches!(
+            Scope::from_str("1.2.3.4.5.6.7.8.9.10.11.12.13.14.15.16.17"),
+            Err(ParseScopeError::TooLong)
+        ));
     }
 
     #[test]
@@ -660,6 +663,17 @@ mod tests {
         assert!(!Scope::new("1.2.a")
             .unwrap()
             .is_prefix_of(Scope::new("1.2.3.4.5.6.7.8").unwrap()));
+        // codelibre_text patch: scopes longer than 8 atoms.
+        let long = Scope::new("1.2.3.4.5.6.7.8.9.10.11.12.13").unwrap();
+        assert_eq!(long.len(), 13);
+        assert_eq!(long.build_string(), "1.2.3.4.5.6.7.8.9.10.11.12.13");
+        assert!(Scope::new("1.2.3.4.5.6.7.8.9").unwrap().is_prefix_of(long));
+        assert!(Scope::new("1.2.3.4.5.6.7.8").unwrap().is_prefix_of(long));
+        assert!(long.is_prefix_of(long));
+        assert!(!Scope::new("1.2.3.4.5.6.7.8.x").unwrap().is_prefix_of(long));
+        assert!(!Scope::new("1.2.3.4.5.6.7.8.9.10.11.12.x").unwrap().is_prefix_of(long));
+        assert!(!long.is_prefix_of(Scope::new("1.2.3.4.5.6.7.8.9").unwrap()));
+        assert!(Scope::new("").unwrap().is_prefix_of(long));
     }
 
     #[test]

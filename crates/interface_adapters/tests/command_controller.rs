@@ -1131,3 +1131,73 @@ fn enter_and_tab_replay_their_key_so_indentation_still_applies() {
     assert!(hooked_widget_input(&mut editor, &mut view, command, enter));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("  ".into()))]);
 }
+
+// ----- side bar commands ---------------------------------------------------------------------------
+
+/// A world whose side bar menu is the built-in `Side Bar.sublime-menu`.
+fn side_bar_world() -> World {
+    use entities::menu::ContextMenus;
+    let items = match sublime_json::parse(builtin_resources::SIDE_BAR_MENU).unwrap() {
+        Value::Array(items) => items,
+        other => panic!("not a menu: {other}"),
+    };
+    let side_bar = items
+        .iter()
+        .map(|item| entities::menu::MenuItem {
+            caption: item["caption"].as_str().unwrap_or_default().to_string(),
+            id: item["id"].as_str().map(String::from),
+            command: item["command"].as_str().map(|name| Command::with_args(name, item.get("args").cloned().unwrap_or(json!({})))),
+            checkbox: false,
+            children: vec![],
+        })
+        .collect();
+    World::new().with_context_menus(ContextMenus { side_bar, ..ContextMenus::default() })
+}
+
+/// The commands the side bar menu shows on `path`.
+fn side_bar_menu_commands(editor: &mut Editor, path: &str, is_dir: bool) -> Vec<String> {
+    use entities::menu::ContextMenuTarget;
+    use interface_adapters::controllers::ui_controller::{handle, UiEvent};
+    use interface_adapters::presenters::menu::present_context_menu;
+    let mut view = ViewState::default();
+    let target = ContextMenuTarget::SideBar { path: PathBuf::from(path), is_dir, root: false };
+    handle(editor, &mut view, UiEvent::ContextMenu(Some(target)));
+    present_context_menu(editor, &view).unwrap().entries.iter().filter_map(|e| e.command.as_ref().map(|c| c.name.clone())).collect()
+}
+
+#[test]
+fn the_side_bar_menu_shows_the_commands_for_a_file_or_a_folder() {
+    let world = side_bar_world();
+    let mut editor = world.editor();
+    assert_eq!(side_bar_menu_commands(&mut editor, "/p/a.md", false), ["rename_path", "delete_file", "open_containing_folder"]);
+    assert_eq!(
+        side_bar_menu_commands(&mut editor, "/p/src", true),
+        ["new_file_at", "rename_path", "open_containing_folder", "new_folder", "delete_folder"]
+    );
+}
+
+#[test]
+fn new_folder_opens_the_input_panel_and_its_answer_makes_the_folder() {
+    let world = World::new();
+    world.disk.mkdir("/p");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(&mut editor, &mut view, &cmd_with("new_folder", json!({ "dirs": ["/p"] })));
+    assert!(view.input_panel.is_some(), "the panel shows at once");
+    interface_adapters::controllers::command_controller::change_plugin_input(&mut editor, &mut view, "made");
+    interface_adapters::controllers::command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    assert!(world.disk.is_dir("/p/made"));
+    assert!(view.input_panel.is_none());
+}
+
+#[test]
+fn a_plugin_side_bar_command_replaces_the_built_in_one() {
+    let world = World::new().with_plugin_commands(&[("delete_file", PluginCommandKind::Window)]);
+    world.disk.put("/p/a.md", "a");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    run(&mut editor, &mut view, &cmd_with("delete_file", json!({ "files": ["/p/a.md"], "prompt": false })));
+    assert!(world.disk.trashed.borrow().is_empty());
+    assert_eq!(world.plugins.runs.borrow()[0].1, "delete_file");
+}
