@@ -32,6 +32,8 @@ directories = "5.0"
 # The operating system language, for `"language": "auto"`
 sys-locale = "0.3"
 ignore = "0.4"
+# The system's trash (Recycle Bin, macOS Trash, freedesktop.org trash) for the side bar's deletes
+trash = "5"
 # Command line and logging
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"

@@ -1,7 +1,8 @@
-"""Puts back what plugins written for Sublime's Python 3.8 hosts use, on the Python we run.
+"""Puts back what plugins written for Sublime's Python 3.3 and 3.8 hosts use, on the Python we run.
 
-Sublime runs plugins on Python 3.8 (or 3.3): plugins, and the libraries Package Control installs
-for them, import modules and call functions that later Pythons removed. Every patch here only
+We run every package on one Python (3.13, the one the installers bring, native on x64 and arm64),
+where Sublime has a 3.3 host and a newer one (3.13 from build 4201 on): plugins, and the libraries
+Package Control installs for them, import modules and call functions that later Pythons removed. Every patch here only
 fills a gap (``if not hasattr(...)``), so a Python that still has them is left alone. Modules that
 are gone entirely live in ``shims/``, which is last on ``sys.path`` for the same reason.
 
@@ -524,6 +525,203 @@ def _fractions_gcd():
         fractions.gcd = math.gcd
 
 
+def _base64_aliases():
+    """``base64.encodestring`` / ``decodestring``, removed in Python 3.9 (``encodebytes`` /
+    ``decodebytes`` since 3.1): plugins that send credentials or embed images use them."""
+    import base64
+
+    if not hasattr(base64, "encodestring"):
+        base64.encodestring = base64.encodebytes
+    if not hasattr(base64, "decodestring"):
+        base64.decodestring = base64.decodebytes
+
+
+def _plistlib_aliases():
+    """``plistlib``'s old API, removed in Python 3.9: ``readPlist`` / ``writePlist`` and their
+    ``Bytes`` forms, with ``Data`` for binary values. Plugins read ``.tmTheme``,
+    ``.tmPreferences`` and ``.tmLanguage`` files with them."""
+    import binascii
+    import plistlib
+
+    if not hasattr(plistlib, "Data"):
+        class Data:
+            """Binary data in a property list, as the old API gave it (``.data`` is the bytes)."""
+
+            def __init__(self, data):
+                if not isinstance(data, bytes):
+                    raise TypeError("data must be as bytes")
+                self.data = data
+
+            @classmethod
+            def fromBase64(cls, data):
+                return cls(binascii.a2b_base64(data))
+
+            def asBase64(self, maxlinelength=76):
+                return binascii.b2a_base64(self.data)
+
+            def __eq__(self, other):
+                if isinstance(other, self.__class__):
+                    return self.data == other.data
+                if isinstance(other, bytes):
+                    return self.data == other
+                return NotImplemented
+
+            def __hash__(self):
+                return hash(self.data)
+
+            def __repr__(self):
+                return "%s(%s)" % (self.__class__.__name__, repr(self.data))
+
+        plistlib.Data = Data
+
+    def old_values(value):
+        """What the old reader gave: ``Data`` for bytes, the rest as it is."""
+        if isinstance(value, bytes):
+            return plistlib.Data(value)
+        if isinstance(value, dict):
+            return {key: old_values(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [old_values(item) for item in value]
+        return value
+
+    def new_values(value):
+        """What the new writer takes: bytes for ``Data``."""
+        if isinstance(value, plistlib.Data):
+            return value.data
+        if isinstance(value, dict):
+            return {key: new_values(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [new_values(item) for item in value]
+        return value
+
+    def opened(path_or_file, mode):
+        if isinstance(path_or_file, (str, bytes)) or hasattr(path_or_file, "__fspath__"):
+            return open(path_or_file, mode)
+        return None
+
+    if not hasattr(plistlib, "readPlist"):
+        def readPlist(pathOrFile):
+            file = opened(pathOrFile, "rb")
+            if file is None:
+                return old_values(plistlib.load(pathOrFile))
+            with file:
+                return old_values(plistlib.load(file))
+
+        plistlib.readPlist = readPlist
+
+    if not hasattr(plistlib, "writePlist"):
+        def writePlist(value, pathOrFile):
+            file = opened(pathOrFile, "wb")
+            if file is None:
+                plistlib.dump(new_values(value), pathOrFile, fmt=plistlib.FMT_XML)
+                return
+            with file:
+                plistlib.dump(new_values(value), file, fmt=plistlib.FMT_XML)
+
+        plistlib.writePlist = writePlist
+
+    if not hasattr(plistlib, "readPlistFromBytes"):
+        plistlib.readPlistFromBytes = lambda data: old_values(plistlib.loads(data))
+    if not hasattr(plistlib, "writePlistToBytes"):
+        plistlib.writePlistToBytes = lambda value: plistlib.dumps(new_values(value), fmt=plistlib.FMT_XML)
+
+
+def _html_parser_aliases():
+    """``HTMLParser.unescape`` (removed in Python 3.9) and ``HTMLParseError`` (3.5): plugins that
+    read web pages or HTML help."""
+    import html
+    import html.parser
+
+    if not hasattr(html.parser.HTMLParser, "unescape"):
+        html.parser.HTMLParser.unescape = lambda self, s: html.unescape(s)
+    if not hasattr(html.parser, "HTMLParseError"):
+        class HTMLParseError(Exception):
+            """Raised by the parser of Python 3.3 on broken HTML (newer ones never raise it)."""
+
+            def __init__(self, msg, position=(None, None)):
+                super().__init__(msg)
+                self.msg = msg
+                self.lineno, self.offset = position
+
+            def __str__(self):
+                result = self.msg
+                if self.lineno is not None:
+                    result += ", at line %d" % self.lineno
+                if self.offset is not None:
+                    result += ", column %d" % (self.offset + 1)
+                return result
+
+        html.parser.HTMLParseError = HTMLParseError
+
+
+def _os_and_system_aliases():
+    """Names Python 3.7–3.12 dropped from small modules, which old plugins still reach for:
+    ``os.errno`` (3.7), ``tarfile.filemode`` (3.8), ``locale.format`` (3.12),
+    ``importlib.find_loader`` (3.12), ``gettext.lgettext`` and friends (3.11),
+    ``sys.getcheckinterval`` / ``setcheckinterval`` (3.9) and
+    ``platform.linux_distribution`` / ``platform.dist`` (3.8)."""
+    import errno
+    import gettext
+    import importlib
+    import importlib.util
+    import locale
+    import os
+    import platform
+    import stat
+    import tarfile
+
+    if not hasattr(os, "errno"):
+        os.errno = errno
+    if not hasattr(tarfile, "filemode"):
+        tarfile.filemode = stat.filemode
+    if not hasattr(locale, "format"):
+        def format(percent, value, grouping=False, monetary=False, *additional):
+            return locale.format_string(percent, value, grouping, monetary, *additional)
+
+        locale.format = format
+
+    if not hasattr(importlib, "find_loader"):
+        def find_loader(name, path=None):
+            spec = importlib.util.find_spec(name, path)
+            return None if spec is None else spec.loader
+
+        importlib.find_loader = find_loader
+
+    for old, new in {"lgettext": "gettext", "ldgettext": "dgettext",
+                     "lngettext": "ngettext", "ldngettext": "dngettext"}.items():
+        if not hasattr(gettext, old):
+            setattr(gettext, old, getattr(gettext, new))
+    for old, new in {"lgettext": "gettext", "lngettext": "ngettext"}.items():
+        if not hasattr(gettext.NullTranslations, old):
+            setattr(gettext.NullTranslations, old, getattr(gettext.NullTranslations, new))
+
+    if not hasattr(sys, "getcheckinterval"):
+        # Python 3.2 replaced the check interval by ``setswitchinterval``; both did nothing since.
+        interval = [100]
+        sys.getcheckinterval = lambda: interval[0]
+        sys.setcheckinterval = lambda value: interval.__setitem__(0, int(value))
+
+    if not hasattr(platform, "linux_distribution"):
+        def os_release():
+            try:
+                return platform.freedesktop_os_release()
+            except (OSError, AttributeError):
+                return {}
+
+        def linux_distribution(distname="", version="", id="", *args, **kwargs):
+            release = os_release()
+            return (release.get("NAME", distname), release.get("VERSION_ID", version),
+                    release.get("VERSION_CODENAME", id))
+
+        def dist(distname="", version="", id="", *args, **kwargs):
+            release = os_release()
+            return (release.get("ID", distname), release.get("VERSION_ID", version),
+                    release.get("VERSION_CODENAME", id))
+
+        platform.linux_distribution = linux_distribution
+        platform.dist = dist
+
+
 def apply():
     """Patches the standard library once, before any plugin is imported."""
     allow_post_handshake_auth()
@@ -541,3 +739,7 @@ def apply():
     _asyncio_aliases()
     _fractions_gcd()
     _asyncio_get_event_loop()
+    _base64_aliases()
+    _plistlib_aliases()
+    _html_parser_aliases()
+    _os_and_system_aliases()

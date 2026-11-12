@@ -63,6 +63,7 @@ pub mod saving;
 pub mod scopes;
 pub mod search;
 pub mod session;
+pub mod side_bar;
 pub mod snippets;
 pub mod windows;
 

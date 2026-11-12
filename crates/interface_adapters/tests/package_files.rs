@@ -55,6 +55,30 @@ fn only_matching_files_are_returned_including_subfolders() {
 }
 
 #[test]
+fn linked_packages_and_folders_are_searched() {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink as link_dir;
+    #[cfg(windows)]
+    use std::os::windows::fs::symlink_dir as link_dir;
+
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    write(&elsewhere.join("Linked").join("Linked.sublime-syntax"));
+    write(&elsewhere.join("syntaxes").join("Nested.sublime-syntax"));
+    let packages = dir.path().join("Packages");
+    write(&packages.join("Rust").join("Rust.sublime-syntax"));
+    if let Err(e) = link_dir(elsewhere.join("Linked"), packages.join("Linked")) {
+        // Windows lets only administrators and developer mode create links.
+        eprintln!("skipped: cannot create a link here ({e})");
+        return;
+    }
+    link_dir(elsewhere.join("syntaxes"), packages.join("Rust").join("syntaxes")).unwrap();
+    let paths = PackagePaths { packages, sublime_packages: None, archive_folders: Vec::new() };
+    let found = find_resources(&paths, false, |n| n.ends_with(".sublime-syntax"));
+    assert_eq!(short(&found), vec!["Linked/Linked.sublime-syntax", "Rust/Rust.sublime-syntax", "syntaxes/Nested.sublime-syntax"]);
+}
+
+#[test]
 fn very_deep_files_are_not_searched() {
     let dir = tempfile::tempdir().unwrap();
     let deep = dir.path().join("Packages/P/a/b/c/d/e/f");

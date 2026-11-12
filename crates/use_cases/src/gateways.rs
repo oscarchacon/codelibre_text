@@ -4,6 +4,7 @@
 //! (Interface Adapters for file formats, Frameworks & Drivers for libraries and the OS).
 //! This keeps the dependency arrows pointing inwards.
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -110,6 +111,13 @@ pub trait FileSystemGateway {
     /// Absolute, normalized form of a path (or the path itself if that fails).
     fn canonicalize(&self, path: &Path) -> PathBuf;
     fn list_dir(&self, path: &Path) -> Vec<DirectoryEntry>;
+    /// Makes a folder, and the folders above it that are missing.
+    fn create_dir(&self, path: &Path) -> std::io::Result<()>;
+    /// Renames (or moves) a file or a folder.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    /// Moves a file or a folder to the system's trash (the Recycle Bin), where the user can get it
+    /// back: what Sublime's side bar deletes do (`send2trash`).
+    fn move_to_trash(&self, path: &Path) -> std::io::Result<()>;
 }
 
 /// How serious a message dialog is (its icon).
@@ -291,9 +299,14 @@ pub trait SyntaxGateway {
     /// The scopes of line `line` of `text` (lines end after `\n`), in order, covering the whole
     /// line. Ranges are bytes of the line. Nothing for a line past the end.
     fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan>;
-    /// The scopes of every line (as [`line_scopes`](Self::line_scopes) gives each), from the
-    /// highlighting cache: nothing is parsed again but what changed.
-    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>>;
+    /// The scopes of the lines `lines` (as [`line_scopes`](Self::line_scopes) gives each; the range
+    /// stops at the last line), from the highlighting cache: nothing is parsed again but what
+    /// changed, and only those lines are copied.
+    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: Range<usize>) -> Vec<Vec<ScopeSpan>>;
+    /// The scopes of every line (see [`lines_scopes`](Self::lines_scopes)).
+    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
+        self.lines_scopes(document, text, syntax, 0..usize::MAX)
+    }
     /// The parser's contexts at byte `column` of line `line`, outermost first
     /// (`view.context_backtrace`).
     fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame>;

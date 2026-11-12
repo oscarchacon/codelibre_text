@@ -106,15 +106,10 @@ fn the_official_syntaxes_load() {
         eprintln!("skipped: no CODELIBRE_TEST_SYNTAX_PACKAGES");
         return;
     };
-    // syntect's global table of scope names (16 bits per name) is full with its own syntaxes plus
-    // this one: a limit of syntect 5.3, the same without `extends` (Sublime ships it, so the app
-    // only reads it as a parent, never as a syntax).
-    const SYNTECT_SCOPE_LIMIT: &[&str] = &["ActionScript/ActionScript.sublime-syntax"];
     let paths = PackagePaths { packages: dir, sublime_packages: None, archive_folders: Vec::new() };
     let mut engine = SyntaxEngine::new(paths);
     let mut errors = Vec::new();
     engine.reload(false, &mut errors);
-    errors.retain(|e| !SYNTECT_SCOPE_LIMIT.iter().any(|known| e.contains(known)));
     println!("{} syntaxes, {} errors", engine.syntax_names().len(), errors.len());
     for error in errors.iter().take(60) {
         println!("  {}", error.chars().take(200).collect::<String>());

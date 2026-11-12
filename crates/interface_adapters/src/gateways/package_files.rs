@@ -21,7 +21,7 @@ pub fn find_resources(paths: &PackagePaths, include_sublime: bool, matches: impl
     for package in paths.roots(include_sublime).iter().filter_map(|root| std::fs::read_dir(root).ok()).flat_map(|e| e.flatten()) {
         let path = package.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-        if !path.is_dir() || ignored.contains(&name) {
+        if !is_dir(&package) || ignored.contains(&name) {
             continue;
         }
         match packages.iter_mut().find(|(known, _)| *known == name) {
@@ -76,13 +76,25 @@ fn collect(package: &Path, dir: &Path, depth: usize, matches: &impl Fn(&str) -> 
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    for path in entries.flatten().map(|e| e.path()) {
-        if path.is_dir() {
-            collect(package, &path, depth + 1, matches, found);
-        } else if path.file_name().and_then(|n| n.to_str()).is_some_and(matches) {
+    for entry in entries.flatten() {
+        if is_dir(&entry) {
+            collect(package, &entry.path(), depth + 1, matches, found);
+        } else if entry.file_name().to_str().is_some_and(matches) {
+            let path = entry.path();
             let relative = path.strip_prefix(package).unwrap_or(&path).to_path_buf();
             found.insert(relative, path);
         }
+    }
+}
+
+/// Whether a directory entry is a folder, from what `read_dir` already read: `Path::is_dir`
+/// would ask the file system again for every entry, and a load searches every package many
+/// times (seconds on Windows). Links (a package linked into `Packages`) are followed.
+fn is_dir(entry: &std::fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(kind) if kind.is_symlink() => entry.path().is_dir(),
+        Ok(kind) => kind.is_dir(),
+        Err(_) => entry.path().is_dir(),
     }
 }
 

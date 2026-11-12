@@ -60,6 +60,25 @@ fn a_package_syntax_names_its_contexts_in_backtraces() {
     assert!(all[0].iter().any(|s| s.scope == "source.toy string.quoted.toy"), "{all:?}");
 }
 
+/// A scope of more than 8 parts, as ActionScript's `<<=` (syntect took 8 at most).
+const LONG_SCOPE: &str = "keyword.operator.assignment.augmented.bitwise.shift.left.signed.toy";
+
+#[test]
+fn a_syntax_with_scopes_of_more_than_eight_parts_loads_and_highlights() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir,
+        "Toy/Toy.sublime-syntax",
+        &format!("%YAML 1.2\n---\nname: Toy\nfile_extensions: [toy]\nscope: source.toy\ncontexts:\n  main:\n    - match: '<<='\n      scope: {LONG_SCOPE}\n"),
+    );
+    let mut engine = engine_in(&dir);
+    let mut errors = Vec::new();
+    engine.reload(false, &mut errors);
+    assert!(errors.is_empty(), "{errors:?}");
+    let spans = engine.line_scopes(1, "a <<= 1\n", "Toy", 0);
+    assert!(spans.iter().any(|s| s.range == (2..5) && s.scope == format!("source.toy {LONG_SCOPE}")), "{spans:?}");
+}
+
 #[test]
 fn line_scopes_cover_the_line_with_the_parser_scopes() {
     let (_dir, mut engine) = engine();
