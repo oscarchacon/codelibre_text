@@ -7,7 +7,7 @@
 
 use entities::build::expand_variables;
 use entities::command::Command;
-use entities::document::{DocumentId, LineEnding, RegionSet};
+use entities::document::{Document, DocumentId, LineEnding, RegionSet};
 use entities::find::{self, FindOptions};
 use entities::layout::Layout;
 use entities::selection::Selection;
@@ -16,7 +16,7 @@ use entities::text_commands::{classify, find_by_class};
 use entities::text::{byte_to_char, char_to_byte, line_col, line_end, line_start, line_to_char, selected_text, word_at};
 use serde_json::{json, Map, Value};
 
-use crate::editing::VIEW_COMMANDS;
+use crate::editing::{PANEL_TEXT_COMMANDS, VIEW_COMMANDS};
 use crate::editor::Editor;
 use crate::gateways::{FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginCommandKind};
 use crate::html_export::HtmlExportOptions;
@@ -308,6 +308,10 @@ impl Editor {
             }
             "window_show_quick_panel" => self.plugin_show_quick_panel(args, run_command),
             "window_show_input_panel" => self.plugin_show_input_panel(args, run_command),
+            "window_set_input_preview" => {
+                self.set_plugin_input_preview(a.str(1)?, a.value(2).as_bool().unwrap_or(false));
+                Ok(Value::Null)
+            }
             "window_folders" => Ok(json!(self
                 .state
                 .folders
@@ -742,7 +746,7 @@ impl Editor {
             if self.run_plugin_command_in(command, Some(target), run_command) {
                 return Ok(Value::Null);
             }
-            return self.run_in_panel(target, command);
+            return self.run_in_panel(target, command, run_command);
         }
         let previous = self.state.active;
         if kind == "view" {
@@ -757,12 +761,30 @@ impl Editor {
         Ok(Value::Null)
     }
 
-    /// The built-in commands that work in a panel's view (the command controller only knows tabs).
-    fn run_in_panel(&mut self, id: DocumentId, command: &Command) -> Result<Value, String> {
-        if !VIEW_COMMANDS.contains(&command.name.as_str()) {
-            return Err(format!("{} cannot run in a panel yet (only {}, append and plugin commands)", command.name, VIEW_COMMANDS.join(", ")));
+    /// The built-in commands that work in a panel's view: [`VIEW_COMMANDS`] on the view itself,
+    /// and [`PANEL_TEXT_COMMANDS`] through the command controller, which only knows the active
+    /// tab: the panel's document is the active one while it runs.
+    fn run_in_panel(&mut self, id: DocumentId, command: &Command, run_command: &mut CommandRunner) -> Result<Value, String> {
+        if VIEW_COMMANDS.contains(&command.name.as_str()) {
+            return self.run_view_command(id, command).map(|()| Value::Null);
         }
-        self.run_view_command(id, command).map(|()| Value::Null)
+        if !PANEL_TEXT_COMMANDS.contains(&command.name.as_str()) {
+            return Err(format!("{} cannot run in a panel (it acts on tabs, the window or the text widget)", command.name));
+        }
+        let placeholder = Document::new_untitled(id, LineEnding::Unix);
+        let document = std::mem::replace(self.panel_document_mut(id).ok_or("the view is closed")?, placeholder);
+        let previous = self.state.active;
+        self.state.documents.push(document);
+        self.state.active = self.state.documents.len() - 1;
+        run_command(self, command);
+        // The commands of the list neither open nor close views: the panel's is where it was put.
+        let index = self.index_of(id).ok_or("the panel's view was closed")?;
+        let document = self.state.documents.remove(index);
+        if let Some(slot) = self.panel_document_mut(id) {
+            *slot = document;
+        }
+        self.state.active = previous.min(self.state.documents.len().saturating_sub(1));
+        Ok(Value::Null)
     }
 
     fn plugin_settings_get(&mut self, target: &SettingsTarget, key: &str) -> Result<Value, String> {

@@ -45,6 +45,11 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
     if enter {
         events.push(if count > 0 { UiEvent::QuickPanelAccepted(selected) } else { UiEvent::QuickPanelDismissed });
     }
+    // An input handler's panel: Backspace in the empty field goes back to the previous argument.
+    let can_go_back = panel.input.as_ref().is_some_and(|input| input.can_go_back) && panel.query.is_empty();
+    if can_go_back && ctx.memory(|m| m.has_focus(input_id)) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Backspace)) {
+        events.push(UiEvent::PluginPanelBack);
+    }
 
     let screen = ctx.screen_rect();
     let width = (screen.width() * 0.5).clamp(420.0, 720.0);
@@ -57,6 +62,9 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     ui.set_width(width);
+                    if let Some(input) = &panel.input {
+                        breadcrumb(ui, chrome, &input.breadcrumb);
+                    }
                     let mut query = panel.query.clone();
                     let input = egui::TextEdit::singleline(&mut query)
                         .id(input_id)
@@ -75,6 +83,14 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
                     if query != panel.query {
                         events.push(UiEvent::QuickPanelQueryChanged(query));
                     }
+                    if let Some(input) = panel.input.as_ref().filter(|input| !input.preview.is_empty()) {
+                        ui.add_space(4.0);
+                        for line in &input.preview {
+                            if let Some(href) = detail_line(ui, chrome, line) {
+                                events.push(UiEvent::QuickPanelLinkClicked(href));
+                            }
+                        }
+                    }
                     ui.add_space(6.0);
                     results(ui, chrome, panel, selected, moved, screen.height() * 0.55, events);
                 });
@@ -89,12 +105,22 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
     }
 }
 
+/// The command and the arguments answered so far, above an input handler's field (as Sublime's
+/// palette shows them). `>` separates them: the default fonts lack `›`.
+pub fn breadcrumb(ui: &mut egui::Ui, chrome: &Chrome, crumbs: &[String]) {
+    if crumbs.is_empty() {
+        return;
+    }
+    ui.label(RichText::new(crumbs.join("  >  ")).color(chrome.fg_dim).size(12.0));
+    ui.add_space(4.0);
+}
+
 /// The height a line of an item's details takes.
 const DETAIL_LINE_HEIGHT: f32 = 14.0;
 
 /// One line of an item's details, cut to the row's width. Returns the `href` of a link clicked
 /// (a click anywhere else is the row's: it accepts the item).
-fn detail_line(ui: &mut egui::Ui, chrome: &Chrome, line: &[Span]) -> Option<String> {
+pub fn detail_line(ui: &mut egui::Ui, chrome: &Chrome, line: &[Span]) -> Option<String> {
     let mut clicked = None;
     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), DETAIL_LINE_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;

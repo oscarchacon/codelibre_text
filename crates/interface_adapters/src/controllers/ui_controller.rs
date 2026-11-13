@@ -58,6 +58,9 @@ pub enum UiEvent {
     InputPanelChanged(String),
     InputPanelSelected { anchor: usize, head: usize },
     InputPanelDone,
+    /// Backspace in the empty field of a panel an input handler asks in (the quick or the input
+    /// panel): back to the previous argument.
+    PluginPanelBack,
 
     /// A line of the output panel was double-clicked (counting from the start of its text).
     OutputPanelLineOpened(usize),
@@ -226,6 +229,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         }
         UiEvent::InputPanelSelected { anchor, head } => editor.select_in_plugin_input_panel(Selection::new(anchor, head)),
         UiEvent::InputPanelDone => command_controller::finish_plugin_input(editor, view, true),
+        UiEvent::PluginPanelBack => command_controller::go_back_in_plugin_panel(editor, view),
 
         UiEvent::OutputPanelLineOpened(line) => {
             if editor.open_result_at_line(line) {

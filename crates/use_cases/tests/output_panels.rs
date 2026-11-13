@@ -88,15 +88,47 @@ fn append_writes_at_the_end_and_force_writes_to_read_only_panels() {
 }
 
 #[test]
-fn append_also_works_in_tabs_and_other_built_in_commands_do_not_run_in_panels() {
+fn append_also_works_in_tabs_and_commands_of_tabs_or_the_window_do_not_run_in_panels() {
     let (world, mut editor, panel) = setup();
     let tab = editor.active_document().unwrap().id;
     call(&world, &mut editor, "run_command", json!(["view", tab, "append", {"characters": "x"}])).unwrap();
     assert_eq!(editor.active_document().unwrap().text, "x");
     assert_eq!(
-        call(&world, &mut editor, "run_command", json!(["view", panel, "sort_lines", {}])),
-        Err("sort_lines cannot run in a panel yet (only move, move_to, left_delete, right_delete, delete_word, select_all, insert, append and plugin commands)".into())
+        call(&world, &mut editor, "run_command", json!(["view", panel, "save", {}])),
+        Err("save cannot run in a panel (it acts on tabs, the window or the text widget)".into())
     );
+}
+
+/// The editor's answer when a plugin runs a command, with the commands it runs going to `run`
+/// (the command controller's place in these tests).
+fn call_running(world: &World, editor: &mut Editor, args: Value, run: &mut dyn FnMut(&mut Editor, &Command)) -> Result<Value, String> {
+    world.plugins.then([plugin_call("run_command", args), PluginMessage::Done { error: None }]);
+    editor.run_plugin_command(&Command::new("probe"), &mut |editor: &mut Editor, command: &Command| run(editor, command));
+    world.plugins.replies.borrow_mut().pop().expect("the editor answered")
+}
+
+#[test]
+fn text_commands_run_in_a_panel_with_the_panel_as_the_active_view_for_a_moment() {
+    let (world, mut editor, panel) = setup();
+    let tab = editor.active_document().unwrap().id;
+    call(&world, &mut editor, "view_insert", json!([panel, 0, "b\na\n"])).unwrap();
+    let mut seen = Vec::new();
+    let answer = call_running(&world, &mut editor, json!(["view", panel, "sort_lines", {}]), &mut |editor, command| {
+        // What the command controller does with it: the active view's text.
+        let id = editor.active_document().map(|d| d.id);
+        seen.push((command.name.clone(), id));
+        let text = editor.text_for_editing(id.unwrap()).unwrap();
+        let mut lines: Vec<String> = text.lines().map(String::from).collect();
+        lines.sort();
+        *text = lines.join("\n") + "\n";
+    });
+    assert_eq!(answer, Ok(Value::Null));
+    assert_eq!(seen, [("sort_lines".to_string(), Some(panel))]);
+    editor.show_output_panel("exec");
+    assert_eq!(panel_text(&editor), "a\nb\n", "the panel's own document changed");
+    assert_eq!(editor.active_document().unwrap().id, tab, "the tab is active again");
+    assert_eq!(call(&world, &mut editor, "window_views", json!([1])).unwrap().as_array().unwrap().len(), 1, "still not a tab");
+    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([panel])), Ok(json!(true)));
 }
 
 /// A panel with results, as a plugin would make it.

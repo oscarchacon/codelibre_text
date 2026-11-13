@@ -136,6 +136,27 @@ pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool
     show_plugin_panels(editor, view);
 }
 
+/// Backspace in the empty field of a panel an input handler asks in: the panel closes (without
+/// its cancel) and the plugin asks for the previous argument again, or opens the palette.
+pub fn go_back_in_plugin_panel(editor: &mut Editor, view: &mut ViewState) {
+    let can = |input: Option<&use_cases::plugin_panels::CommandInputPanel>| input.is_some_and(|i| i.can_go_back);
+    let in_quick_panel = can(editor.plugin_quick_panel().and_then(|p| p.input.as_ref()))
+        && view.quick_panel.as_ref().is_some_and(|p| p.kind == SearchKind::PluginItems);
+    let in_input_panel = can(editor.plugin_input_panel().and_then(|p| p.input.as_ref())) && view.input_panel.is_some();
+    if in_quick_panel {
+        view.quick_panel = None;
+    } else if in_input_panel {
+        view.input_panel = None;
+    } else {
+        return;
+    }
+    editor.go_back_in_plugin_panel(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    show_plugin_panels(editor, view);
+    if view.quick_panel.is_none() && view.input_panel.is_none() {
+        view.focus_editor = true;
+    }
+}
+
 /// A command chosen in the palette: a plugin command with an input handler first asks for its
 /// arguments, in the plugin's panels, and then runs itself.
 pub fn run_from_palette(editor: &mut Editor, view: &mut ViewState, command: Command) {
@@ -154,7 +175,7 @@ const WINDOW_COMMANDS: &[&str] = &[
     "prompt_open_project", "prompt_open_project_or_workspace", "open_project", "open_project_or_workspace",
     "close_project",
     "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
-    "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_full_screen", "toggle_distraction_free",
+    "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_minimap", "toggle_full_screen", "toggle_distraction_free",
     "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
     "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
     "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
@@ -446,6 +467,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         // ----- view ----------------------------------------------------------------------------
         "toggle_side_bar" => view.show_side_bar = !view.show_side_bar,
         "toggle_status_bar" => view.show_status_bar = !view.show_status_bar,
+        "toggle_minimap" => view.show_minimap = !view.show_minimap,
         "toggle_full_screen" | "toggle_distraction_free" => {
             view.fullscreen = !view.fullscreen;
             view.request(ViewRequest::SetFullscreen(view.fullscreen));
@@ -640,16 +662,47 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
     }
 }
 
+/// Built-in commands that, in an event, run through the use cases instead of the frame's usual
+/// path (the text widget or [`run_command`]): saving, closing, select all and the clipboard
+/// ([`run_document_command`]). A formatter that saves in `on_modified`, or a plugin that copies
+/// and pastes in `on_post_save`, sees their result at once. The use cases that fire events look
+/// the views up again afterwards, so closing one meanwhile is safe. Undo / redo stay the
+/// widget's (its history) and wait for the next frame, as do panels and builds (view state).
+const DOCUMENT_COMMANDS: &[&str] = &[
+    "save", "prompt_save_as", "save_all", "revert", "close", "close_file", "select_all", "copy", "cut", "paste",
+    "paste_and_indent",
+];
+
+/// [`DOCUMENT_COMMANDS`], during an event, on the active view (the one that asked).
+fn run_document_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "save" => {
+            editor.save_active(false);
+        }
+        "prompt_save_as" => {
+            editor.save_active(true);
+        }
+        "save_all" => editor.save_all(),
+        "revert" => editor.revert_active_document(),
+        "close" | "close_file" => editor.close_active_document(),
+        "select_all" => editor.run_view_command_on_active(command),
+        "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
+        "copy" | "cut" => editor.copy_selections(command.name == "cut"),
+        "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
+        "paste" | "paste_and_indent" => editor.paste_at_selections(),
+        other => unreachable!("{other} is not in DOCUMENT_COMMANDS"),
+    }
+}
+
 /// Whether a built-in command can run in the middle of a use case (it needs no view state).
 fn runs_during_event(name: &str) -> bool {
-    EDITING_COMMANDS.contains(&name) || EDITOR_COMMANDS.contains(&name)
+    EDITING_COMMANDS.contains(&name) || EDITOR_COMMANDS.contains(&name) || DOCUMENT_COMMANDS.contains(&name)
 }
 
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
 /// state: a formatter's command in `on_pre_save` must reach the file being saved. The others
-/// (panels, the widget's undo and clipboard, saving and closing, which would change the views
-/// under the use case that fired the event) answer false and wait for the next frame, which runs
-/// them on the view that asked.
+/// (panels, builds, the widget's undo and redo) answer false and wait for the next frame, which
+/// runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     if !runs_during_event(&command.name) {
         return false;
@@ -662,6 +715,8 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     }
     if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
         run_editing_command(editor, &rewritten);
+    } else if DOCUMENT_COMMANDS.contains(&rewritten.name.as_str()) {
+        run_document_command(editor, &rewritten);
     } else {
         run_editor_command(editor, &rewritten);
     }

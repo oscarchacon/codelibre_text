@@ -107,6 +107,9 @@ pub struct EditorState {
     pub session_errors: Vec<String>,
     /// The last line put on the clipboard by copy/cut with nothing selected (pasted as a line).
     pub(crate) line_clipboard: Option<String>,
+    /// The documents being saved: a listener of their `on_pre_save` / `on_post_save` that saves
+    /// them again does nothing (the save in progress writes them).
+    pub(crate) saving: Vec<entities::document::DocumentId>,
     /// What copy and cut put on the clipboard, newest first (see `clipboard_history`).
     pub(crate) clipboard_history: Vec<String>,
     pub(crate) plugins: PluginState,
@@ -193,6 +196,7 @@ impl Editor {
                 console: String::new(),
                 session_errors: Vec::new(),
                 line_clipboard: None,
+                saving: Vec::new(),
                 clipboard_history: Vec::new(),
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),

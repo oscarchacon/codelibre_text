@@ -7,7 +7,7 @@ use use_cases::search::SearchKind;
 #[test]
 fn a_new_view_shows_the_bars_and_focuses_the_text() {
     let view = ViewState::default();
-    assert!(view.show_side_bar && view.show_status_bar && view.focus_editor);
+    assert!(view.show_side_bar && view.show_status_bar && view.show_minimap && view.focus_editor);
     assert!(!view.fullscreen && !view.show_about && !view.show_load_errors && !view.exit_confirmed);
     assert!(view.quick_panel.is_none() && !view.find_panel.visible);
 }
@@ -35,19 +35,23 @@ fn requests_are_taken_in_order_once() {
 fn the_layout_round_trips_through_the_session() {
     let mut view = ViewState::default();
     view.show_side_bar = false;
+    view.show_minimap = false;
     let layout = view.layout();
-    assert_eq!(layout, vec![("side_bar".to_string(), false), ("status_bar".to_string(), true)]);
+    assert_eq!(
+        layout,
+        vec![("side_bar".to_string(), false), ("status_bar".to_string(), true), ("minimap".to_string(), false)]
+    );
 
     let mut restored = ViewState::default();
     restored.apply_layout(&layout);
-    assert!(!restored.show_side_bar && restored.show_status_bar);
+    assert!(!restored.show_side_bar && restored.show_status_bar && !restored.show_minimap);
 }
 
 #[test]
 fn unknown_layout_flags_are_ignored() {
     let mut view = ViewState::default();
-    view.apply_layout(&[("minimap".into(), false)]);
-    assert!(view.show_side_bar && view.show_status_bar);
+    view.apply_layout(&[("tabs".into(), false)]);
+    assert!(view.show_side_bar && view.show_status_bar && view.show_minimap);
 }
 
 #[test]
