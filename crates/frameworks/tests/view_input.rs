@@ -5,7 +5,7 @@ use codelibre_text::views::{input_panel, output_panel, quick_panel};
 use egui::{CentralPanel, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use entities::minihtml::{Line, Span};
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::{InputPanelViewModel, OutputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
+use interface_adapters::view_models::{CommandInputViewModel, InputPanelViewModel, OutputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
 
 fn chrome() -> Chrome {
     let color = Color32::from_gray(128);
@@ -52,6 +52,8 @@ fn panel() -> OutputPanelViewModel {
         first_line: 10,
         current_line: None,
         result_revision: 0,
+        highlight: None,
+        selections: Vec::new(),
     }
 }
 
@@ -60,7 +62,7 @@ fn opened_at(y: f32, clicks: usize) -> Vec<UiEvent> {
     let ctx = Context::default();
     let chrome = chrome();
     let panel = panel();
-    let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| output_panel::show(ui, &chrome, &panel, events);
+    let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| output_panel::show(ui, &chrome, &panel, None, events);
     let at = Pos2::new(40.0, y);
     frame(&ctx, Vec::new(), &mut show);
     frame(&ctx, vec![Event::PointerMoved(at)], &mut show);
@@ -112,6 +114,7 @@ fn quick_panel_details_frame(ctx: &Context, details: &[Line], events: Vec<Event>
         }],
         take_focus: false,
         monospace: false,
+        input: None,
     };
     let mut reported = Vec::new();
     let _ = ctx.run(input(events), |ctx| quick_panel::show(ctx, &chrome(), &panel, &mut reported));
@@ -196,6 +199,7 @@ fn enter_in_the_input_panel_leaves_nothing_for_the_text_area() {
         selection: (3, 3),
         selection_revision: 0,
         take_focus: true,
+        input: None,
     };
     let mut left_over = Vec::new();
     let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
@@ -215,4 +219,77 @@ fn enter_in_the_input_panel_leaves_nothing_for_the_text_area() {
     assert!(reported.iter().any(|e| matches!(e, UiEvent::InputPanelChanged(text) if text == "abcy")), "{reported:?}");
     assert!(matches!(reported.last(), Some(UiEvent::InputPanelDone)), "{reported:?}");
     assert!(left_over.is_empty(), "the text area would take them: {left_over:?}");
+}
+
+#[test]
+fn a_background_splits_the_sections_it_covers_and_keeps_their_colors() {
+    let mut job = egui::text::LayoutJob::default();
+    let red = egui::TextFormat::simple(egui::FontId::monospace(12.0), Color32::RED);
+    let blue = egui::TextFormat::simple(egui::FontId::monospace(12.0), Color32::BLUE);
+    job.append("abcd", 0.0, red);
+    job.append("efgh", 0.0, blue);
+    output_panel::paint_background(&mut job, 2..6, Color32::YELLOW);
+    let parts: Vec<_> = job.sections.iter().map(|s| (s.byte_range.clone(), s.format.color, s.format.background)).collect();
+    let none = Color32::TRANSPARENT;
+    assert_eq!(
+        parts,
+        [
+            (0..2, Color32::RED, none),
+            (2..4, Color32::RED, Color32::YELLOW),
+            (4..6, Color32::BLUE, Color32::YELLOW),
+            (6..8, Color32::BLUE, none),
+        ]
+    );
+}
+
+fn backspace() -> Vec<Event> {
+    let key = |pressed: bool| Event::Key { key: Key::Backspace, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    vec![key(true), key(false)]
+}
+
+/// The input panel of an input handler with `text`, focused, after Backspace.
+fn input_panel_back(text: &str, can_go_back: bool) -> Vec<UiEvent> {
+    let ctx = Context::default();
+    let chrome = chrome();
+    let mut panel = InputPanelViewModel {
+        id: 1,
+        caption: "Name:".into(),
+        text: text.into(),
+        selection: (text.len(), text.len()),
+        selection_revision: 0,
+        take_focus: true,
+        input: Some(CommandInputViewModel { breadcrumb: vec!["Rename".into()], can_go_back, preview: Vec::new() }),
+    };
+    frame(&ctx, Vec::new(), &mut |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| input_panel::show(ui, &chrome, &panel, events));
+    panel.take_focus = false;
+    frame(&ctx, backspace(), &mut |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| input_panel::show(ui, &chrome, &panel, events))
+}
+
+#[test]
+fn backspace_in_an_input_handler_s_empty_field_goes_back() {
+    assert!(matches!(input_panel_back("", true).as_slice(), [UiEvent::PluginPanelBack]));
+    let typed = input_panel_back("ab", true);
+    assert!(!typed.iter().any(|e| matches!(e, UiEvent::PluginPanelBack)), "it deletes: {typed:?}");
+    assert!(input_panel_back("", false).is_empty(), "the first panel of a plain show_input_panel");
+}
+
+#[test]
+fn backspace_in_an_input_handler_s_empty_list_query_goes_back() {
+    let ctx = Context::default();
+    let mut panel = QuickPanelViewModel {
+        placeholder: String::new(),
+        keep_open: false,
+        no_matches: String::new(),
+        query: String::new(),
+        selected: 0,
+        items: Vec::new(),
+        take_focus: true,
+        monospace: false,
+        input: Some(CommandInputViewModel { breadcrumb: vec!["Open".into(), "a.txt".into()], can_go_back: true, preview: Vec::new() }),
+    };
+    let mut reported = Vec::new();
+    let _ = ctx.run(input(Vec::new()), |ctx| quick_panel::show(ctx, &chrome(), &panel, &mut reported));
+    panel.take_focus = false;
+    let _ = ctx.run(input(backspace()), |ctx| quick_panel::show(ctx, &chrome(), &panel, &mut reported));
+    assert!(matches!(reported.as_slice(), [UiEvent::PluginPanelBack]), "{reported:?}");
 }

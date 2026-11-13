@@ -106,6 +106,7 @@
 		"children": [
 			{ "command": "toggle_side_bar", "caption": "Side Bar" },
 			{ "command": "toggle_status_bar", "caption": "Status Bar" },
+			{ "command": "toggle_minimap", "caption": "Minimap" },
 			{ "command": "show_panel", "args": { "panel": "console", "toggle": true }, "caption": "Show Console" },
 			{ "command": "toggle_full_screen", "caption": "Enter Full Screen" },
 			{ "caption": "-", "id": "groups" },

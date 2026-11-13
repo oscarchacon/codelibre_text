@@ -1348,6 +1348,8 @@ class AskCommand(sublime_plugin.WindowCommand):
             json!("Which?"),
             json!(1),
             json!(false),
+            // Not asked by an input handler: no breadcrumb, no Backspace back.
+            Value::Null,
             // The window the call is about.
             json!({ "__window__": 1 }),
         ]
@@ -1363,7 +1365,7 @@ class AskCommand(sublime_plugin.WindowCommand):
 
     host.run(PluginCommandKind::Window, "ask", &Value::Null, None).unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_input_panel");
-    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false), json!({ "__window__": 1 })]);
+    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false), Value::Null, json!({ "__window__": 1 })]);
     host.reply(Ok(Value::Null)).unwrap();
     assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
     host.callback(2, "done", &json!(["alice"])).unwrap();
@@ -1642,6 +1644,10 @@ fn the_bundled_python_is_found_next_to_the_executable() {
         ("codelibre_text", "python"),
         ("CodeLibre Text.app/Contents/MacOS/codelibre_text", "CodeLibre Text.app/Contents/Resources/python"),
         ("usr/bin/codelibre_text", "usr/lib/codelibre-text/python"),
+        (
+            "target/debug/build/codelibre_text/hash/out/python_plugin_host",
+            "target/debug/python",
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join(executable);
@@ -1857,6 +1863,109 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
     command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
     assert!(view.input_panel.is_some());
     assert!(!view.focus_editor, "the text would take the keys typed for the panel");
+}
+
+#[test]
+fn input_handlers_ask_inside_the_palette_with_a_breadcrumb_a_preview_and_backspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class GreetCommand(sublime_plugin.WindowCommand):
+    def run(self, who, words):
+        print("hello", who, words)
+
+    def input(self, args):
+        return WhoInputHandler()
+
+    def input_description(self):
+        return "Greet"
+
+class WhoInputHandler(sublime_plugin.ListInputHandler):
+    def list_items(self):
+        return [("Ana", "ana"), ("Bob", "bob")]
+
+    def preview(self, value):
+        return sublime.Html("<b>%s</b> will be greeted" % value)
+
+    def description(self, value, text):
+        return text.upper()
+
+    def next_input(self, args):
+        return WordsInputHandler()
+
+class WordsInputHandler(sublime_plugin.TextInputHandler):
+    def want_event(self):
+        return True
+
+    def preview(self, text):
+        return "%d words" % len(text.split())
+
+    def validate(self, text, event):
+        print("validate", text, event)
+        return True
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run_from_palette(&mut editor, &mut view, Command::new("greet"));
+    let list = editor.plugin_quick_panel().expect("the list").input.clone().expect("asked by an input handler");
+    assert_eq!(list.breadcrumb, ["Greet"], "{}", editor.state().console);
+    assert!(list.can_go_back);
+    let preview: String = list.preview.iter().flatten().map(|span| span.text.as_str()).collect();
+    assert_eq!(preview, "ana will be greeted", "the first item is highlighted: {}", editor.state().console);
+
+    command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(1));
+    let field = editor.plugin_input_panel().expect("the text field").input.clone().unwrap();
+    assert_eq!(field.breadcrumb, ["Greet", "BOB"], "the list's description of the answer");
+    assert_eq!(field.preview[0][0].text, "0 words", "the initial text's preview");
+
+    // Backspace in the empty field: the list again, without the answer in the breadcrumb.
+    command_controller::go_back_in_plugin_panel(&mut editor, &mut view);
+    assert!(view.input_panel.is_none());
+    assert_eq!(editor.plugin_quick_panel().expect("the list again").input.as_ref().unwrap().breadcrumb, ["Greet"]);
+
+    command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
+    command_controller::change_plugin_input(&mut editor, &mut view, "good day");
+    assert_eq!(editor.plugin_input_panel().unwrap().input.as_ref().unwrap().preview[0][0].text, "2 words");
+    command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    let console = &editor.state().console;
+    assert!(console.contains("validate good day {'modifier_keys': {}}"), "want_event: {console}");
+    assert!(console.contains("hello ana good day"), "{console}");
+}
+
+#[test]
+fn backspace_in_the_first_input_handler_goes_back_to_the_palette() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime_plugin
+
+class AskCommand(sublime_plugin.WindowCommand):
+    def run(self, words):
+        pass
+
+    def input(self, args):
+        return WordsInputHandler()
+
+class WordsInputHandler(sublime_plugin.TextInputHandler):
+    def cancel(self):
+        print("cancelled")
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run_from_palette(&mut editor, &mut view, Command::new("ask"));
+    assert!(view.input_panel.is_some(), "{}", editor.state().console);
+    command_controller::go_back_in_plugin_panel(&mut editor, &mut view);
+    assert!(view.input_panel.is_none());
+    for command in view.take_commands() {
+        command_controller::run(&mut editor, &mut view, &command);
+    }
+    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(use_cases::search::SearchKind::Commands), "the palette");
+    assert!(editor.state().console.contains("cancelled"), "{}", editor.state().console);
 }
 
 /// A plugin of package `name` that says when it loads and unloads, and counts its runs.

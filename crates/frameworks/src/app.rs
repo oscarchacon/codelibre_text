@@ -438,6 +438,7 @@ impl App {
         }
 
         if let Some(output) = presenters::output_panel::present(&self.editor) {
+            let highlighted = output_panel::highlighted(&self.engine, &output);
             egui::TopBottomPanel::bottom("output_panel")
                 .resizable(true)
                 .default_height(180.0)
@@ -448,7 +449,7 @@ impl App {
                         .inner_margin(egui::Margin::symmetric(8, 4))
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
-                .show(ctx, |ui| output_panel::show(ui, chrome, &output, &mut events));
+                .show(ctx, |ui| output_panel::show(ui, chrome, &output, highlighted.as_ref(), &mut events));
         }
 
         if let Some(find) = presenters::find_panel::present(&mut self.editor, view) {

@@ -530,6 +530,14 @@ _callbacks = {}
 _callback_ids = itertools.count(1)
 
 
+def _input_panel_info(info):
+    """What the editor needs of an input handler's panel: its breadcrumb, and whether Backspace in
+    an empty field goes back (the ``back`` callback)."""
+    if not info:
+        return None
+    return {"breadcrumb": [str(crumb) for crumb in info.get("breadcrumb", [])], "back": info.get("on_back") is not None}
+
+
 def _register_callbacks(final, **functions):
     callback_id = next(_callback_ids)
     _callbacks[callback_id] = dict(functions, final=final)
@@ -1924,8 +1932,9 @@ class Window:
     def panels(self):
         return sublime_api.window_panels(self.window_id, self._window_arg())
 
-    def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None):
-        """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled."""
+    def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None, _input=None):
+        """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled.
+        ``_input`` (input handlers only, ``sublime_plugin``): the palette's breadcrumb and ``on_back``."""
         def select(index):
             if on_select is None:
                 return
@@ -1933,18 +1942,26 @@ class Window:
                 on_select(index, {"modifier_keys": {}})
             else:
                 on_select(index)
-        callback = _register_callbacks(("select",), select=select, highlight=on_highlight)
+        on_back = (_input or {}).get("on_back")
+        callback = _register_callbacks(("select", "back"), select=select, highlight=on_highlight, back=on_back)
         rows = [_quick_panel_item(item) for item in items]
         sublime_api.window_show_quick_panel(
-            self.window_id, rows, flags, selected_index, placeholder or "", callback, on_highlight is not None
-        , self._window_arg())
+            self.window_id, rows, flags, selected_index, placeholder or "", callback, on_highlight is not None,
+            _input_panel_info(_input), self._window_arg())
 
-    def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel):
-        """A one-line text field at the bottom. Returns its view."""
-        callback = _register_callbacks(("done", "cancel"), done=on_done, change=on_change, cancel=on_cancel)
+    def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel, _input=None):
+        """A one-line text field at the bottom. Returns its view. ``_input``: see ``show_quick_panel``."""
+        on_back = (_input or {}).get("on_back")
+        callback = _register_callbacks(
+            ("done", "cancel", "back"), done=on_done, change=on_change, cancel=on_cancel, back=on_back
+        )
         return View(sublime_api.window_show_input_panel(
-            self.window_id, str(caption), str(initial_text), callback, on_change is not None
-        , self._window_arg()))
+            self.window_id, str(caption), str(initial_text), callback, on_change is not None,
+            _input_panel_info(_input), self._window_arg()))
+
+    def _set_input_preview(self, text, html):
+        """An input handler's ``preview`` in the panel it asks in (``sublime_plugin``)."""
+        sublime_api.window_set_input_preview(self.window_id, str(text), bool(html), self._window_arg())
 
     def status_message(self, msg):
         status_message(msg)
@@ -2070,7 +2087,8 @@ class Window:
         pass
 
     def is_minimap_visible(self):
-        return False
+        # Shown unless `toggle_minimap` hid it; plugins do not see that window state yet.
+        return True
 
     def set_minimap_visible(self, flag):
         pass

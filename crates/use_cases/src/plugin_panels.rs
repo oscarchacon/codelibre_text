@@ -47,6 +47,30 @@ pub struct PluginPanelItem {
     pub kind: String,
 }
 
+/// A panel an input handler asks in (`sublime_plugin._CommandInput`): it is part of the command
+/// palette, as in Sublime. Its breadcrumb is the command and what was answered before, Backspace
+/// in its empty field goes back (the plugin's `back` callback), and it shows the handler's preview.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandInputPanel {
+    pub breadcrumb: Vec<String>,
+    pub can_go_back: bool,
+    /// The handler's `preview` for the item highlighted or the text typed (minihtml for `sublime.Html`).
+    pub preview: Vec<minihtml::Line>,
+}
+
+impl CommandInputPanel {
+    /// The panel's last argument, sent by `sublime.py` for input handlers only (else `null`).
+    fn from_json(value: Option<&Value>) -> Option<Self> {
+        let value = value.filter(|v| v.is_object())?;
+        let breadcrumb = value.get("breadcrumb").and_then(Value::as_array).into_iter().flatten();
+        Some(Self {
+            breadcrumb: breadcrumb.filter_map(Value::as_str).map(String::from).collect(),
+            can_go_back: value.get("back").and_then(Value::as_bool).unwrap_or(false),
+            preview: Vec::new(),
+        })
+    }
+}
+
 /// A list a plugin asked the user to pick from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginQuickPanel {
@@ -58,6 +82,8 @@ pub struct PluginQuickPanel {
     /// A click outside does not close it.
     pub keep_open: bool,
     wants_highlight: bool,
+    /// Asked by an input handler: the palette's breadcrumb, Backspace and preview.
+    pub input: Option<CommandInputPanel>,
 }
 
 /// A one-line text field a plugin asked for. Its text is a document, so `show_input_panel`
@@ -72,6 +98,8 @@ pub struct PluginInputPanel {
     pub io: Option<String>,
     /// A built-in command asked (`new_folder`, `rename_path`): it hears the answer, not a plugin.
     pub(crate) builtin: Option<BuiltinInput>,
+    /// Asked by an input handler (see [`CommandInputPanel`]).
+    pub input: Option<CommandInputPanel>,
 }
 
 /// What a built-in command does with the text of the input panel it opened.
@@ -149,6 +177,7 @@ impl Editor {
             monospace: flags & MONOSPACE_FONT != 0,
             keep_open: flags & KEEP_OPEN_ON_FOCUS_LOST != 0,
             wants_highlight: args.get(6).and_then(Value::as_bool).unwrap_or(false),
+            input: CommandInputPanel::from_json(args.get(7)),
         });
         self.state.plugin_panels.requests.push(PluginPanelRequest::QuickPanel);
         Ok(Value::Null)
@@ -171,6 +200,7 @@ impl Editor {
             wants_changes: args.get(4).and_then(Value::as_bool).unwrap_or(false),
             io: None,
             builtin: None,
+            input: CommandInputPanel::from_json(args.get(5)),
         });
         self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
         Ok(json!(id))
@@ -199,6 +229,7 @@ impl Editor {
             wants_changes: false,
             io: None,
             builtin: Some(builtin),
+            input: None,
         });
         self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
     }
@@ -222,6 +253,7 @@ impl Editor {
             wants_changes: false,
             io: Some(name.to_string()),
             builtin: None,
+            input: None,
         });
         (output, Some(id))
     }
@@ -302,6 +334,44 @@ impl Editor {
                 self.plugin_callback(panel.callback, "cancel", json!([]), run_command);
             }
         }
+    }
+
+    /// `window._set_input_preview(text, html)`: an input handler's preview, shown in the panel it
+    /// asks in (the quick panel when one is open for it, else the input panel).
+    pub(crate) fn set_plugin_input_preview(&mut self, text: &str, html: bool) {
+        let panels = &mut self.state.plugin_panels;
+        let quick = panels.quick_panel.as_mut().and_then(|p| p.input.as_mut());
+        let Some(input) = quick.or_else(|| panels.input_panel.as_mut().and_then(|p| p.input.as_mut())) else {
+            return;
+        };
+        input.preview = if html {
+            minihtml::parse(text).into_iter().filter(|line| !line.is_empty()).collect()
+        } else {
+            text.lines().filter(|line| !line.is_empty()).map(|line| vec![minihtml::Span { text: line.to_string(), ..Default::default() }]).collect()
+        };
+    }
+
+    /// Backspace in the empty field of a panel an input handler asks in: it closes, and the
+    /// plugin goes back to the previous handler (or to the palette). False when no open panel
+    /// can go back: the key is the field's.
+    pub fn go_back_in_plugin_panel(&mut self, run_command: &mut CommandRunner) -> bool {
+        let panels = &mut self.state.plugin_panels;
+        let can = |input: Option<&CommandInputPanel>| input.is_some_and(|i| i.can_go_back);
+        let callback = if can(panels.quick_panel.as_ref().and_then(|p| p.input.as_ref())) {
+            panels.quick_panel.take().map(|p| p.callback)
+        } else if can(panels.input_panel.as_ref().and_then(|p| p.input.as_ref())) {
+            panels.input_panel.take().map(|p| {
+                self.state.plugins.view_settings.remove(&p.document.id);
+                p.callback
+            })
+        } else {
+            None
+        };
+        let Some(callback) = callback else {
+            return false;
+        };
+        self.plugin_callback(callback, "back", json!([]), run_command);
+        true
     }
 
     /// The user edited the plugin's input panel (the plugin hears it if it passed `on_change`).

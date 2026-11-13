@@ -8,7 +8,8 @@ use serde_json::Value;
 use use_cases::scopes::CaretContext;
 use use_cases::Editor;
 
-use crate::view_state::ViewState;
+use crate::controllers::command_controller::hooked_widget_input;
+use crate::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 
 /// Commands the text widget already does when it receives the key itself.
 /// Bindings to them let the key through instead of running the command.
@@ -94,15 +95,7 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         // (Whole-line copy/paste is decided once, on the clipboard event: see `clipboard_shortcut`.)
         // A typed character bound to one of them (`)` stepping over the closing bracket with `move`)
         // runs it: the widget would type the character instead.
-        KeyResult::Command(command)
-            if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) && !typed_character(alternatives) =>
-        {
-            KeyHandling::PassThrough
-        }
-        KeyResult::Command(command) => {
-            view.queue_command(command);
-            KeyHandling::Consumed
-        }
+        KeyResult::Command(command) => bound_command(editor, view, command, alternatives, hooked),
     };
 
     let keymap = &editor.state().keymap;
@@ -113,6 +106,96 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
         editor.clear_status();
     }
     handling
+}
+
+/// A key binding's command. Deleting, typing and moving the caret the widget can do itself are
+/// given to it as its own input (its undo history keeps them, as when the key is the widget's
+/// own), also for a key the widget would not understand (`ctrl+h` bound to `left_delete`); with
+/// listeners of text commands they are asked about first. Other commands run as commands.
+fn bound_command(editor: &mut Editor, view: &mut ViewState, command: Command, alternatives: &[KeyCombo], hooked: bool) -> KeyHandling {
+    // The widget only knows the primary selection; with several, the use cases edit them all
+    // (the view turns the widget's own keys into edits at every selection).
+    let several = editor.active_document().is_some_and(|d| !d.extra_selections().is_empty());
+    let in_widget = view.text_has_focus && !several;
+    let replay = widget_replay(&command);
+    let own_key = replay.as_ref().is_some_and(|replay| is_widget_key(replay, alternatives));
+    match replay {
+        Some(replay) if in_widget && hooked => {
+            hooked_widget_input(editor, view, command, replay);
+            KeyHandling::Consumed
+        }
+        Some(replay) if in_widget && !own_key => {
+            view.request(ViewRequest::WidgetEdit(replay));
+            view.last_command = Some(command.name);
+            KeyHandling::Consumed
+        }
+        Some(_) if view.text_has_focus && !own_key => {
+            view.queue_command(command);
+            KeyHandling::Consumed
+        }
+        _ if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) && !typed_character(alternatives) => {
+            KeyHandling::PassThrough
+        }
+        _ => {
+            view.queue_command(command);
+            KeyHandling::Consumed
+        }
+    }
+}
+
+/// The widget's own input that does what `command` does, when there is one: deleting, typing,
+/// and moving by characters, lines and pages or to the ends of the line (`extend` holds Shift).
+/// Moves by words or to the ends of the text need Ctrl, which a replayed key does not carry, so
+/// they stay commands.
+fn widget_replay(command: &Command) -> Option<WidgetEdit> {
+    let key = |key| Some(WidgetEdit::Key { key, shift: command.bool_arg("extend", false) });
+    let forward = command.bool_arg("forward", true);
+    match command.name.as_str() {
+        "left_delete" => Some(WidgetEdit::Key { key: WidgetKey::Backspace, shift: false }),
+        "right_delete" => Some(WidgetEdit::Key { key: WidgetKey::Delete, shift: false }),
+        "insert" => match command.str_arg("characters") {
+            "" => None,
+            "\n" => Some(WidgetEdit::Key { key: WidgetKey::Enter, shift: false }),
+            "\t" => Some(WidgetEdit::Key { key: WidgetKey::Tab, shift: false }),
+            characters => Some(WidgetEdit::Insert(characters.to_string())),
+        },
+        "move" => match command.str_arg("by") {
+            "characters" => key(if forward { WidgetKey::Right } else { WidgetKey::Left }),
+            "lines" => key(if forward { WidgetKey::Down } else { WidgetKey::Up }),
+            "pages" => key(if forward { WidgetKey::PageDown } else { WidgetKey::PageUp }),
+            _ => None,
+        },
+        "move_to" => match command.str_arg("to") {
+            "bol" => key(WidgetKey::Home),
+            "eol" => key(WidgetKey::End),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether the key pressed is the one the widget takes for `replay` itself (Backspace for
+/// `left_delete`): then the key can go straight to it.
+fn is_widget_key(replay: &WidgetEdit, alternatives: &[KeyCombo]) -> bool {
+    let WidgetEdit::Key { key, shift } = replay else {
+        return false;
+    };
+    let name = match key {
+        WidgetKey::Backspace => "backspace",
+        WidgetKey::Delete => "delete",
+        WidgetKey::Enter => "enter",
+        WidgetKey::Tab => "tab",
+        WidgetKey::Left => "left",
+        WidgetKey::Right => "right",
+        WidgetKey::Up => "up",
+        WidgetKey::Down => "down",
+        WidgetKey::Home => "home",
+        WidgetKey::End => "end",
+        WidgetKey::PageUp => "pageup",
+        WidgetKey::PageDown => "pagedown",
+    };
+    let combo = if *shift { format!("shift+{name}") } else { name.to_string() };
+    KeyCombo::parse(&combo).is_some_and(|combo| alternatives.contains(&combo))
 }
 
 /// A widget edit in the text goes through the commands when plugins listen to them. Other fields

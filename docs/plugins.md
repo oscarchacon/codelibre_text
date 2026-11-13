@@ -174,12 +174,23 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       query, on the view that asked (`Editor::set_event_command_runner`, set by `compose()`), through the hooks, so a
       formatter's `view.run_command(...)` in `on_pre_save` reaches the file.
 - [x] Built-in commands that change only selections, the find string or settings (`EDITOR_COMMANDS` in
-      `command_controller.rs`: `split_selection_into_lines`, `find_all_under`, `set_setting`, `set_file_type`…) also run at once.
-      The others (panels, the widget's undo / clipboard, `save`, `close`…) wait for the next frame, and then run on the view
+      `command_controller.rs`: `split_selection_into_lines`, `find_all_under`, `set_setting`, `set_file_type`…) also run at once,
+      and so do saving, closing, select all and the clipboard (below).
+      The others (panels, builds, the widget's undo / redo…) wait for the next frame, and then run on the view
       that asked (`queue_plugin_command` keeps it; the active view comes back afterwards).
-- [ ] Still not at once: `save` / `close`, `select_all`, the widget's undo / clipboard and the panel / build commands;
-      they change views or `ViewState` under the use case that fired the event, so they wait for the next frame
-      (`runs_during_event` in `command_controller.rs`).
+- [x] **Saving, closing, select all and the clipboard at once** (2026-11-13, `DOCUMENT_COMMANDS` in
+      `command_controller.rs`): `save`, `prompt_save_as`, `save_all`, `revert`, `close` / `close_file`, `select_all`,
+      `copy`, `cut`, `paste` / `paste_and_indent` run inside the event through the use cases, not the widget
+      (`Editor::copy_selections` / `paste_at_selections`, with the whole-line forms as usual). The use cases that fire
+      events look their views up again afterwards: `save_all` goes by id (a listener may close views meanwhile), and a
+      listener that saves the view being saved does nothing (`EditorState::saving`: the save in progress writes it,
+      once). Tests: `a_listener_saves_another_view_during_the_event`,
+      `a_listener_that_saves_the_view_being_saved_does_not_save_it_again`,
+      `save_all_goes_on_when_a_listener_closes_a_view`,
+      `a_listener_s_select_all_and_clipboard_commands_run_during_the_event` (`interface_adapters/tests/command_controller.rs`).
+- [ ] Still not at once: undo / redo (the history is the widget's) and the panel / build commands (they change
+      `ViewState`, which the use case that fired the event cannot reach), so they wait for the next frame
+      (`runs_during_event`). A cut or paste at once is a use case edit, outside the widget's undo, as `insert` is.
 - [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
       listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
       becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
@@ -204,8 +215,19 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       nothing changes: every key goes straight to the widget.
 - [x] `on_post_text_command_async` / `on_post_window_command_async` run on the async thread; a listener that defines only
       the `_async` form still makes the editor ask (`sublime_plugin.events` advertises the sync name).
-- [ ] Hooks, still missing: a `left_delete` / `move` the user binds in a keymap runs as a command (the use case, not the
-      widget), so it is outside the widget's undo.
+- [x] **Key bindings to what the widget does** (2026-11-13, `bound_command` in `keyboard_controller.rs`): a binding to
+      `left_delete`, `right_delete`, `insert` or `move` / `move_to` by characters, lines, pages or to `bol` / `eol`
+      goes to the widget as its own input (`widget_replay`: Backspace, Delete, Enter, Tab, typed text, the arrows with
+      Shift for `extend`…), so its undo history keeps it. With listeners of text commands it is asked about first
+      (`hooked_widget_input`, as the widget's own keys); without, the widget's own key (Backspace for `left_delete`)
+      still goes straight to it, and another key (`ctrl+h`) is replayed as that one, where before it did nothing.
+      With several selections, or a `move` by words / to `bof`, it runs as a command (the use cases), as before.
+      Tests: `bindings_to_what_the_widget_does_reach_it_as_its_own_input`,
+      `rebound_widget_keys_run_as_commands_with_several_selections_or_no_focus`,
+      `listeners_hear_a_bound_widget_key_and_the_widget_still_does_it` (`interface_adapters/tests/keyboard_controller.rs`).
+- [ ] Hooks, still missing: a listener's replacement (`on_text_command` answering another command) and plugins'
+      `view.run_command("left_delete")` still edit through the use cases, outside the widget's undo (they must take
+      effect at once).
 - [x] **Quick panel**: `window.show_quick_panel(items, on_select, flags, selected_index, on_highlight, placeholder)`;
       items are strings, lists (caption, detail lines of plain text) or `QuickPanelItem`s (annotation as the hint, its
       minihtml shown as text; the letter of `kind` in a badge); `MONOSPACE_FONT`, `WANT_EVENT` (the event is `{"modifier_keys": {}}`).
@@ -257,8 +279,10 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       read by threads that wake the window; a new build replaces the running one; `cancel_build` kills the whole tree. A
       plugin's own `exec` command wins. Ignored: `encoding` (UTF-8, lossy), `syntax`, `word_wrap`.
 - [x] **Tools > Build System**: Automatic, then every build system by name (`{"command": "$build_systems"}` in the menu,
-      expanded by `presenters::menu`, read at each package load: `Editor::menu_build_systems`); each runs
-      `set_build_system`, the one set is checked. Builds inside zipped packages load since `.sublime-package` support.
+      expanded by `presenters::menu`, read at each package load: `Editor::menu_build_systems`), each followed by its
+      variants as "Build - Variant" (2026-11-13, as in the build picker); each runs `set_build_system` (with `variant`
+      for a variant), and only the build or variant set is checked (`Editor::is_build_system_set`). Builds inside zipped
+      packages load since `.sublime-package` support.
 - [x] **Projects**: a `.sublime-project` opened from File > Open Project…, the palette (`project_open`) or a plugin is a
       project (`entities/src/project.rs`): its `folders` become the window's folders (`set_folders`,
       `sync_project_folders`), its `settings` layer over the global ones, its `build_systems` are builds (with
@@ -267,18 +291,41 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `extract_variables` understanding `$project*`. The commands are `prompt_open_project` / `open_project` and
       `close_project`, with Sublime's `prompt_open_project_or_workspace` / `open_project_or_workspace` as aliases
       (workspaces are not read). The session keeps the project open.
-- [ ] Builds, still missing: variants in the Build System menu. There is no Ctrl+Break: egui has no such key.
-- [ ] Output panels, still missing: the panel's own syntax highlighting, selections drawn, built-in commands other than
-      `VIEW_COMMANDS` (`editing.rs`: `move`, `move_to`, `left_delete`, `right_delete`, `delete_word`, `select_all`,
-      `insert`), the console as a panel (it is a tab), results in Find Results (find in files is not implemented).
-      `append` and result lines work in panels; `unlisted`, `word_wrap` and `font_size` of the view are respected.
+- [ ] Builds, still missing: there is no Ctrl+Break (egui has no such key).
+- [x] **Output panels as views** (2026-11-13): a panel whose view has a syntax (`assign_syntax`, the `syntax` setting:
+      LSP's and SublimeLinter's panels) is drawn in its colors: `presenters::output_panel` sends the whole text with
+      the view id (`OutputPanelHighlight`, the engine's cache is per view and only highlights what an append added),
+      `views::output_panel::highlighted` cuts the job to the lines shown. Its selections (`view.sel()`, not carets)
+      are drawn with a background (`paint_background`, which keeps the colors), as the visited result is. Built-in
+      commands that only change a view's text and selections (`PANEL_TEXT_COMMANDS` in `editing.rs`: `sort_lines`,
+      `upper_case`, `toggle_comment`, `insert_snippet`, `split_selection_into_lines`, `goto_line`…) run in a panel:
+      `Editor::run_in_panel` makes the panel's document the active one for the moment the command controller runs
+      it; those of tabs, the window or the widget (`save`, `show_panel`, `undo`, `copy`…) answer an error. A destroyed
+      panel's highlighting is forgotten. Tests: `text_commands_run_in_a_panel_with_the_panel_as_the_active_view_for_a_moment`
+      (`use_cases/tests/output_panels.rs`), `an_output_panel_with_a_syntax_is_highlighted_and_shows_its_selections`
+      (`presenters.rs`), `a_background_splits_the_sections_it_covers_and_keeps_their_colors` (`view_input.rs`).
+- [ ] Output panels, still missing: the console as a panel (it is a tab), results in Find Results (find in files is
+      not implemented), a caret drawn while a plugin focuses a panel. `append` and result lines work in panels;
+      `unlisted`, `word_wrap` and `font_size` of the view are respected.
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
       `cancel`, `next_input`, `BackInputHandler`, `sublime.ListInputItem`) and runs the command itself. Key bindings
       and menus run the command directly. `preview` goes to the status bar.
-- [ ] Input handlers, still missing: they are not inside the palette as in Sublime (no breadcrumb, `Backspace` does
-      not go back to the previous handler), `want_event`, HTML previews. `initial_selection` keeps its regions.
+- [x] **Input handlers as part of the palette** (2026-11-13): the panels `_CommandInput` asks in carry a last argument
+      (`_input` of `show_quick_panel` / `show_input_panel`, private to `sublime_plugin`; `CommandInputPanel` in
+      `plugin_panels.rs`): a breadcrumb drawn above the field (the command's `input_description`, then each answer as
+      the handler's `description(value, text)` / `description(text)` gives it), and Backspace in the empty field
+      (`UiEvent::PluginPanelBack`, `command_controller::go_back_in_plugin_panel`) closes the panel without `cancel` and
+      calls its `back` callback: the previous handler is asked again, without its answer, or the first one is
+      cancelled and the palette opens. `preview` goes into the panel, under the field (`window._set_input_preview` →
+      `window_set_input_preview`; `sublime.Html` as minihtml, links clickable), for the highlighted item and for the
+      initial and typed text. `want_event()`: `validate` and `confirm` get `{"modifier_keys": {}}` too. Tests:
+      `input_handlers_ask_inside_the_palette_with_a_breadcrumb_a_preview_and_backspace`,
+      `backspace_in_the_first_input_handler_goes_back_to_the_palette` (`python_plugin_host.rs`), the `PluginPanelBack`
+      ones of `ui_controller.rs` and `view_input.rs`.
+- [ ] Input handlers, still missing: the palette's own field is not reused (the handler's panel replaces it in the
+      same place), `modifier_keys` are always empty. `initial_selection` keeps its regions.
 - [x] **Command metadata**: `is_visible`, `is_enabled`, `is_checked`, `description` of every plugin command in the
       menus and the palette, asked in one `command_states` query when a menu or the palette opens (`plugin_commands.rs`)
       and only if some command defines them. Menus hide, grey out and check their items; the palette leaves out
@@ -314,8 +361,20 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
       lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
-- [ ] Regions, still missing: the minimap. Icons are tinted with the color scheme's foreground when their scope
-      has no color (Sublime's exact rule for untinted icons was not checked).
+- [x] **Minimap** (`views/minimap.rs`, drawn by `editor_view.rs` between the text and the vertical scroll bar, as in
+      Sublime: the scroll area takes the whole width, so its bar stays at the window's edge and the wheel scrolls over
+      the minimap too; the text keeps out of the minimap's strip and the bar's lane, `minimap::bar_lane`): the text as a bar per
+      word in its syntax color, the selection and the regions (not those with `HIDE_ON_MINIMAP`,
+      `RegionViewModel::on_minimap`). A box marks what the text area shows (on hover, always with
+      `always_show_minimap_viewport`; framed with `draw_minimap_border`, in the scheme's `minimap_border`); a click or
+      a drag scrolls the text there. A text taller than the minimap scrolls it in step (`minimap::Geometry`).
+      `toggle_minimap` (View menu, palette) hides it, saved with the session (`ViewState::show_minimap`). Text areas
+      under 320 px have none. Tests: `frameworks/tests/minimap.rs`, `the_minimap_follows_toggle_minimap_and_its_settings`.
+      Not yet tried by hand.
+- [ ] Minimap, still missing: `window.is_minimap_visible()` answers True and `set_minimap_visible` does nothing
+      (plugins do not see the window's `ViewState`, as with the side bar); it draws bars, not Sublime's tiny glyphs.
+- [ ] Regions, still missing: icons are tinted with the color scheme's foreground when their scope has no color
+      (Sublime's exact rule for untinted icons was not checked).
 - [x] **Resources**: `sublime.find_resources(pattern)` (file name with `*` / `?`, as `Packages/<pkg>/<path>`, each
       once, ours over Sublime's), `load_resource` (UTF-8, `\n` line endings), `load_binary_resource` (sent as hex);
       a missing one raises `FileNotFoundError`. `decode_value` / `encode_value`. Zipped packages are unpacked, above.

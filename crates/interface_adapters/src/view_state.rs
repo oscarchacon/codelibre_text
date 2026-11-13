@@ -96,6 +96,8 @@ pub enum ViewRequest {
 pub struct ViewState {
     pub show_side_bar: bool,
     pub show_status_bar: bool,
+    /// The minimap right of the text (`toggle_minimap`), saved with the session.
+    pub show_minimap: bool,
     pub fullscreen: bool,
     pub quick_panel: Option<QuickPanel>,
     pub find_panel: FindPanelState,
@@ -137,6 +139,7 @@ impl Default for ViewState {
         Self {
             show_side_bar: true,
             show_status_bar: true,
+            show_minimap: true,
             fullscreen: false,
             quick_panel: None,
             find_panel: FindPanelState::default(),
@@ -199,6 +202,7 @@ impl ViewState {
         vec![
             ("side_bar".into(), self.show_side_bar),
             ("status_bar".into(), self.show_status_bar),
+            ("minimap".into(), self.show_minimap),
         ]
     }
 
@@ -207,6 +211,7 @@ impl ViewState {
             match key.as_str() {
                 "side_bar" => self.show_side_bar = *value,
                 "status_bar" => self.show_status_bar = *value,
+                "minimap" => self.show_minimap = *value,
                 _ => {}
             }
         }
