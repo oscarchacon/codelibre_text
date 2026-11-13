@@ -361,7 +361,9 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
       lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
-- [x] **Minimap** (`views/minimap.rs`, drawn by `editor_view.rs` in a strip right of the text): the text as a bar per
+- [x] **Minimap** (`views/minimap.rs`, drawn by `editor_view.rs` between the text and the vertical scroll bar, as in
+      Sublime: the scroll area takes the whole width, so its bar stays at the window's edge and the wheel scrolls over
+      the minimap too; the text keeps out of the minimap's strip and the bar's lane, `minimap::bar_lane`): the text as a bar per
       word in its syntax color, the selection and the regions (not those with `HIDE_ON_MINIMAP`,
       `RegionViewModel::on_minimap`). A box marks what the text area shows (on hover, always with
       `always_show_minimap_viewport`; framed with `draw_minimap_border`, in the scheme's `minimap_border`); a click or

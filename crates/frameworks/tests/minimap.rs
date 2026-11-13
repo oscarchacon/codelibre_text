@@ -16,6 +16,13 @@ fn narrow_text_areas_have_no_minimap() {
 }
 
 #[test]
+fn floating_scroll_bars_keep_a_lane_right_of_the_minimap() {
+    let floating = egui::style::ScrollStyle::floating();
+    assert_eq!(minimap::bar_lane(&floating), floating.bar_width + floating.bar_outer_margin);
+    assert_eq!(minimap::bar_lane(&egui::style::ScrollStyle::solid()), 0.0, "solid bars have their own room");
+}
+
+#[test]
 fn a_text_that_fits_in_the_minimap_does_not_scroll_it() {
     // 2000 px of text are 300 px of minimap: it fits in 500.
     let at_end = geometry(2000.0, 1500.0);
@@ -77,6 +84,57 @@ fn minimap_frame(ctx: &Context, events: Vec<Event>) -> Option<f32> {
         });
     });
     asked
+}
+
+/// The text area's layout: a scroll area over the whole width with the text inside, and the
+/// minimap drawn after it at its right, inside the scroll area's rectangle.
+fn editor_frame(ctx: &Context, text: &mut String, events: Vec<Event>) -> Option<f32> {
+    let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), events, ..Default::default() };
+    let mut asked = None;
+    let _ = ctx.run(input, |ctx| {
+        CentralPanel::default().show(ctx, |ui| {
+            let scroll = egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                let output = egui::TextEdit::multiline(text).code_editor().desired_width(f32::INFINITY).show(ui);
+                output.galley
+            });
+            let galley = &scroll.inner;
+            let inner = scroll.inner_rect;
+            let area = Rect::from_min_max(egui::pos2(inner.right() - 110.0, inner.top()), egui::pos2(inner.right() - 10.0, inner.bottom()));
+            let geometry = Geometry {
+                text_height: galley.rect.height(),
+                content_height: scroll.content_size.y,
+                viewport_height: inner.height(),
+                offset: scroll.state.offset.y,
+                height: area.height(),
+            };
+            let row_height = galley.rows[0].rect.height();
+            let minimap_text = Text { galley, row_height, selection: 0..0, regions: &[], region_colors: &[] };
+            let colors = Colors { background: Color32::BLACK, foreground: Color32::WHITE, selection: Color32::BLUE, border: None };
+            let settings = MinimapViewModel { always_show_viewport: false, draw_border: false };
+            asked = minimap::show(ui, egui::Id::new("minimap"), area, &settings, &minimap_text, geometry, &colors);
+        });
+    });
+    asked
+}
+
+#[test]
+fn the_minimap_takes_clicks_over_the_scroll_area_it_sits_in() {
+    let ctx = Context::default();
+    let mut text = "fn main() {}\n".repeat(300);
+    for _ in 0..2 {
+        editor_frame(&ctx, &mut text, vec![]);
+    }
+    let at = Pos2::new(740.0, 400.0);
+    editor_frame(&ctx, &mut text, vec![Event::PointerMoved(at)]);
+    assert!(editor_frame(&ctx, &mut text, vec![button(at, true)]).is_some(), "the press reaches the minimap");
+    editor_frame(&ctx, &mut text, vec![button(at, false)]);
+
+    // Also after a click in the text.
+    let in_text = Pos2::new(100.0, 100.0);
+    editor_frame(&ctx, &mut text, vec![Event::PointerMoved(in_text), button(in_text, true)]);
+    editor_frame(&ctx, &mut text, vec![button(in_text, false)]);
+    editor_frame(&ctx, &mut text, vec![Event::PointerMoved(at)]);
+    assert!(editor_frame(&ctx, &mut text, vec![button(at, true)]).is_some(), "after a click in the text too");
 }
 
 fn button(pos: Pos2, pressed: bool) -> Event {

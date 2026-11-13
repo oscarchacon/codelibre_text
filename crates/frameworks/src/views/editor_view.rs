@@ -137,16 +137,18 @@ pub fn show(
     // A column for the regions' icons, left of the line numbers, while some region set has one.
     let gutter_width = gutter_width + if has_icons(model) { icon_size(row_height) } else { 0.0 };
 
-    // The minimap takes a strip at the right; the text and its scroll bars the rest.
-    let full = ui.available_rect_before_wrap();
-    let minimap_width = if model.minimap.is_some() { minimap::width(full.width()) } else { 0.0 };
-    let text_rect = Rect::from_min_max(full.min, egui::pos2(full.right() - minimap_width, full.bottom()));
-    let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(*ui.layout()));
+    // As in Sublime the minimap sits between the text and the vertical scroll bar: the scroll area
+    // takes the whole width (so its bar stays at the window's edge, where it is seen, and the wheel
+    // scrolls over the minimap too) and the text keeps out of the minimap's strip.
+    let minimap_width = if model.minimap.is_some() { minimap::width(ui.available_width()) } else { 0.0 };
+    let bar_lane = if minimap_width > 0.0 { minimap::bar_lane(&ui.spacing().scroll) } else { 0.0 };
+    let reserved = minimap_width + bar_lane;
     let scroll = egui::ScrollArea::both()
         .id_salt(("editor_scroll", model.document))
         .auto_shrink([false, false])
-        .show(&mut text_ui, |ui| {
-            let viewport = ui.clip_rect();
+        .show(ui, |ui| {
+            let shown = ui.clip_rect();
+            let viewport = shown.with_max_x(shown.right() - reserved);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 ui.add_space(gutter_width);
@@ -295,14 +297,22 @@ pub fn show(
                     let align = center.then_some(egui::Align::Center);
                     ui.scroll_to_rect(at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)), align);
                 }
+                // Long lines must not show in the minimap's strip and the bar's lane (the bar is
+                // painted after the content, so over this).
+                if reserved > 0.0 {
+                    ui.painter().rect_filled(Rect::from_min_max(egui::pos2(viewport.right(), shown.top()), shown.max), 0.0, colors.background);
+                }
                 (galley.clone(), selection)
             })
             .inner
         });
-    ui.allocate_rect(full, egui::Sense::hover());
 
     if let Some(settings) = model.minimap.as_ref().filter(|_| minimap_width > 0.0) {
-        let area = Rect::from_min_max(egui::pos2(text_rect.right(), full.top()), full.max);
+        let inner = scroll.inner_rect;
+        let area = Rect::from_min_max(
+            egui::pos2(inner.right() - reserved, inner.top()),
+            egui::pos2(inner.right() - bar_lane, inner.bottom()),
+        );
         let (galley, selection) = &scroll.inner;
         let geometry = minimap::Geometry {
             text_height: galley.rect.height(),

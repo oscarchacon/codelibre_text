@@ -26,6 +26,17 @@ pub fn width(width: f32) -> f32 {
     }
 }
 
+/// The room the vertical scroll bar needs right of the minimap. Floating bars (egui's default) are
+/// drawn over the scroll area's content, so the minimap leaves them their lane; solid bars have
+/// their own room outside it.
+pub fn bar_lane(style: &egui::style::ScrollStyle) -> f32 {
+    if style.floating {
+        style.bar_width + style.bar_outer_margin
+    } else {
+        0.0
+    }
+}
+
 /// Where the minimap is against the text area, in the minimap's own pixels (0 is its top).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Geometry {
