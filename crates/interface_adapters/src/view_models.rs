@@ -129,6 +129,21 @@ pub struct QuickPanelViewModel {
     pub take_focus: bool,
     /// Items in the monospace font (a plugin's `sublime.MONOSPACE_FONT`).
     pub monospace: bool,
+    /// An input handler asks in it: see [`CommandInputViewModel`].
+    pub input: Option<CommandInputViewModel>,
+}
+
+/// A panel an input handler asks in, as part of the command palette.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandInputViewModel {
+    /// The command, then what was answered before, drawn above the field.
+    pub breadcrumb: Vec<String>,
+    /// Backspace in the empty field sends [`UiEvent::PluginPanelBack`].
+    ///
+    /// [`UiEvent::PluginPanelBack`]: crate::controllers::ui_controller::UiEvent::PluginPanelBack
+    pub can_go_back: bool,
+    /// The handler's preview, drawn under the field.
+    pub preview: Vec<minihtml::Line>,
 }
 
 pub struct InputPanelViewModel {
@@ -140,6 +155,8 @@ pub struct InputPanelViewModel {
     pub selection: (usize, usize),
     pub selection_revision: u64,
     pub take_focus: bool,
+    /// An input handler asks in it: see [`CommandInputViewModel`].
+    pub input: Option<CommandInputViewModel>,
 }
 
 /// The output panel shown at the bottom (a build's or a plugin's output).
@@ -158,6 +175,23 @@ pub struct OutputPanelViewModel {
     pub current_line: Option<usize>,
     /// Changes when a result is visited: the view scrolls to it.
     pub result_revision: u64,
+    /// The panel's highlighting, when its view has a syntax (`assign_syntax`, the `syntax`
+    /// setting): LSP's and SublimeLinter's panels have their own.
+    pub highlight: Option<OutputPanelHighlight>,
+    /// What is selected in the panel's view (a plugin's `view.sel()`), as bytes of `text`.
+    pub selections: Vec<Range<usize>>,
+}
+
+/// What the syntax engine needs to highlight an output panel. It highlights the whole text (its
+/// cache is per view and grows with appends), of which the panel shows the part from `start`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputPanelHighlight {
+    pub document: DocumentId,
+    pub syntax: String,
+    pub color_scheme: String,
+    pub full_text: String,
+    /// The byte of `full_text` where the panel's `text` starts.
+    pub start: usize,
 }
 
 pub struct FindPanelViewModel {
@@ -223,6 +257,17 @@ pub struct EditorViewModel {
     /// Some plugin listens to `on_hover`: the view reports where the mouse rests.
     pub report_hover: bool,
     pub auto_complete: Option<AutoCompleteViewModel>,
+    /// The minimap right of the text, unless `toggle_minimap` hid it.
+    pub minimap: Option<MinimapViewModel>,
+}
+
+/// The minimap's settings (Sublime's `always_show_minimap_viewport` and `draw_minimap_border`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinimapViewModel {
+    /// The box of the visible part is drawn always, not only while the mouse is over the minimap.
+    pub always_show_viewport: bool,
+    /// That box has a border (the color scheme's `minimap_border`).
+    pub draw_border: bool,
 }
 
 /// minihtml as the view draws it: its boxes, and the bytes of its images by `src` (those that
@@ -307,6 +352,8 @@ pub struct RegionViewModel {
     /// The picture of an icon that is a resource (`Packages/…/x.png`), tinted with the region's color.
     pub icon_image: Option<std::rc::Rc<Vec<u8>>>,
     pub fill: bool,
+    /// Drawn on the minimap too (no `HIDE_ON_MINIMAP`).
+    pub on_minimap: bool,
     pub outline: bool,
     pub underline: Option<Underline>,
     /// Empty regions are drawn (as a bar where the caret would be).

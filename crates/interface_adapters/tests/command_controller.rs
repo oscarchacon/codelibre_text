@@ -341,6 +341,17 @@ fn toggling_side_bar_status_bar_and_full_screen() {
 }
 
 #[test]
+fn toggle_minimap_hides_and_shows_the_minimap() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(&mut editor, &mut view, &cmd("toggle_minimap"));
+    assert!(!view.show_minimap);
+    run(&mut editor, &mut view, &cmd("toggle_minimap"));
+    assert!(view.show_minimap);
+}
+
+#[test]
 fn font_size_commands() {
     let world = World::new();
     let mut editor = world.editor();
@@ -911,15 +922,109 @@ fn a_listener_s_waiting_command_runs_on_the_view_that_asked() {
     let a = editor.active_document().unwrap().id;
     let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
     editor.text_for_editing(a).unwrap().push('!');
-    editor.text_for_editing(b).unwrap().push('?');
-    // `save` needs the controller: it waits for the next frame, and then saves b, not the active a.
-    world.plugins.then([plugin_call("run_command", json!(["view", b, "save", null])), PluginMessage::Done { error: None }]);
+    // `clone_file` needs the controller: it waits for the next frame, and then clones b, not the active a.
+    world.plugins.then([plugin_call("run_command", json!(["view", b, "clone_file", null])), PluginMessage::Done { error: None }]);
     assert!(editor.save_active(false));
-    assert_eq!(world.file_text("/p/b.txt"), "other");
-    world.plugins.then([PluginMessage::Done { error: None }]);
+    assert!(editor.clones_of(b).is_empty());
     poll_plugins(&mut editor, &mut view);
+    assert_eq!(editor.clones_of(b).len(), 1);
+    assert!(editor.clones_of(a).is_empty());
+}
+
+#[test]
+fn a_listener_saves_another_view_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/b.txt");
+    open(&mut editor, "/p/a.txt");
+    let a = editor.active_document().unwrap().id;
+    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    editor.text_for_editing(a).unwrap().push('!');
+    editor.text_for_editing(b).unwrap().push('?');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", b, "save", null])),
+        // b's own on_post_save.
+        PluginMessage::Done { error: None },
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    // Done before the next frame.
     assert_eq!(world.file_text("/p/b.txt"), "other?");
     assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+}
+
+#[test]
+fn a_listener_that_saves_the_view_being_saved_does_not_save_it_again() {
+    let world = listening_world(&["on_pre_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    // A second `on_pre_save` would take the `Done` of the first and leave it waiting: the save
+    // in progress writes the file, once.
+    world.plugins.then([plugin_call("run_command", json!(["view", id, "save", null])), PluginMessage::Done { error: None }]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/a.txt"), "quiet!");
+    assert_eq!(world.plugins.events.borrow().iter().filter(|(name, _)| name == "on_pre_save").count(), 1);
+}
+
+#[test]
+fn save_all_goes_on_when_a_listener_closes_a_view() {
+    let world = listening_world(&["on_pre_save"]).with_file("/p/c.txt", "third");
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    for path in ["/p/a.txt", "/p/b.txt", "/p/c.txt"] {
+        open(&mut editor, path);
+    }
+    let id = |editor: &Editor, name: &str| editor.state().documents.iter().find(|d| d.name() == name).unwrap().id;
+    let (a, b, c) = (id(&editor, "a.txt"), id(&editor, "b.txt"), id(&editor, "c.txt"));
+    editor.text_for_editing(a).unwrap().push('!');
+    editor.text_for_editing(c).unwrap().push('?');
+    world.plugins.then([
+        // a's on_pre_save closes b (no changes: no question), which comes before c.
+        plugin_call("run_command", json!(["view", b, "close", null])),
+        PluginMessage::Done { error: None },
+        // c's on_pre_save.
+        PluginMessage::Done { error: None },
+    ]);
+    editor.save_all();
+    assert!(editor.state().documents.iter().all(|d| d.id != b), "closed at once");
+    assert_eq!(world.file_text("/p/a.txt"), "quiet!");
+    assert_eq!(world.file_text("/p/c.txt"), "third?");
+    assert_eq!(editor.active_document().unwrap().id, c, "the active view stays");
+}
+
+#[test]
+fn a_listener_s_select_all_and_clipboard_commands_run_during_the_event() {
+    let world = listening_world(&["on_pre_save"]);
+    let mut editor = world.editor();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    editor.text_for_editing(id).unwrap().push('!');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "select_all", null])),
+        plugin_call("run_command", json!(["view", id, "copy", null])),
+        plugin_call("run_command", json!(["view", id, "move_to", { "to": "eof" }])),
+        plugin_call("run_command", json!(["view", id, "paste", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/a.txt"), "quiet!quiet!");
+    assert_eq!(*world.clipboard.borrow(), Ok("quiet!".to_string()));
+    assert_eq!(editor.clipboard_history(), ["quiet!"]);
+
+    editor.text_for_editing(id).unwrap().push('?');
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "select_all", null])),
+        plugin_call("run_command", json!(["view", id, "cut", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/a.txt"), "");
+    assert_eq!(*world.clipboard.borrow(), Ok("quiet!quiet!?".to_string()));
 }
 
 #[test]

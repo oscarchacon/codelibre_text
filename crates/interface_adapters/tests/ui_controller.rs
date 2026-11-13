@@ -500,3 +500,53 @@ fn a_palette_command_with_an_input_handler_does_not_run_yet() {
     handle(&mut editor, &mut view, UiEvent::QuickPanelAccepted(0));
     assert_eq!(queued(&mut view), vec![Command::new("ask")]);
 }
+
+#[test]
+fn an_input_handler_s_list_shows_its_breadcrumb_and_preview_and_backspace_goes_back() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("pick", Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let input = json!({ "breadcrumb": ["Open Recent", "Projects"], "back": true });
+    let show = test_support::plugin_call("window_show_quick_panel", json!([1, ["a", "b"], 0, 0, "", 7, false, input]));
+    let preview = test_support::plugin_call("window_set_input_preview", json!([1, "<b>a</b> is <i>new</i>", true]));
+    world.plugins.then([show, preview, done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("pick"));
+    let model = interface_adapters::presenters::quick_panel::present(&editor, &mut view).unwrap();
+    let input = model.input.expect("asked by an input handler");
+    assert_eq!(input.breadcrumb, ["Open Recent", "Projects"]);
+    assert!(input.can_go_back);
+    let preview: String = input.preview.iter().flatten().map(|span| span.text.as_str()).collect();
+    assert_eq!(preview, "a is new");
+    assert!(input.preview[0][0].bold, "minihtml for sublime.Html");
+
+    world.plugins.then([done()]);
+    handle(&mut editor, &mut view, UiEvent::PluginPanelBack);
+    assert_eq!(callbacks(&world), [(7, "back".to_string(), json!([]))], "not select -1: the handler is not cancelled");
+    assert!(view.quick_panel.is_none() && editor.plugin_quick_panel().is_none());
+    assert!(view.focus_editor);
+}
+
+#[test]
+fn backspace_goes_back_only_in_an_input_handler_s_panel() {
+    use use_cases::gateways::PluginCommandKind::Window;
+    let world = World::new().with_plugin_commands(&[("ask", Window)]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let show = test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "", 3, false]));
+    world.plugins.then([show, done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
+    assert_eq!(interface_adapters::presenters::quick_panel::present_input_panel(&editor, &mut view).unwrap().input, None);
+    handle(&mut editor, &mut view, UiEvent::PluginPanelBack);
+    assert!(view.input_panel.is_some(), "a plain show_input_panel stays");
+    assert!(callbacks(&world).is_empty());
+
+    let input = json!({ "breadcrumb": ["Rename"], "back": true });
+    let show = test_support::plugin_call("window_show_input_panel", json!([1, "Name:", "", 4, false, input]));
+    // The plain panel is cancelled when the next one opens; then the new one goes back.
+    world.plugins.then([show, done(), done(), done()]);
+    interface_adapters::controllers::command_controller::run(&mut editor, &mut view, &Command::new("ask"));
+    handle(&mut editor, &mut view, UiEvent::PluginPanelBack);
+    assert_eq!(callbacks(&world).last(), Some(&(4, "back".to_string(), json!([]))));
+    assert!(view.input_panel.is_none() && editor.plugin_input_panel().is_none());
+}

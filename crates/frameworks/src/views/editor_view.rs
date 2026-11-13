@@ -25,7 +25,7 @@ use interface_adapters::view_models::{
 use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
-use crate::views::context_menu;
+use crate::views::{context_menu, minimap};
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
@@ -137,11 +137,18 @@ pub fn show(
     // A column for the regions' icons, left of the line numbers, while some region set has one.
     let gutter_width = gutter_width + if has_icons(model) { icon_size(row_height) } else { 0.0 };
 
-    egui::ScrollArea::both()
+    // As in Sublime the minimap sits between the text and the vertical scroll bar: the scroll area
+    // takes the whole width (so its bar stays at the window's edge, where it is seen, and the wheel
+    // scrolls over the minimap too) and the text keeps out of the minimap's strip.
+    let minimap_width = if model.minimap.is_some() { minimap::width(ui.available_width()) } else { 0.0 };
+    let bar_lane = if minimap_width > 0.0 { minimap::bar_lane(&ui.spacing().scroll) } else { 0.0 };
+    let reserved = minimap_width + bar_lane;
+    let scroll = egui::ScrollArea::both()
         .id_salt(("editor_scroll", model.document))
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let viewport = ui.clip_rect();
+            let shown = ui.clip_rect();
+            let viewport = shown.with_max_x(shown.right() - reserved);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 ui.add_space(gutter_width);
@@ -290,8 +297,50 @@ pub fn show(
                     let align = center.then_some(egui::Align::Center);
                     ui.scroll_to_rect(at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)), align);
                 }
-            });
+                // Long lines must not show in the minimap's strip and the bar's lane (the bar is
+                // painted after the content, so over this).
+                if reserved > 0.0 {
+                    ui.painter().rect_filled(Rect::from_min_max(egui::pos2(viewport.right(), shown.top()), shown.max), 0.0, colors.background);
+                }
+                (galley.clone(), selection)
+            })
+            .inner
         });
+
+    if let Some(settings) = model.minimap.as_ref().filter(|_| minimap_width > 0.0) {
+        let inner = scroll.inner_rect;
+        let area = Rect::from_min_max(
+            egui::pos2(inner.right() - reserved, inner.top()),
+            egui::pos2(inner.right() - bar_lane, inner.bottom()),
+        );
+        let (galley, selection) = &scroll.inner;
+        let geometry = minimap::Geometry {
+            text_height: galley.rect.height(),
+            content_height: scroll.content_size.y,
+            viewport_height: scroll.inner_rect.height(),
+            offset: scroll.state.offset.y,
+            height: area.height(),
+        };
+        let text = minimap::Text {
+            galley,
+            row_height,
+            selection: selection.start()..selection.end(),
+            regions: &model.regions,
+            region_colors: &region_colors,
+        };
+        let minimap_colors = minimap::Colors {
+            background: colors.background,
+            foreground: colors.foreground,
+            selection: colors.selection,
+            border: colors.minimap_border,
+        };
+        if let Some(offset) = minimap::show(ui, id.with("minimap"), area, settings, &text, geometry, &minimap_colors) {
+            let mut state = scroll.state;
+            state.offset.y = offset;
+            state.store(&ctx, scroll.id);
+            ctx.request_repaint();
+        }
+    }
 
     // After SelectionChanged, so the command sees the caret it was pressed at.
     events.extend(key_events);
@@ -1053,6 +1102,7 @@ struct Colors {
     gutter_foreground: Color32,
     guide: Color32,
     find_highlight: Color32,
+    minimap_border: Option<Color32>,
 }
 
 impl Colors {
@@ -1073,6 +1123,7 @@ impl Colors {
                 .map(to_color32)
                 .unwrap_or(Color32::from_rgb(255, 231, 146))
                 .gamma_multiply(0.45),
+            minimap_border: s.minimap_border.map(to_color32),
         }
     }
 }

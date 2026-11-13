@@ -72,7 +72,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
 - Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
   them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
-  next bullet). egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
+  next bullet); a binding of another key to deleting, typing or moving the caret is replayed as the widget's own key
+  (`bound_command` / `widget_replay`), so its undo keeps it. egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
   (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
 - Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
@@ -128,6 +129,6 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
-phase B and C (`docs/plugins.md`: output panel highlighting and selections, input handler breadcrumbs and `want_event`;
-by design there is no Python 3.3 or 3.8 host: every plugin runs on the bundled 3.13), minimap, folding, find in files.
+phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
+on the bundled 3.13), folding, find in files. The minimap (`views/minimap.rs`) draws words as bars, not glyphs.
 Highlighting is skipped above 4 MB.

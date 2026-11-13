@@ -168,14 +168,20 @@ impl Editor {
         self.state.build_options = options;
     }
 
-    /// Reads the build systems Tools > Build System lists, by name (at every package load).
+    /// Reads the build systems Tools > Build System lists, by name, each followed by its variants
+    /// as "Build - Variant" (at every package load).
     pub(crate) fn refresh_menu_build_systems(&mut self) {
-        let mut options: Vec<BuildOption> = self
-            .build_systems()
-            .into_iter()
-            .map(|build| BuildOption { caption: build.name, resource: build.resource, variant: None })
-            .collect();
-        options.sort_by_key(|o| o.caption.to_lowercase());
+        let mut systems = self.build_systems();
+        systems.sort_by_key(|build| build.name.to_lowercase());
+        let mut options = Vec::new();
+        for build in systems {
+            options.push(BuildOption { caption: build.name.clone(), resource: build.resource.clone(), variant: None });
+            options.extend(build.variants.iter().map(|variant| BuildOption {
+                caption: format!("{} - {}", build.name, variant.name),
+                resource: build.resource.clone(),
+                variant: Some(variant.name.clone()),
+            }));
+        }
         self.state.menu_build_systems = options;
     }
 
@@ -187,6 +193,15 @@ impl Editor {
     /// The build system set with `set_build_system` (`None`: chosen by the file, "Automatic").
     pub fn build_system_set(&self) -> Option<&str> {
         self.state.builds.choice.as_ref().filter(|c| c.always).map(|c| c.resource.as_str())
+    }
+
+    /// Whether `set_build_system` set this build system and variant (an empty `file`: "Automatic",
+    /// none set; an empty `variant`: the build itself), as Tools > Build System checks them.
+    pub fn is_build_system_set(&self, file: &str, variant: &str) -> bool {
+        match self.state.builds.choice.as_ref().filter(|c| c.always) {
+            Some(choice) => choice.resource == file && choice.variant.as_deref().unwrap_or_default() == variant,
+            None => file.is_empty(),
+        }
     }
 
     /// The command that stops the last build (`exec` with `kill` unless the build says otherwise).

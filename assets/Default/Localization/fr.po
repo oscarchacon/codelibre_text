@@ -267,6 +267,10 @@ msgid "Status Bar"
 msgstr "Barre d'état"
 
 #: assets/Default/Main.sublime-menu
+msgid "Minimap"
+msgstr "Minimap"
+
+#: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Afficher la console"
 
@@ -499,6 +503,10 @@ msgstr "Affichage : Afficher la console"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Status Bar"
 msgstr "Affichage : Afficher/masquer la barre d'état"
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Minimap"
+msgstr "Affichage : Afficher/masquer la minimap"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"

@@ -521,8 +521,9 @@ fn built_in_commands_that_work_in_panels() {
     assert_eq!(call(&world, &mut editor, "view_selection_get", json!([id])), Ok(json!([[0, 5]])));
     call(&world, &mut editor, "run_command", json!(["view", id, "insert", { "characters": "bye" }])).unwrap();
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bye");
-    let refused = call(&world, &mut editor, "run_command", json!(["view", id, "sort_lines", null]));
-    assert!(refused.unwrap_err().starts_with("sort_lines cannot run in a panel"));
+    // Commands of tabs, the window or the text widget do not (text commands do: `output_panels.rs`).
+    let refused = call(&world, &mut editor, "run_command", json!(["view", id, "undo", null]));
+    assert!(refused.unwrap_err().starts_with("undo cannot run in a panel"));
 }
 
 #[test]

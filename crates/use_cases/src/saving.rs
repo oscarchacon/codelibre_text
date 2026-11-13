@@ -17,7 +17,24 @@ const PACKAGE_RESOURCE_EXTENSIONS: &[&str] = &[
 impl Editor {
     /// Saves the active document, asking for a path if it has none (or for `save_as`).
     /// Returns false if it was not saved.
+    ///
+    /// A plugin may save or close views while its listeners hear `on_pre_save` / `on_post_save`
+    /// (the commands run at once): saving this same view again does nothing, as the save in
+    /// progress writes it, and a view closed meanwhile is not written.
     pub fn save_active(&mut self, save_as: bool) -> bool {
+        let Some(id) = self.active_document().map(|d| d.id) else {
+            return false;
+        };
+        if self.state.saving.contains(&id) {
+            return false;
+        }
+        self.state.saving.push(id);
+        let saved = self.save_active_now(save_as);
+        self.state.saving.retain(|saving| *saving != id);
+        saved
+    }
+
+    fn save_active_now(&mut self, save_as: bool) -> bool {
         let settings = self.view_settings();
         // A view's `default_dir` setting is where its first save starts (plugins set it on the
         // files they create: Package Control's new repository, PackageDev's new resources).
@@ -88,16 +105,22 @@ impl Editor {
         true
     }
 
+    /// Saves every changed file. By id, not by position: the listeners of each save may close or
+    /// open views meanwhile.
     pub fn save_all(&mut self) {
-        let active = self.state.active;
-        for index in 0..self.state.documents.len() {
-            let doc = &self.state.documents[index];
-            if doc.is_dirty() && doc.path.is_some() {
-                self.state.active = index;
-                self.save_active(false);
-            }
+        let active = self.active_document().map(|d| d.id);
+        let ids: Vec<_> = self.state.documents.iter().filter(|d| d.is_dirty() && d.path.is_some()).map(|d| d.id).collect();
+        for id in ids {
+            // A clone saved before it, or a listener, may have saved it already.
+            let Some(index) = self.index_of(id).filter(|&i| self.state.documents[i].is_dirty()) else {
+                continue;
+            };
+            self.state.active = index;
+            self.save_active(false);
         }
-        self.state.active = active;
+        if let Some(index) = active.and_then(|id| self.index_of(id)) {
+            self.state.active = index;
+        }
     }
 
     /// Saving package resources reloads them; saving a plugin reloads the plugins, as in Sublime.

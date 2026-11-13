@@ -3,22 +3,31 @@
 //! the editor view's: selections they set arrive by revision, the caret goes back as an event.
 
 use egui::text::{CCursor, CCursorRange};
-use egui::{Event, Id, Key, RichText, Ui};
+use egui::{Event, Id, Key, Modifiers, RichText, Ui};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::InputPanelViewModel;
 
+use super::quick_panel;
 use super::theme::Chrome;
 
 pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &mut Vec<UiEvent>) {
     let mut text = panel.text.clone();
     let mut selected = None;
     let mut done = false;
+    let id = Id::new("input_panel_input");
     ui.add_space(6.0);
+    // An input handler's panel: its breadcrumb, and Backspace in the empty field goes back.
+    if let Some(input) = &panel.input {
+        quick_panel::breadcrumb(ui, chrome, &input.breadcrumb);
+        let focused = ui.memory(|m| m.has_focus(id));
+        if input.can_go_back && panel.text.is_empty() && focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Backspace)) {
+            events.push(UiEvent::PluginPanelBack);
+        }
+    }
     ui.horizontal(|ui| {
         if !panel.caption.is_empty() {
             ui.label(RichText::new(&panel.caption).color(chrome.fg_dim));
         }
-        let id = Id::new("input_panel_input");
         let mut field = egui::TextEdit::singleline(&mut text)
             .id(id)
             .desired_width(f32::INFINITY)
@@ -44,6 +53,14 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &
             selected = Some((range.secondary.index, range.primary.index)).filter(|s| *s != panel.selection);
         }
     });
+    if let Some(input) = panel.input.as_ref().filter(|input| !input.preview.is_empty()) {
+        ui.add_space(4.0);
+        for line in &input.preview {
+            if let Some(href) = quick_panel::detail_line(ui, chrome, line) {
+                events.push(UiEvent::QuickPanelLinkClicked(href));
+            }
+        }
+    }
     ui.add_space(6.0);
     // Before a Done of the same frame, so it gets the final text; the caret after the text it is in.
     if let Some((anchor, head)) = selected {
