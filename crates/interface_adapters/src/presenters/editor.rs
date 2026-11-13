@@ -7,12 +7,13 @@ use use_cases::Editor;
 
 use crate::view_models::{
     AnnotationViewModel, AutoCompleteViewModel, CompletionViewModel, EditorViewModel, HtmlViewModel, PhantomLayout, PhantomViewModel, PopupViewModel,
-    RegionViewModel, Underline,
+    MinimapViewModel, RegionViewModel, Underline,
 };
 use crate::view_state::ViewState;
 
 // Sublime's `add_regions` flags (`sublime.DRAW_EMPTY`, …).
 const DRAW_EMPTY: u64 = 1;
+const HIDE_ON_MINIMAP: u64 = 2;
 const DRAW_EMPTY_AS_OVERWRITE: u64 = 4;
 const DRAW_NO_FILL: u64 = 32;
 const HIDDEN: u64 = 128;
@@ -112,6 +113,10 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
         phantoms,
         report_hover: editor.plugins_hear_hover(),
         auto_complete: present_auto_complete(editor, doc.id, len),
+        minimap: view.show_minimap.then(|| MinimapViewModel {
+            always_show_viewport: settings.bool("always_show_minimap_viewport", false),
+            draw_border: settings.bool("draw_minimap_border", false),
+        }),
     })
 }
 
@@ -206,6 +211,7 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         icon: set.icon.clone(),
         icon_image: editor.region_icon(&set.icon),
         fill: !has(DRAW_NO_FILL),
+        on_minimap: !has(HIDE_ON_MINIMAP),
         outline: !has(DRAW_NO_OUTLINE),
         underline,
         draw_empty: has(DRAW_EMPTY),

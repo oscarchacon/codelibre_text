@@ -4,7 +4,7 @@ use entities::command::Command;
 use entities::keymap::{Binding, KeyCombo};
 use interface_adapters::controllers::command_controller::{poll_plugins, run};
 use interface_adapters::controllers::keyboard_controller::{clipboard_shortcut, key_pressed, KeyHandling};
-use interface_adapters::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit};
+use interface_adapters::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::{json, Value};
 use test_support::{plugin_call, status, World};
 use use_cases::gateways::{PluginCommandKind, PluginMessage};
@@ -432,6 +432,83 @@ fn widget_keys_stay_with_the_widget_without_listeners_or_focus() {
     view.text_has_focus = false;
     assert!(!press(&mut editor, &mut view, "ctrl+z"), "it undoes in the find field");
     assert!(queued(&mut view).is_empty());
+}
+
+/// Bindings of other keys to what the widget does itself (deleting, typing, moving the caret).
+fn rebound_world(events: &[&str]) -> World {
+    World::new()
+        .with_binding(bind(&["ctrl+h"], Command::new("left_delete"), vec![]))
+        .with_binding(bind(&["alt+j"], Command::with_args("move", json!({ "by": "lines", "forward": true, "extend": true })), vec![]))
+        .with_binding(bind(&["ctrl+e"], Command::with_args("move_to", json!({ "to": "eol" })), vec![]))
+        .with_binding(bind(&["ctrl+t"], Command::with_args("insert", json!({ "characters": "ab" })), vec![]))
+        .with_binding(bind(&["backspace"], Command::new("left_delete"), vec![]))
+        .with_binding(bind(&["ctrl+left"], Command::with_args("move", json!({ "by": "words", "forward": false })), vec![]))
+        .with_plugins(&[], events)
+}
+
+#[test]
+fn bindings_to_what_the_widget_does_reach_it_as_its_own_input() {
+    let world = rebound_world(&[]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    let key = |key, shift| ViewRequest::WidgetEdit(WidgetEdit::Key { key, shift });
+    for spec in ["ctrl+h", "alt+j", "ctrl+e", "ctrl+t"] {
+        assert!(press(&mut editor, &mut view, spec), "{spec}: the widget would not understand the key");
+    }
+    assert_eq!(
+        view.take_requests(),
+        [
+            key(WidgetKey::Backspace, false),
+            key(WidgetKey::Down, true),
+            key(WidgetKey::End, false),
+            ViewRequest::WidgetEdit(WidgetEdit::Insert("ab".into())),
+        ],
+        "so its undo history keeps them"
+    );
+    assert!(queued(&mut view).is_empty(), "not use case edits");
+
+    assert!(!press(&mut editor, &mut view, "backspace"), "the widget's own key goes to it");
+    assert!(!press(&mut editor, &mut view, "ctrl+left"), "it moves by words with Ctrl itself");
+    assert!(view.take_requests().is_empty());
+}
+
+#[test]
+fn rebound_widget_keys_run_as_commands_with_several_selections_or_no_focus() {
+    let world = rebound_world(&[]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    editor.insert_at_selections("a\nb");
+    editor.add_carets_on_next_line(false);
+    assert!(press(&mut editor, &mut view, "ctrl+h"));
+    assert_eq!(queued(&mut view), ["left_delete"], "the use case deletes at every caret");
+
+    editor.single_selection();
+    view.text_has_focus = false;
+    assert!(!press(&mut editor, &mut view, "ctrl+h"), "the focused field gets the key");
+    assert!(view.take_requests().is_empty());
+}
+
+#[test]
+fn listeners_hear_a_bound_widget_key_and_the_widget_still_does_it() {
+    let world = rebound_world(&["on_text_command"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    world.plugins.then([PluginMessage::Answer(Value::Null)]);
+    assert!(press(&mut editor, &mut view, "backspace"));
+    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Key { key: WidgetKey::Backspace, shift: false })]);
+    assert!(queued(&mut view).is_empty(), "not a use case edit, outside the widget's undo");
+    let queries = world.plugins.queries.borrow();
+    assert_eq!((queries[0].0.as_str(), &queries[0].2[0]), ("on_text_command", &json!("left_delete")));
+    drop(queries);
+
+    // A listener that replaces it gets its own command instead.
+    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "x" }]))]);
+    assert!(press(&mut editor, &mut view, "ctrl+h"));
+    assert!(view.take_requests().is_empty());
+    assert_eq!(editor.active_document().unwrap().text, "x");
 }
 
 #[test]

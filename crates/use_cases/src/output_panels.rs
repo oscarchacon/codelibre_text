@@ -72,6 +72,8 @@ impl Editor {
     pub(crate) fn destroy_output_panel(&mut self, name: &str) {
         if let Some(id) = self.find_output_panel(name) {
             self.state.plugins.view_settings.remove(&id);
+            // Its highlighting, when it had a syntax.
+            self.gateways.syntaxes.forget(id);
         }
         if let Some(id) = self.state.plugin_panels.close_io_panel(name) {
             self.state.plugins.view_settings.remove(&id);
@@ -199,6 +201,13 @@ impl Editor {
         let panels = self.state.output_panels.panels.iter_mut().map(|p| &mut p.document);
         let input = self.state.plugin_panels.input_document_mut();
         self.state.documents.iter_mut().chain(panels).chain(input).find(|d| d.id == id)
+    }
+
+    /// The document of a view that is not a tab (an output panel's, the input panel's).
+    pub(crate) fn panel_document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
+        let panels = self.state.output_panels.panels.iter_mut().map(|p| &mut p.document);
+        let input = self.state.plugin_panels.input_document_mut();
+        panels.chain(input).find(|d| d.id == id)
     }
 
     /// A view that is not a tab.

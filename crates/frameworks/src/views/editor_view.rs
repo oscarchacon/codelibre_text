@@ -25,7 +25,7 @@ use interface_adapters::view_models::{
 use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
-use crate::views::context_menu;
+use crate::views::{context_menu, minimap};
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
@@ -137,10 +137,15 @@ pub fn show(
     // A column for the regions' icons, left of the line numbers, while some region set has one.
     let gutter_width = gutter_width + if has_icons(model) { icon_size(row_height) } else { 0.0 };
 
-    egui::ScrollArea::both()
+    // The minimap takes a strip at the right; the text and its scroll bars the rest.
+    let full = ui.available_rect_before_wrap();
+    let minimap_width = if model.minimap.is_some() { minimap::width(full.width()) } else { 0.0 };
+    let text_rect = Rect::from_min_max(full.min, egui::pos2(full.right() - minimap_width, full.bottom()));
+    let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(*ui.layout()));
+    let scroll = egui::ScrollArea::both()
         .id_salt(("editor_scroll", model.document))
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show(&mut text_ui, |ui| {
             let viewport = ui.clip_rect();
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -290,8 +295,42 @@ pub fn show(
                     let align = center.then_some(egui::Align::Center);
                     ui.scroll_to_rect(at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)), align);
                 }
-            });
+                (galley.clone(), selection)
+            })
+            .inner
         });
+    ui.allocate_rect(full, egui::Sense::hover());
+
+    if let Some(settings) = model.minimap.as_ref().filter(|_| minimap_width > 0.0) {
+        let area = Rect::from_min_max(egui::pos2(text_rect.right(), full.top()), full.max);
+        let (galley, selection) = &scroll.inner;
+        let geometry = minimap::Geometry {
+            text_height: galley.rect.height(),
+            content_height: scroll.content_size.y,
+            viewport_height: scroll.inner_rect.height(),
+            offset: scroll.state.offset.y,
+            height: area.height(),
+        };
+        let text = minimap::Text {
+            galley,
+            row_height,
+            selection: selection.start()..selection.end(),
+            regions: &model.regions,
+            region_colors: &region_colors,
+        };
+        let minimap_colors = minimap::Colors {
+            background: colors.background,
+            foreground: colors.foreground,
+            selection: colors.selection,
+            border: colors.minimap_border,
+        };
+        if let Some(offset) = minimap::show(ui, id.with("minimap"), area, settings, &text, geometry, &minimap_colors) {
+            let mut state = scroll.state;
+            state.offset.y = offset;
+            state.store(&ctx, scroll.id);
+            ctx.request_repaint();
+        }
+    }
 
     // After SelectionChanged, so the command sees the caret it was pressed at.
     events.extend(key_events);
@@ -1053,6 +1092,7 @@ struct Colors {
     gutter_foreground: Color32,
     guide: Color32,
     find_highlight: Color32,
+    minimap_border: Option<Color32>,
 }
 
 impl Colors {
@@ -1073,6 +1113,7 @@ impl Colors {
                 .map(to_color32)
                 .unwrap_or(Color32::from_rgb(255, 231, 146))
                 .gamma_multiply(0.45),
+            minimap_border: s.minimap_border.map(to_color32),
         }
     }
 }

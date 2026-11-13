@@ -42,22 +42,27 @@ fn entries(items: &[MenuItem], editor: &Editor, settings: &Settings) -> Vec<Menu
     tidy(entries)
 }
 
-/// Tools > Build System: `set_build_system` with each build system, the one set checked.
+/// Tools > Build System: `set_build_system` with each build system and each of its variants, the
+/// one set checked.
 fn build_system_entries(editor: &Editor) -> Vec<MenuEntryViewModel> {
-    let set = editor.build_system_set();
     let state = editor.state();
     editor
         .menu_build_systems()
         .iter()
         .map(|build| {
-            let command = Command::with_args("set_build_system", serde_json::json!({ "file": build.resource }));
+            let variant = build.variant.as_deref().unwrap_or_default();
+            let args = match &build.variant {
+                Some(variant) => serde_json::json!({ "file": build.resource, "variant": variant }),
+                None => serde_json::json!({ "file": build.resource }),
+            };
+            let command = Command::with_args("set_build_system", args);
             MenuEntryViewModel {
                 caption: build.caption.clone(),
                 id: None,
                 separator: false,
                 shortcut: state.keymap.binding_for(&command),
                 key: state.keymap.key_for(&command).cloned(),
-                checked: Some(set == Some(build.resource.as_str())),
+                checked: Some(editor.is_build_system_set(&build.resource, variant)),
                 enabled: true,
                 command: Some(command),
                 children: Vec::new(),
@@ -78,7 +83,7 @@ fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEn
     }
     let checked = item.checkbox.then(|| match (plugin, &item.command) {
         (Some(plugin), _) => plugin.checked,
-        (None, Some(c)) if c.name == "set_build_system" => editor.build_system_set().unwrap_or_default() == c.str_arg("file"),
+        (None, Some(c)) if c.name == "set_build_system" => editor.is_build_system_set(c.str_arg("file"), c.str_arg("variant")),
         (None, Some(c)) if c.name == "set_max_columns" => editor.max_columns() == c.usize_arg("columns", 0),
         (None, command) => command.as_ref().map(|c| c.str_arg("setting")).is_some_and(|setting| settings.bool(setting, false)),
     });

@@ -1,8 +1,9 @@
 use entities::minihtml::Span;
+use use_cases::plugin_panels::CommandInputPanel;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
-use crate::view_models::{InputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
+use crate::view_models::{CommandInputViewModel, InputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
 use crate::view_state::ViewState;
 
 /// The open quick panel, searching again only when the query changed.
@@ -30,6 +31,7 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewMo
         selected: panel.selected,
         take_focus: std::mem::take(&mut panel.focus_requested),
         monospace: plugin_panel.is_some_and(|p| p.monospace),
+        input: plugin_panel.and_then(|p| p.input.as_ref()).map(command_input),
         keep_open: plugin_panel.is_some_and(|p| p.keep_open),
         items: panel
             .results
@@ -66,5 +68,10 @@ pub fn present_input_panel(editor: &Editor, view: &mut ViewState) -> Option<Inpu
         selection: (selection.anchor, selection.head),
         selection_revision: panel.document.selection_revision(),
         take_focus: std::mem::take(&mut state.focus_requested),
+        input: panel.input.as_ref().map(command_input),
     })
+}
+
+fn command_input(input: &CommandInputPanel) -> CommandInputViewModel {
+    CommandInputViewModel { breadcrumb: input.breadcrumb.clone(), can_go_back: input.can_go_back, preview: input.preview.clone() }
 }

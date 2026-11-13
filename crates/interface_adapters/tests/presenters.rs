@@ -10,7 +10,7 @@ use entities::selection::Selection;
 use interface_adapters::presenters::{
     dialogs, editor as editor_presenter, find_panel, menu, output_panel, quick_panel, side_bar, status_bar, tabs, window,
 };
-use interface_adapters::view_models::{DialogViewModel, TreeRowKind};
+use interface_adapters::view_models::{DialogViewModel, MinimapViewModel, TreeRowKind};
 use interface_adapters::view_state::{QuickPanel, ViewState};
 use serde_json::json;
 use test_support::{open, World};
@@ -213,7 +213,7 @@ fn the_menu_shows_shortcuts_and_check_marks() {
 }
 
 #[test]
-fn the_build_system_menu_lists_the_build_systems_and_checks_the_one_set() {
+fn the_build_system_menu_lists_the_build_systems_and_their_variants_and_checks_the_one_set() {
     let item = |caption: &str, command: Option<Command>, checkbox: bool, children: Vec<MenuItem>| MenuItem {
         caption: caption.into(),
         id: None,
@@ -224,7 +224,7 @@ fn the_build_system_menu_lists_the_build_systems_and_checks_the_one_set() {
     let automatic = Command::with_args("set_build_system", json!({ "file": "" }));
     let world = World::new()
         .with_resource("Packages/U/Zig.sublime-build", r#"{ "cmd": ["zig"] }"#)
-        .with_resource("Packages/U/Make.sublime-build", r#"{ "cmd": ["make"] }"#)
+        .with_resource("Packages/U/Make.sublime-build", r#"{ "cmd": ["make"], "variants": [{ "name": "Clean", "cmd": ["make", "clean"] }] }"#)
         .with_menu(item(
             "Tools",
             None,
@@ -236,13 +236,25 @@ fn the_build_system_menu_lists_the_build_systems_and_checks_the_one_set() {
     let systems = |editor: &Editor| menu::present(editor)[0].children[0].children.iter().map(|e| (e.caption.clone(), e.checked)).collect::<Vec<_>>();
     assert_eq!(
         systems(&editor),
-        [("Automatic".into(), Some(true)), ("-".into(), None), ("Make".into(), Some(false)), ("Zig".into(), Some(false))]
+        [
+            ("Automatic".into(), Some(true)),
+            ("-".into(), None),
+            ("Make".into(), Some(false)),
+            ("Make - Clean".into(), Some(false)),
+            ("Zig".into(), Some(false))
+        ]
     );
     editor.set_build_system("Packages/U/Zig.sublime-build", "");
     assert_eq!(systems(&editor)[0].1, Some(false));
-    assert_eq!(systems(&editor)[3], ("Zig".into(), Some(true)));
-    let entry = &menu::present(&editor)[0].children[0].children[3];
+    assert_eq!(systems(&editor)[4], ("Zig".into(), Some(true)));
+    let entry = &menu::present(&editor)[0].children[0].children[4];
     assert_eq!(entry.command.as_ref().unwrap().str_arg("file"), "Packages/U/Zig.sublime-build");
+
+    editor.set_build_system("Packages/U/Make.sublime-build", "Clean");
+    let checked: Vec<_> = systems(&editor).into_iter().filter(|(_, checked)| *checked == Some(true)).collect();
+    assert_eq!(checked, [("Make - Clean".into(), Some(true))], "only the variant, not its build");
+    let entry = &menu::present(&editor)[0].children[0].children[3];
+    assert_eq!(entry.command.as_ref().unwrap().str_arg("variant"), "Clean");
 }
 
 #[test]
@@ -449,6 +461,17 @@ fn the_editor_view_model_reflects_the_document_and_its_settings() {
 }
 
 #[test]
+fn the_minimap_follows_toggle_minimap_and_its_settings() {
+    let world = World::new().with_preferences(json!({ "draw_minimap_border": true }));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    let minimap = editor_presenter::present(&mut editor, &mut view).unwrap().minimap;
+    assert_eq!(minimap, Some(MinimapViewModel { always_show_viewport: false, draw_border: true }));
+    view.show_minimap = false;
+    assert_eq!(editor_presenter::present(&mut editor, &mut view).unwrap().minimap, None);
+}
+
+#[test]
 fn word_wrap_must_be_exactly_true() {
     let world = World::new().with_preferences(json!({ "word_wrap": "auto" }));
     let mut editor = world.editor();
@@ -553,6 +576,34 @@ fn the_output_panel_shows_the_end_of_its_text() {
     assert_eq!(panel.name, "exec");
     assert_eq!(panel.text.lines().count(), output_panel::MAX_LINES);
     assert!(panel.text.starts_with("line 5\n") && panel.text.ends_with(&format!("line {}\n", output_panel::MAX_LINES + 4)));
+    assert_eq!(panel.highlight, None, "plain text is drawn in one color");
+    assert!(panel.selections.is_empty());
+}
+
+#[test]
+fn an_output_panel_with_a_syntax_is_highlighted_and_shows_its_selections() {
+    let world = World::new().with_plugin_commands(&[("lint", use_cases::gateways::PluginCommandKind::Window)]);
+    let mut editor = world.editor();
+    let text: String = (0..output_panel::MAX_LINES + 1).map(|i| format!("ln {i}\n")).collect();
+    let panel_id = editor.active_document().unwrap().id + 1;
+    let total = text.chars().count() as u64;
+    world.plugins.then([
+        test_support::plugin_call("window_create_output_panel", json!([1, "lint"])),
+        test_support::plugin_call("run_command", json!(["view", panel_id, "append", {"characters": text}])),
+        test_support::plugin_call("view_assign_syntax", json!([panel_id, "Packages/Python/Python.sublime-syntax"])),
+        // The first line (not shown: past MAX_LINES) and the last two characters.
+        test_support::plugin_call("view_selection_set", json!([panel_id, [[0, 3], [total - 3, total - 1], [5, 5]]])),
+        use_cases::gateways::PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(&Command::new("lint"), &mut |_, _| {});
+    editor.show_output_panel("lint");
+    let panel = output_panel::present(&editor).unwrap();
+    let highlight = panel.highlight.expect("a syntax was assigned");
+    assert_eq!((highlight.document, highlight.syntax.as_str()), (panel_id, "Python"));
+    assert_eq!(&highlight.full_text[highlight.start..], panel.text, "the whole text, for the highlighting cache");
+    let end = panel.text.len();
+    assert_eq!(panel.selections.len(), 1, "carets and what is not shown are left out");
+    assert_eq!(panel.selections[0], end - 3..end - 1);
 }
 #[test]
 fn plugin_regions_and_statuses_are_presented() {
@@ -564,7 +615,7 @@ fn plugin_regions_and_statuses_are_presented() {
     let call = |function: &str, args: serde_json::Value| test_support::plugin_call(function, args);
     world.plugins.then([
         call("view_add_regions", json!([v, "plain", [[8, 13], [0, 3]], "region.bluish", "Packages/Lint/added.png", 0])),
-        call("view_add_regions", json!([v, "squiggly", [[4, 7], [5, 5]], "invalid", "dot", 32 | 256 | 2048 | 1])),
+        call("view_add_regions", json!([v, "squiggly", [[4, 7], [5, 5]], "invalid", "dot", 32 | 256 | 2048 | 1 | 2])),
         call("view_add_regions", json!([v, "hidden", [[0, 1]], "", "", 128])),
         call("view_set_status", json!([v, "lint", "1 warning"])),
         call("view_show", json!([v, 8, false])),
@@ -582,6 +633,7 @@ fn plugin_regions_and_statuses_are_presented() {
     assert!(squiggly.icon_image.is_none(), "a dot is drawn");
     assert_eq!((squiggly.scope.as_str(), squiggly.icon.as_str()), ("invalid", "dot"));
     assert!(!squiggly.fill && !squiggly.outline && squiggly.draw_empty);
+    assert!(plain.on_minimap && !squiggly.on_minimap, "HIDE_ON_MINIMAP");
     assert_eq!(squiggly.underline, Some(interface_adapters::view_models::Underline::Squiggly));
     assert_eq!(model.show, Some((8, false, 1)));
     assert_eq!(status_bar::present(&editor).plugin_statuses, vec!["1 warning".to_string()]);

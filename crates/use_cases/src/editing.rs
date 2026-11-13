@@ -3,7 +3,7 @@
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::selection::Selection;
-use entities::text::{line_to_char, word_at};
+use entities::text::{line_to_char, selected_text, word_at};
 use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
 use entities::text_commands::{self as tc, Case, CaretMotion, LineOrder, TrimOptions};
 
@@ -56,6 +56,17 @@ pub enum Expansion {
 
 /// Built-in commands that work on any view, also the panels', which are not the active document.
 pub(crate) const VIEW_COMMANDS: &[&str] = &["move", "move_to", "left_delete", "right_delete", "delete_word", "select_all", "insert"];
+
+/// Built-in commands that only change a view's text and selections: in a panel's view they run
+/// with the panel as the active view for a moment (see `Editor::run_in_panel`). Not those that
+/// open, close or save views, show panels, or go through the text widget (undo, the clipboard).
+pub(crate) const PANEL_TEXT_COMMANDS: &[&str] = &[
+    "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
+    "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
+    "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert_snippet", "goto_line",
+    "find_under_expand", "find_all_under", "select_lines", "split_selection_into_lines", "single_selection", "next_field",
+    "prev_field", "clear_fields", "set_file_type", "set_line_ending",
+];
 
 impl Editor {
     /// [`VIEW_COMMANDS`] on the active view; `move` and `move_to` work on every selection. The
@@ -326,6 +337,42 @@ impl Editor {
             let caret = char_to_byte(&doc.text, doc.selection().head);
             let start = byte_to_char(&doc.text, line_start(&doc.text, caret));
             doc.replace_range(start, start, &line);
+        }
+    }
+
+    /// `copy` / `cut` without the text widget, for a plugin's command during an event (the widget
+    /// does them otherwise): the selections, one per line, go to the clipboard and its history;
+    /// `cut` deletes them. With nothing selected it does nothing (see [`Self::copy_whole_line`]).
+    pub fn copy_selections(&mut self, cut: bool) {
+        let Some(doc) = self.active_document() else {
+            return;
+        };
+        let selections: Vec<Selection> = doc.selections().into_iter().filter(|s| !s.is_empty()).collect();
+        if selections.is_empty() {
+            return;
+        }
+        let text = selections.iter().map(|&s| selected_text(&doc.text, s)).collect::<Vec<_>>().join("\n");
+        if let Err(e) = self.gateways.clipboard.write_text(&text) {
+            self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
+            return;
+        }
+        self.state.line_clipboard = None;
+        self.push_clipboard_history(&text);
+        if cut {
+            if let Some(doc) = self.active_document_mut() {
+                doc.edit_all(|text, selections| tc::replace_selections(text, selections, ""));
+            }
+        }
+    }
+
+    /// `paste` without the text widget, for a plugin's command during an event: the clipboard's
+    /// text replaces every selection.
+    pub fn paste_at_selections(&mut self) {
+        let Some(text) = self.clipboard_text() else {
+            return;
+        };
+        if let Some(doc) = self.active_document_mut() {
+            doc.edit_all(|content, selections| tc::replace_selections(content, selections, &text));
         }
     }
 

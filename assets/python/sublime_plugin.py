@@ -131,36 +131,54 @@ class CommandInputHandler:
     def preview(self, arg):
         return ""
 
-    def validate(self, arg):
+    def validate(self, arg, event=None):
         return True
 
     def cancel(self):
         pass
 
-    def confirm(self, arg):
+    def confirm(self, arg, event=None):
         pass
 
     def next_input(self, args):
         return None
 
+    def want_event(self):
+        """True: ``validate`` and ``confirm`` also get the event (``{"modifier_keys": {}}``)."""
+        return False
+
 
 class TextInputHandler(CommandInputHandler):
-    pass
+    def description(self, text):
+        """What the breadcrumb shows for the text entered."""
+        return text
 
 
 class ListInputHandler(CommandInputHandler):
     def list_items(self):
         return []
 
+    def description(self, value, text):
+        """What the breadcrumb shows for the item picked (``text`` is its caption)."""
+        return text
+
 
 class BackInputHandler(CommandInputHandler):
     pass
 
 
+# The event input handlers that want one get: the editor reports no modifier keys.
+_INPUT_EVENT = {"modifier_keys": {}}
+
+
 class _CommandInput:
     """Asks for a command's arguments, one handler after the other, in the window's quick and input
     panels, then runs the command with them. Runs only from panel callbacks: the editor is not
-    waiting for it."""
+    waiting for it.
+
+    As in Sublime's palette, each panel shows a breadcrumb (the command, then what was answered),
+    Backspace in an empty field goes back to the previous handler (or to the palette from the
+    first), and a handler's ``preview`` is shown in the panel (text or ``sublime.Html``)."""
 
     def __init__(self, name, args, kind, view_id, window_id, description):
         self.name = name
@@ -169,8 +187,13 @@ class _CommandInput:
         self.view_id = view_id
         self.window = sublime.Window(window_id)
         self.description = description
-        # The handlers already answered, to go back to.
+        # The handlers already answered, to go back to, and what the breadcrumb shows for each.
         self.answered = []
+        self.crumbs = []
+
+    def _input(self, handler):
+        """What the panel needs to be part of the palette: its breadcrumb and where Backspace goes."""
+        return {"breadcrumb": [self.description or self.name] + self.crumbs, "on_back": lambda: self._back_from(handler)}
 
     def ask(self, handler):
         if isinstance(handler, ListInputHandler):
@@ -179,13 +202,16 @@ class _CommandInput:
             self._ask_text(handler, handler.initial_text())
 
     def _ask_text(self, handler, text):
-        caption = self.description or handler.placeholder() or handler.name()
+        caption = handler.placeholder() or handler.name()
         on_change = None
         if type(handler).preview is not CommandInputHandler.preview:
             on_change = lambda value: self._preview(handler, value)
         panel = self.window.show_input_panel(
-            caption, text, lambda value: self._answer(handler, value), on_change, handler.cancel,
+            caption, text, lambda value: self._answer(handler, value, value), on_change, handler.cancel,
+            _input=self._input(handler),
         )
+        if on_change is not None:
+            on_change(text)
         initial_selection = getattr(handler, "initial_selection", None)
         if panel is not None and initial_selection is not None:
             regions = initial_selection() or []
@@ -199,33 +225,38 @@ class _CommandInput:
         if isinstance(items, tuple) and len(items) == 2:
             items, selected = items
         values = [_item_value(item) for item in items]
+        rows = [item[0] if isinstance(item, tuple) else item for item in items]
 
         def select(index):
             if index < 0:
                 handler.cancel()
             else:
-                self._answer(handler, values[index])
+                self._answer(handler, values[index], _item_caption(rows[index]))
 
         on_highlight = None
         if type(handler).preview is not CommandInputHandler.preview:
             on_highlight = lambda index: self._preview(handler, values[index])
         placeholder = handler.placeholder() or self.description
-        rows = [item[0] if isinstance(item, tuple) else item for item in items]
-        self.window.show_quick_panel(rows, select, 0, selected, on_highlight, placeholder)
+        # The editor highlights the first selected item itself, which shows its preview.
+        self.window.show_quick_panel(rows, select, 0, selected, on_highlight, placeholder, _input=self._input(handler))
 
     def _preview(self, handler, value):
         preview = handler.preview(value)
-        if preview:
-            sublime.status_message(str(getattr(preview, "contents", preview)))
+        if isinstance(preview, sublime.Html):
+            self.window._set_input_preview(preview.text, True)
+        else:
+            self.window._set_input_preview(str(preview or ""), False)
 
-    def _answer(self, handler, value):
-        if not handler.validate(value):
+    def _answer(self, handler, value, text):
+        wants_event = handler.want_event()
+        event = (_INPUT_EVENT,) if wants_event else ()
+        if not handler.validate(value, *event):
             if isinstance(handler, ListInputHandler):
                 self.ask(handler)
             else:
                 self._ask_text(handler, value)
             return
-        handler.confirm(value)
+        handler.confirm(value, *event)
         if handler.name():
             self.args[handler.name()] = value
         following = handler.next_input(self.args)
@@ -233,14 +264,24 @@ class _CommandInput:
             self._back(handler)
         elif following is not None:
             self.answered.append(handler)
+            self.crumbs.append(_crumb(handler, value, text))
             self.ask(following)
         else:
             self._run()
+
+    def _back_from(self, handler):
+        """Backspace in an empty field: the previous handler, or the palette from the first."""
+        if not self.answered:
+            handler.cancel()
+            self.window.run_command("show_overlay", {"overlay": "command_palette"})
+            return
+        self._back(handler)
 
     def _back(self, handler):
         self.args.pop(handler.name(), None)
         if self.answered:
             previous = self.answered.pop()
+            self.crumbs.pop()
             self.args.pop(previous.name(), None)
             self.ask(previous)
         else:
@@ -253,6 +294,28 @@ class _CommandInput:
             self.window.run_command(self.name, self.args)
         else:
             sublime.run_command(self.name, self.args)
+
+
+def _item_caption(row):
+    """The text of a quick panel row (a string, a ``ListInputItem`` or a ``QuickPanelItem``)."""
+    for attribute in ("text", "trigger"):
+        if hasattr(row, attribute):
+            return getattr(row, attribute)
+    if isinstance(row, (list, tuple)):
+        return str(row[0]) if row else ""
+    return str(row)
+
+
+def _crumb(handler, value, text):
+    """The breadcrumb's text for an answer: the handler's ``description``, else the text."""
+    try:
+        if isinstance(handler, ListInputHandler):
+            description = handler.description(value, text)
+        else:
+            description = handler.description(text)
+    except Exception:
+        description = text
+    return str(description if description is not None else text)
 
 
 def _item_value(item):
