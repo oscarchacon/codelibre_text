@@ -1644,6 +1644,10 @@ fn the_bundled_python_is_found_next_to_the_executable() {
         ("codelibre_text", "python"),
         ("CodeLibre Text.app/Contents/MacOS/codelibre_text", "CodeLibre Text.app/Contents/Resources/python"),
         ("usr/bin/codelibre_text", "usr/lib/codelibre-text/python"),
+        (
+            "target/debug/build/codelibre_text/hash/out/python_plugin_host",
+            "target/debug/python",
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join(executable);

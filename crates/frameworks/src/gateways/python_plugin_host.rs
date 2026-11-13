@@ -401,12 +401,29 @@ const PYTHON_FOLDERS: &[&str] = if cfg!(target_os = "macos") {
 /// `python` beside the executable (Windows, the portable archives, a development build's
 /// `target/<profile>/python`), `Contents/Resources/python` in the macOS app, and
 /// `lib/codelibre-text/python` beside `bin` (the Linux packages and `install.sh`), and the
-/// development build's for the tests in `target/<profile>/deps`.
+/// development build's for the tests in `target/<profile>/deps` or Cargo's nested
+/// `target/<profile>/build/.../out` directory.
 pub fn bundled_interpreter(executable: &Path) -> Option<PathBuf> {
     let folder = executable.parent()?;
     let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
     let places = ["python", "../Resources/python", "../lib/codelibre-text/python", "../python"];
-    places.into_iter().map(|place| folder.join(place).join(program)).find(|python| python.is_file())
+    if let Some(python) = places
+        .into_iter()
+        .map(|place| folder.join(place).join(program))
+        .find(|python| python.is_file())
+    {
+        return Some(python);
+    }
+
+    // Cargo can place test executables in target/<profile>/build/<crate>/<hash>/out rather
+    // than target/<profile>/deps. Find that profile's bundled Python before falling back to a
+    // system interpreter, which may have different compatibility behavior.
+    let cargo_build = folder
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("build"))?;
+    let profile = cargo_build.parent()?;
+    let python = profile.join("python").join(program);
+    python.is_file().then_some(python)
 }
 
 /// Runs the interpreter once for its version. (The Windows Store's `python.exe` placeholder
