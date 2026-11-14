@@ -9,7 +9,11 @@ fn rgba(r: u8, g: u8, b: u8, a: u8) -> Rgba {
 /// The color a scheme gives to `globals.background`.
 fn background(spec: &str) -> Option<Rgba> {
     let source = format!(r#"{{ "globals": {{ "background": "{spec}" }} }}"#);
-    parse(&source, "Test").unwrap().globals.get("background").copied()
+    parse(&source, "Test")
+        .unwrap()
+        .globals
+        .get("background")
+        .copied()
 }
 
 #[test]
@@ -30,8 +34,14 @@ fn rgb_and_rgba_functions() {
 #[test]
 fn hsl_and_hsla_functions() {
     assert_eq!(background("hsl(0, 100%, 50%)"), Some(rgba(255, 0, 0, 255)));
-    assert_eq!(background("hsl(120, 100%, 50%)"), Some(rgba(0, 255, 0, 255)));
-    assert_eq!(background("hsla(240, 100%, 50%, 0.5)"), Some(rgba(0, 0, 255, 128)));
+    assert_eq!(
+        background("hsl(120, 100%, 50%)"),
+        Some(rgba(0, 255, 0, 255))
+    );
+    assert_eq!(
+        background("hsla(240, 100%, 50%, 0.5)"),
+        Some(rgba(0, 0, 255, 128))
+    );
 }
 
 #[test]
@@ -52,9 +62,18 @@ fn variables_can_refer_to_other_variables() {
         "Test",
     )
     .unwrap();
-    assert_eq!(scheme.globals.get("background"), Some(&rgba(255, 0, 0, 255)));
-    assert!(!scheme.globals.contains_key("foreground"), "circular variables are ignored");
-    assert!(!scheme.globals.contains_key("caret"), "unknown variables are ignored");
+    assert_eq!(
+        scheme.globals.get("background"),
+        Some(&rgba(255, 0, 0, 255))
+    );
+    assert!(
+        !scheme.globals.contains_key("foreground"),
+        "circular variables are ignored"
+    );
+    assert!(
+        !scheme.globals.contains_key("caret"),
+        "unknown variables are ignored"
+    );
 }
 
 #[test]
@@ -73,7 +92,11 @@ fn color_function_with_alpha() {
     .unwrap();
     assert_eq!(scheme.globals["selection"], rgba(0, 0, 255, 64));
     assert_eq!(scheme.globals["line_highlight"], rgba(255, 255, 255, 128));
-    assert_eq!(scheme.globals["gutter"], rgba(1, 2, 3, 255), "other adjusters are ignored");
+    assert_eq!(
+        scheme.globals["gutter"],
+        rgba(1, 2, 3, 255),
+        "other adjusters are ignored"
+    );
 }
 
 #[test]
@@ -99,16 +122,27 @@ fn rules_keep_scope_colors_and_font_styles() {
 
     let string = &scheme.rules[1];
     assert_eq!(string.background, Some(rgba(0, 0, 1, 255)));
-    assert!(string.has_font_style && !string.italic, "an empty font_style resets the style");
+    assert!(
+        string.has_font_style && !string.italic,
+        "an empty font_style resets the style"
+    );
 
     let keyword = &scheme.rules[2];
-    assert_eq!(keyword.foreground, Some(rgba(255, 0, 0, 255)), "gradients use their first stop");
+    assert_eq!(
+        keyword.foreground,
+        Some(rgba(255, 0, 0, 255)),
+        "gradients use their first stop"
+    );
     assert!(!keyword.has_font_style);
 }
 
 #[test]
 fn name_and_author() {
-    let named = parse(r#"{ "name": "Mariana", "author": "Sublime HQ" }"#, "file stem").unwrap();
+    let named = parse(
+        r#"{ "name": "Mariana", "author": "Sublime HQ" }"#,
+        "file stem",
+    )
+    .unwrap();
     assert_eq!(named.name, "Mariana");
     assert_eq!(named.author.as_deref(), Some("Sublime HQ"));
     assert_eq!(parse("{}", "file stem").unwrap().name, "file stem");
@@ -116,7 +150,11 @@ fn name_and_author() {
 
 #[test]
 fn comments_and_trailing_commas_are_accepted() {
-    let scheme = parse("{ // scheme\n \"globals\": { \"background\": \"#000\", }, }", "Test").unwrap();
+    let scheme = parse(
+        "{ // scheme\n \"globals\": { \"background\": \"#000\", }, }",
+        "Test",
+    )
+    .unwrap();
     assert_eq!(scheme.globals["background"], rgba(0, 0, 0, 255));
 }
 

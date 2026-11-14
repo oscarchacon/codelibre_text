@@ -1,16 +1,31 @@
-use entities::localization::{fill, normalize_language_code, resolve_language, Catalog, Language, Translations};
+use entities::localization::{
+    fill, normalize_language_code, resolve_language, Catalog, Language, Translations,
+};
 
 fn spanish() -> Translations {
     let mut catalog = Catalog::new(Some("nplurals=2; plural=(n != 1);")).unwrap();
     catalog.insert(None, "Save", vec!["Guardar".into()]);
     catalog.insert(None, "Saved {path}", vec!["Guardado: {path}".into()]);
-    catalog.insert(None, "{count} match", vec!["{count} coincidencia".into(), "{count} coincidencias".into()]);
+    catalog.insert(
+        None,
+        "{count} match",
+        vec![
+            "{count} coincidencia".into(),
+            "{count} coincidencias".into(),
+        ],
+    );
     catalog.insert(None, "Untranslated", vec![String::new()]);
     Translations::new("es", catalog)
 }
 
 fn languages(codes: &[&str]) -> Vec<Language> {
-    codes.iter().map(|c| Language { code: c.to_string(), name: c.to_string() }).collect()
+    codes
+        .iter()
+        .map(|c| Language {
+            code: c.to_string(),
+            name: c.to_string(),
+        })
+        .collect()
 }
 
 #[test]
@@ -18,7 +33,10 @@ fn translated_text_replaces_the_english_one() {
     let es = spanish();
     assert_eq!(es.language(), "es");
     assert_eq!(es.tr("Save"), "Guardar");
-    assert_eq!(es.tr_args("Saved {path}", &[("path", &"a.txt")]), "Guardado: a.txt");
+    assert_eq!(
+        es.tr_args("Saved {path}", &[("path", &"a.txt")]),
+        "Guardado: a.txt"
+    );
 }
 
 #[test]
@@ -32,20 +50,44 @@ fn text_without_a_translation_stays_in_english() {
 #[test]
 fn plurals_follow_the_language_rule() {
     let es = spanish();
-    assert_eq!(es.tr_n("{count} match", "{count} matches", 1, &[]), "1 coincidencia");
-    assert_eq!(es.tr_n("{count} match", "{count} matches", 0, &[]), "0 coincidencias");
-    assert_eq!(es.tr_n("{count} match", "{count} matches", 7, &[]), "7 coincidencias");
+    assert_eq!(
+        es.tr_n("{count} match", "{count} matches", 1, &[]),
+        "1 coincidencia"
+    );
+    assert_eq!(
+        es.tr_n("{count} match", "{count} matches", 0, &[]),
+        "0 coincidencias"
+    );
+    assert_eq!(
+        es.tr_n("{count} match", "{count} matches", 7, &[]),
+        "7 coincidencias"
+    );
     let english = Translations::default();
-    assert_eq!(english.tr_n("{count} file", "{count} files", 1, &[]), "1 file");
-    assert_eq!(english.tr_n("{count} file", "{count} files", 2, &[]), "2 files");
+    assert_eq!(
+        english.tr_n("{count} file", "{count} files", 1, &[]),
+        "1 file"
+    );
+    assert_eq!(
+        english.tr_n("{count} file", "{count} files", 2, &[]),
+        "2 files"
+    );
 }
 
 #[test]
 fn plural_formulas_with_several_forms_choose_the_right_one() {
     // Polish: 1 plik, 2-4 pliki, 5+ plików (but 22 pliki).
-    let rule = "nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);";
+    let rule =
+        "nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);";
     let mut catalog = Catalog::new(Some(rule)).unwrap();
-    catalog.insert(None, "{count} file", vec!["{count} plik".into(), "{count} pliki".into(), "{count} plików".into()]);
+    catalog.insert(
+        None,
+        "{count} file",
+        vec![
+            "{count} plik".into(),
+            "{count} pliki".into(),
+            "{count} plików".into(),
+        ],
+    );
     let pl = Translations::new("pl", catalog);
     let form = |n| pl.tr_n("{count} file", "{count} files", n, &[]);
     assert_eq!(form(1), "1 plik");
@@ -83,7 +125,10 @@ fn messages_with_a_context_do_not_match_plain_lookups() {
 
 #[test]
 fn fill_replaces_known_placeholders_only() {
-    assert_eq!(fill("{a} and {b}", &[("a", &1), ("b", &"two")]), "1 and two");
+    assert_eq!(
+        fill("{a} and {b}", &[("a", &1), ("b", &"two")]),
+        "1 and two"
+    );
     assert_eq!(fill("{unknown} {a}", &[("a", &1)]), "{unknown} 1");
     assert_eq!(fill("no { closing", &[]), "no { closing");
 }

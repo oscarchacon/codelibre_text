@@ -17,7 +17,13 @@ const PROJECT: &str = r#"{
 }"#;
 
 fn last_rebuild(world: &World) -> (Vec<PathBuf>, Vec<String>, Vec<String>) {
-    world.file_index.rebuilds.borrow().last().cloned().expect("a rebuild")
+    world
+        .file_index
+        .rebuilds
+        .borrow()
+        .last()
+        .cloned()
+        .expect("a rebuild")
 }
 
 #[test]
@@ -92,7 +98,12 @@ fn list_folder_puts_folders_first_sorted_and_hides_excluded_entries() {
     let entries: Vec<(String, bool)> = editor
         .list_folder(Path::new("/p"))
         .into_iter()
-        .map(|e| (e.path.file_name().unwrap().to_string_lossy().into_owned(), e.is_dir))
+        .map(|e| {
+            (
+                e.path.file_name().unwrap().to_string_lossy().into_owned(),
+                e.is_dir,
+            )
+        })
         .collect();
     assert_eq!(
         entries,
@@ -126,9 +137,18 @@ fn a_project_opens_its_folders_has_variables_and_adds_builds() {
         .with_file("/p/demo.sublime-project", PROJECT);
     let mut editor = world.editor();
     assert!(editor.open_project(Path::new("/p/demo.sublime-project")));
-    assert_eq!(editor.state().folders, vec![PathBuf::from("/p"), PathBuf::from("/p/src")]);
-    assert_eq!(editor.project_file(), Some(Path::new("/p/demo.sublime-project")));
-    assert_eq!(editor.workspace_file(), Some(PathBuf::from("/p/demo.sublime-workspace")));
+    assert_eq!(
+        editor.state().folders,
+        vec![PathBuf::from("/p"), PathBuf::from("/p/src")]
+    );
+    assert_eq!(
+        editor.project_file(),
+        Some(Path::new("/p/demo.sublime-project"))
+    );
+    assert_eq!(
+        editor.workspace_file(),
+        Some(PathBuf::from("/p/demo.sublime-workspace"))
+    );
 
     let variables = editor.project_variables();
     assert_eq!(variables["project"], "/p/demo.sublime-project");
@@ -137,13 +157,19 @@ fn a_project_opens_its_folders_has_variables_and_adds_builds() {
     assert_eq!(variables["project_base_name"], "demo");
     assert_eq!(variables["project_extension"], "sublime-project");
 
-    let names: Vec<&str> = editor.menu_build_systems().iter().map(|b| b.caption.as_str()).collect();
+    let names: Vec<&str> = editor
+        .menu_build_systems()
+        .iter()
+        .map(|b| b.caption.as_str())
+        .collect();
     assert_eq!(names, ["Echo"]);
 }
 
 #[test]
 fn a_project_build_runs_with_the_project_variables() {
-    let world = World::new().with_file("/p/a.txt", "x\n").with_file("/p/demo.sublime-project", PROJECT);
+    let world = World::new()
+        .with_file("/p/a.txt", "x\n")
+        .with_file("/p/demo.sublime-project", PROJECT);
     let mut editor = world.editor();
     open(&mut editor, "/p/demo.sublime-project");
     open(&mut editor, "/p/a.txt");
@@ -158,8 +184,14 @@ fn opening_a_project_file_opens_the_project_not_a_tab() {
     let world = World::new().with_file("/p/demo.sublime-project", PROJECT);
     let mut editor = world.editor();
     assert!(editor.open_file(Path::new("/p/demo.sublime-project")));
-    assert_eq!(editor.project_file(), Some(Path::new("/p/demo.sublime-project")));
-    assert!(editor.state().documents.iter().all(|d| d.path.is_none()), "no tab for the project file");
+    assert_eq!(
+        editor.project_file(),
+        Some(Path::new("/p/demo.sublime-project"))
+    );
+    assert!(
+        editor.state().documents.iter().all(|d| d.path.is_none()),
+        "no tab for the project file"
+    );
 }
 
 #[test]
@@ -174,7 +206,8 @@ fn project_data_reads_the_file_and_set_project_data_writes_it() {
     data["folders"] = json!([{ "path": "/p/src" }]);
     assert!(editor.set_project_data(data));
     assert_eq!(editor.state().folders, vec![PathBuf::from("/p/src")]);
-    let written: serde_json::Value = serde_json::from_slice(&world.disk.bytes("/p/demo.sublime-project").unwrap()).unwrap();
+    let written: serde_json::Value =
+        serde_json::from_slice(&world.disk.bytes("/p/demo.sublime-project").unwrap()).unwrap();
     assert_eq!(written["name"], "Changed");
     assert_eq!(written["folders"], json!([{ "path": "src" }]));
 }
@@ -184,8 +217,17 @@ fn a_window_without_a_project_reports_its_folders_as_project_data() {
     let world = World::new().with_dir("/p");
     let mut editor = world.editor();
     editor.add_folder(PathBuf::from("/p"));
-    assert_eq!(editor.project_data(), json!({ "folders": [{ "path": "/p" }] }));
-    assert_eq!(editor.project_variables().get("project").map(String::as_str), Some(""));
+    assert_eq!(
+        editor.project_data(),
+        json!({ "folders": [{ "path": "/p" }] })
+    );
+    assert_eq!(
+        editor
+            .project_variables()
+            .get("project")
+            .map(String::as_str),
+        Some("")
+    );
     assert!(editor.workspace_file().is_none());
 }
 
@@ -201,11 +243,20 @@ fn closing_a_project_closes_its_folders() {
 
 #[test]
 fn adding_a_folder_keeps_the_project_data_in_sync() {
-    let world = World::new().with_dir("/p").with_dir("/q").with_file("/p/demo.sublime-project", PROJECT);
+    let world = World::new()
+        .with_dir("/p")
+        .with_dir("/q")
+        .with_file("/p/demo.sublime-project", PROJECT);
     let mut editor = world.editor();
     editor.open_project(Path::new("/p/demo.sublime-project"));
     editor.add_folder(PathBuf::from("/q"));
     let folders = editor.project_data()["folders"].clone();
-    assert!(folders.as_array().unwrap().iter().any(|f| f["path"] == "/q"), "{folders}");
+    assert!(
+        folders
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "/q"),
+        "{folders}"
+    );
 }
-

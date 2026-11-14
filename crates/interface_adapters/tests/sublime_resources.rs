@@ -17,7 +17,9 @@ struct Packages {
 
 impl Packages {
     fn new() -> Self {
-        Self { dir: tempfile::tempdir().unwrap() }
+        Self {
+            dir: tempfile::tempdir().unwrap(),
+        }
     }
 
     fn ours(&self) -> std::path::PathBuf {
@@ -41,7 +43,11 @@ impl Packages {
 
     fn gateway(&self) -> SublimeResourceGateway {
         let sublime = self.sublimes().is_dir().then(|| self.sublimes());
-        SublimeResourceGateway::new(PackagePaths { packages: self.ours(), sublime_packages: sublime, archive_folders: Vec::new() })
+        SublimeResourceGateway::new(PackagePaths {
+            packages: self.ours(),
+            sublime_packages: sublime,
+            archive_folders: Vec::new(),
+        })
     }
 }
 
@@ -73,19 +79,47 @@ fn bound_command(resources: &UiResources, key: &str) -> Option<String> {
 fn package_controls_settings_of_sublimes_profile_are_not_adopted() {
     let packages = Packages::new();
     packages
-        .sublime_file("User", "Package Control.sublime-settings", r#"{ "installed_packages": ["Emmet"] }"#)
+        .sublime_file(
+            "User",
+            "Package Control.sublime-settings",
+            r#"{ "installed_packages": ["Emmet"] }"#,
+        )
         .sublime_file("User", "Emmet.sublime-settings", r#"{ "a": 1 }"#)
-        .sublime_file("Package Control", "Package Control.sublime-settings", r#"{ "channels": ["c"] }"#);
+        .sublime_file(
+            "Package Control",
+            "Package Control.sublime-settings",
+            r#"{ "channels": ["c"] }"#,
+        );
     let gateway = packages.gateway();
     let mut errors = Vec::new();
-    let settings = gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
-    assert_eq!(settings.get("installed_packages"), None, "what Sublime has installed is not what we have");
-    assert_eq!(settings.get("channels"), Some(&json!(["c"])), "a package's defaults are read");
-    assert_eq!(gateway.load_settings_file("Emmet.sublime-settings", true, &mut errors).get("a"), Some(&json!(1)), "other packages' are");
+    let settings =
+        gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    assert_eq!(
+        settings.get("installed_packages"),
+        None,
+        "what Sublime has installed is not what we have"
+    );
+    assert_eq!(
+        settings.get("channels"),
+        Some(&json!(["c"])),
+        "a package's defaults are read"
+    );
+    assert_eq!(
+        gateway
+            .load_settings_file("Emmet.sublime-settings", true, &mut errors)
+            .get("a"),
+        Some(&json!(1)),
+        "other packages' are"
+    );
 
     // Ours are read as always.
-    packages.file("User", "Package Control.sublime-settings", r#"{ "installed_packages": ["A"] }"#);
-    let settings = gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    packages.file(
+        "User",
+        "Package Control.sublime-settings",
+        r#"{ "installed_packages": ["A"] }"#,
+    );
+    let settings =
+        gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
     assert_eq!(settings.get("installed_packages"), Some(&json!(["A"])));
     assert!(errors.is_empty(), "{errors:?}");
 }
@@ -103,7 +137,10 @@ fn builtin_defaults_are_loaded_without_any_package() {
     let mut errors = Vec::new();
     let settings = packages.gateway().load_settings(&mut errors).global();
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(settings.str("color_scheme"), Some("Monokai.sublime-color-scheme"));
+    assert_eq!(
+        settings.str("color_scheme"),
+        Some("Monokai.sublime-color-scheme")
+    );
     assert_eq!(settings.usize("tab_size", 0), 4);
 }
 
@@ -111,8 +148,16 @@ fn builtin_defaults_are_loaded_without_any_package() {
 fn user_preferences_override_package_preferences() {
     let packages = Packages::new();
     packages
-        .file("Alpha", "Preferences.sublime-settings", r#"{ "tab_size": 3, "rulers": [80] }"#)
-        .file("User", "Preferences.sublime-settings", "{ // mine\n \"tab_size\": 2, }");
+        .file(
+            "Alpha",
+            "Preferences.sublime-settings",
+            r#"{ "tab_size": 3, "rulers": [80] }"#,
+        )
+        .file(
+            "User",
+            "Preferences.sublime-settings",
+            "{ // mine\n \"tab_size\": 2, }",
+        );
     let settings = packages.gateway().load_settings(&mut Vec::new()).global();
     assert_eq!(settings.usize("tab_size", 0), 2);
     assert_eq!(settings.numbers("rulers"), vec![80]);
@@ -150,11 +195,33 @@ fn broken_settings_files_are_reported_with_their_path() {
 #[test]
 fn sublime_text_settings_are_read_unless_disabled_by_the_user() {
     let packages = Packages::new();
-    packages.sublime_file("User", "Preferences.sublime-settings", r#"{ "tab_size": 6 }"#);
-    assert_eq!(packages.gateway().load_settings(&mut Vec::new()).global().usize("tab_size", 0), 6);
+    packages.sublime_file(
+        "User",
+        "Preferences.sublime-settings",
+        r#"{ "tab_size": 6 }"#,
+    );
+    assert_eq!(
+        packages
+            .gateway()
+            .load_settings(&mut Vec::new())
+            .global()
+            .usize("tab_size", 0),
+        6
+    );
 
-    packages.file("User", "Preferences.sublime-settings", r#"{ "import_sublime_packages": false }"#);
-    assert_eq!(packages.gateway().load_settings(&mut Vec::new()).global().usize("tab_size", 0), 4);
+    packages.file(
+        "User",
+        "Preferences.sublime-settings",
+        r#"{ "import_sublime_packages": false }"#,
+    );
+    assert_eq!(
+        packages
+            .gateway()
+            .load_settings(&mut Vec::new())
+            .global()
+            .usize("tab_size", 0),
+        4
+    );
 }
 
 #[test]
@@ -167,14 +234,26 @@ fn user_settings_can_be_written_and_read_back() {
     values.insert("font_size".into(), json!(13));
     gateway.write_user_settings(&values).unwrap();
     assert_eq!(gateway.read_user_settings()["font_size"], json!(13));
-    assert_eq!(gateway.load_settings(&mut Vec::new()).global().f32("font_size", 0.0), 13.0);
+    assert_eq!(
+        gateway
+            .load_settings(&mut Vec::new())
+            .global()
+            .f32("font_size", 0.0),
+        13.0
+    );
 }
 
 #[test]
 fn default_resources_for_edit_settings() {
     let gateway = Packages::new().gateway();
-    assert!(gateway.default_resource("Preferences.sublime-settings").unwrap().contains("color_scheme"));
-    assert!(gateway.default_resource("Default (Linux).sublime-keymap").unwrap().contains("show_overlay"));
+    assert!(gateway
+        .default_resource("Preferences.sublime-settings")
+        .unwrap()
+        .contains("color_scheme"));
+    assert!(gateway
+        .default_resource("Default (Linux).sublime-keymap")
+        .unwrap()
+        .contains("show_overlay"));
     assert!(gateway.default_resource("Rust.sublime-settings").is_none());
 }
 
@@ -191,18 +270,35 @@ fn builtin_key_bindings_are_loaded() {
     let (resources, errors) = ui(&Packages::new().gateway(), false);
     assert!(errors.is_empty(), "{errors:?}");
     // `primary` is Cmd on macOS, whose built-in keymap is another one.
-    assert_eq!(bound_command(&resources, "primary+shift+p").as_deref(), Some("show_overlay"));
-    assert_eq!(bound_command(&resources, "primary+s").as_deref(), Some("save"));
+    assert_eq!(
+        bound_command(&resources, "primary+shift+p").as_deref(),
+        Some("show_overlay")
+    );
+    assert_eq!(
+        bound_command(&resources, "primary+s").as_deref(),
+        Some("save")
+    );
 }
 
 #[test]
 fn package_key_bindings_override_the_builtin_ones() {
     let packages = Packages::new();
     packages
-        .file("MyPackage", "Default.sublime-keymap", r#"[{ "keys": ["ctrl+s"], "command": "save_all" }]"#)
-        .file("User", &format!("Default ({}).sublime-keymap", platform_name()), r#"[{ "keys": ["ctrl+q"], "command": "exit" }]"#);
+        .file(
+            "MyPackage",
+            "Default.sublime-keymap",
+            r#"[{ "keys": ["ctrl+s"], "command": "save_all" }]"#,
+        )
+        .file(
+            "User",
+            &format!("Default ({}).sublime-keymap", platform_name()),
+            r#"[{ "keys": ["ctrl+q"], "command": "exit" }]"#,
+        );
     let (resources, _) = ui(&packages.gateway(), false);
-    assert_eq!(bound_command(&resources, "ctrl+s").as_deref(), Some("save_all"));
+    assert_eq!(
+        bound_command(&resources, "ctrl+s").as_deref(),
+        Some("save_all")
+    );
     assert_eq!(bound_command(&resources, "ctrl+q").as_deref(), Some("exit"));
 }
 
@@ -217,25 +313,42 @@ fn bindings_keep_arguments_and_contexts() {
     );
     let (resources, _) = ui(&packages.gateway(), false);
     let binding = resources.keymap.bindings.last().unwrap();
-    assert_eq!(binding.command, Command::with_args("insert", json!({ "characters": "x" })));
+    assert_eq!(
+        binding.command,
+        Command::with_args("insert", json!({ "characters": "x" }))
+    );
     assert_eq!(binding.context.len(), 1);
 }
 
 #[test]
 fn bindings_with_invalid_keys_are_skipped() {
     let packages = Packages::new();
-    packages.file("User", "Default.sublime-keymap", r#"[{ "keys": ["hyper+x"], "command": "a" }, { "keys": ["f5"] }]"#);
+    packages.file(
+        "User",
+        "Default.sublime-keymap",
+        r#"[{ "keys": ["hyper+x"], "command": "a" }, { "keys": ["f5"] }]"#,
+    );
     let (with_bad, _) = ui(&packages.gateway(), false);
     let (builtin, _) = ui(&Packages::new().gateway(), false);
-    assert_eq!(with_bad.keymap.bindings.len(), builtin.keymap.bindings.len());
+    assert_eq!(
+        with_bad.keymap.bindings.len(),
+        builtin.keymap.bindings.len()
+    );
 }
 
 #[test]
 fn sublime_texts_own_default_keymap_is_ignored() {
     let packages = Packages::new();
-    packages.sublime_file("Default", "Default.sublime-keymap", r#"[{ "keys": ["primary+s"], "command": "native_save" }]"#);
+    packages.sublime_file(
+        "Default",
+        "Default.sublime-keymap",
+        r#"[{ "keys": ["primary+s"], "command": "native_save" }]"#,
+    );
     let (resources, _) = ui(&packages.gateway(), true);
-    assert_eq!(bound_command(&resources, "primary+s").as_deref(), Some("save"));
+    assert_eq!(
+        bound_command(&resources, "primary+s").as_deref(),
+        Some("save")
+    );
 }
 
 #[test]
@@ -252,12 +365,27 @@ fn broken_keymaps_are_reported() {
 #[test]
 fn the_builtin_main_menu_is_loaded() {
     let (resources, _) = ui(&Packages::new().gateway(), false);
-    let captions: Vec<&str> = resources.main_menu.iter().map(|m| m.caption.as_str()).collect();
+    let captions: Vec<&str> = resources
+        .main_menu
+        .iter()
+        .map(|m| m.caption.as_str())
+        .collect();
     assert_eq!(captions[0], "File");
-    let view = resources.main_menu.iter().find(|m| m.caption == "View").unwrap();
-    let word_wrap = view.children.iter().find(|c| c.caption == "Word Wrap").unwrap();
+    let view = resources
+        .main_menu
+        .iter()
+        .find(|m| m.caption == "View")
+        .unwrap();
+    let word_wrap = view
+        .children
+        .iter()
+        .find(|c| c.caption == "Word Wrap")
+        .unwrap();
     assert!(word_wrap.checkbox);
-    assert_eq!(word_wrap.command.as_ref().unwrap().str_arg("setting"), "word_wrap");
+    assert_eq!(
+        word_wrap.command.as_ref().unwrap().str_arg("setting"),
+        "word_wrap"
+    );
 }
 
 #[test]
@@ -269,24 +397,56 @@ fn package_menus_merge_into_existing_menus_by_id() {
         r#"[{ "id": "tools", "children": [{ "caption": "&My Tool", "command": "my_tool" }, { "command": "no_caption" }] }]"#,
     );
     let (resources, _) = ui(&packages.gateway(), false);
-    let tools = resources.main_menu.iter().find(|m| m.id.as_deref() == Some("tools")).unwrap();
+    let tools = resources
+        .main_menu
+        .iter()
+        .find(|m| m.id.as_deref() == Some("tools"))
+        .unwrap();
     let captions: Vec<&str> = tools.children.iter().map(|c| c.caption.as_str()).collect();
-    assert!(captions.ends_with(&["My Tool", "no_caption"]), "{captions:?}");
-    assert_eq!(resources.main_menu.iter().filter(|m| m.id.as_deref() == Some("tools")).count(), 1);
+    assert!(
+        captions.ends_with(&["My Tool", "no_caption"]),
+        "{captions:?}"
+    );
+    assert_eq!(
+        resources
+            .main_menu
+            .iter()
+            .filter(|m| m.id.as_deref() == Some("tools"))
+            .count(),
+        1
+    );
 }
 
 #[test]
 fn context_menus_come_after_the_built_in_ones() {
     let packages = Packages::new();
-    packages.file("MyPackage", "Context.sublime-menu", r#"[{ "caption": "Mine", "command": "mine", "args": { "x": 1 } }]"#);
-    packages.file("MyPackage", "Side Bar.sublime-menu", r#"[{ "caption": "Delete", "command": "delete", "args": { "paths": [] } }]"#);
-    packages.file("MyPackage", "Tab Context.sublime-menu", r#"[{ "caption": "Pin", "command": "pin" }]"#);
+    packages.file(
+        "MyPackage",
+        "Context.sublime-menu",
+        r#"[{ "caption": "Mine", "command": "mine", "args": { "x": 1 } }]"#,
+    );
+    packages.file(
+        "MyPackage",
+        "Side Bar.sublime-menu",
+        r#"[{ "caption": "Delete", "command": "delete", "args": { "paths": [] } }]"#,
+    );
+    packages.file(
+        "MyPackage",
+        "Tab Context.sublime-menu",
+        r#"[{ "caption": "Pin", "command": "pin" }]"#,
+    );
     let (resources, _) = ui(&packages.gateway(), false);
     let menus = &resources.context_menus;
     let commands = |items: &[entities::menu::MenuItem]| -> Vec<String> {
-        items.iter().filter_map(|i| i.command.as_ref().map(|c| c.name.clone())).collect()
+        items
+            .iter()
+            .filter_map(|i| i.command.as_ref().map(|c| c.name.clone()))
+            .collect()
     };
-    assert_eq!(commands(&menus.text), ["cut", "copy", "paste", "select_all", "mine"]);
+    assert_eq!(
+        commands(&menus.text),
+        ["cut", "copy", "paste", "select_all", "mine"]
+    );
     assert_eq!(commands(&menus.side_bar).last().unwrap(), "delete");
     assert_eq!(commands(&menus.mount_point), ["remove_folder"]);
     assert_eq!(commands(&menus.tab).last().unwrap(), "pin");
@@ -301,9 +461,16 @@ fn palette_entries_from_every_package_are_added() {
         r#"[{ "caption": "My: Thing", "command": "my_thing", "args": { "x": 1 } }, { "caption": "No command" }]"#,
     );
     let (resources, _) = ui(&packages.gateway(), false);
-    let mine: Vec<_> = resources.palette.iter().filter(|p| p.caption.starts_with("My:")).collect();
+    let mine: Vec<_> = resources
+        .palette
+        .iter()
+        .filter(|p| p.caption.starts_with("My:"))
+        .collect();
     assert_eq!(mine.len(), 1);
-    assert_eq!(mine[0].command, Command::with_args("my_thing", json!({ "x": 1 })));
+    assert_eq!(
+        mine[0].command,
+        Command::with_args("my_thing", json!({ "x": 1 }))
+    );
     assert!(resources.palette.iter().any(|p| p.caption == "File: Save"));
     assert!(!resources.palette.iter().any(|p| p.caption == "No command"));
 }
@@ -311,8 +478,18 @@ fn palette_entries_from_every_package_are_added() {
 #[test]
 fn sublime_text_packages_add_palette_entries_only_when_included() {
     let packages = Packages::new();
-    packages.sublime_file("Git", "Git.sublime-commands", r#"[{ "caption": "Git: Status", "command": "git_status" }]"#);
-    let has_git = |include| ui(&packages.gateway(), include).0.palette.iter().any(|p| p.caption == "Git: Status");
+    packages.sublime_file(
+        "Git",
+        "Git.sublime-commands",
+        r#"[{ "caption": "Git: Status", "command": "git_status" }]"#,
+    );
+    let has_git = |include| {
+        ui(&packages.gateway(), include)
+            .0
+            .palette
+            .iter()
+            .any(|p| p.caption == "Git: Status")
+    };
     assert!(has_git(true));
     assert!(!has_git(false));
 }
@@ -341,7 +518,10 @@ fn the_builtin_languages_are_listed_by_their_own_names() {
     let packages = Packages::new();
     let languages = packages.gateway().languages(false);
     let names: Vec<&str> = languages.iter().map(|l| l.name.as_str()).collect();
-    assert_eq!(names, ["Deutsch", "Español", "Français", "Português (Brasil)"]);
+    assert_eq!(
+        names,
+        ["Deutsch", "Español", "Français", "Português (Brasil)"]
+    );
 }
 
 #[test]
@@ -350,7 +530,9 @@ fn packages_add_languages_with_localization_files() {
     packages.file("Klingon", "Localization/tlh.po", KLINGON);
     packages.file("Klingon", "tlh.po", "not in a Localization folder");
     let languages = packages.gateway().languages(false);
-    assert!(languages.iter().any(|l| l.code == "tlh" && l.name == "tlhIngan Hol"));
+    assert!(languages
+        .iter()
+        .any(|l| l.code == "tlh" && l.name == "tlhIngan Hol"));
     assert_eq!(languages.iter().filter(|l| l.code == "tlh").count(), 1);
 }
 
@@ -359,7 +541,9 @@ fn package_translations_extend_and_override_the_builtin_ones() {
     let packages = Packages::new();
     packages.file("User", "Localization/es.po", PACKAGE_SPANISH);
     let mut errors = Vec::new();
-    let catalog = packages.gateway().load_translations("es", false, &mut errors);
+    let catalog = packages
+        .gateway()
+        .load_translations("es", false, &mut errors);
     assert!(errors.is_empty(), "{errors:?}");
     let es = entities::localization::Translations::new("es", catalog);
     assert_eq!(es.tr("Save"), "Grabar");
@@ -370,9 +554,15 @@ fn package_translations_extend_and_override_the_builtin_ones() {
 #[test]
 fn broken_translation_files_are_reported() {
     let packages = Packages::new();
-    packages.file("Broken", "Localization/es.po", "msgid \"a\"\nmsgstr \"unterminated\n");
+    packages.file(
+        "Broken",
+        "Localization/es.po",
+        "msgid \"a\"\nmsgstr \"unterminated\n",
+    );
     let mut errors = Vec::new();
-    let catalog = packages.gateway().load_translations("es", false, &mut errors);
+    let catalog = packages
+        .gateway()
+        .load_translations("es", false, &mut errors);
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("Broken"), "{errors:?}");
     assert!(!catalog.is_empty(), "the built-in Spanish is still loaded");
@@ -382,7 +572,9 @@ fn broken_translation_files_are_reported() {
 fn the_system_language_comes_from_the_caller() {
     let packages = Packages::new();
     assert_eq!(packages.gateway().system_language(), None);
-    let gateway = packages.gateway().with_system_language(Some("es-CL".into()));
+    let gateway = packages
+        .gateway()
+        .with_system_language(Some("es-CL".into()));
     assert_eq!(gateway.system_language().as_deref(), Some("es-CL"));
 }
 
@@ -399,10 +591,16 @@ fn plugins_find_resources_by_file_name_pattern() {
     let gateway = packages.gateway();
     assert_eq!(
         gateway.find_resources("*.sublime-color-scheme", true),
-        vec!["Packages/Tool/schemes/Dark.sublime-color-scheme", "Packages/User/Light.sublime-color-scheme"],
+        vec![
+            "Packages/Tool/schemes/Dark.sublime-color-scheme",
+            "Packages/User/Light.sublime-color-scheme"
+        ],
         "a file in both copies of a package is listed once"
     );
-    assert_eq!(gateway.find_resources("Tool.sublime-?ettings", false), vec!["Packages/Tool/Tool.sublime-settings"]);
+    assert_eq!(
+        gateway.find_resources("Tool.sublime-?ettings", false),
+        vec!["Packages/Tool/Tool.sublime-settings"]
+    );
 }
 
 #[test]
@@ -410,7 +608,10 @@ fn plugins_load_resources_by_name() {
     let packages = Packages::new();
     packages.file("Tool", "data/info.txt", "hello");
     let gateway = packages.gateway();
-    assert_eq!(gateway.load_resource("Packages/Tool/data/info.txt", false), Ok(b"hello".to_vec()));
+    assert_eq!(
+        gateway.load_resource("Packages/Tool/data/info.txt", false),
+        Ok(b"hello".to_vec())
+    );
     assert_eq!(
         gateway.load_resource("Packages/Tool/missing.txt", false),
         Err("resource not found: Packages/Tool/missing.txt".into())
@@ -420,9 +621,17 @@ fn plugins_load_resources_by_name() {
 #[test]
 fn the_built_in_defaults_are_resources_of_the_default_package() {
     let dir = tempfile::tempdir().unwrap();
-    let paths = PackagePaths { packages: dir.path().join("Packages"), sublime_packages: None, archive_folders: Vec::new() };
+    let paths = PackagePaths {
+        packages: dir.path().join("Packages"),
+        sublime_packages: None,
+        archive_folders: Vec::new(),
+    };
     let gateway = SublimeResourceGateway::new(paths);
-    let defaults = gateway.load_json_resource("Packages/Default/Preferences.sublime-settings", false).unwrap();
+    let defaults = gateway
+        .load_json_resource("Packages/Default/Preferences.sublime-settings", false)
+        .unwrap();
     assert_eq!(defaults["ignored_packages"], serde_json::json!(["Vintage"]));
-    assert!(gateway.load_resource("Packages/Default/Nope.sublime-settings", false).is_err());
+    assert!(gateway
+        .load_resource("Packages/Default/Nope.sublime-settings", false)
+        .is_err());
 }

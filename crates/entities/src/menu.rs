@@ -58,7 +58,11 @@ pub enum ContextMenuTarget {
     /// The text of a view, at a char.
     Text { document: DocumentId, point: usize },
     /// A file or folder of the side bar; `root` for a folder of the window (a mount point).
-    SideBar { path: PathBuf, is_dir: bool, root: bool },
+    SideBar {
+        path: PathBuf,
+        is_dir: bool,
+        root: bool,
+    },
     /// A tab: its group and its index among the group's tabs.
     Tab { group: usize, index: usize },
 }
@@ -93,7 +97,11 @@ impl ContextMenuTarget {
                 let path = Value::String(path.display().to_string());
                 for (key, wanted) in [("files", !is_dir), ("dirs", *is_dir), ("paths", true)] {
                     if let Some(value) = args.get_mut(key) {
-                        *value = Value::Array(if wanted { vec![path.clone()] } else { Vec::new() });
+                        *value = Value::Array(if wanted {
+                            vec![path.clone()]
+                        } else {
+                            Vec::new()
+                        });
                     }
                 }
             }

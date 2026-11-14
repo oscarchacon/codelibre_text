@@ -42,16 +42,41 @@ impl SyntaxGateway for SyntectSyntaxes {
         self.0.borrow_mut().symbols(document, text, syntax)
     }
 
-    fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
-        self.0.borrow_mut().line_scopes(document, text, syntax, line)
+    fn line_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+    ) -> Vec<ScopeSpan> {
+        self.0
+            .borrow_mut()
+            .line_scopes(document, text, syntax, line)
     }
 
-    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: std::ops::Range<usize>) -> Vec<Vec<ScopeSpan>> {
-        self.0.borrow_mut().lines_scopes(document, text, syntax, lines)
+    fn lines_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        lines: std::ops::Range<usize>,
+    ) -> Vec<Vec<ScopeSpan>> {
+        self.0
+            .borrow_mut()
+            .lines_scopes(document, text, syntax, lines)
     }
 
-    fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame> {
-        self.0.borrow_mut().context_backtrace(document, text, syntax, line, column)
+    fn context_backtrace(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+        column: usize,
+    ) -> Vec<ContextFrame> {
+        self.0
+            .borrow_mut()
+            .context_backtrace(document, text, syntax, line, column)
     }
 
     fn syntax_infos(&self) -> Vec<SyntaxInfo> {

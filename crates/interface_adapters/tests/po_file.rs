@@ -62,8 +62,14 @@ fn reads_translations_split_over_several_lines_with_escapes() {
 #[test]
 fn reads_plural_forms() {
     let es = spanish();
-    assert_eq!(es.tr_n("{count} match", "{count} matches", 1, &[]), "1 coincidencia");
-    assert_eq!(es.tr_n("{count} match", "{count} matches", 4, &[]), "4 coincidencias");
+    assert_eq!(
+        es.tr_n("{count} match", "{count} matches", 1, &[]),
+        "1 coincidencia"
+    );
+    assert_eq!(
+        es.tr_n("{count} match", "{count} matches", 4, &[]),
+        "4 coincidencias"
+    );
 }
 
 #[test]

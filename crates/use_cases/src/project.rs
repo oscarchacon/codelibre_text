@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub use entities::project::matches_pattern;
 use entities::project::Project;
 use serde_json::Value;
 
@@ -23,7 +24,9 @@ impl Editor {
     /// Shows the native "Open Folder" dialog (in `initial_directory` if given). Returns the folder
     /// that was added.
     pub fn prompt_add_folder(&mut self, initial_directory: Option<&str>) -> Option<PathBuf> {
-        let start = initial_directory.filter(|d| !d.is_empty()).map(|d| self.gateways.resources.paths().expand(d));
+        let start = initial_directory
+            .filter(|d| !d.is_empty())
+            .map(|d| self.gateways.resources.paths().expand(d));
         let folder = self.gateways.dialogs.pick_folder(start.as_deref())?;
         self.add_folder(folder.clone());
         Some(self.gateways.file_system.canonicalize(&folder))
@@ -57,12 +60,18 @@ impl Editor {
         let data: Value = match serde_json::from_slice(&bytes) {
             Ok(data) => data,
             Err(e) => {
-                self.notify(self.tr_args("{name} is not a project: {error}", &[("name", &path.display()), ("error", &e.to_string())]));
+                self.notify(self.tr_args(
+                    "{name} is not a project: {error}",
+                    &[("name", &path.display()), ("error", &e.to_string())],
+                ));
                 return false;
             }
         };
         let Some(project) = Project::from_json(Some(path.clone()), &data) else {
-            self.notify(self.tr_args("{name} is not a project: it needs to be an object", &[("name", &path.display())]));
+            self.notify(self.tr_args(
+                "{name} is not a project: it needs to be an object",
+                &[("name", &path.display())],
+            ));
             return false;
         };
         self.set_folders(project.folder_paths());
@@ -73,9 +82,18 @@ impl Editor {
 
     /// Shows the native "Open Project" dialog.
     pub fn prompt_open_project(&mut self) {
-        let filter = FileFilter { name: "Projects".to_string(), extensions: vec!["sublime-project".to_string()] };
+        let filter = FileFilter {
+            name: "Projects".to_string(),
+            extensions: vec!["sublime-project".to_string()],
+        };
         let start = self.state.folders.first().cloned();
-        if let Some(path) = self.gateways.dialogs.pick_files(start.as_deref(), &[filter]).into_iter().next() {
+        if let Some(path) = self
+            .gateways
+            .dialogs
+            .pick_files(start.as_deref(), &[filter])
+            .into_iter()
+            .next()
+        {
             self.open_project(&path);
         }
     }
@@ -95,7 +113,10 @@ impl Editor {
 
     /// `window.workspace_file_name()`: the project's `.sublime-workspace`.
     pub fn workspace_file(&self) -> Option<PathBuf> {
-        self.state.project.as_ref().and_then(Project::workspace_file)
+        self.state
+            .project
+            .as_ref()
+            .and_then(Project::workspace_file)
     }
 
     /// `window.project_data()`: the project's object, or a folder list for a window that only has
@@ -125,9 +146,13 @@ impl Editor {
         self.set_folders(folders);
         project.set_folder_paths(&self.state.folders);
         if let Some(path) = project.file.clone() {
-            let text = serde_json::to_string_pretty(&Value::Object(project.data.clone())).unwrap_or_default();
+            let text = serde_json::to_string_pretty(&Value::Object(project.data.clone()))
+                .unwrap_or_default();
             if let Err(e) = self.gateways.file_system.write(&path, text.as_bytes()) {
-                self.notify(self.tr_args("Could not save {name}: {error}", &[("name", &path.display()), ("error", &e.to_string())]));
+                self.notify(self.tr_args(
+                    "Could not save {name}: {error}",
+                    &[("name", &path.display()), ("error", &e.to_string())],
+                ));
             }
         }
         self.state.project = Some(project);
@@ -139,16 +164,25 @@ impl Editor {
     pub fn project_variables(&self) -> HashMap<String, String> {
         match &self.state.project {
             Some(project) => project.variables(),
-            None => ["project", "project_path", "project_name", "project_base_name", "project_extension"]
-                .into_iter()
-                .map(|name| (name.to_string(), String::new()))
-                .collect(),
+            None => [
+                "project",
+                "project_path",
+                "project_name",
+                "project_base_name",
+                "project_extension",
+            ]
+            .into_iter()
+            .map(|name| (name.to_string(), String::new()))
+            .collect(),
         }
     }
 
     /// Replaces the folders at once (opening a project, restoring the session).
     fn set_folders(&mut self, folders: Vec<PathBuf>) {
-        self.state.folders = folders.into_iter().map(|f| self.gateways.file_system.canonicalize(&f)).collect();
+        self.state.folders = folders
+            .into_iter()
+            .map(|f| self.gateways.file_system.canonicalize(&f))
+            .collect();
         self.refresh_file_index();
     }
 
@@ -192,30 +226,24 @@ impl Editor {
             .into_iter()
             .filter(|e| {
                 let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let patterns = if e.is_dir { &folder_excludes } else { &file_excludes };
-                !patterns.iter().any(|pattern| matches_pattern(pattern, name))
+                let patterns = if e.is_dir {
+                    &folder_excludes
+                } else {
+                    &file_excludes
+                };
+                !patterns
+                    .iter()
+                    .any(|pattern| matches_pattern(pattern, name))
             })
             .collect();
         entries.sort_by_key(|e| {
-            let name = e.path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let name = e
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             (!e.is_dir, name)
         });
         entries
     }
-}
-
-/// Sublime-style exclude patterns: `*` and `?` wildcards matched against a file name.
-pub fn matches_pattern(pattern: &str, name: &str) -> bool {
-    fn matches(p: &[char], n: &[char]) -> bool {
-        match (p.first(), n.first()) {
-            (None, None) => true,
-            (Some('*'), _) => matches(&p[1..], n) || (!n.is_empty() && matches(p, &n[1..])),
-            (Some('?'), Some(_)) => matches(&p[1..], &n[1..]),
-            (Some(a), Some(b)) if a == b => matches(&p[1..], &n[1..]),
-            _ => false,
-        }
-    }
-    let p: Vec<char> = pattern.chars().collect();
-    let n: Vec<char> = name.chars().collect();
-    matches(&p, &n)
 }

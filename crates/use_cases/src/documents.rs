@@ -13,7 +13,11 @@ use crate::editor::{CloseChoice, Editor, PendingClose};
 fn minihtml_text(html: &str) -> String {
     minihtml::parse(html)
         .iter()
-        .map(|line| line.iter().map(|span| span.text.as_str()).collect::<String>())
+        .map(|line| {
+            line.iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -70,7 +74,10 @@ impl Editor {
             match Document::from_bytes(id, &path, bytes, modified) {
                 Ok(doc) => doc,
                 Err(DocumentError::Binary) => {
-                    self.notify(self.tr_args("{path} looks like a binary file", &[("path", &path.display())]));
+                    self.notify(self.tr_args(
+                        "{path} looks like a binary file",
+                        &[("path", &path.display())],
+                    ));
                     return false;
                 }
             }
@@ -96,7 +103,12 @@ impl Editor {
 
     /// Opens a buffer that is not a file (e.g. the default settings, read only).
     pub fn open_scratch(&mut self, name: &str, text: &str, syntax: &str, read_only: bool) {
-        if let Some(index) = self.state.documents.iter().position(|d| d.scratch_name.as_deref() == Some(name)) {
+        if let Some(index) = self
+            .state
+            .documents
+            .iter()
+            .position(|d| d.scratch_name.as_deref() == Some(name))
+        {
             self.activate(index);
             return;
         }
@@ -108,9 +120,20 @@ impl Editor {
 
     /// `window.new_html_sheet`: a read-only scratch tab with the text of the minihtml `contents`.
     /// An existing sheet with the same name gets the new text.
-    pub fn new_html_sheet(&mut self, name: &str, contents: &str, group: Option<usize>) -> DocumentId {
+    pub fn new_html_sheet(
+        &mut self,
+        name: &str,
+        contents: &str,
+        group: Option<usize>,
+    ) -> DocumentId {
         let text = minihtml_text(contents);
-        if let Some(id) = self.state.documents.iter().find(|d| d.scratch_name.as_deref() == Some(name)).map(|d| d.id) {
+        if let Some(id) = self
+            .state
+            .documents
+            .iter()
+            .find(|d| d.scratch_name.as_deref() == Some(name))
+            .map(|d| d.id)
+        {
             self.set_html_sheet(id, contents);
             if let Some(group) = group {
                 self.set_view_index(id, group, usize::MAX);
@@ -131,7 +154,9 @@ impl Editor {
     /// `HtmlSheet.set_contents`: new minihtml for an HTML sheet (its view's text becomes the new
     /// text).
     pub fn set_html_sheet(&mut self, id: DocumentId, contents: &str) {
-        let Some(doc) = self.any_document_mut(id) else { return };
+        let Some(doc) = self.any_document_mut(id) else {
+            return;
+        };
         let read_only = std::mem::replace(&mut doc.read_only, false);
         let end = doc.char_count();
         doc.replace_range(0, end, &minihtml_text(contents));
@@ -164,12 +189,22 @@ impl Editor {
     /// already open is just shown.
     pub fn preview_file(&mut self, path: &Path) -> bool {
         let canonical = self.gateways.file_system.canonicalize(path);
-        if let Some(index) = self.state.documents.iter().position(|d| d.path.as_deref() == Some(canonical.as_path())) {
+        if let Some(index) = self
+            .state
+            .documents
+            .iter()
+            .position(|d| d.path.as_deref() == Some(canonical.as_path()))
+        {
             self.activate(index);
             return true;
         }
         let group = self.state.active_group;
-        let previous = self.state.documents.iter().find(|d| d.transient && d.group == group && !d.is_dirty()).map(|d| d.id);
+        let previous = self
+            .state
+            .documents
+            .iter()
+            .find(|d| d.transient && d.group == group && !d.is_dirty())
+            .map(|d| d.id);
         if !self.open_file(path) {
             return false;
         }
@@ -191,7 +226,11 @@ impl Editor {
 
     /// The preview of `group`, if it has one (`window.transient_view_in_group`).
     pub fn transient_document_in_group(&self, group: usize) -> Option<DocumentId> {
-        self.state.documents.iter().find(|d| d.transient && d.group == group).map(|d| d.id)
+        self.state
+            .documents
+            .iter()
+            .find(|d| d.transient && d.group == group)
+            .map(|d| d.id)
     }
 
     pub fn activate(&mut self, index: usize) {
@@ -224,8 +263,17 @@ impl Editor {
         let tabs = self.group_indexes(self.state.active_group);
         let count = tabs.len();
         if count > 0 {
-            let at = tabs.iter().position(|&i| i == self.state.active).unwrap_or(0);
-            self.activate(tabs[if forward { (at + 1) % count } else { (at + count - 1) % count }]);
+            let at = tabs
+                .iter()
+                .position(|&i| i == self.state.active)
+                .unwrap_or(0);
+            self.activate(
+                tabs[if forward {
+                    (at + 1) % count
+                } else {
+                    (at + count - 1) % count
+                }],
+            );
         }
     }
 
@@ -247,7 +295,11 @@ impl Editor {
         for id in ids {
             // A clone of it still shows the buffer: nothing to save yet.
             match self.index_of(id) {
-                Some(index) if self.state.documents[index].is_dirty() && self.clones_of(id).is_empty() => need_confirmation.push(id),
+                Some(index)
+                    if self.state.documents[index].is_dirty() && self.clones_of(id).is_empty() =>
+                {
+                    need_confirmation.push(id)
+                }
                 Some(index) => self.remove_document(index),
                 None => {}
             }
@@ -365,8 +417,12 @@ impl Editor {
             .read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         let modified = self.gateways.file_system.modified(&path);
-        let fresh = Document::from_bytes(doc.id, &path, bytes, modified)
-            .map_err(|_| self.tr_args("{path} looks like a binary file", &[("path", &path.display())]))?;
+        let fresh = Document::from_bytes(doc.id, &path, bytes, modified).map_err(|_| {
+            self.tr_args(
+                "{path} looks like a binary file",
+                &[("path", &path.display())],
+            )
+        })?;
         self.state.documents[index].reload_from(fresh);
         Ok(())
     }
@@ -380,7 +436,9 @@ impl Editor {
         self.state.last_disk_check = std::time::Instant::now();
         for index in 0..self.state.documents.len() {
             let doc = &self.state.documents[index];
-            let Some(path) = doc.path.clone() else { continue };
+            let Some(path) = doc.path.clone() else {
+                continue;
+            };
             let on_disk = self.gateways.file_system.modified(&path);
             if doc.modified_at.is_none() || on_disk.is_none() || on_disk == doc.modified_at {
                 continue;
@@ -388,7 +446,10 @@ impl Editor {
             if doc.is_dirty() {
                 let name = self.document_name(doc);
                 self.state.documents[index].modified_at = on_disk;
-                self.notify(self.tr_args("{name} changed on disk; you have unsaved changes", &[("name", &name)]));
+                self.notify(self.tr_args(
+                    "{name} changed on disk; you have unsaved changes",
+                    &[("name", &name)],
+                ));
             } else {
                 let id = doc.id;
                 match self.reload_document(index) {
@@ -423,7 +484,10 @@ impl Editor {
     }
 
     /// Where a file or folder dialog opens: the `initial_directory` argument if given.
-    pub(crate) fn dialog_start(&self, initial_directory: Option<&str>) -> Option<std::path::PathBuf> {
+    pub(crate) fn dialog_start(
+        &self,
+        initial_directory: Option<&str>,
+    ) -> Option<std::path::PathBuf> {
         match initial_directory.filter(|d| !d.is_empty()) {
             Some(dir) => Some(self.gateways.resources.paths().expand(dir)),
             None => self.current_directory(),

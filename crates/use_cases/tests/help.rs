@@ -27,7 +27,10 @@ fn report_issue_opens_the_form_with_this_version_and_os() {
     let mut editor = world.editor();
     editor.report_issue();
     let os = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
-    assert_eq!(*world.opened_urls.borrow(), vec![issue_report_url(env!("CARGO_PKG_VERSION"), &os, "")]);
+    assert_eq!(
+        *world.opened_urls.borrow(),
+        vec![issue_report_url(env!("CARGO_PKG_VERSION"), &os, "")]
+    );
 }
 
 fn reported_errors(world: &World) -> String {
@@ -39,7 +42,9 @@ fn reported_errors(world: &World) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            decoded.push(u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap(), 16).unwrap());
+            decoded.push(
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap(), 16).unwrap(),
+            );
             i += 3;
         } else {
             decoded.push(bytes[i]);
@@ -52,17 +57,31 @@ fn reported_errors(world: &World) -> String {
 #[test]
 fn load_errors_go_to_the_error_log_and_into_the_report_without_the_home_folder() {
     let world = World::new();
-    world.resources.errors.borrow_mut().push(format!("{HOME_FOLDER}/Packages/bad.sublime-keymap: expected `]`"));
+    world.resources.errors.borrow_mut().push(format!(
+        "{HOME_FOLDER}/Packages/bad.sublime-keymap: expected `]`"
+    ));
     let mut editor = world.editor();
-    assert_eq!(*world.logged_errors.borrow(), vec![format!("{HOME_FOLDER}/Packages/bad.sublime-keymap: expected `]`")]);
+    assert_eq!(
+        *world.logged_errors.borrow(),
+        vec![format!(
+            "{HOME_FOLDER}/Packages/bad.sublime-keymap: expected `]`"
+        )]
+    );
     editor.report_issue();
-    assert_eq!(reported_errors(&world), "~/Packages/bad.sublime-keymap: expected `]`");
+    assert_eq!(
+        reported_errors(&world),
+        "~/Packages/bad.sublime-keymap: expected `]`"
+    );
 }
 
 #[test]
 fn an_error_seen_again_is_logged_again_but_reported_once() {
     let world = World::new();
-    world.resources.errors.borrow_mut().push("bad.sublime-keymap: expected `]`".into());
+    world
+        .resources
+        .errors
+        .borrow_mut()
+        .push("bad.sublime-keymap: expected `]`".into());
     let mut editor = world.editor();
     editor.reload_packages();
     assert_eq!(world.logged_errors.borrow().len(), 2);
@@ -73,7 +92,11 @@ fn an_error_seen_again_is_logged_again_but_reported_once() {
 fn the_report_keeps_the_newest_errors_that_fit_and_says_where_the_rest_are() {
     let world = World::new();
     for i in 0..100 {
-        world.resources.errors.borrow_mut().push(format!("error {i:03}: {}", "x".repeat(100)));
+        world
+            .resources
+            .errors
+            .borrow_mut()
+            .push(format!("error {i:03}: {}", "x".repeat(100)));
     }
     let mut editor = world.editor();
     editor.report_issue();
@@ -81,14 +104,22 @@ fn the_report_keeps_the_newest_errors_that_fit_and_says_where_the_rest_are() {
     let logs = url.split("&logs=").nth(1).unwrap();
     assert!(logs.len() <= REPORT_ERRORS_LIMIT + 200, "{}", logs.len());
     let report = reported_errors(&world);
-    assert!(report.starts_with(&format!("(Shortened: every error is in {ERROR_LOG})\n\nerror ")), "{report}");
+    assert!(
+        report.starts_with(&format!(
+            "(Shortened: every error is in {ERROR_LOG})\n\nerror "
+        )),
+        "{report}"
+    );
     assert!(report.ends_with(&format!("error 099: {}", "x".repeat(100))));
 }
 
 #[test]
 fn an_error_too_long_for_the_report_keeps_its_end() {
     let world = World::new();
-    world.resources.errors.borrow_mut().push(format!("Traceback:\n{}\nValueError: the cause", "  line\n".repeat(2000)));
+    world.resources.errors.borrow_mut().push(format!(
+        "Traceback:\n{}\nValueError: the cause",
+        "  line\n".repeat(2000)
+    ));
     let mut editor = world.editor();
     editor.report_issue();
     let report = reported_errors(&world);
@@ -100,10 +131,17 @@ fn an_error_too_long_for_the_report_keeps_its_end() {
 #[test]
 fn open_error_log_opens_it_in_a_tab() {
     let world = World::new();
-    world.resources.errors.borrow_mut().push("bad.sublime-keymap: expected `]`".into());
+    world
+        .resources
+        .errors
+        .borrow_mut()
+        .push("bad.sublime-keymap: expected `]`".into());
     let mut editor = world.editor();
     editor.open_error_log();
-    assert_eq!(editor.active_document().unwrap().text, "bad.sublime-keymap: expected `]`");
+    assert_eq!(
+        editor.active_document().unwrap().text,
+        "bad.sublime-keymap: expected `]`"
+    );
 }
 
 #[test]
@@ -119,7 +157,10 @@ fn open_url_opens_the_link_in_the_browser() {
     let world = World::new();
     let mut editor = world.editor();
     editor.open_url("https://example.com");
-    assert_eq!(*world.opened_urls.borrow(), vec!["https://example.com".to_string()]);
+    assert_eq!(
+        *world.opened_urls.borrow(),
+        vec!["https://example.com".to_string()]
+    );
 }
 
 #[test]

@@ -394,6 +394,10 @@ msgstr "Ocultar otros"
 msgid "Show All"
 msgstr "Mostrar todo"
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr "Consola"
+
 #: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Ayuda"
@@ -1275,3 +1279,133 @@ msgstr "Eliminar"
 
 msgid "Unable to delete {path}: {error}"
 msgstr "No se pudo eliminar {path}: {error}"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "0 matches"
+msgstr "0 coincidencias"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "<skipped {count} character>"
+msgid_plural "<skipped {count} characters>"
+msgstr[0] "<{count} carácter omitido>"
+msgstr[1] "<{count} caracteres omitidos>"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Current File"
+msgstr "Añadir archivo actual"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Exclude Filter"
+msgstr "Añadir filtro de exclusión"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Folder"
+msgstr "Añadir carpeta"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Include Filter"
+msgstr "Añadir filtro de inclusión"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Files"
+msgstr "Añadir archivos abiertos"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Folders"
+msgstr "Añadir carpetas abiertas"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Project Filters"
+msgstr "Añadir filtros del proyecto"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Find in Files"
+msgstr "Cancelar búsqueda en archivos"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Clear"
+msgstr "Vaciar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Results"
+msgstr "Resultados de búsqueda"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Find in Files cancelled"
+msgstr "Búsqueda en archivos cancelada"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find in Files…"
+msgstr "Buscar en archivos…"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Find in Folder…"
+msgstr "Buscar en la carpeta…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Cancel Find in Files"
+msgstr "Buscar: Cancelar búsqueda en archivos"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Find in Files…"
+msgstr "Buscar: Buscar en archivos…"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "No open folders or files to search"
+msgstr "No hay carpetas ni archivos abiertos donde buscar"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace in Files"
+msgstr "Reemplazar en archivos"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace {count} occurrence across {files} files?"
+msgid_plural "Replace {count} occurrences across {files} files?"
+msgstr[0] "¿Reemplazar {count} coincidencia en {files} archivos?"
+msgstr[1] "¿Reemplazar {count} coincidencias en {files} archivos?"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Searching {count} file for \"{query}\""
+msgid_plural "Searching {count} files for \"{query}\""
+msgstr[0] "Buscando en {count} archivo \"{query}\""
+msgstr[1] "Buscando en {count} archivos \"{query}\""
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Searching…"
+msgstr "Buscando…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Results Panel"
+msgstr "Mostrar panel de resultados"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where"
+msgstr "Dónde"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where to search"
+msgstr "Dónde buscar"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "case sensitive"
+msgstr "distingue mayúsculas"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "regex"
+msgstr "regex"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "whole word"
+msgstr "palabra completa"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match across {files} files"
+msgid_plural "{count} matches across {files} files"
+msgstr[0] "{count} coincidencia en {files} archivos"
+msgstr[1] "{count} coincidencias en {files} archivos"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match in 1 file"
+msgid_plural "{count} matches in 1 file"
+msgstr[0] "{count} coincidencia en 1 archivo"
+msgstr[1] "{count} coincidencias en 1 archivo"

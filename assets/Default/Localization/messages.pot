@@ -289,6 +289,30 @@ msgid "Use Selection for Find"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Find in Files…"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Results"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Results Panel"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Next Result"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Previous Result"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Find in Files"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "View"
 msgstr ""
 
@@ -500,14 +524,6 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Show Build Results"
-msgstr ""
-
-#: assets/Default/Main.sublime-menu
-msgid "Next Result"
-msgstr ""
-
-#: assets/Default/Main.sublime-menu
-msgid "Previous Result"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -743,6 +759,14 @@ msgid "Find: Replace…"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
+msgid "Find: Find in Files…"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Cancel Find in Files"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
 msgid "Indentation: Convert to Spaces"
 msgstr ""
 
@@ -865,6 +889,10 @@ msgstr ""
 msgid "Delete Folder"
 msgstr ""
 
+#: assets/Default/Side Bar.sublime-menu
+msgid "Find in Folder…"
+msgstr ""
+
 #: assets/Default/Side Bar Mount Point.sublime-menu
 msgid "Remove Folder from Project"
 msgstr ""
@@ -951,15 +979,87 @@ msgid_plural "{count} package resources failed to load (Help > Package Load Erro
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/use_cases/src/find_replace.rs
-msgid "Unable to find {query}"
+#: crates/use_cases/src/find_in_files.rs
+msgid "No open folders or files to search"
 msgstr ""
 
+#: crates/use_cases/src/find_in_files.rs
+msgid "Find in Files cancelled"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Searching {count} file for \"{query}\""
+msgid_plural "Searching {count} files for \"{query}\""
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "regex"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "case sensitive"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "whole word"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "<skipped {count} character>"
+msgid_plural "<skipped {count} characters>"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "0 matches"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match in 1 file"
+msgid_plural "{count} matches in 1 file"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match across {files} files"
+msgid_plural "{count} matches across {files} files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace {count} occurrence across {files} files?"
+msgid_plural "Replace {count} occurrences across {files} files?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace in Files"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Replace"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
+#: crates/use_cases/src/packages.rs
+#: crates/use_cases/src/plugin_api.rs
+#: crates/use_cases/src/side_bar.rs
+#: crates/frameworks/src/views/dialogs.rs
+msgid "Cancel"
+msgstr ""
+
+#: crates/use_cases/src/find_in_files.rs
 #: crates/use_cases/src/find_replace.rs
 msgid "Replaced {count} occurrence"
 msgid_plural "Replaced {count} occurrences"
 msgstr[0] ""
 msgstr[1] ""
+
+#: crates/use_cases/src/find_replace.rs
+msgid "Unable to find {query}"
+msgstr ""
 
 #: crates/use_cases/src/help.rs
 msgid "open_url: no url given"
@@ -995,13 +1095,6 @@ msgstr ""
 
 #: crates/use_cases/src/packages.rs
 msgid "Install"
-msgstr ""
-
-#: crates/use_cases/src/packages.rs
-#: crates/use_cases/src/plugin_api.rs
-#: crates/use_cases/src/side_bar.rs
-#: crates/frameworks/src/views/dialogs.rs
-msgid "Cancel"
 msgstr ""
 
 #: crates/use_cases/src/packages.rs
@@ -1190,6 +1283,10 @@ msgid "Error: {error}"
 msgstr ""
 
 #: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Searching…"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
 msgid "{count} match"
 msgid_plural "{count} matches"
 msgstr[0] ""
@@ -1213,6 +1310,10 @@ msgstr ""
 
 #: crates/interface_adapters/src/presenters/menu.rs
 msgid "Show All"
+msgstr ""
+
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
 msgstr ""
 
 #: crates/interface_adapters/src/presenters/quick_panel.rs
@@ -1314,7 +1415,43 @@ msgid "Find Prev"
 msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs
-msgid "Replace"
+msgid "Where"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where to search"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Clear"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Folder"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Include Filter"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Exclude Filter"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Project Filters"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Folders"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Files"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Current File"
 msgstr ""
 
 #: crates/frameworks/src/views/side_bar.rs

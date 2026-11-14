@@ -1,6 +1,6 @@
 //! Tests for `input` (egui keys → keymap key combos).
 
-use codelibre_text::input::key_combos;
+use codelibre_text::input::{key_combos, plugin_event};
 use egui::{Key, Modifiers};
 use entities::keymap::KeyCombo;
 
@@ -10,8 +10,14 @@ fn parse(spec: &str) -> KeyCombo {
 
 #[test]
 fn letters_with_modifiers() {
-    assert_eq!(key_combos(Key::P, None, Modifiers::CTRL | Modifiers::SHIFT), vec![parse("ctrl+shift+p")]);
-    assert_eq!(key_combos(Key::Num1, None, Modifiers::ALT), vec![parse("alt+1")]);
+    assert_eq!(
+        key_combos(Key::P, None, Modifiers::CTRL | Modifiers::SHIFT),
+        vec![parse("ctrl+shift+p")]
+    );
+    assert_eq!(
+        key_combos(Key::Num1, None, Modifiers::ALT),
+        vec![parse("alt+1")]
+    );
     assert_eq!(key_combos(Key::A, None, Modifiers::NONE), vec![parse("a")]);
 }
 
@@ -27,8 +33,27 @@ fn the_command_modifier_is_ctrl_outside_macos() {
 
 #[test]
 fn the_mac_command_key_is_super() {
-    let modifiers = Modifiers { mac_cmd: true, ..Default::default() };
+    let modifiers = Modifiers {
+        mac_cmd: true,
+        ..Default::default()
+    };
     assert!(key_combos(Key::K, None, modifiers)[0].super_key);
+}
+
+#[test]
+fn plugin_events_report_only_the_modifiers_that_are_down() {
+    assert_eq!(
+        plugin_event(Modifiers::CTRL | Modifiers::SHIFT),
+        serde_json::json!({"modifier_keys": {"ctrl": true, "shift": true}})
+    );
+    assert_eq!(
+        plugin_event(Modifiers::COMMAND),
+        if cfg!(target_os = "macos") {
+            serde_json::json!({"modifier_keys": {"super": true}})
+        } else {
+            serde_json::json!({"modifier_keys": {"ctrl": true}})
+        }
+    );
 }
 
 #[test]
@@ -45,26 +70,41 @@ fn named_keys_use_sublime_names() {
         (Key::Minus, "-"),
         (Key::Backtick, "`"),
     ] {
-        assert_eq!(key_combos(key, None, Modifiers::NONE)[0].key, name, "{key:?}");
+        assert_eq!(
+            key_combos(key, None, Modifiers::NONE)[0].key,
+            name,
+            "{key:?}"
+        );
     }
 }
 
 #[test]
 fn the_physical_key_is_an_alternative_reading() {
-    let combos = key_combos(Key::Questionmark, Some(Key::Slash), Modifiers::CTRL | Modifiers::SHIFT);
+    let combos = key_combos(
+        Key::Questionmark,
+        Some(Key::Slash),
+        Modifiers::CTRL | Modifiers::SHIFT,
+    );
     assert_eq!(combos, vec![parse("ctrl+shift+?"), parse("ctrl+shift+/")]);
 }
 
 #[test]
 fn keys_without_a_sublime_name_are_dropped() {
     assert!(key_combos(Key::F20, None, Modifiers::NONE).is_empty());
-    assert_eq!(key_combos(Key::F20, Some(Key::F2), Modifiers::NONE), vec![parse("f2")]);
+    assert_eq!(
+        key_combos(Key::F20, Some(Key::F2), Modifiers::NONE),
+        vec![parse("f2")]
+    );
 }
 
 #[test]
 fn typed_symbols_are_named_by_their_character() {
     use codelibre_text::input::typed_combo;
-    assert_eq!(typed_combo("*"), Some(parse("*")), "Shift+8, or Shift++ on a Spanish keyboard");
+    assert_eq!(
+        typed_combo("*"),
+        Some(parse("*")),
+        "Shift+8, or Shift++ on a Spanish keyboard"
+    );
     assert_eq!(typed_combo("\""), Some(parse("\"")));
     assert_eq!(typed_combo("("), Some(parse("(")));
     assert_eq!(typed_combo("a"), None, "letters have their key event");

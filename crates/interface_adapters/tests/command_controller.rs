@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::LineEnding;
 use entities::selection::Selection;
-use interface_adapters::controllers::command_controller::{close_quick_panel, hooked_widget_input, poll_plugins, run, run_during_event};
+use interface_adapters::controllers::command_controller::{
+    close_quick_panel, hooked_widget_input, poll_plugins, run, run_during_event,
+};
 use interface_adapters::gateways::{builtin_resources, sublime_json};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::{json, Value};
@@ -37,6 +39,39 @@ fn text_after(command: Command, text: &str, selection: Selection) -> String {
     let (mut editor, mut view) = setup(&world, text, selection);
     run(&mut editor, &mut view, &command);
     active_text(&editor)
+}
+
+#[test]
+fn editing_commands_add_the_pre_edit_text_to_the_widget_undo_history() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
+    let id = editor.active_document().unwrap().id;
+
+    run(&mut editor, &mut view, &cmd("left_delete"));
+    poll_plugins(&mut editor, &mut view);
+
+    assert_eq!(active_text(&editor), "hell");
+    assert!(matches!(
+        view.take_requests().as_slice(),
+        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
+            if *document == id && text == "hello" && *selection == Selection::caret(5)
+    ));
+}
+
+#[test]
+fn editing_commands_run_during_plugin_events_add_undo_boundaries_too() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
+    let id = editor.active_document().unwrap().id;
+
+    assert!(run_during_event(&mut editor, &cmd("left_delete")));
+    poll_plugins(&mut editor, &mut view);
+
+    assert!(matches!(
+        view.take_requests().as_slice(),
+        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
+            if *document == id && text == "hello" && *selection == Selection::caret(5)
+    ));
 }
 
 // ----- files ---------------------------------------------------------------------------------------
@@ -84,10 +119,21 @@ fn open_file_and_open_dir_expand_package_paths() {
     let world = World::new().with_file("/packages/User/a.txt", "hi");
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("open_file", json!({ "file": "${packages}/User/a.txt" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("open_file", json!({ "file": "${packages}/User/a.txt" })),
+    );
     assert_eq!(active_text(&editor), "hi");
-    run(&mut editor, &mut view, &cmd_with("open_dir", json!({ "dir": "${packages}" })));
-    assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/packages")]);
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("open_dir", json!({ "dir": "${packages}" })),
+    );
+    assert_eq!(
+        *world.opened_folders.borrow(),
+        vec![PathBuf::from("/packages")]
+    );
 }
 
 #[test]
@@ -95,7 +141,11 @@ fn open_url_and_report_issue_open_the_browser() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("open_url", json!({ "url": "https://example.com" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("open_url", json!({ "url": "https://example.com" })),
+    );
     run(&mut editor, &mut view, &cmd("report_issue"));
     let urls = world.opened_urls.borrow();
     assert_eq!(urls[0], "https://example.com");
@@ -104,7 +154,10 @@ fn open_url_and_report_issue_open_the_browser() {
 
 #[test]
 fn close_window_and_exit_ask_the_window_to_close() {
-    for (name, request) in [("close_window", ViewRequest::CloseWindow), ("exit", ViewRequest::Exit)] {
+    for (name, request) in [
+        ("close_window", ViewRequest::CloseWindow),
+        ("exit", ViewRequest::Exit),
+    ] {
         let world = World::new();
         let mut editor = world.editor();
         let mut view = ViewState::default();
@@ -121,7 +174,10 @@ fn new_window_and_clone_file() {
     open(&mut editor, "/p/a.txt");
     run(&mut editor, &mut view, &cmd("clone_file"));
     assert_eq!(editor.state().documents.len(), 2, "two views of a.txt");
-    let (original, clone) = (editor.state().documents[0].id, editor.state().documents[1].id);
+    let (original, clone) = (
+        editor.state().documents[0].id,
+        editor.state().documents[1].id,
+    );
     assert_eq!(editor.clones_of(original), vec![clone]);
 
     run(&mut editor, &mut view, &cmd("new_window"));
@@ -164,10 +220,21 @@ fn show_overlay_opens_the_palette_or_goto_with_preset_text() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     view.focus_editor = false;
-    run(&mut editor, &mut view, &cmd_with("show_overlay", json!({ "overlay": "command_palette" })));
-    assert_eq!(view.quick_panel.as_ref().unwrap().kind, SearchKind::Commands);
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_overlay", json!({ "overlay": "command_palette" })),
+    );
+    assert_eq!(
+        view.quick_panel.as_ref().unwrap().kind,
+        SearchKind::Commands
+    );
 
-    run(&mut editor, &mut view, &cmd_with("show_overlay", json!({ "overlay": "goto", "text": ":" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_overlay", json!({ "overlay": "goto", "text": ":" })),
+    );
     let panel = view.quick_panel.as_ref().unwrap();
     assert_eq!(panel.kind, SearchKind::Goto);
     assert_eq!(panel.query, ":");
@@ -180,7 +247,11 @@ fn unknown_overlays_are_reported() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("show_overlay", json!({ "overlay": "minimap" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_overlay", json!({ "overlay": "minimap" })),
+    );
     assert!(view.quick_panel.is_none());
     assert_eq!(status(&editor), "Overlay not supported: minimap");
 }
@@ -220,7 +291,11 @@ fn closing_a_normal_quick_panel_changes_no_setting() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("show_overlay", json!({ "overlay": "goto" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_overlay", json!({ "overlay": "goto" })),
+    );
     close_quick_panel(&mut editor, &mut view);
     assert!(view.quick_panel.is_none());
     assert_eq!(editor.color_scheme_name(), "Monokai");
@@ -229,14 +304,119 @@ fn closing_a_normal_quick_panel_changes_no_setting() {
 // ----- find panel ----------------------------------------------------------------------------------
 
 #[test]
+fn find_in_files_searches_into_the_results_panel() {
+    let world = World::new();
+    world.disk.put("/p/a.txt", "a foo\n");
+    world.disk.put("/p/b.txt", "nothing\n");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "find_in_files", "where": "/p, *.txt", "case_sensitive": true }),
+        ),
+    );
+    assert!(view.find_panel.visible && view.find_panel.in_files);
+    assert_eq!(editor.find_where(), "/p, *.txt");
+    assert!(editor.state().find.case_sensitive);
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    assert!(!view.find_panel.visible, "the results take its place");
+    editor.poll_find_in_files();
+    let panel = editor.shown_output_panel().unwrap();
+    assert_eq!(panel.name, "find_results");
+    assert_eq!(
+        panel.document.text,
+        "Searching 2 files for \"foo\" (case sensitive)\n\n/p/a.txt:\n    1: a foo\n    2  \n\n1 match in 1 file\n"
+    );
+    run(&mut editor, &mut view, &cmd("next_result"));
+    assert_eq!(active_text(&editor), "a foo\n");
+
+    // The same panel toggles; another one replaces it.
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find_in_files" })),
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find", "toggle": true })),
+    );
+    assert!(view.find_panel.visible && !view.find_panel.in_files);
+}
+
+#[test]
+fn find_all_selects_every_match_in_the_find_panel() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "cat dog cat", Selection::caret(0));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
+    let mut options = editor.state().find.clone();
+    options.query = "cat".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        doc.selections(),
+        vec![Selection::new(0, 3), Selection::new(8, 11)]
+    );
+    assert!(!view.find_panel.visible, "close_find_after_find_all");
+}
+
+#[test]
+fn find_in_folder_opens_find_in_files_on_the_folders() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("find_in_folder", json!({ "dirs": ["/p/src"] })),
+    );
+    assert!(view.find_panel.visible && view.find_panel.in_files);
+    assert_eq!(editor.find_where(), "/p/src,<project filters>");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("add_where_snippet", json!({ "snippet": "-*.${0:txt}" })),
+    );
+    assert_eq!(editor.find_where(), "/p/src,<project filters>,-*.txt");
+    run(&mut editor, &mut view, &cmd("clear_location"));
+    assert_eq!(editor.find_where(), "");
+}
+
+#[test]
 fn show_panel_find_and_replace() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "cat dog", Selection::new(0, 3));
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
-    assert!(view.find_panel.visible && view.find_panel.focus_requested && !view.find_panel.replace_mode);
-    assert_eq!(editor.state().find.query, "cat", "the selection becomes the query");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
+    assert!(
+        view.find_panel.visible && view.find_panel.focus_requested && !view.find_panel.replace_mode
+    );
+    assert_eq!(
+        editor.state().find.query,
+        "cat",
+        "the selection becomes the query"
+    );
 
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "replace" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "replace" })),
+    );
     assert!(view.find_panel.replace_mode);
 
     run(&mut editor, &mut view, &cmd("hide_panel"));
@@ -249,7 +429,11 @@ fn missing_output_panels_are_reported() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "output.exec" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "output.exec" })),
+    );
     assert!(!view.find_panel.visible);
     assert_eq!(status(&editor), "Panel not supported: output.exec");
 }
@@ -261,19 +445,36 @@ fn output_panels_take_the_place_of_the_find_panel() {
     let mut view = ViewState::default();
     world.plugins.then([
         plugin_call("window_create_output_panel", json!([1, "exec"])),
-        plugin_call("run_command", json!(["window", 1, "show_panel", {"panel": "output.exec"}])),
+        plugin_call(
+            "run_command",
+            json!(["window", 1, "show_panel", {"panel": "output.exec"}]),
+        ),
         PluginMessage::Done { error: None },
     ]);
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
     run(&mut editor, &mut view, &cmd("my_build"));
-    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"));
+    assert_eq!(
+        editor.shown_output_panel().map(|p| p.name.as_str()),
+        Some("exec")
+    );
     assert!(!view.find_panel.visible, "one panel at a time");
 
-    let show = cmd_with("show_panel", json!({ "panel": "output.exec", "toggle": true }));
+    let show = cmd_with(
+        "show_panel",
+        json!({ "panel": "output.exec", "toggle": true }),
+    );
     run(&mut editor, &mut view, &show);
     assert!(editor.shown_output_panel().is_none(), "toggled off");
     run(&mut editor, &mut view, &show);
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
     assert!(editor.shown_output_panel().is_none() && view.find_panel.visible);
     run(&mut editor, &mut view, &show);
     run(&mut editor, &mut view, &cmd("hide_panel"));
@@ -295,9 +496,15 @@ fn find_under_searches_the_word_at_the_caret() {
     let (mut editor, mut view) = setup(&world, "foo bar foo", Selection::caret(1));
     run(&mut editor, &mut view, &cmd("find_under"));
     assert_eq!(editor.state().find.query, "foo");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(8, 11));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(8, 11)
+    );
     run(&mut editor, &mut view, &cmd("find_under_prev"));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 3));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 3)
+    );
 }
 
 #[test]
@@ -307,16 +514,26 @@ fn slurp_find_string_and_find_under_expand() {
     run(&mut editor, &mut view, &cmd("slurp_find_string"));
     assert_eq!(editor.state().find.query, "ab");
     run(&mut editor, &mut view, &cmd("find_under_expand"));
-    assert_eq!(editor.active_document().unwrap().selections(), vec![Selection::new(0, 2), Selection::new(3, 5)]);
+    assert_eq!(
+        editor.active_document().unwrap().selections(),
+        vec![Selection::new(0, 2), Selection::new(3, 5)]
+    );
     run(&mut editor, &mut view, &cmd("single_selection"));
-    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+    assert!(editor
+        .active_document()
+        .unwrap()
+        .extra_selections()
+        .is_empty());
 }
 
 #[test]
 fn replace_commands() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "a a a", Selection::new(0, 1));
-    editor.set_find_options(entities::find::FindOptions { query: "a".into(), ..Default::default() });
+    editor.set_find_options(entities::find::FindOptions {
+        query: "a".into(),
+        ..Default::default()
+    });
     editor.set_replacement("b".into());
     run(&mut editor, &mut view, &cmd("replace_next"));
     assert_eq!(active_text(&editor), "b a a");
@@ -337,7 +554,10 @@ fn toggling_side_bar_status_bar_and_full_screen() {
     assert!(!view.show_side_bar && !view.show_status_bar && view.fullscreen);
     assert_eq!(view.take_requests(), vec![ViewRequest::SetFullscreen(true)]);
     run(&mut editor, &mut view, &cmd("toggle_distraction_free"));
-    assert_eq!(view.take_requests(), vec![ViewRequest::SetFullscreen(false)]);
+    assert_eq!(
+        view.take_requests(),
+        vec![ViewRequest::SetFullscreen(false)]
+    );
 }
 
 #[test]
@@ -369,9 +589,17 @@ fn toggle_and_set_setting() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("toggle_setting", json!({ "setting": "word_wrap" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("toggle_setting", json!({ "setting": "word_wrap" })),
+    );
     assert!(editor.view_settings().bool("word_wrap", false));
-    run(&mut editor, &mut view, &cmd_with("set_setting", json!({ "setting": "tab_size", "value": 2 })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("set_setting", json!({ "setting": "tab_size", "value": 2 })),
+    );
     assert_eq!(editor.view_settings().usize("tab_size", 0), 2);
 }
 
@@ -382,7 +610,11 @@ fn switching_tabs() {
     let mut view = ViewState::default();
     editor.new_file();
     editor.new_file();
-    run(&mut editor, &mut view, &cmd_with("select_by_index", json!({ "index": 0 })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("select_by_index", json!({ "index": 0 })),
+    );
     assert_eq!(editor.state().active, 0);
     run(&mut editor, &mut view, &cmd("next_view"));
     assert_eq!(editor.state().active, 1);
@@ -392,7 +624,11 @@ fn switching_tabs() {
     run(&mut editor, &mut view, &cmd("next_view_in_stack"));
     assert_eq!(editor.state().active, 1, "back to the previous document");
     run(&mut editor, &mut view, &cmd("prev_view_in_stack"));
-    assert_eq!(editor.state().active, 2, "to the least recently used document");
+    assert_eq!(
+        editor.state().active,
+        2,
+        "to the least recently used document"
+    );
 }
 
 #[test]
@@ -400,12 +636,33 @@ fn set_file_type_and_line_endings() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("set_file_type", json!({ "syntax": "Packages/Rust/Rust.sublime-syntax" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "set_file_type",
+            json!({ "syntax": "Packages/Rust/Rust.sublime-syntax" }),
+        ),
+    );
     assert_eq!(editor.active_document().unwrap().syntax, "Rust");
-    run(&mut editor, &mut view, &cmd_with("set_line_ending", json!({ "type": "windows" })));
-    assert_eq!(editor.active_document().unwrap().line_ending, LineEnding::Windows);
-    run(&mut editor, &mut view, &cmd_with("set_line_ending", json!({ "type": "unix" })));
-    assert_eq!(editor.active_document().unwrap().line_ending, LineEnding::Unix);
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("set_line_ending", json!({ "type": "windows" })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().line_ending,
+        LineEnding::Windows
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("set_line_ending", json!({ "type": "unix" })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().line_ending,
+        LineEnding::Unix
+    );
 }
 
 // ----- text ----------------------------------------------------------------------------------------
@@ -426,20 +683,62 @@ fn text_commands_by_sublime_name() {
         (cmd("swap_case"), "aB", caret(0), "Ab"),
         (cmd("transpose"), "ab", caret(1), "ba"),
         (cmd("delete_word"), "one two", caret(7), "one "),
-        (cmd_with("delete_word", json!({ "forward": true })), "one two", caret(4), "one "),
+        (
+            cmd_with("delete_word", json!({ "forward": true })),
+            "one two",
+            caret(4),
+            "one ",
+        ),
         (cmd("expand_tabs"), "\tx", caret(0), "    x"),
         (cmd("unexpand_tabs"), "    x", caret(0), "\tx"),
         (cmd("trim_trailing_white_space"), "a  ", caret(0), "a"),
-        (cmd_with("sort_lines", json!({ "case_sensitive": false })), "b\nA", caret(0), "A\nb"),
-        (cmd_with("permute_lines", json!({ "operation": "reverse" })), "1\n2", caret(0), "2\n1"),
-        (cmd_with("permute_lines", json!({ "operation": "unique" })), "1\n1", caret(0), "1"),
-        (cmd_with("insert", json!({ "characters": "!" })), "a", caret(1), "a!"),
-        (cmd_with("insert_snippet", json!({ "contents": "fn ${1:name}() {$0}" })), "", caret(0), "fn name() {}"),
-        (cmd_with("toggle_comment", json!({ "block": true })), "x", Selection::new(0, 1), "x"),
+        (
+            cmd_with("sort_lines", json!({ "case_sensitive": false })),
+            "b\nA",
+            caret(0),
+            "A\nb",
+        ),
+        (
+            cmd_with("permute_lines", json!({ "operation": "reverse" })),
+            "1\n2",
+            caret(0),
+            "2\n1",
+        ),
+        (
+            cmd_with("permute_lines", json!({ "operation": "unique" })),
+            "1\n1",
+            caret(0),
+            "1",
+        ),
+        (
+            cmd_with("insert", json!({ "characters": "!" })),
+            "a",
+            caret(1),
+            "a!",
+        ),
+        (
+            cmd_with(
+                "insert_snippet",
+                json!({ "contents": "fn ${1:name}() {$0}" }),
+            ),
+            "",
+            caret(0),
+            "fn name() {}",
+        ),
+        (
+            cmd_with("toggle_comment", json!({ "block": true })),
+            "x",
+            Selection::new(0, 1),
+            "x",
+        ),
     ];
     for (command, text, selection, expected) in cases {
         let name = command.name.clone();
-        assert_eq!(text_after(command, text, selection), expected, "{name} on {text:?}");
+        assert_eq!(
+            text_after(command, text, selection),
+            expected,
+            "{name} on {text:?}"
+        );
     }
 }
 
@@ -447,12 +746,33 @@ fn text_commands_by_sublime_name() {
 fn expand_selection_to_line_and_word() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "ab cd\nx", Selection::caret(1));
-    run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "word" })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 2));
-    run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "line" })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 6));
-    run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": "scope" })));
-    assert_eq!(status(&editor), "expand_selection to scope is not supported");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("expand_selection", json!({ "to": "word" })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 2)
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("expand_selection", json!({ "to": "line" })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 6)
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("expand_selection", json!({ "to": "scope" })),
+    );
+    assert_eq!(
+        status(&editor),
+        "expand_selection to scope is not supported"
+    );
 }
 
 #[test]
@@ -460,15 +780,38 @@ fn expand_selection_to_brackets_indentation_smart_and_line_variants() {
     let expand = |to: &str, text: &str, selection: Selection| {
         let world = World::new();
         let (mut editor, mut view) = setup(&world, text, selection);
-        run(&mut editor, &mut view, &cmd_with("expand_selection", json!({ "to": to })));
+        run(
+            &mut editor,
+            &mut view,
+            &cmd_with("expand_selection", json!({ "to": to })),
+        );
         editor.active_document().unwrap().selection()
     };
-    assert_eq!(expand("brackets", "f(a, b)", Selection::caret(3)), Selection::new(2, 6));
-    assert_eq!(expand("smart", "f(abc)", Selection::caret(3)), Selection::new(2, 5), "the word first");
-    assert_eq!(expand("line_prev", "a\nb", Selection::caret(3)), Selection::new(3, 2));
-    assert_eq!(expand("line_without_eol", "ab\nc", Selection::caret(1)), Selection::new(0, 2));
-    assert_eq!(expand("line_strict", "ab\nc", Selection::caret(1)), Selection::new(0, 2));
-    assert_eq!(expand("indentation", "a\n  b\n  c\nd", Selection::caret(4)), Selection::new(2, 9));
+    assert_eq!(
+        expand("brackets", "f(a, b)", Selection::caret(3)),
+        Selection::new(2, 6)
+    );
+    assert_eq!(
+        expand("smart", "f(abc)", Selection::caret(3)),
+        Selection::new(2, 5),
+        "the word first"
+    );
+    assert_eq!(
+        expand("line_prev", "a\nb", Selection::caret(3)),
+        Selection::new(3, 2)
+    );
+    assert_eq!(
+        expand("line_without_eol", "ab\nc", Selection::caret(1)),
+        Selection::new(0, 2)
+    );
+    assert_eq!(
+        expand("line_strict", "ab\nc", Selection::caret(1)),
+        Selection::new(0, 2)
+    );
+    assert_eq!(
+        expand("indentation", "a\n  b\n  c\nd", Selection::caret(4)),
+        Selection::new(2, 9)
+    );
 }
 
 #[test]
@@ -480,10 +823,32 @@ fn trim_trailing_white_space_arguments() {
     editor.run_text_command(TextCommand::Insert("new  \n".into()));
     let id = editor.active_document().unwrap().id;
     editor.sync_selection_from_view(id, Selection::caret(17));
-    run(&mut editor, &mut view, &cmd_with("trim_trailing_white_space", json!({ "only_modified": true })));
-    assert_eq!(active_text(&editor), "new\nold  \nkeep  ", "only the line typed since the save");
-    run(&mut editor, &mut view, &cmd_with("trim_trailing_white_space", json!({ "trim_on_caret": false })));
-    assert_eq!(active_text(&editor), "new\nold\nkeep  ", "not the caret's line");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "trim_trailing_white_space",
+            json!({ "only_modified": true }),
+        ),
+    );
+    assert_eq!(
+        active_text(&editor),
+        "new\nold  \nkeep  ",
+        "only the line typed since the save"
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "trim_trailing_white_space",
+            json!({ "trim_on_caret": false }),
+        ),
+    );
+    assert_eq!(
+        active_text(&editor),
+        "new\nold\nkeep  ",
+        "not the caret's line"
+    );
 }
 
 #[test]
@@ -495,67 +860,157 @@ fn show_panel_toggle_hides_an_open_panel_and_the_console() {
     assert!(view.find_panel.visible);
     run(&mut editor, &mut view, &find);
     assert!(!view.find_panel.visible);
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
     assert!(view.find_panel.visible, "without toggle it stays open");
 
     let console = cmd_with("show_panel", json!({ "panel": "console", "toggle": true }));
+    let active = editor.active_document().unwrap().id;
     run(&mut editor, &mut view, &console);
-    assert_eq!(editor.active_document().unwrap().name(), "Console");
+    assert_eq!(editor.shown_output_panel().unwrap().name, "console");
+    assert_eq!(editor.active_document().unwrap().id, active);
     run(&mut editor, &mut view, &console);
-    assert!(editor.state().documents.iter().all(|d| d.name() != "Console"));
+    assert!(editor.shown_output_panel().is_none());
+    assert!(editor
+        .state()
+        .documents
+        .iter()
+        .all(|d| d.name() != "Console"));
 }
 
 #[test]
 fn file_dialogs_start_in_initial_directory_and_open_file_goes_to_a_position() {
     let world = World::new().with_file("/p/a.txt", "one\ntwo\nthree");
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
-    run(&mut editor, &mut view, &cmd_with("prompt_open_file", json!({ "initial_directory": "${packages}/User" })));
-    assert_eq!(world.dialogs.last_open_dir.borrow().as_deref(), Some(std::path::Path::new("/packages/User")));
-    run(&mut editor, &mut view, &cmd_with("prompt_open_folder", json!({ "initial_directory": "/p" })));
-    assert_eq!(world.dialogs.last_folder_dir.borrow().as_deref(), Some(std::path::Path::new("/p")));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "prompt_open_file",
+            json!({ "initial_directory": "${packages}/User" }),
+        ),
+    );
+    assert_eq!(
+        world.dialogs.last_open_dir.borrow().as_deref(),
+        Some(std::path::Path::new("/packages/User"))
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("prompt_open_folder", json!({ "initial_directory": "/p" })),
+    );
+    assert_eq!(
+        world.dialogs.last_folder_dir.borrow().as_deref(),
+        Some(std::path::Path::new("/p"))
+    );
 
-    run(&mut editor, &mut view, &cmd_with("open_file", json!({ "file": "/p/a.txt:2:3", "encoded_position": true })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(6));
-    run(&mut editor, &mut view, &cmd_with("open_file", json!({ "file": "/p/a.txt:3", "encoded_position": true })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(8));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "open_file",
+            json!({ "file": "/p/a.txt:2:3", "encoded_position": true }),
+        ),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(6)
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "open_file",
+            json!({ "file": "/p/a.txt:3", "encoded_position": true }),
+        ),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(8)
+    );
 }
 
 #[test]
 fn unsupported_permutations_are_reported() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "b\na", Selection::caret(0));
-    run(&mut editor, &mut view, &cmd_with("permute_lines", json!({ "operation": "shuffle" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("permute_lines", json!({ "operation": "shuffle" })),
+    );
     assert_eq!(active_text(&editor), "b\na");
     assert!(status(&editor).contains("only reverse and unique"));
 }
 
 #[test]
 fn sublime_line_macros() {
-    let macro_cmd = |name: &str| cmd_with("run_macro_file", json!({ "file": format!("res://Packages/Default/{name}.sublime-macro") }));
+    let macro_cmd = |name: &str| {
+        cmd_with(
+            "run_macro_file",
+            json!({ "file": format!("res://Packages/Default/{name}.sublime-macro") }),
+        )
+    };
     let caret = Selection::caret;
     assert_eq!(text_after(macro_cmd("Delete Line"), "a\nb", caret(0)), "b");
     assert_eq!(text_after(macro_cmd("Add Line"), "a", caret(0)), "a\n");
-    assert_eq!(text_after(macro_cmd("Add Line Before"), "a", caret(0)), "\na");
-    assert_eq!(text_after(macro_cmd("Add Line in Braces"), "{}", caret(1)), "{\n\t\n}");
-    assert_eq!(text_after(macro_cmd("Delete to Hard EOL"), "abc", caret(1)), "a");
-    assert_eq!(text_after(macro_cmd("Delete to Hard BOL"), "abc", caret(2)), "c");
+    assert_eq!(
+        text_after(macro_cmd("Add Line Before"), "a", caret(0)),
+        "\na"
+    );
+    assert_eq!(
+        text_after(macro_cmd("Add Line in Braces"), "{}", caret(1)),
+        "{\n\t\n}"
+    );
+    assert_eq!(
+        text_after(macro_cmd("Delete to Hard EOL"), "abc", caret(1)),
+        "a"
+    );
+    assert_eq!(
+        text_after(macro_cmd("Delete to Hard BOL"), "abc", caret(2)),
+        "c"
+    );
 }
 
 #[test]
 fn unknown_macros_are_reported() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "a", Selection::caret(0));
-    run(&mut editor, &mut view, &cmd_with("run_macro_file", json!({ "file": "res://Packages/X/Dance.sublime-macro" })));
-    assert_eq!(status(&editor), "Macro not supported: res://Packages/X/Dance.sublime-macro");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "run_macro_file",
+            json!({ "file": "res://Packages/X/Dance.sublime-macro" }),
+        ),
+    );
+    assert_eq!(
+        status(&editor),
+        "Macro not supported: res://Packages/X/Dance.sublime-macro"
+    );
 }
 
 #[test]
 fn goto_line_is_one_based() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "a\nb\nc", Selection::caret(0));
-    run(&mut editor, &mut view, &cmd_with("goto_line", json!({ "line": 3 })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("goto_line", json!({ "line": 3 })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(4)
+    );
 }
 
 // ----- widget edits --------------------------------------------------------------------------------
@@ -566,7 +1021,18 @@ fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
     *world.clipboard.borrow_mut() = Ok("clip".into());
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    for name in ["undo", "soft_undo", "redo", "redo_or_repeat", "soft_redo", "select_all", "copy", "cut", "paste", "paste_and_indent"] {
+    for name in [
+        "undo",
+        "soft_undo",
+        "redo",
+        "redo_or_repeat",
+        "soft_redo",
+        "select_all",
+        "copy",
+        "cut",
+        "paste",
+        "paste_and_indent",
+    ] {
         run(&mut editor, &mut view, &cmd(name));
     }
     let edits: Vec<WidgetEdit> = view
@@ -580,7 +1046,18 @@ fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
     use WidgetEdit::*;
     assert_eq!(
         edits,
-        vec![Undo, Undo, Redo, Redo, Redo, SelectAll, Copy, Cut, Paste("clip".into()), Paste("clip".into())]
+        vec![
+            Undo,
+            Undo,
+            Redo,
+            Redo,
+            Redo,
+            SelectAll,
+            Copy,
+            Cut,
+            Paste("clip".into()),
+            Paste("clip".into())
+        ]
     );
     assert!(view.focus_editor);
 }
@@ -596,18 +1073,32 @@ fn copy_and_cut_with_nothing_selected_take_the_whole_line_and_paste_puts_it_abov
     let id = editor.active_document().unwrap().id;
     editor.sync_selection_from_view(id, Selection::caret(1));
     run(&mut editor, &mut view, &cmd("paste"));
-    assert_eq!(active_text(&editor), "two\none\ntwo", "inserted above the caret's line");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(5), "the caret stays on its line");
+    assert_eq!(
+        active_text(&editor),
+        "two\none\ntwo",
+        "inserted above the caret's line"
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(5),
+        "the caret stays on its line"
+    );
 
     run(&mut editor, &mut view, &cmd("cut"));
     assert_eq!(active_text(&editor), "two\ntwo");
     assert_eq!(*world.clipboard.borrow(), Ok("one\n".to_string()));
-    assert!(view.take_requests().is_empty(), "the text widget did nothing");
+    assert!(
+        view.take_requests().is_empty(),
+        "the text widget did nothing"
+    );
 
     // Something else on the clipboard is pasted normally.
     *world.clipboard.borrow_mut() = Ok("x".into());
     run(&mut editor, &mut view, &cmd("paste"));
-    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("x".into()))]);
+    assert_eq!(
+        view.take_requests(),
+        vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("x".into()))]
+    );
 }
 
 #[test]
@@ -624,21 +1115,38 @@ fn paste_from_history_lists_what_was_copied_and_pastes_the_choice() {
     editor.sync_selection_from_view(id, Selection::caret(2));
     run(&mut editor, &mut view, &cmd("copy"));
     run(&mut editor, &mut view, &cmd("copy"));
-    assert_eq!(editor.clipboard_history(), ["alpha beta\n", "beta", "alpha"], "newest first, each once");
+    assert_eq!(
+        editor.clipboard_history(),
+        ["alpha beta\n", "beta", "alpha"],
+        "newest first, each once"
+    );
     view.take_requests();
 
     run(&mut editor, &mut view, &cmd("paste_from_history"));
     let panel = view.quick_panel.as_ref().expect("the history's panel");
     assert_eq!(panel.kind, SearchKind::ClipboardHistory);
-    let captions: Vec<_> = editor.search(SearchKind::ClipboardHistory, "").into_iter().map(|c| c.caption).collect();
+    let captions: Vec<_> = editor
+        .search(SearchKind::ClipboardHistory, "")
+        .into_iter()
+        .map(|c| c.caption)
+        .collect();
     assert_eq!(captions, ["alpha beta", "beta", "alpha"]);
 
     let chosen = editor.search(SearchKind::ClipboardHistory, "").remove(2);
-    let CandidateTarget::Command(paste) = chosen.target else { panic!("a command") };
+    let CandidateTarget::Command(paste) = chosen.target else {
+        panic!("a command")
+    };
     run(&mut editor, &mut view, &paste);
     assert_eq!(*world.clipboard.borrow(), Ok("alpha".to_string()));
-    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("alpha".into()))]);
-    assert_eq!(editor.clipboard_history()[0], "alpha", "the choice comes first");
+    assert_eq!(
+        view.take_requests(),
+        vec![ViewRequest::WidgetEdit(WidgetEdit::Paste("alpha".into()))]
+    );
+    assert_eq!(
+        editor.clipboard_history()[0],
+        "alpha",
+        "the choice comes first"
+    );
 }
 
 #[test]
@@ -647,7 +1155,10 @@ fn reset_font_size_uses_default_font_size() {
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
     run(&mut editor, &mut view, &cmd("increase_font_size"));
     run(&mut editor, &mut view, &cmd("reset_font_size"));
-    assert_eq!(world.resources.user_settings.borrow()["font_size"], json!(13));
+    assert_eq!(
+        world.resources.user_settings.borrow()["font_size"],
+        json!(13)
+    );
 }
 
 #[test]
@@ -667,7 +1178,14 @@ fn edit_settings_reload_packages_and_help_windows() {
     let world = World::new();
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("edit_settings", json!({ "base_file": "${packages}/Default/Preferences.sublime-settings", "default": "{}" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "edit_settings",
+            json!({ "base_file": "${packages}/Default/Preferences.sublime-settings", "default": "{}" }),
+        ),
+    );
     assert!(world.file_exists("/packages/User/Preferences.sublime-settings"));
     run(&mut editor, &mut view, &cmd("reload_packages"));
     assert!(status(&editor).starts_with("Packages reloaded"));
@@ -689,44 +1207,109 @@ fn unknown_commands_are_reported() {
 fn other_commands_go_to_the_plugins_which_can_run_built_in_ones() {
     let world = World::new().with_plugin_commands(&[("shout", PluginCommandKind::Text)]);
     let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
-    world
-        .plugins
-        .then([plugin_call("run_command", json!(["window", 1, "upper_case", null])), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", 1, "upper_case", null])),
+        PluginMessage::Done { error: None },
+    ]);
     run(&mut editor, &mut view, &cmd("shout"));
     assert_eq!(world.plugins.runs.borrow()[0].1, "shout");
-    assert_eq!(active_text(&editor), "ABC", "the plugin ran upper_case through this controller");
+    assert_eq!(
+        active_text(&editor),
+        "ABC",
+        "the plugin ran upper_case through this controller"
+    );
 }
 
 #[test]
 fn listeners_rewrite_commands_before_they_run_and_hear_about_them_after() {
-    let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command", "on_window_command"]);
+    let world = World::new().with_plugins(
+        &[],
+        &[
+            "on_text_command",
+            "on_post_text_command",
+            "on_window_command",
+        ],
+    );
     let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
-    world.plugins.then([PluginMessage::Answer(json!(["upper_case", null])), PluginMessage::Answer(Value::Null)]);
+    world.plugins.then([
+        PluginMessage::Answer(json!(["upper_case", null])),
+        PluginMessage::Answer(Value::Null),
+    ]);
     run(&mut editor, &mut view, &cmd("title_case"));
-    assert_eq!(active_text(&editor), "ABC", "the listener's command ran instead");
+    assert_eq!(
+        active_text(&editor),
+        "ABC",
+        "the listener's command ran instead"
+    );
     let queries = world.plugins.queries.borrow();
-    assert_eq!(queries.iter().map(|q| q.0.as_str()).collect::<Vec<_>>(), ["on_text_command", "on_post_text_command"]);
-    assert_eq!(queries[1].2, json!(["upper_case", null]), "the post event names the command that ran");
+    assert_eq!(
+        queries.iter().map(|q| q.0.as_str()).collect::<Vec<_>>(),
+        ["on_text_command", "on_post_text_command"]
+    );
+    assert_eq!(
+        queries[1].2,
+        json!(["upper_case", null]),
+        "the post event names the command that ran"
+    );
     drop(queries);
 
     world.plugins.then([PluginMessage::Answer(Value::Null)]);
     run(&mut editor, &mut view, &cmd("toggle_side_bar"));
-    assert_eq!(world.plugins.queries.borrow().last().unwrap().0, "on_window_command", "a window command");
+    assert_eq!(
+        world.plugins.queries.borrow().last().unwrap().0,
+        "on_window_command",
+        "a window command"
+    );
+}
+
+#[test]
+fn listener_replacements_keep_the_original_state_in_widget_undo_history() {
+    let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
+    let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        PluginMessage::Answer(json!(["upper_case", null])),
+        PluginMessage::Answer(Value::Null),
+    ]);
+
+    run(&mut editor, &mut view, &cmd("title_case"));
+    poll_plugins(&mut editor, &mut view);
+
+    assert_eq!(active_text(&editor), "ABC");
+    assert!(matches!(
+        view.take_requests().as_slice(),
+        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
+            if *document == id && text == "abc" && *selection == Selection::new(0, 3)
+    ));
 }
 
 #[test]
 fn show_panel_console_opens_the_console() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
+    let active = editor.active_document().unwrap().id;
     editor.log("hello from a plugin\n");
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({"panel": "console", "toggle": true})));
-    assert_eq!(active_text(&editor), "hello from a plugin\n");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({"panel": "console", "toggle": true})),
+    );
+    let panel = editor.shown_output_panel().unwrap();
+    assert_eq!(panel.name, "console");
+    assert_eq!(panel.document.text, "hello from a plugin\n");
+    assert!(editor.is_output_panel_focused(panel.document.id));
+    assert_eq!(editor.active_document().unwrap().id, active);
 }
 
 #[test]
 fn every_command_in_the_builtin_resources_is_implemented() {
     let mut commands = Vec::new();
-    for source in [builtin_resources::PC_KEYMAP, builtin_resources::OSX_KEYMAP, builtin_resources::MAIN_MENU, builtin_resources::PALETTE_COMMANDS] {
+    for source in [
+        builtin_resources::PC_KEYMAP,
+        builtin_resources::OSX_KEYMAP,
+        builtin_resources::MAIN_MENU,
+        builtin_resources::PALETTE_COMMANDS,
+    ] {
         collect_commands(&sublime_json::parse(source).unwrap(), &mut commands);
     }
     // `$build_systems` is not a command: the menu presenter puts the build systems there.
@@ -735,7 +1318,11 @@ fn every_command_in_the_builtin_resources_is_implemented() {
         let mut editor = world.editor();
         let mut view = ViewState::default();
         run(&mut editor, &mut view, &command);
-        assert!(!status(&editor).starts_with("Command not available"), "{} is not implemented", command.name);
+        assert!(
+            !status(&editor).starts_with("Command not available"),
+            "{} is not implemented",
+            command.name
+        );
     }
 }
 
@@ -743,7 +1330,10 @@ fn collect_commands(value: &Value, out: &mut Vec<Command>) {
     match value {
         Value::Object(map) => {
             if let Some(Value::String(name)) = map.get("command") {
-                out.push(Command::with_args(name, map.get("args").cloned().unwrap_or(Value::Null)));
+                out.push(Command::with_args(
+                    name,
+                    map.get("args").cloned().unwrap_or(Value::Null),
+                ));
             }
             map.values().for_each(|v| collect_commands(v, out));
         }
@@ -752,10 +1342,13 @@ fn collect_commands(value: &Value, out: &mut Vec<Command>) {
     }
 }
 
-const BUILD: &str = r#"{ "selector": "source.python", "cmd": ["python", "$file"], "file_regex": "^(.*):(\\d+)$" }"#;
+const BUILD: &str =
+    r#"{ "selector": "source.python", "cmd": ["python", "$file"], "file_regex": "^(.*):(\\d+)$" }"#;
 
 fn build_world() -> World {
-    World::new().with_file("/p/a.py", "one\ntwo\n").with_resource("Packages/U/Py.sublime-build", BUILD)
+    World::new()
+        .with_file("/p/a.py", "one\ntwo\n")
+        .with_resource("Packages/U/Py.sublime-build", BUILD)
 }
 
 #[test]
@@ -764,10 +1357,17 @@ fn build_runs_the_target_and_shows_the_results_in_place_of_the_find_panel() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     open(&mut editor, "/p/a.py");
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
     run(&mut editor, &mut view, &cmd("build"));
     assert_eq!(world.processes.started.borrow().len(), 1);
-    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"));
+    assert_eq!(
+        editor.shown_output_panel().map(|p| p.name.as_str()),
+        Some("exec")
+    );
     assert!(!view.find_panel.visible);
 }
 
@@ -788,7 +1388,11 @@ fn build_with_opens_the_picker_and_a_choice_runs_it() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     open(&mut editor, "/p/a.py");
-    run(&mut editor, &mut view, &cmd_with("build", json!({ "select": true })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("build", json!({ "select": true })),
+    );
     let panel = view.quick_panel.as_ref().expect("the picker");
     assert_eq!(panel.kind, SearchKind::BuildSystems);
     assert!(world.processes.started.borrow().is_empty());
@@ -803,12 +1407,18 @@ fn build_with_opens_the_picker_and_a_choice_runs_it() {
 
 #[test]
 fn several_builds_ask_which_one() {
-    let world = build_world().with_resource("Packages/U/Other.sublime-build", r#"{ "selector": "source.python", "cmd": ["x"] }"#);
+    let world = build_world().with_resource(
+        "Packages/U/Other.sublime-build",
+        r#"{ "selector": "source.python", "cmd": ["x"] }"#,
+    );
     let mut editor = world.editor();
     let mut view = ViewState::default();
     open(&mut editor, "/p/a.py");
     run(&mut editor, &mut view, &cmd("build"));
-    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(SearchKind::BuildSystems));
+    assert_eq!(
+        view.quick_panel.as_ref().map(|p| p.kind),
+        Some(SearchKind::BuildSystems)
+    );
 }
 
 #[test]
@@ -828,7 +1438,11 @@ fn a_plugin_exec_command_replaces_the_built_in_one() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     world.plugins.then([PluginMessage::Done { error: None }]);
-    run(&mut editor, &mut view, &cmd_with("exec", json!({ "cmd": ["x"] })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("exec", json!({ "cmd": ["x"] })),
+    );
     assert!(world.processes.started.borrow().is_empty());
     assert_eq!(world.plugins.runs.borrow()[0].1, "exec");
 }
@@ -840,17 +1454,31 @@ fn next_result_goes_to_the_file_and_hides_the_find_panel() {
     let mut view = ViewState::default();
     open(&mut editor, "/p/a.py");
     run(&mut editor, &mut view, &cmd("build"));
-    world.processes.events.borrow_mut().push_back(ProcessEvent::Output("a.py:2\n".into()));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(ProcessEvent::Output("a.py:2\n".into()));
     editor.poll_builds();
-    run(&mut editor, &mut view, &cmd_with("show_panel", json!({ "panel": "find" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
     run(&mut editor, &mut view, &cmd("next_result"));
     assert!(!view.find_panel.visible && editor.shown_output_panel().is_some());
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(4)
+    );
 }
 
 fn listening_world(events: &[&str]) -> World {
     let commands = [("probe", PluginCommandKind::Text)];
-    World::new().with_file("/p/a.txt", "quiet").with_file("/p/b.txt", "other").with_plugins(&commands, events)
+    World::new()
+        .with_file("/p/a.txt", "quiet")
+        .with_file("/p/b.txt", "other")
+        .with_plugins(&commands, events)
 }
 
 #[test]
@@ -861,7 +1489,10 @@ fn a_listener_s_editing_command_reaches_the_file_being_saved() {
     open(&mut editor, "/p/a.txt");
     let id = editor.active_document().unwrap().id;
     editor.text_for_editing(id).unwrap().push('!');
-    world.plugins.then([plugin_call("view_selection_set", json!([id, [[0, 6]]])), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call("view_selection_set", json!([id, [[0, 6]]])),
+        PluginMessage::Done { error: None },
+    ]);
     editor.run_plugin_command(&cmd("probe"), &mut |_, _| {});
     world.plugins.then([
         plugin_call("run_command", json!(["view", id, "upper_case", null])),
@@ -879,17 +1510,39 @@ fn a_listener_s_command_runs_on_the_view_it_named() {
     open(&mut editor, "/p/b.txt");
     open(&mut editor, "/p/a.txt");
     let a = editor.active_document().unwrap().id;
-    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    let b = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.name() == "b.txt")
+        .unwrap()
+        .id;
     editor.text_for_editing(a).unwrap().push('!');
     world.plugins.then([
-        plugin_call("run_command", json!(["view", b, "insert", { "characters": "x" }])),
+        plugin_call(
+            "run_command",
+            json!(["view", b, "insert", { "characters": "x" }]),
+        ),
         PluginMessage::Done { error: None },
     ]);
     assert!(editor.save_active(false));
-    let text = |id| editor.state().documents.iter().find(|d| d.id == id).unwrap().text.clone();
+    let text = |id| {
+        editor
+            .state()
+            .documents
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap()
+            .text
+            .clone()
+    };
     assert!(text(b).contains('x'), "{}", text(b));
     assert_eq!(text(a), "quiet!");
-    assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+    assert_eq!(
+        editor.active_document().unwrap().id,
+        a,
+        "the active view stays"
+    );
 }
 
 #[test]
@@ -901,7 +1554,10 @@ fn a_listener_s_command_that_needs_the_view_waits_for_the_next_frame() {
     open(&mut editor, "/p/a.txt");
     let id = editor.active_document().unwrap().id;
     world.plugins.then([
-        plugin_call("run_command", json!(["window", id, "show_panel", { "panel": "find" }])),
+        plugin_call(
+            "run_command",
+            json!(["window", id, "show_panel", { "panel": "find" }]),
+        ),
         PluginMessage::Done { error: None },
     ]);
     editor.text_for_editing(id).unwrap().push('!');
@@ -920,10 +1576,19 @@ fn a_listener_s_waiting_command_runs_on_the_view_that_asked() {
     open(&mut editor, "/p/b.txt");
     open(&mut editor, "/p/a.txt");
     let a = editor.active_document().unwrap().id;
-    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    let b = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.name() == "b.txt")
+        .unwrap()
+        .id;
     editor.text_for_editing(a).unwrap().push('!');
     // `clone_file` needs the controller: it waits for the next frame, and then clones b, not the active a.
-    world.plugins.then([plugin_call("run_command", json!(["view", b, "clone_file", null])), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", b, "clone_file", null])),
+        PluginMessage::Done { error: None },
+    ]);
     assert!(editor.save_active(false));
     assert!(editor.clones_of(b).is_empty());
     poll_plugins(&mut editor, &mut view);
@@ -939,7 +1604,13 @@ fn a_listener_saves_another_view_during_the_event() {
     open(&mut editor, "/p/b.txt");
     open(&mut editor, "/p/a.txt");
     let a = editor.active_document().unwrap().id;
-    let b = editor.state().documents.iter().find(|d| d.name() == "b.txt").unwrap().id;
+    let b = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.name() == "b.txt")
+        .unwrap()
+        .id;
     editor.text_for_editing(a).unwrap().push('!');
     editor.text_for_editing(b).unwrap().push('?');
     world.plugins.then([
@@ -951,7 +1622,11 @@ fn a_listener_saves_another_view_during_the_event() {
     assert!(editor.save_active(false));
     // Done before the next frame.
     assert_eq!(world.file_text("/p/b.txt"), "other?");
-    assert_eq!(editor.active_document().unwrap().id, a, "the active view stays");
+    assert_eq!(
+        editor.active_document().unwrap().id,
+        a,
+        "the active view stays"
+    );
 }
 
 #[test]
@@ -964,10 +1639,22 @@ fn a_listener_that_saves_the_view_being_saved_does_not_save_it_again() {
     editor.text_for_editing(id).unwrap().push('!');
     // A second `on_pre_save` would take the `Done` of the first and leave it waiting: the save
     // in progress writes the file, once.
-    world.plugins.then([plugin_call("run_command", json!(["view", id, "save", null])), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call("run_command", json!(["view", id, "save", null])),
+        PluginMessage::Done { error: None },
+    ]);
     assert!(editor.save_active(false));
     assert_eq!(world.file_text("/p/a.txt"), "quiet!");
-    assert_eq!(world.plugins.events.borrow().iter().filter(|(name, _)| name == "on_pre_save").count(), 1);
+    assert_eq!(
+        world
+            .plugins
+            .events
+            .borrow()
+            .iter()
+            .filter(|(name, _)| name == "on_pre_save")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -978,8 +1665,20 @@ fn save_all_goes_on_when_a_listener_closes_a_view() {
     for path in ["/p/a.txt", "/p/b.txt", "/p/c.txt"] {
         open(&mut editor, path);
     }
-    let id = |editor: &Editor, name: &str| editor.state().documents.iter().find(|d| d.name() == name).unwrap().id;
-    let (a, b, c) = (id(&editor, "a.txt"), id(&editor, "b.txt"), id(&editor, "c.txt"));
+    let id = |editor: &Editor, name: &str| {
+        editor
+            .state()
+            .documents
+            .iter()
+            .find(|d| d.name() == name)
+            .unwrap()
+            .id
+    };
+    let (a, b, c) = (
+        id(&editor, "a.txt"),
+        id(&editor, "b.txt"),
+        id(&editor, "c.txt"),
+    );
     editor.text_for_editing(a).unwrap().push('!');
     editor.text_for_editing(c).unwrap().push('?');
     world.plugins.then([
@@ -990,10 +1689,17 @@ fn save_all_goes_on_when_a_listener_closes_a_view() {
         PluginMessage::Done { error: None },
     ]);
     editor.save_all();
-    assert!(editor.state().documents.iter().all(|d| d.id != b), "closed at once");
+    assert!(
+        editor.state().documents.iter().all(|d| d.id != b),
+        "closed at once"
+    );
     assert_eq!(world.file_text("/p/a.txt"), "quiet!");
     assert_eq!(world.file_text("/p/c.txt"), "third?");
-    assert_eq!(editor.active_document().unwrap().id, c, "the active view stays");
+    assert_eq!(
+        editor.active_document().unwrap().id,
+        c,
+        "the active view stays"
+    );
 }
 
 #[test]
@@ -1007,7 +1713,10 @@ fn a_listener_s_select_all_and_clipboard_commands_run_during_the_event() {
     world.plugins.then([
         plugin_call("run_command", json!(["view", id, "select_all", null])),
         plugin_call("run_command", json!(["view", id, "copy", null])),
-        plugin_call("run_command", json!(["view", id, "move_to", { "to": "eof" }])),
+        plugin_call(
+            "run_command",
+            json!(["view", id, "move_to", { "to": "eof" }]),
+        ),
         plugin_call("run_command", json!(["view", id, "paste", null])),
         PluginMessage::Done { error: None },
     ]);
@@ -1037,8 +1746,14 @@ fn a_listener_s_settings_and_selection_commands_run_during_the_event() {
     editor.text_for_editing(id).unwrap().push('!');
     world.plugins.then([
         plugin_call("view_selection_set", json!([id, [[0, 7]]])),
-        plugin_call("run_command", json!(["view", id, "split_selection_into_lines", null])),
-        plugin_call("run_command", json!(["window", id, "set_setting", { "setting": "tab_size", "value": 7 }])),
+        plugin_call(
+            "run_command",
+            json!(["view", id, "split_selection_into_lines", null]),
+        ),
+        plugin_call(
+            "run_command",
+            json!(["window", id, "set_setting", { "setting": "tab_size", "value": 7 }]),
+        ),
         PluginMessage::Done { error: None },
     ]);
     assert!(editor.save_active(false));
@@ -1062,7 +1777,10 @@ fn a_listener_s_editing_command_goes_through_the_hooks() {
         PluginMessage::Done { error: None },
     ]);
     assert!(editor.save_active(false));
-    assert!(world.file_text("/p/a.txt").contains('>'), "the listener replaced it");
+    assert!(
+        world.file_text("/p/a.txt").contains('>'),
+        "the listener replaced it"
+    );
     let queries = world.plugins.queries.borrow();
     let names: Vec<&str> = queries.iter().map(|(name, _, _)| name.as_str()).collect();
     assert_eq!(names, ["on_text_command", "on_post_text_command"]);
@@ -1071,14 +1789,20 @@ fn a_listener_s_editing_command_goes_through_the_hooks() {
 
 #[test]
 fn reindent_uses_the_view_s_settings_and_defaults_to_the_caret_s_line() {
-    let world = World::new().with_file("/p/a.rs", "fn f() {\ng();\nh();\n}\n").with_preferences(json!({ "translate_tabs_to_spaces": true, "tab_size": 2 }));
+    let world = World::new()
+        .with_file("/p/a.rs", "fn f() {\ng();\nh();\n}\n")
+        .with_preferences(json!({ "translate_tabs_to_spaces": true, "tab_size": 2 }));
     let mut editor = world.editor();
     let mut view = ViewState::default();
     open(&mut editor, "/p/a.rs");
     editor.go_to_line(1);
     run(&mut editor, &mut view, &cmd("reindent"));
     assert_eq!(active_text(&editor), "fn f() {\n  g();\nh();\n}\n");
-    run(&mut editor, &mut view, &cmd_with("reindent", json!({ "single_line": false })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("reindent", json!({ "single_line": false })),
+    );
     assert_eq!(active_text(&editor), "fn f() {\n  g();\n  h();\n}\n");
 }
 
@@ -1102,25 +1826,53 @@ fn reindent_in_on_pre_save_reaches_the_file() {
     let id = editor.active_document().unwrap().id;
     editor.text_for_editing(id).unwrap().push('\n');
     world.plugins.then([
-        plugin_call("run_command", json!(["view", id, "reindent", { "single_line": false }])),
+        plugin_call(
+            "run_command",
+            json!(["view", id, "reindent", { "single_line": false }]),
+        ),
         PluginMessage::Done { error: None },
     ]);
     assert!(editor.save_active(false));
-    assert!(world.file_text("/p/a.rs").contains("\n\tg();\n"), "{}", world.file_text("/p/a.rs"));
+    assert!(
+        world.file_text("/p/a.rs").contains("\n\tg();\n"),
+        "{}",
+        world.file_text("/p/a.rs")
+    );
 }
 
 #[test]
 fn motions_and_deletes_run_as_commands_on_every_selection() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "ab\ncd\n", Selection::caret(0));
-    run(&mut editor, &mut view, &cmd_with("move_to", json!({ "to": "eof" })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(6));
-    run(&mut editor, &mut view, &cmd_with("move", json!({ "by": "lines", "forward": false, "extend": true })));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(6, 3));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("move_to", json!({ "to": "eof" })),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(6)
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "move",
+            json!({ "by": "lines", "forward": false, "extend": true }),
+        ),
+    );
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(6, 3)
+    );
     run(&mut editor, &mut view, &cmd("right_delete"));
     assert_eq!(active_text(&editor), "ab\n");
 
-    run(&mut editor, &mut view, &cmd_with("move_to", json!({ "to": "brackets" })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("move_to", json!({ "to": "brackets" })),
+    );
     assert_eq!(status(&editor), "move_to to brackets is not supported");
 }
 
@@ -1133,7 +1885,10 @@ fn a_listener_s_move_runs_during_the_event() {
     let id = editor.active_document().unwrap().id;
     editor.text_for_editing(id).unwrap().push('!');
     world.plugins.then([
-        plugin_call("run_command", json!(["view", id, "move_to", { "to": "eof" }])),
+        plugin_call(
+            "run_command",
+            json!(["view", id, "move_to", { "to": "eof" }]),
+        ),
         plugin_call("run_command", json!(["view", id, "left_delete", null])),
         PluginMessage::Done { error: None },
     ]);
@@ -1143,11 +1898,19 @@ fn a_listener_s_move_runs_during_the_event() {
 
 #[test]
 fn the_default_keymaps_bind_what_the_hooks_must_hear() {
-    for (source, primary) in [(builtin_resources::PC_KEYMAP, "ctrl"), (builtin_resources::OSX_KEYMAP, "super")] {
+    for (source, primary) in [
+        (builtin_resources::PC_KEYMAP, "ctrl"),
+        (builtin_resources::OSX_KEYMAP, "super"),
+    ] {
         let Value::Array(bindings) = sublime_json::parse(source).unwrap() else {
             panic!("a keymap is a list");
         };
-        let bound = |key: &str| bindings.iter().find(|b| b["keys"] == json!([key])).map(|b| b["command"].as_str().unwrap());
+        let bound = |key: &str| {
+            bindings
+                .iter()
+                .find(|b| b["keys"] == json!([key]))
+                .map(|b| b["command"].as_str().unwrap())
+        };
         assert_eq!(bound(&format!("{primary}+z")), Some("undo"));
         assert_eq!(bound(&format!("{primary}+y")), Some("redo_or_repeat"));
         assert_eq!(bound(&format!("{primary}+a")), Some("select_all"));
@@ -1158,17 +1921,32 @@ fn the_default_keymaps_bind_what_the_hooks_must_hear() {
 fn typing_asks_the_listener_and_replays_it_to_the_widget() {
     let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
-    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    world.plugins.then([
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+    ]);
     let typed = Command::with_args("insert", json!({ "characters": "a" }));
-    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("a".into())));
-    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("a".into()))]);
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        typed,
+        WidgetEdit::Insert("a".into())
+    ));
+    assert_eq!(
+        view.take_requests(),
+        [ViewRequest::WidgetEdit(WidgetEdit::Insert("a".into()))]
+    );
     let queries = world.plugins.queries.borrow();
     assert_eq!(queries[0].0, "on_text_command");
     assert_eq!(queries[0].2, json!(["insert", { "characters": "a" }]));
     drop(queries);
 
     poll_plugins(&mut editor, &mut view);
-    assert_eq!(world.plugins.queries.borrow().len(), 1, "the widget has not typed it yet");
+    assert_eq!(
+        world.plugins.queries.borrow().len(),
+        1,
+        "the widget has not typed it yet"
+    );
     world.plugins.then([PluginMessage::Answer(Value::Null)]);
     poll_plugins(&mut editor, &mut view);
     let queries = world.plugins.queries.borrow();
@@ -1180,10 +1958,20 @@ fn typing_asks_the_listener_and_replays_it_to_the_widget() {
 fn a_listener_replaces_the_typed_characters_the_widget_receives() {
     let world = World::new().with_plugins(&[], &["on_text_command"]);
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
-    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "()" }]))]);
+    world.plugins.then([PluginMessage::Answer(
+        json!(["insert", { "characters": "()" }]),
+    )]);
     let typed = Command::with_args("insert", json!({ "characters": "(" }));
-    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("(".into())));
-    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("()".into()))]);
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        typed,
+        WidgetEdit::Insert("(".into())
+    ));
+    assert_eq!(
+        view.take_requests(),
+        [ViewRequest::WidgetEdit(WidgetEdit::Insert("()".into()))]
+    );
 }
 
 #[test]
@@ -1193,22 +1981,52 @@ fn typing_with_several_selections_edits_all_of_them() {
     editor.add_carets_on_next_line(true);
     world.plugins.then([PluginMessage::Answer(Value::Null)]);
     let typed = Command::with_args("insert", json!({ "characters": "x" }));
-    assert!(hooked_widget_input(&mut editor, &mut view, typed, WidgetEdit::Insert("x".into())));
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        typed,
+        WidgetEdit::Insert("x".into())
+    ));
     assert_eq!(active_text(&editor), "axbc\naxbc");
-    assert!(view.take_requests().is_empty(), "the use case did it, not the widget");
+    assert!(
+        view.take_requests().is_empty(),
+        "the use case did it, not the widget"
+    );
 }
 
 #[test]
 fn deleting_and_moving_replay_the_widget_key_when_nobody_replaces_them() {
     let world = World::new().with_plugins(&[], &["on_text_command"]);
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
-    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
-    let backspace = WidgetEdit::Key { key: WidgetKey::Backspace, shift: false };
-    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("left_delete"), backspace.clone()));
+    world.plugins.then([
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+    ]);
+    let backspace = WidgetEdit::Key {
+        key: WidgetKey::Backspace,
+        shift: false,
+    };
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        Command::new("left_delete"),
+        backspace.clone()
+    ));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(backspace)]);
-    let right = WidgetEdit::Key { key: WidgetKey::Right, shift: true };
-    let command = Command::with_args("move", json!({ "by": "characters", "forward": true, "extend": true }));
-    assert!(hooked_widget_input(&mut editor, &mut view, command, right.clone()));
+    let right = WidgetEdit::Key {
+        key: WidgetKey::Right,
+        shift: true,
+    };
+    let command = Command::with_args(
+        "move",
+        json!({ "by": "characters", "forward": true, "extend": true }),
+    );
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        command,
+        right.clone()
+    ));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(right)]);
 }
 
@@ -1216,25 +2034,61 @@ fn deleting_and_moving_replay_the_widget_key_when_nobody_replaces_them() {
 fn enter_and_tab_replay_their_key_so_indentation_still_applies() {
     let world = World::new().with_plugins(&[], &["on_text_command"]);
     let (mut editor, mut view) = setup(&world, "", Selection::caret(0));
-    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
-    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    world.plugins.then([
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+    ]);
+    let enter = WidgetEdit::Key {
+        key: WidgetKey::Enter,
+        shift: false,
+    };
     let command = Command::with_args("insert", json!({ "characters": "\n" }));
-    assert!(hooked_widget_input(&mut editor, &mut view, command, enter.clone()));
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        command,
+        enter.clone()
+    ));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(enter)]);
-    let tab = WidgetEdit::Key { key: WidgetKey::Tab, shift: false };
+    let tab = WidgetEdit::Key {
+        key: WidgetKey::Tab,
+        shift: false,
+    };
     let command = Command::with_args("insert", json!({ "characters": "\t" }));
-    assert!(hooked_widget_input(&mut editor, &mut view, command, tab.clone()));
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        command,
+        tab.clone()
+    ));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(tab)]);
-    let unindent = WidgetEdit::Key { key: WidgetKey::Tab, shift: true };
-    assert!(hooked_widget_input(&mut editor, &mut view, Command::new("unindent"), unindent.clone()));
+    let unindent = WidgetEdit::Key {
+        key: WidgetKey::Tab,
+        shift: true,
+    };
+    assert!(hooked_widget_input(
+        &mut editor,
+        &mut view,
+        Command::new("unindent"),
+        unindent.clone()
+    ));
     assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(unindent)]);
 
     // A listener that changes them gets its characters typed instead.
-    world.plugins.then([PluginMessage::Answer(json!(["insert", { "characters": "  " }]))]);
-    let enter = WidgetEdit::Key { key: WidgetKey::Enter, shift: false };
+    world.plugins.then([PluginMessage::Answer(
+        json!(["insert", { "characters": "  " }]),
+    )]);
+    let enter = WidgetEdit::Key {
+        key: WidgetKey::Enter,
+        shift: false,
+    };
     let command = Command::with_args("insert", json!({ "characters": "\n" }));
     assert!(hooked_widget_input(&mut editor, &mut view, command, enter));
-    assert_eq!(view.take_requests(), [ViewRequest::WidgetEdit(WidgetEdit::Insert("  ".into()))]);
+    assert_eq!(
+        view.take_requests(),
+        [ViewRequest::WidgetEdit(WidgetEdit::Insert("  ".into()))]
+    );
 }
 
 // ----- side bar commands ---------------------------------------------------------------------------
@@ -1251,12 +2105,17 @@ fn side_bar_world() -> World {
         .map(|item| entities::menu::MenuItem {
             caption: item["caption"].as_str().unwrap_or_default().to_string(),
             id: item["id"].as_str().map(String::from),
-            command: item["command"].as_str().map(|name| Command::with_args(name, item.get("args").cloned().unwrap_or(json!({})))),
+            command: item["command"].as_str().map(|name| {
+                Command::with_args(name, item.get("args").cloned().unwrap_or(json!({})))
+            }),
             checkbox: false,
             children: vec![],
         })
         .collect();
-    World::new().with_context_menus(ContextMenus { side_bar, ..ContextMenus::default() })
+    World::new().with_context_menus(ContextMenus {
+        side_bar,
+        ..ContextMenus::default()
+    })
 }
 
 /// The commands the side bar menu shows on `path`.
@@ -1265,19 +2124,38 @@ fn side_bar_menu_commands(editor: &mut Editor, path: &str, is_dir: bool) -> Vec<
     use interface_adapters::controllers::ui_controller::{handle, UiEvent};
     use interface_adapters::presenters::menu::present_context_menu;
     let mut view = ViewState::default();
-    let target = ContextMenuTarget::SideBar { path: PathBuf::from(path), is_dir, root: false };
+    let target = ContextMenuTarget::SideBar {
+        path: PathBuf::from(path),
+        is_dir,
+        root: false,
+    };
     handle(editor, &mut view, UiEvent::ContextMenu(Some(target)));
-    present_context_menu(editor, &view).unwrap().entries.iter().filter_map(|e| e.command.as_ref().map(|c| c.name.clone())).collect()
+    present_context_menu(editor, &view)
+        .unwrap()
+        .entries
+        .iter()
+        .filter_map(|e| e.command.as_ref().map(|c| c.name.clone()))
+        .collect()
 }
 
 #[test]
 fn the_side_bar_menu_shows_the_commands_for_a_file_or_a_folder() {
     let world = side_bar_world();
     let mut editor = world.editor();
-    assert_eq!(side_bar_menu_commands(&mut editor, "/p/a.md", false), ["rename_path", "delete_file", "open_containing_folder"]);
+    assert_eq!(
+        side_bar_menu_commands(&mut editor, "/p/a.md", false),
+        ["rename_path", "delete_file", "open_containing_folder"]
+    );
     assert_eq!(
         side_bar_menu_commands(&mut editor, "/p/src", true),
-        ["new_file_at", "rename_path", "open_containing_folder", "new_folder", "delete_folder"]
+        [
+            "new_file_at",
+            "rename_path",
+            "open_containing_folder",
+            "new_folder",
+            "delete_folder",
+            "find_in_folder"
+        ]
     );
 }
 
@@ -1287,10 +2165,22 @@ fn new_folder_opens_the_input_panel_and_its_answer_makes_the_folder() {
     world.disk.mkdir("/p");
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    run(&mut editor, &mut view, &cmd_with("new_folder", json!({ "dirs": ["/p"] })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("new_folder", json!({ "dirs": ["/p"] })),
+    );
     assert!(view.input_panel.is_some(), "the panel shows at once");
-    interface_adapters::controllers::command_controller::change_plugin_input(&mut editor, &mut view, "made");
-    interface_adapters::controllers::command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    interface_adapters::controllers::command_controller::change_plugin_input(
+        &mut editor,
+        &mut view,
+        "made",
+    );
+    interface_adapters::controllers::command_controller::finish_plugin_input(
+        &mut editor,
+        &mut view,
+        true,
+    );
     assert!(world.disk.is_dir("/p/made"));
     assert!(view.input_panel.is_none());
 }
@@ -1302,7 +2192,14 @@ fn a_plugin_side_bar_command_replaces_the_built_in_one() {
     let mut editor = world.editor();
     let mut view = ViewState::default();
     world.plugins.then([PluginMessage::Done { error: None }]);
-    run(&mut editor, &mut view, &cmd_with("delete_file", json!({ "files": ["/p/a.md"], "prompt": false })));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "delete_file",
+            json!({ "files": ["/p/a.md"], "prompt": false }),
+        ),
+    );
     assert!(world.disk.trashed.borrow().is_empty());
     assert_eq!(world.plugins.runs.borrow()[0].1, "delete_file");
 }

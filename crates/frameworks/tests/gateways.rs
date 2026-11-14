@@ -33,7 +33,11 @@ fn missing_files() {
     assert!(!StdFileSystem.exists(&missing));
     assert!(StdFileSystem.modified(&missing).is_none());
     assert!(StdFileSystem.list_dir(&missing).is_empty());
-    assert_eq!(StdFileSystem.canonicalize(&missing), missing, "unchanged when it cannot be resolved");
+    assert_eq!(
+        StdFileSystem.canonicalize(&missing),
+        missing,
+        "unchanged when it cannot be resolved"
+    );
 }
 
 #[test]
@@ -44,7 +48,12 @@ fn list_dir_reports_files_and_folders() {
     let mut entries: Vec<(String, bool)> = StdFileSystem
         .list_dir(dir.path())
         .into_iter()
-        .map(|e| (e.path.file_name().unwrap().to_string_lossy().into_owned(), e.is_dir))
+        .map(|e| {
+            (
+                e.path.file_name().unwrap().to_string_lossy().into_owned(),
+                e.is_dir,
+            )
+        })
         .collect();
     entries.sort();
     assert_eq!(entries, vec![("a.txt".into(), false), ("src".into(), true)]);
@@ -64,13 +73,19 @@ fn canonicalize_resolves_dot_dot_without_the_windows_verbatim_prefix() {
 fn wait_for_scan(index: &mut FolderIndex) {
     let start = Instant::now();
     while !index.poll() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the scan did not finish");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the scan did not finish"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 fn names(files: &[PathBuf]) -> Vec<String> {
-    let mut names: Vec<String> = files.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    let mut names: Vec<String> = files
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
     names.sort();
     names
 }
@@ -92,12 +107,19 @@ fn the_index_lists_files_respecting_excludes_and_gitignore() {
 
     let mut index = FolderIndex::default();
     assert!(!index.is_indexing());
-    index.rebuild(vec![root.to_path_buf()], vec![".git".into(), "target".into()], vec!["*.pyc".into()]);
+    index.rebuild(
+        vec![root.to_path_buf()],
+        vec![".git".into(), "target".into()],
+        vec!["*.pyc".into()],
+    );
     assert!(index.is_indexing());
     wait_for_scan(&mut index);
 
     assert!(!index.is_indexing());
-    assert_eq!(names(index.files()), vec![".gitignore", "README.md", "main.rs"]);
+    assert_eq!(
+        names(index.files()),
+        vec![".gitignore", "README.md", "main.rs"]
+    );
     assert!(!index.poll(), "a finished scan is reported once");
 }
 
@@ -108,7 +130,11 @@ fn several_folders_are_indexed_together() {
     fs::write(a.path().join("one.txt"), "").unwrap();
     fs::write(b.path().join("two.txt"), "").unwrap();
     let mut index = FolderIndex::default();
-    index.rebuild(vec![a.path().to_path_buf(), b.path().to_path_buf()], vec![], vec![]);
+    index.rebuild(
+        vec![a.path().to_path_buf(), b.path().to_path_buf()],
+        vec![],
+        vec![],
+    );
     wait_for_scan(&mut index);
     assert_eq!(names(index.files()), vec!["one.txt", "two.txt"]);
 }
@@ -129,8 +155,17 @@ fn rebuilding_with_no_folders_empties_the_index() {
 
 #[test]
 fn the_session_lives_next_to_the_packages_folder() {
-    let paths = PackagePaths { packages: PathBuf::from("/data/Packages"), sublime_packages: None, archive_folders: Vec::new() };
-    assert_eq!(session_file(&paths), Path::new("/data").join("Local").join("Session.sublime_session"));
+    let paths = PackagePaths {
+        packages: PathBuf::from("/data/Packages"),
+        sublime_packages: None,
+        archive_folders: Vec::new(),
+    };
+    assert_eq!(
+        session_file(&paths),
+        Path::new("/data")
+            .join("Local")
+            .join("Session.sublime_session")
+    );
 }
 
 #[test]
@@ -138,6 +173,9 @@ fn packages_live_in_a_folder_named_packages() {
     let paths = package_paths();
     assert_eq!(paths.packages.file_name().unwrap(), "Packages");
     if let Some(sublime) = paths.sublime_packages {
-        assert!(sublime.is_dir(), "only reported when Sublime Text is installed");
+        assert!(
+            sublime.is_dir(),
+            "only reported when Sublime Text is installed"
+        );
     }
 }
