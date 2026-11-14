@@ -717,6 +717,7 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
         self.editor.poll_builds();
+        self.editor.poll_find_in_files();
         self.editor.poll_downloads();
         self.editor.poll_unpacking();
         self.editor.poll_syntax_failures();

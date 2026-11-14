@@ -618,6 +618,9 @@ impl Editor {
                 Ok(Value::Null)
             }
             "window_active_panel" if self.plugin_input_panel().is_some() => Ok(json!("input")),
+            "window_active_panel" if self.state.find_panel_shown.is_some() => {
+                Ok(json!(self.state.find_panel_shown))
+            }
             "window_active_panel" => Ok(self.shown_output_panel().map_or(Value::Null, |p| {
                 if p.name == "console" {
                     json!("console")

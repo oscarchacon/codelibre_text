@@ -180,6 +180,21 @@ fn panels_are_found_listed_emptied_and_destroyed() {
 }
 
 #[test]
+fn the_find_panels_are_the_active_panel_while_shown() {
+    let (world, mut editor, _) = setup();
+    editor.sync_find_panel(Some("find_in_files"));
+    assert_eq!(
+        call(&world, &mut editor, "window_active_panel", json!([1])),
+        Ok(json!("find_in_files"))
+    );
+    editor.sync_find_panel(None);
+    assert_eq!(
+        call(&world, &mut editor, "window_active_panel", json!([1])),
+        Ok(Value::Null)
+    );
+}
+
+#[test]
 fn shown_panel() {
     let (world, mut editor, _) = setup();
     assert!(!editor.show_output_panel("nope"));

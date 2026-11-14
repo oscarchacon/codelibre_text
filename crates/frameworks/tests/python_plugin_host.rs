@@ -14,8 +14,8 @@ use codelibre_text::gateways::python_plugin_host::{
 };
 use codelibre_text::gateways::{
     child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog,
-    folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
-    std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    folder_index::FolderIndex, folder_search::FolderSearch, native_dialogs::NativeDialogs,
+    os_shell::OsShell, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
     system_clipboard::SystemClipboard,
 };
 use codelibre_text::syntax_engine::SyntaxEngine;
@@ -125,6 +125,7 @@ fn editor_with_load_errors(dir: &Path, plugin: &str) -> Option<Editor> {
         syntaxes: Box::new(SyntectSyntaxes(engine)),
         sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),

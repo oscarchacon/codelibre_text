@@ -7,7 +7,7 @@
 //! Lines matching the view settings `result_file_regex` / `result_line_regex` are results: places
 //! in files that `next_result` and `prev_result` go through (relative paths are under `result_base_dir`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use entities::build::{find_results, ResultLocation};
 use entities::document::{Document, DocumentId, LineEnding};
@@ -265,7 +265,15 @@ impl Editor {
             panel.current_result = Some(result.line);
             panel.result_revision += 1;
         }
-        let path = Path::new(base.as_deref().unwrap_or_default()).join(&result.file);
+        // Find Results writes the home folder as `~`.
+        let file = match (
+            result.file.strip_prefix("~/"),
+            self.gateways.shell.home_folder(),
+        ) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => PathBuf::from(&result.file),
+        };
+        let path = Path::new(base.as_deref().unwrap_or_default()).join(file);
         // `open_file` would make an empty buffer for a file that is not there.
         if !self.gateways.file_system.exists(&path) {
             self.notify(self.tr_args("File not found: {path}", &[("path", &path.display())]));
@@ -273,6 +281,9 @@ impl Editor {
         }
         if self.open_file(&path) {
             self.go_to_position(result.row - 1, result.column - 1);
+            if panel == crate::find_in_files::FIND_RESULTS_PANEL {
+                self.select_find_result_match();
+            }
         }
         if !result.message.is_empty() {
             self.notify(result.message.clone());

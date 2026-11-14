@@ -11,6 +11,7 @@ pub mod command;
 pub mod completion;
 pub mod document;
 pub mod find;
+pub mod find_in_files;
 pub mod keymap;
 pub mod layout;
 pub mod localization;

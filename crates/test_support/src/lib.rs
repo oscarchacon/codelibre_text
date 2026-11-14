@@ -22,6 +22,7 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use entities::document::DocumentId;
+use entities::find_in_files::{search_bytes, search_text, FileHits};
 use entities::keymap::{Binding, Keymap};
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
@@ -31,10 +32,11 @@ use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
     ArchiveFolder, ClipboardGateway, ContextFrame, DialogGateway, DirectoryEntry, DownloadGateway,
-    ErrorLogGateway, FileFilter, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog,
-    PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent,
-    ProcessGateway, ProcessRequest, ResourceGateway, ScopeSpan, SessionGateway, ShellGateway,
-    SyntaxGateway, SyntaxInfo, UiResources,
+    ErrorLogGateway, FileFilter, FileIndexGateway, FileSearchEvent, FileSearchGateway,
+    FileSearchRequest, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
+    PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway,
+    ProcessRequest, ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway,
+    SyntaxInfo, UiResources,
 };
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
@@ -1000,6 +1002,81 @@ impl FileIndexGateway for FakeFileIndex {
     }
 }
 
+// ----- find in files -------------------------------------------------------------------------------
+
+/// What Find in Files asked for; while `paused`, the search finds nothing yet (to test cancelling).
+#[derive(Default)]
+pub struct FileSearchScript {
+    pub requests: RefCell<Vec<FileSearchRequest>>,
+    pub paused: Cell<bool>,
+}
+
+/// Searches the memory disk at once, with the entities' rules (the real one walks folders on a
+/// thread).
+struct FakeFileSearch {
+    disk: Rc<MemoryDisk>,
+    script: Rc<FileSearchScript>,
+    events: VecDeque<FileSearchEvent>,
+}
+
+impl FileSearchGateway for FakeFileSearch {
+    fn start(&mut self, request: FileSearchRequest) {
+        self.script.requests.borrow_mut().push(request.clone());
+        self.events.clear();
+        let mut files: Vec<PathBuf> = Vec::new();
+        for root in &request.roots {
+            let all: Vec<PathBuf> = self.disk.files.borrow().keys().cloned().collect();
+            for file in all.into_iter().filter(|f| f.starts_with(root)) {
+                let skipped = file
+                    .ancestors()
+                    .skip(1)
+                    .take_while(|dir| dir.starts_with(root) && *dir != root.as_path())
+                    .any(|dir| request.filter.skips_folder(dir));
+                if !skipped && request.filter.accepts_file(&file) && !files.contains(&file) {
+                    files.push(file);
+                }
+            }
+        }
+        self.events.push_back(FileSearchEvent::Listed(files.len()));
+        let pattern = request
+            .options
+            .pattern()
+            .ok()
+            .flatten()
+            .expect("a valid query");
+        for file in files {
+            let open = request.open_texts.iter().find(|(p, _)| *p == file);
+            let found = match open {
+                Some((_, text)) => Some(search_text(&pattern, text, request.context_lines)),
+                None => search_bytes(
+                    &pattern,
+                    &self.disk.bytes(&file).unwrap_or_default(),
+                    request.context_lines,
+                ),
+            };
+            if let Some((lines, matches)) = found.filter(|(_, m)| *m > 0) {
+                self.events.push_back(FileSearchEvent::Found(FileHits {
+                    path: file,
+                    lines,
+                    matches,
+                }));
+            }
+        }
+        self.events.push_back(FileSearchEvent::Done);
+    }
+
+    fn poll(&mut self) -> Vec<FileSearchEvent> {
+        if self.script.paused.get() {
+            return Vec::new();
+        }
+        self.events.drain(..).collect()
+    }
+
+    fn cancel(&mut self) {
+        self.events.clear();
+    }
+}
+
 // ----- the world -----------------------------------------------------------------------------------
 
 /// Shared state of every fake gateway.
@@ -1011,6 +1088,7 @@ pub struct World {
     pub syntaxes: Rc<Syntaxes>,
     pub session: Rc<RefCell<Option<Session>>>,
     pub file_index: Rc<FileIndex>,
+    pub file_search: Rc<FileSearchScript>,
     /// Folders opened in the file manager.
     pub opened_folders: Rc<RefCell<Vec<PathBuf>>>,
     /// Files shown selected in the file manager.
@@ -1076,6 +1154,7 @@ impl World {
             syntaxes: Rc::default(),
             session: Rc::default(),
             file_index: Rc::default(),
+            file_search: Rc::default(),
             opened_folders: Rc::default(),
             selected_files: Rc::default(),
             opened_urls: Rc::default(),
@@ -1237,6 +1316,11 @@ impl World {
             resources: Box::new(FakeResources(self.resources.clone())),
             syntaxes: Box::new(FakeSyntaxes(self.syntaxes.clone())),
             sessions: Box::new(FakeSessions(self.session.clone())),
+            file_search: Box::new(FakeFileSearch {
+                disk: self.disk.clone(),
+                script: self.file_search.clone(),
+                events: VecDeque::new(),
+            }),
             file_index: Box::new(FakeFileIndex {
                 shared: self.file_index.clone(),
                 files: self.file_index.files.clone(),

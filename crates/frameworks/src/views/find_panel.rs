@@ -1,6 +1,7 @@
 //! Find / replace panel at the bottom, with Sublime's option toggles.
 
 use egui::{Id, Key, RichText, Ui};
+use entities::command::Command;
 use entities::find::FindOptions;
 use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
@@ -23,6 +24,17 @@ pub fn show(
         wrap: panel.wrap,
     };
     let mut replacement = panel.replacement.clone();
+    let mut where_text = panel.where_text.clone();
+    // Enter searches the files in Find in Files, else goes to the next match.
+    let enter_event = |backwards: bool| {
+        if panel.in_files {
+            UiEvent::FindAll
+        } else if backwards {
+            UiEvent::FindPrevious
+        } else {
+            UiEvent::FindNext
+        }
+    };
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
@@ -62,11 +74,7 @@ pub fn show(
         }
         if query.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             let backwards = ui.input(|i| i.modifiers.shift);
-            events.push(if backwards {
-                UiEvent::FindPrevious
-            } else {
-                UiEvent::FindNext
-            });
+            events.push(enter_event(backwards));
             query.request_focus();
         }
 
@@ -85,6 +93,12 @@ pub fn show(
             {
                 events.push(UiEvent::CloseFindPanel);
             }
+            if panel.in_files {
+                if ui.button(text.tr("Find")).clicked() {
+                    events.push(UiEvent::FindAll);
+                }
+                return;
+            }
             if ui.button(text.tr("Find Prev")).clicked() {
                 events.push(UiEvent::FindPrevious);
             }
@@ -94,7 +108,27 @@ pub fn show(
         });
     });
 
-    if panel.replace_mode {
+    if panel.in_files {
+        ui.horizontal(|ui| {
+            ui.add_space(4.0 * 32.0 + 6.0);
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut where_text)
+                    .id(Id::new("where_input"))
+                    .hint_text(text.tr("Where"))
+                    .desired_width((ui.available_width() - 260.0).max(160.0))
+                    .font(egui::TextStyle::Monospace),
+            );
+            if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                events.push(UiEvent::FindAll);
+                field.request_focus();
+            }
+            ui.menu_button("…", |ui| where_menu(ui, text, events))
+                .response
+                .on_hover_text(text.tr("Where to search"));
+        });
+    }
+
+    if panel.replace_mode || panel.in_files {
         ui.horizontal(|ui| {
             ui.add_space(4.0 * 32.0 + 6.0);
             let field = ui.add(
@@ -105,11 +139,22 @@ pub fn show(
                     .font(egui::TextStyle::Monospace),
             );
             if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                events.push(UiEvent::ReplaceNext);
+                events.push(if panel.in_files {
+                    UiEvent::FindAll
+                } else {
+                    UiEvent::ReplaceNext
+                });
                 field.request_focus();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(26.0);
+                if panel.in_files {
+                    // Replaces in every file the search finds (it asks first).
+                    if ui.button(text.tr("Replace")).clicked() {
+                        events.push(UiEvent::ReplaceAll);
+                    }
+                    return;
+                }
                 if ui.button(text.tr("Replace All")).clicked() {
                     events.push(UiEvent::ReplaceAll);
                 }
@@ -132,6 +177,35 @@ pub fn show(
     }
     if replacement != panel.replacement {
         events.insert(0, UiEvent::ReplacementChanged(replacement));
+    }
+    if where_text != panel.where_text {
+        events.insert(0, UiEvent::FindWhereChanged(where_text));
+    }
+}
+
+/// Sublime's `Find in Files.sublime-menu`: what the "…" button adds to "Where".
+fn where_menu(ui: &mut Ui, text: &Translations, events: &mut Vec<UiEvent>) {
+    let snippet = |snippet: &str| {
+        Command::with_args(
+            "add_where_snippet",
+            serde_json::json!({ "snippet": snippet }),
+        )
+    };
+    let items = [
+        (text.tr("Clear"), Command::new("clear_location")),
+        (text.tr("Add Folder"), Command::new("add_directory")),
+        (text.tr("Add Include Filter"), snippet("*.${0:txt}")),
+        (text.tr("Add Exclude Filter"), snippet("-*.${0:txt}")),
+        (text.tr("Add Project Filters"), snippet("<project filters>")),
+        (text.tr("Add Open Folders"), snippet("<open folders>")),
+        (text.tr("Add Open Files"), snippet("<open files>")),
+        (text.tr("Add Current File"), snippet("<current file>")),
+    ];
+    for (caption, command) in items {
+        if ui.button(caption).clicked() {
+            events.push(UiEvent::RunCommand(command));
+            ui.close_menu();
+        }
     }
 }
 

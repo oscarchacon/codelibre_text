@@ -50,6 +50,12 @@ impl Editor {
         self.state.window_chrome = shown;
     }
 
+    /// The find panel the view shows (`find`, `replace`, `find_in_files`), for
+    /// `window.active_panel()`. The controller reports it every frame, like the chrome.
+    pub fn sync_find_panel(&mut self, name: Option<&str>) {
+        self.state.find_panel_shown = name.map(String::from);
+    }
+
     /// What plugins asked the current window to show or hide since the last call, in order.
     pub fn take_window_chrome_requests(&mut self) -> Vec<(String, bool)> {
         std::mem::take(&mut self.state.window_chrome_requests)

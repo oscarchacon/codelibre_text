@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use entities::document::DocumentId;
+use entities::find::FindOptions;
+use entities::find_in_files::{FileHits, PathFilter};
 use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
@@ -570,4 +572,41 @@ pub trait FileIndexGateway {
     fn poll(&mut self) -> bool;
     fn files(&self) -> &[PathBuf];
     fn is_indexing(&self) -> bool;
+}
+
+/// What a Find in Files search reads ([`FileSearchGateway::start`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileSearchRequest {
+    /// Folders (searched with their subfolders) and files.
+    pub roots: Vec<PathBuf>,
+    pub filter: PathFilter,
+    /// A valid, non-empty query.
+    pub options: FindOptions,
+    /// Lines shown around each match (`find_in_files_context_lines`).
+    pub context_lines: usize,
+    /// Files bigger than this are skipped (`find_in_files_max_file_size`; 0: no limit).
+    pub max_file_size: u64,
+    /// The text of open files, searched instead of what is on disk.
+    pub open_texts: Vec<(PathBuf, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileSearchEvent {
+    /// How many files will be searched (first, once they are listed).
+    Listed(usize),
+    /// A file with matches, in path order.
+    Found(FileHits),
+    /// A file that could not be read.
+    Failed(PathBuf, String),
+    /// The search ended (not sent after `cancel`).
+    Done,
+}
+
+/// Searches files in the background (Find in Files).
+pub trait FileSearchGateway {
+    /// Starts a search; one still running is cancelled.
+    fn start(&mut self, request: FileSearchRequest);
+    /// What the search found since the last call; never waits.
+    fn poll(&mut self) -> Vec<FileSearchEvent>;
+    fn cancel(&mut self);
 }

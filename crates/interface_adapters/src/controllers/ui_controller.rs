@@ -109,6 +109,10 @@ pub enum UiEvent {
 
     FindOptionsChanged(FindOptions),
     ReplacementChanged(String),
+    /// Find in Files' "Where" field changed.
+    FindWhereChanged(String),
+    /// Find in Files' Find button (or Enter in its fields).
+    FindAll,
     FindNext,
     FindPrevious,
     ReplaceNext,
@@ -357,6 +361,8 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
 
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
+        UiEvent::FindWhereChanged(text) => editor.set_find_where(text),
+        UiEvent::FindAll => view.queue_command(Command::new("find_all")),
         UiEvent::FindNext => view.queue_command(Command::new("find_next")),
         UiEvent::FindPrevious => view.queue_command(Command::new("find_prev")),
         UiEvent::ReplaceNext => view.queue_command(Command::new("replace_next")),

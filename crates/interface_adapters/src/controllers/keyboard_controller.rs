@@ -102,6 +102,7 @@ pub fn key_pressed(
             || editor.shown_output_panel().is_some(),
         // Output panels are not focused: the caret stays in the text.
         panel_has_focus: view.find_panel.visible || view.input_panel.is_some(),
+        panel: shown_panel(editor, view),
         num_selections: editor
             .active_document()
             .map_or(1, |d| d.extra_selections().len() + 1),
@@ -334,12 +335,27 @@ fn takes_over_from_widget(editor: &mut Editor, view: &ViewState, command: &str) 
         }
 }
 
+/// The panel shown, as the `panel` context names it ("" for none).
+fn shown_panel(editor: &Editor, view: &ViewState) -> String {
+    if let Some(name) = view.find_panel_name() {
+        return name.to_string();
+    }
+    if view.input_panel.is_some() {
+        return "input".to_string();
+    }
+    editor
+        .shown_output_panel()
+        .map_or_else(String::new, |p| format!("output.{}", p.name))
+}
+
 /// Answers keymap `context` conditions from the current screen state.
 struct ViewKeyContext {
     auto_complete_visible: bool,
     overlay_visible: bool,
     panel_visible: bool,
     panel_has_focus: bool,
+    /// The `panel` context: `find`, `replace`, `find_in_files`, `input` or `output.<name>`.
+    panel: String,
     num_selections: usize,
     settings: Settings,
     /// Every selection of the active view: what `selector`, `selection_empty`,
@@ -423,6 +439,7 @@ impl KeyContext for ViewKeyContext {
             "overlay_visible" | "overlay_has_focus" => Value::Bool(self.overlay_visible),
             "panel_visible" => Value::Bool(self.panel_visible),
             "panel_has_focus" => Value::Bool(self.panel_has_focus),
+            "panel" => Value::String(self.panel.clone()),
             "num_selections" => Value::from(self.num_selections),
             "auto_complete_visible" => Value::Bool(self.auto_complete_visible),
             "has_next_field" => Value::Bool(self.has_next_field),

@@ -211,6 +211,9 @@ pub struct FindPanelViewModel {
     pub query: String,
     pub replacement: String,
     pub replace_mode: bool,
+    /// Find in Files: the "Where" field shows.
+    pub in_files: bool,
+    pub where_text: String,
     pub regex: bool,
     pub case_sensitive: bool,
     pub whole_word: bool,

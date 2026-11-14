@@ -97,6 +97,10 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
   them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
   IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
+- Find in Files (`use_cases/src/find_in_files.rs`, rules in `entities/src/find_in_files.rs`): `FileSearchGateway`
+  (`gateways/folder_search.rs`) lists and searches on threads; `Editor::poll_find_in_files` (every frame) writes
+  Find Results to the output panel `find_results` in Sublime 4215's exact format (checked by running it), so
+  `next_result` / double click work through `result_file_regex` / `result_line_regex`.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
@@ -138,5 +142,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
 phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
-on the bundled 3.13), folding, find in files. The minimap (`views/minimap.rs`) draws words as bars, not glyphs.
+on the bundled 3.13), folding, Find Results in a tab (`use_buffer`: they go to the `find_results` panel). The minimap (`views/minimap.rs`) draws words as bars, not glyphs.
 Highlighting is skipped above 4 MB.

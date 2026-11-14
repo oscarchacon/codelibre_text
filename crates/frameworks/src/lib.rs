@@ -29,9 +29,10 @@ use use_cases::{Editor, Gateways};
 
 use gateways::{
     app_directories, child_processes::ChildProcesses, curl_downloads::CurlDownloads,
-    file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs,
-    os_shell::OsShell, python_plugin_host::PythonPluginHost, std_file_system::StdFileSystem,
-    syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
+    file_error_log::FileErrorLog, folder_index::FolderIndex, folder_search::FolderSearch,
+    native_dialogs::NativeDialogs, os_shell::OsShell, python_plugin_host::PythonPluginHost,
+    std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    system_clipboard::SystemClipboard,
 };
 use syntax_engine::{SharedSyntaxEngine, SyntaxEngine};
 
@@ -59,6 +60,7 @@ pub fn compose(paths: Vec<PathBuf>, ctx: egui::Context) -> (Editor, ViewState, S
         syntaxes: Box::new(SyntectSyntaxes(engine.clone())),
         sessions: Box::new(SessionFileGateway::new(session_file)),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default().with_waker(waker.clone())),
         shell: Box::new(OsShell),
         plugins: Box::new(plugin_host),
         processes: Box::new(ChildProcesses::default().with_waker(waker.clone())),

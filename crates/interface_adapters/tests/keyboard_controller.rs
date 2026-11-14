@@ -450,6 +450,25 @@ fn panel_visible_context() {
 }
 
 #[test]
+fn the_panel_context_names_the_panel_shown() {
+    let world = World::new().with_binding(bind(
+        &["enter"],
+        Command::new("find_all"),
+        vec![
+            json!({ "key": "panel", "operand": "find_in_files" }),
+            json!({ "key": "panel_has_focus" }),
+        ],
+    ));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.find_panel.visible = true;
+    assert!(!press(&mut editor, &mut view, "enter"), "the find panel");
+    view.find_panel.in_files = true;
+    assert!(press(&mut editor, &mut view, "enter"));
+    assert_eq!(queued(&mut view), vec!["find_all"]);
+}
+
+#[test]
 fn plugins_answer_contexts_the_editor_does_not_know() {
     let world = World::new()
         .with_binding(bind(

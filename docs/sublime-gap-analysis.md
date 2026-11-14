@@ -38,7 +38,7 @@ cannot be told apart by the string scan and are listed under native.
 | Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
-| Find in Files | `show_panel` `find_in_files` (UI exists but no search), `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder` | native / py |
+| Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), results in a tab (`use_buffer`), `find_in_files_side_by_side` | native / py |
 | Snippets | `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
 | Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |
@@ -63,14 +63,14 @@ cannot be told apart by the string scan and are listed under native.
 - Files: `default_encoding`, `fallback_encoding`, `reload_file_on_change`, `always_prompt_for_file_reload`, `save_on_focus_lost`,
   `binary_file_patterns`, `close_windows_when_empty`, `open_files_in_new_window`.
 - Status bar: `show_encoding`, `show_line_endings`, `show_line_column`, `show_syntax`, `show_indentation`, `show_full_path`.
-- Find: `find_selected_text`, `auto_find_in_selection`, `close_find_after_*`, `find_in_files_*`.
+- Find: `find_selected_text`, `auto_find_in_selection`, `close_find_after_replace_all`, `find_in_files_side_by_side`, `find_in_files_max_result_size` (`close_find_after_find_all`, `find_in_files_context_lines` / `_context_characters` / `_max_file_size` / `_suppress_errors`: read since 2026-11-14).
 - Feature-bound (need the feature first): `auto_complete_delay` / `_use_history` / `_cycle`, `spell_check`/`dictionary`, `mini_diff`/`git_diff_target`, `show_git_status`,
   `index_*`, `show_definitions`, `hot_exit_projects`, `remember_layout`, `vintage_*`.
 
 ## Suggested order
 
 1. Multiple cursors (`select_lines`, `split_selection_into_lines`, `find_all_under`) — builds on `Document::edit_all`.
-2. Find panel toggles + `find_all` + Find in Files.
+2. Find panel toggles (`find_all` and Find in Files: done).
 3. `wrap_lines`, `expand_selection_to_paragraph`, `toggle_bookmark`/`next_bookmark`, `switch_file` — small entity-level work.
 4. Status-bar and display settings (`draw_white_space`, `match_brackets`, `font_face`, `show_encoding`…).
 5. Folding, auto-complete, split layouts, `mini_diff` — larger view work.

@@ -304,6 +304,97 @@ fn closing_a_normal_quick_panel_changes_no_setting() {
 // ----- find panel ----------------------------------------------------------------------------------
 
 #[test]
+fn find_in_files_searches_into_the_results_panel() {
+    let world = World::new();
+    world.disk.put("/p/a.txt", "a foo\n");
+    world.disk.put("/p/b.txt", "nothing\n");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "find_in_files", "where": "/p, *.txt", "case_sensitive": true }),
+        ),
+    );
+    assert!(view.find_panel.visible && view.find_panel.in_files);
+    assert_eq!(editor.find_where(), "/p, *.txt");
+    assert!(editor.state().find.case_sensitive);
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    assert!(!view.find_panel.visible, "the results take its place");
+    editor.poll_find_in_files();
+    let panel = editor.shown_output_panel().unwrap();
+    assert_eq!(panel.name, "find_results");
+    assert_eq!(
+        panel.document.text,
+        "Searching 2 files for \"foo\" (case sensitive)\n\n/p/a.txt:\n    1: a foo\n    2  \n\n1 match in 1 file\n"
+    );
+    run(&mut editor, &mut view, &cmd("next_result"));
+    assert_eq!(active_text(&editor), "a foo\n");
+
+    // The same panel toggles; another one replaces it.
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find_in_files" })),
+    );
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find", "toggle": true })),
+    );
+    assert!(view.find_panel.visible && !view.find_panel.in_files);
+}
+
+#[test]
+fn find_all_selects_every_match_in_the_find_panel() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "cat dog cat", Selection::caret(0));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
+    let mut options = editor.state().find.clone();
+    options.query = "cat".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        doc.selections(),
+        vec![Selection::new(0, 3), Selection::new(8, 11)]
+    );
+    assert!(!view.find_panel.visible, "close_find_after_find_all");
+}
+
+#[test]
+fn find_in_folder_opens_find_in_files_on_the_folders() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("find_in_folder", json!({ "dirs": ["/p/src"] })),
+    );
+    assert!(view.find_panel.visible && view.find_panel.in_files);
+    assert_eq!(editor.find_where(), "/p/src,<project filters>");
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("add_where_snippet", json!({ "snippet": "-*.${0:txt}" })),
+    );
+    assert_eq!(editor.find_where(), "/p/src,<project filters>,-*.txt");
+    run(&mut editor, &mut view, &cmd("clear_location"));
+    assert_eq!(editor.find_where(), "");
+}
+
+#[test]
 fn show_panel_find_and_replace() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "cat dog", Selection::new(0, 3));
@@ -2062,7 +2153,8 @@ fn the_side_bar_menu_shows_the_commands_for_a_file_or_a_folder() {
             "rename_path",
             "open_containing_folder",
             "new_folder",
-            "delete_folder"
+            "delete_folder",
+            "find_in_folder"
         ]
     );
 }

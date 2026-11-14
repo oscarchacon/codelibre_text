@@ -20,11 +20,12 @@ use entities::completion::CompletionSet;
 
 use crate::builds::{BuildOption, BuildState};
 use crate::completions::{AutoComplete, DueAutoComplete, LastCompletion};
+use crate::find_in_files::FindInFilesState;
 use crate::find_replace::FindCache;
 use crate::gateways::{
     ClipboardGateway, DialogGateway, DownloadGateway, ErrorLogGateway, FileIndexGateway,
-    FileSystemGateway, PluginHostGateway, ProcessGateway, ResourceGateway, SessionGateway,
-    ShellGateway, SyntaxGateway,
+    FileSearchGateway, FileSystemGateway, PluginHostGateway, ProcessGateway, ResourceGateway,
+    SessionGateway, ShellGateway, SyntaxGateway,
 };
 use crate::output_panels::OutputPanels;
 use crate::packages::FolderStamp;
@@ -40,6 +41,7 @@ pub struct Gateways {
     pub syntaxes: Box<dyn SyntaxGateway>,
     pub sessions: Box<dyn SessionGateway>,
     pub file_index: Box<dyn FileIndexGateway>,
+    pub file_search: Box<dyn FileSearchGateway>,
     pub shell: Box<dyn ShellGateway>,
     pub plugins: Box<dyn PluginHostGateway>,
     pub processes: Box<dyn ProcessGateway>,
@@ -130,6 +132,8 @@ pub struct EditorState {
     /// The output panels plugins created (not tabs).
     pub(crate) output_panels: OutputPanels,
     pub(crate) builds: BuildState,
+    /// The "Where" field and the search running (see `find_in_files`).
+    pub(crate) find_in_files: FindInFilesState,
     /// The auto-complete list (see `completions`).
     pub(crate) auto_complete: Option<AutoComplete>,
     /// A list waiting for `auto_complete_delay`.
@@ -148,6 +152,8 @@ pub struct EditorState {
     /// What the current window shows around the text (`side_bar`, `status_bar`, `minimap`), as
     /// its view last reported it (`Editor::sync_window_chrome`), for `window.is_*_visible()`.
     pub(crate) window_chrome: Vec<(String, bool)>,
+    /// The find panel the current window's view shows (`Editor::sync_find_panel`).
+    pub(crate) find_panel_shown: Option<String>,
     /// What plugins asked the current window to show or hide (`window.set_*_visible`).
     pub(crate) window_chrome_requests: Vec<(String, bool)>,
     /// What each view of a buffer with clones looked like when they last followed each other.
@@ -223,6 +229,7 @@ impl Editor {
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),
                 builds: BuildState::default(),
+                find_in_files: FindInFilesState::default(),
                 auto_complete: None,
                 auto_complete_due: None,
                 last_completion: None,
@@ -234,6 +241,7 @@ impl Editor {
                 next_window_id: 1,
                 window_closing: false,
                 window_chrome: Vec::new(),
+                find_panel_shown: None,
                 window_chrome_requests: Vec::new(),
                 meta_preferences: Vec::new(),
                 completion_sets: None,

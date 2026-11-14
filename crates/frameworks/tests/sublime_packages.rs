@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
 use codelibre_text::gateways::{
     child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog,
-    folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
-    std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    folder_index::FolderIndex, folder_search::FolderSearch, native_dialogs::NativeDialogs,
+    os_shell::OsShell, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
     system_clipboard::SystemClipboard,
 };
 use codelibre_text::syntax_engine::SyntaxEngine;
@@ -180,6 +180,7 @@ fn the_plugins_sublime_ships_load() {
             dir.path().join("Session.sublime_session"),
         )),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -246,6 +247,7 @@ fn scratch_editor(dir: &Path) -> Editor {
         syntaxes: Box::new(SyntectSyntaxes(engine)),
         sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -1434,6 +1436,7 @@ fn package_control_loads_in_a_scratch_profile() {
             dir.path().join("Session.sublime_session"),
         )),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),

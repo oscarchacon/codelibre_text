@@ -141,3 +141,19 @@ impl Project {
         Some(file.with_extension("sublime-workspace"))
     }
 }
+
+/// Sublime-style exclude patterns: `*` and `?` wildcards matched against a file name.
+pub fn matches_pattern(pattern: &str, name: &str) -> bool {
+    fn matches(p: &[char], n: &[char]) -> bool {
+        match (p.first(), n.first()) {
+            (None, None) => true,
+            (Some('*'), _) => matches(&p[1..], n) || (!n.is_empty() && matches(p, &n[1..])),
+            (Some('?'), Some(_)) => matches(&p[1..], &n[1..]),
+            (Some(a), Some(b)) if a == b => matches(&p[1..], &n[1..]),
+            _ => false,
+        }
+    }
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    matches(&p, &n)
+}

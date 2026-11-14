@@ -23,6 +23,7 @@ pub const SIDE_BAR_COMMANDS: &[&str] = &[
     "rename_path",
     "delete_file",
     "delete_folder",
+    "find_in_folder",
 ];
 
 impl Editor {
@@ -35,9 +36,20 @@ impl Editor {
             "new_file_at" | "new_folder" => count("dirs") == 1,
             "rename_path" => count("paths") == 1,
             "delete_file" => count("files") > 0,
-            "delete_folder" => count("dirs") > 0,
+            "delete_folder" | "find_in_folder" => count("dirs") > 0,
             _ => true,
         }
+    }
+
+    /// `find_in_folder {"dirs"}`: Find in Files' "Where" becomes those folders (and the
+    /// project's filters), as Sublime's `side_bar.py` does; the panel opens after.
+    pub fn find_in_folder(&mut self, command: &Command) {
+        let mut entries: Vec<String> = paths(command, "dirs")
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect();
+        entries.push("<project filters>".to_string());
+        self.set_find_where(entries.join(","));
     }
 
     /// `new_file_at {"dirs"}`: a new file whose first save starts in that folder (`default_dir`).

@@ -23,7 +23,8 @@ standard library names newer Pythons dropped) with four more shims (`pipes`, `cg
 2026-11-14: plugins' edits in the widget's undo history (one step per frame), text input handlers in the palette's
 own field, the modifier keys of `WANT_EVENT` / `want_event()`, the console as an output panel, a focused panel's
 caret, and `window.is_*_visible` / `set_*_visible` for the side bar, status bar and minimap. What is left of phase B
-(unticked below) does not concern Package Control, whose part of phase C is done.
+(unticked below) does not concern Package Control, whose part of phase C is done. Also on 2026-11-14: Find in Files and
+its Find Results panel (below, with output panels).
 
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
@@ -343,8 +344,14 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] **A focused panel's caret** (2026-11-14): `window.focus_view(panel)` or a click in the panel gives its view the
       focus (`Editor::focus_output_panel`, `UiEvent::OutputPanelFocused`); its caret is drawn while it has it, and a
       tab, a group or a click in the text takes it back (`blur_output_panel`).
-- [ ] Output panels, still missing: results in Find Results (find in files is not implemented). `append` and result
-      lines work in panels; `unlisted`, `word_wrap` and `font_size` of the view are respected.
+- [x] **Find Results** (2026-11-14, `use_cases/src/find_in_files.rs`): Find in Files (Ctrl+Shift+F, `show_panel
+      {"panel": "find_in_files", "where"}`) writes to the output panel `find_results` (`window.find_output_panel
+      ("find_results")` finds it) what Sublime 4215 writes, checked by running it: `Searching 3 files for "foo"`, each
+      file as `~/path:` with its lines (`    2: match`, `    3  context`, `    .` between runs, `find_in_files_context_lines`),
+      long lines cut to `find_in_files_context_characters` (`<skipped N characters>`), and `4 matches across 2 files`.
+      Its `result_file_regex` / `result_line_regex` are Sublime's, so F4 and a double click go to each match (selected,
+      as in Sublime). `window.active_panel()` answers `find`, `replace` or `find_in_files` while one shows. Missing:
+      the results in a tab (Sublime's "Use Buffer"), with the matches outlined.
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
@@ -682,8 +689,8 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       FileManager) runs instead. Tests: `use_cases/tests/side_bar.rs`, the side bar ones of
       `interface_adapters/tests/command_controller.rs` and `presenters.rs`, `frameworks/tests/std_file_system.rs`
       (not the trash: it would fill the tester's). Missing: `Widget Context`, the menus of the find / output panels and
-      the gutter, `modifier_keys` (always empty), `find_in_folder` (find in files is not implemented), several
-      selected side bar entries.
+      the gutter, `modifier_keys` (always empty), several selected side bar entries. `find_in_folder {"dirs"}` (since
+      2026-11-14) opens Find in Files on the folders, as Sublime's `side_bar.py`; SideBarEnhancements' runs instead.
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).

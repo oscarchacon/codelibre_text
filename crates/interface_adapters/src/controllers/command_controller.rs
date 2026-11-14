@@ -29,10 +29,12 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
         editor.plugin_command_ran(&command, target);
     }
     editor.sync_window_chrome(view.layout());
+    editor.sync_find_panel(view.find_panel_name());
     editor.poll_plugins(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
     // `window.set_minimap_visible(…)` and the like, from any plugin call since the last frame.
     view.apply_layout(&editor.take_window_chrome_requests());
     editor.sync_window_chrome(view.layout());
+    editor.sync_find_panel(view.find_panel_name());
     let focused_panel = editor
         .shown_output_panel()
         .filter(|panel| editor.is_output_panel_focused(panel.document.id))
@@ -336,6 +338,11 @@ const WINDOW_COMMANDS: &[&str] = &[
     "select_language",
     "show_panel",
     "hide_panel",
+    "cancel_find",
+    "add_directory",
+    "clear_location",
+    "add_where_snippet",
+    "find_in_folder",
     "toggle_side_bar",
     "toggle_status_bar",
     "toggle_minimap",
@@ -572,6 +579,14 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             }),
         "delete_file" => editor.delete_file(command),
         "delete_folder" => editor.delete_folder(command),
+        "find_in_folder" => {
+            editor.find_in_folder(command);
+            let show = Command::with_args(
+                "show_panel",
+                serde_json::json!({ "panel": "find_in_files" }),
+            );
+            run(editor, view, &show);
+        }
         "save" => {
             editor.save_active(false);
         }
@@ -672,7 +687,8 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 "find" | "incremental_find" | "find_in_files" | "replace"
                     if toggle
                         && view.find_panel.visible
-                        && view.find_panel.replace_mode == (panel == "replace") =>
+                        && view.find_panel.replace_mode == (panel == "replace")
+                        && view.find_panel.in_files == (panel == "find_in_files") =>
                 {
                     view.find_panel.visible = false;
                 }
@@ -681,20 +697,24 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     editor.hide_output_panel();
                     view.find_panel.visible = true;
                     view.find_panel.replace_mode = panel == "replace";
+                    view.find_panel.in_files = panel == "find_in_files";
                     view.find_panel.focus_requested = true;
                     editor.use_selection_as_query_if_single_line();
+                    apply_find_panel_args(editor, command);
                 }
                 "console" if toggle => editor.toggle_console(),
                 "console" => editor.show_console(),
                 other => editor
                     .notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
             }
+            editor.sync_find_panel(view.find_panel_name());
         }
         "hide_panel" => {
             view.find_panel.visible = false;
             finish_plugin_input(editor, view, false);
             editor.hide_output_panel();
             view.focus_editor = true;
+            editor.sync_find_panel(None);
         }
 
         // ----- builds --------------------------------------------------------------------------
@@ -731,7 +751,24 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             find_next(editor, view, command.name == "find_under");
         }
         "replace_next" => editor.replace_next(),
+        "replace_all" if find_in_files_panel(view) => find_in_files(editor, view, true),
         "replace_all" => editor.replace_all(),
+        "find_all" if find_in_files_panel(view) => find_in_files(editor, view, false),
+        "find_all" => {
+            editor.select_find_matches();
+            let close = command.bool_arg("close_panel", false)
+                || editor
+                    .global_settings()
+                    .bool("close_find_after_find_all", true);
+            if close && view.find_panel.visible {
+                view.find_panel.visible = false;
+                view.focus_editor = true;
+            }
+        }
+        "cancel_find" => editor.cancel_find_in_files(),
+        "add_directory" => editor.prompt_add_where_folder(),
+        "clear_location" => editor.clear_where(),
+        "add_where_snippet" => editor.add_where_snippet(command.str_arg("snippet")),
 
         // ----- auto-complete -------------------------------------------------------------------
         "auto_complete" => editor.show_auto_complete(AutoCompleteOptions {
@@ -1144,6 +1181,37 @@ fn cancel_quick_panel(editor: &mut Editor, view: &mut ViewState) {
                 });
             show_plugin_panels(editor, view);
         }
+    }
+}
+
+/// The find panel shown is Find in Files'.
+fn find_in_files_panel(view: &ViewState) -> bool {
+    view.find_panel.visible && view.find_panel.in_files
+}
+
+/// Find in Files' Find / Replace: the results panel takes the find panel's place.
+fn find_in_files(editor: &mut Editor, view: &mut ViewState, replace: bool) {
+    if editor.find_in_files(replace) {
+        view.find_panel.visible = false;
+        finish_plugin_input(editor, view, false);
+        editor.sync_find_panel(None);
+    }
+}
+
+/// `show_panel`'s `where` (Find in Files) and the options `regex`, `case_sensitive` and
+/// `whole_word`, when given.
+fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
+    if let Some(place) = command.args.get("where").and_then(|v| v.as_str()) {
+        editor.set_find_where(place.to_string());
+    }
+    let mut options = editor.state().find.clone();
+    let flag = |key: &str| command.args.get(key).and_then(|v| v.as_bool());
+    options.regex = flag("regex").unwrap_or(options.regex);
+    options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
+    options.whole_word = flag("whole_word").unwrap_or(options.whole_word);
+    options.wrap = flag("wrap").unwrap_or(options.wrap);
+    if options != editor.state().find {
+        editor.set_find_options(options);
     }
 }
 

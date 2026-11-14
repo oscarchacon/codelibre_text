@@ -48,6 +48,8 @@ pub struct InputPanelState {
 pub struct FindPanelState {
     pub visible: bool,
     pub replace_mode: bool,
+    /// Find in Files: the "Where" field shows, and Find searches the files it lists.
+    pub in_files: bool,
     /// The query field should take keyboard focus on the next frame.
     pub focus_requested: bool,
 }
@@ -225,6 +227,20 @@ impl ViewState {
     }
 
     /// Flags saved with the session.
+    /// The find panel shown, as Sublime names it (`window.active_panel()`, the `panel` context).
+    pub fn find_panel_name(&self) -> Option<&'static str> {
+        let find = &self.find_panel;
+        if !find.visible {
+            None
+        } else if find.in_files {
+            Some("find_in_files")
+        } else if find.replace_mode {
+            Some("replace")
+        } else {
+            Some("find")
+        }
+    }
+
     pub fn layout(&self) -> Vec<(String, bool)> {
         vec![
             ("side_bar".into(), self.show_side_bar),

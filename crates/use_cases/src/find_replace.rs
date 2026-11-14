@@ -131,6 +131,24 @@ impl Editor {
         doc.set_selections(primary, matches);
     }
 
+    /// `find_all` in the find panel: selects every match of the query in the active view.
+    pub fn select_find_matches(&mut self) {
+        let Ok(Some(pattern)) = self.state.find.pattern() else {
+            return;
+        };
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let matches = find::find_all_selections(&pattern, &doc.text);
+        match matches.first() {
+            Some(&first) => doc.set_selections(first, matches),
+            None => {
+                let query = self.state.find.query.clone();
+                self.notify(self.tr_args("Unable to find {query}", &[("query", &query)]));
+            }
+        }
+    }
+
     pub fn replace_next(&mut self) {
         let options = self.state.find.clone();
         let replacement = self.state.replacement.clone();

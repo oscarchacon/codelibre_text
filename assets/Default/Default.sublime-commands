@@ -48,6 +48,8 @@
 
 	{ "caption": "Find: Find…", "command": "show_panel", "args": { "panel": "find" } },
 	{ "caption": "Find: Replace…", "command": "show_panel", "args": { "panel": "replace" } },
+	{ "caption": "Find: Find in Files…", "command": "show_panel", "args": { "panel": "find_in_files" } },
+	{ "caption": "Find: Cancel Find in Files", "command": "cancel_find" },
 
 	{ "caption": "Indentation: Convert to Spaces", "command": "expand_tabs" },
 	{ "caption": "Indentation: Convert to Tabs", "command": "unexpand_tabs" },
