@@ -59,11 +59,25 @@ impl KeyCombo {
     /// macOS its symbols in its order (⌃⌥⇧⌘), with symbols for keys such as ↩ ⌫ ↑ too.
     pub fn display_for(&self, macos: bool) -> String {
         let modifiers = if macos {
-            [(self.ctrl, "⌃"), (self.alt, "⌥"), (self.shift, "⇧"), (self.super_key, "⌘")]
+            [
+                (self.ctrl, "⌃"),
+                (self.alt, "⌥"),
+                (self.shift, "⇧"),
+                (self.super_key, "⌘"),
+            ]
         } else {
-            [(self.ctrl, "Ctrl"), (self.alt, "Alt"), (self.shift, "Shift"), (self.super_key, "Super")]
+            [
+                (self.ctrl, "Ctrl"),
+                (self.alt, "Alt"),
+                (self.shift, "Shift"),
+                (self.super_key, "Super"),
+            ]
         };
-        let mut parts: Vec<String> = modifiers.iter().filter(|(on, _)| *on).map(|(_, name)| name.to_string()).collect();
+        let mut parts: Vec<String> = modifiers
+            .iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, name)| name.to_string())
+            .collect();
         let symbol = match self.key.as_str() {
             _ if !macos => None,
             "enter" => Some("↩"),
@@ -131,7 +145,11 @@ pub struct Binding {
 
 impl Binding {
     pub fn display(&self) -> String {
-        self.keys.iter().map(KeyCombo::display).collect::<Vec<_>>().join(", ")
+        self.keys
+            .iter()
+            .map(KeyCombo::display)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -142,7 +160,13 @@ pub trait KeyContext {
 
     /// Like [`query`](Self::query), with the condition's `match_all`: whether every selection must
     /// match, not just one. Only plugins' contexts tell the difference.
-    fn query_all(&self, key: &str, operator: &str, operand: &Value, _match_all: bool) -> Option<bool> {
+    fn query_all(
+        &self,
+        key: &str,
+        operator: &str,
+        operand: &Value,
+        _match_all: bool,
+    ) -> Option<bool> {
         self.query(key, operator, operand)
     }
 }
@@ -153,7 +177,11 @@ pub trait KeyContext {
 pub fn compare_text(operator: &str, text: &str, operand: &Value) -> Option<bool> {
     let pattern = operand.as_str()?;
     let regex = |anchored: bool| {
-        let source = if anchored { format!("^(?:{pattern})$") } else { pattern.to_string() };
+        let source = if anchored {
+            format!("^(?:{pattern})$")
+        } else {
+            pattern.to_string()
+        };
         regex::Regex::new(&source).ok()
     };
     match operator {
@@ -191,7 +219,11 @@ impl Keymap {
     }
 
     pub fn pending_chord_display(&self) -> String {
-        self.pending_chord.iter().map(KeyCombo::display).collect::<Vec<_>>().join(", ")
+        self.pending_chord
+            .iter()
+            .map(KeyCombo::display)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Feeds one key press. `alternatives` are equivalent readings of the same key, e.g. the
@@ -201,7 +233,10 @@ impl Keymap {
         for combo in alternatives {
             // A shifted symbol (`?`) may be written without shift in the keymap.
             if combo.shift && combo.is_symbol() {
-                candidates.push(KeyCombo { shift: false, ..combo.clone() });
+                candidates.push(KeyCombo {
+                    shift: false,
+                    ..combo.clone()
+                });
             }
             candidates.push(combo.clone());
         }
@@ -213,8 +248,8 @@ impl Keymap {
 
             let mut is_prefix = false;
             for binding in self.bindings.iter().rev() {
-                let starts_with_sequence =
-                    binding.keys.len() >= sequence.len() && binding.keys[..sequence.len()] == sequence[..];
+                let starts_with_sequence = binding.keys.len() >= sequence.len()
+                    && binding.keys[..sequence.len()] == sequence[..];
                 if !starts_with_sequence || !context_matches(&binding.context, context) {
                     continue;
                 }
@@ -253,7 +288,10 @@ impl Keymap {
     }
 
     fn binding(&self, command: &Command) -> Option<&Binding> {
-        self.bindings.iter().rev().find(|b| b.command.same_as(command))
+        self.bindings
+            .iter()
+            .rev()
+            .find(|b| b.command.same_as(command))
     }
 }
 
@@ -262,9 +300,20 @@ fn context_matches(conditions: &[Value], context: &dyn KeyContext) -> bool {
         let Some(key) = condition.get("key").and_then(Value::as_str) else {
             return false;
         };
-        let operator = condition.get("operator").and_then(Value::as_str).unwrap_or("equal");
-        let operand = condition.get("operand").cloned().unwrap_or(Value::Bool(true));
-        let match_all = condition.get("match_all").and_then(Value::as_bool).unwrap_or(false);
-        context.query_all(key, operator, &operand, match_all).unwrap_or(false)
+        let operator = condition
+            .get("operator")
+            .and_then(Value::as_str)
+            .unwrap_or("equal");
+        let operand = condition
+            .get("operand")
+            .cloned()
+            .unwrap_or(Value::Bool(true));
+        let match_all = condition
+            .get("match_all")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        context
+            .query_all(key, operator, &operand, match_all)
+            .unwrap_or(false)
     })
 }

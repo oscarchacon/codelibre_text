@@ -6,7 +6,9 @@ use entities::selection::Selection;
 use serde_json::{json, Value};
 use test_support::{active_text, plugin_call, status, World};
 use use_cases::gateways::PluginCommandKind::Text;
-use use_cases::gateways::{MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginMessage};
+use use_cases::gateways::{
+    MessageAnswer, MessageButtons, MessageDialog, MessageLevel, PluginMessage,
+};
 use use_cases::Editor;
 
 fn editor_with(world: &World, text: &str) -> Editor {
@@ -21,9 +23,17 @@ fn view_id(editor: &Editor) -> u64 {
 
 /// The editor's answer when a plugin calls `function(args...)`.
 fn call(world: &World, editor: &mut Editor, function: &str, args: Value) -> Result<Value, String> {
-    world.plugins.then([plugin_call(function, args), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call(function, args),
+        PluginMessage::Done { error: None },
+    ]);
     editor.run_plugin_command(&Command::new("probe"), &mut |_, _| {});
-    world.plugins.replies.borrow_mut().pop().expect("the editor answered")
+    world
+        .plugins
+        .replies
+        .borrow_mut()
+        .pop()
+        .expect("the editor answered")
 }
 
 fn plugin_world() -> World {
@@ -35,53 +45,153 @@ fn reading_the_text() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "héllo\nworld");
     let v = view_id(&editor);
-    assert_eq!(call(&world, &mut editor, "view_size", json!([v])), Ok(json!(11)));
-    assert_eq!(call(&world, &mut editor, "view_cached_substr", json!([v, 1, 4])), Ok(json!("éll")));
-    assert_eq!(call(&world, &mut editor, "view_cached_substr", json!([v, 9, 99])), Ok(json!("ld")), "clamped");
-    assert_eq!(call(&world, &mut editor, "view_rowcol", json!([v, 8])), Ok(json!([1, 2])));
-    assert_eq!(call(&world, &mut editor, "view_text_point", json!([v, 1, 2])), Ok(json!(8)));
+    assert_eq!(
+        call(&world, &mut editor, "view_size", json!([v])),
+        Ok(json!(11))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_cached_substr", json!([v, 1, 4])),
+        Ok(json!("éll"))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_cached_substr", json!([v, 9, 99])),
+        Ok(json!("ld")),
+        "clamped"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_rowcol", json!([v, 8])),
+        Ok(json!([1, 2]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_text_point", json!([v, 1, 2])),
+        Ok(json!(8))
+    );
 }
 
 #[test]
 fn meta_info_symbols_backtraces_and_classes() {
     let world = plugin_world()
         .with_file("/p/a.py", "x = \"  one\"\ny = \"two\"")
-        .with_meta_preference("source.python", json!({ "shellVariables": [{ "name": "TM_COMMENT_START", "value": "# " }] }))
-        .with_meta_preference("string.quoted", json!({ "showInSymbolList": 1, "symbolTransformation": "s/\"//g;s/^\\s+//" }));
+        .with_meta_preference(
+            "source.python",
+            json!({ "shellVariables": [{ "name": "TM_COMMENT_START", "value": "# " }] }),
+        )
+        .with_meta_preference(
+            "string.quoted",
+            json!({ "showInSymbolList": 1, "symbolTransformation": "s/\"//g;s/^\\s+//" }),
+        );
     let mut editor = world.editor_opening(&["/p/a.py"]);
     let v = view_id(&editor);
     assert_eq!(
-        call(&world, &mut editor, "view_meta_info", json!([v, "shellVariables", 0])),
+        call(
+            &world,
+            &mut editor,
+            "view_meta_info",
+            json!([v, "shellVariables", 0])
+        ),
         Ok(json!([{ "name": "TM_COMMENT_START", "value": "# " }]))
     );
-    assert_eq!(call(&world, &mut editor, "view_meta_info", json!([v, "nothing", 0])), Ok(Value::Null));
     assert_eq!(
-        call(&world, &mut editor, "view_symbol_regions", json!([v, "symbols"])),
+        call(
+            &world,
+            &mut editor,
+            "view_meta_info",
+            json!([v, "nothing", 0])
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_symbol_regions",
+            json!([v, "symbols"])
+        ),
         Ok(json!([
             ["one", [4, 11], "Python", [0, "", ""]],
             ["two", [16, 21], "Python", [0, "", ""]],
         ]))
     );
-    assert_eq!(call(&world, &mut editor, "view_symbol_regions", json!([v, "references"])), Ok(json!([])), "no reference list");
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_symbol_regions",
+            json!([v, "references"])
+        ),
+        Ok(json!([])),
+        "no reference list"
+    );
     assert_eq!(
         call(&world, &mut editor, "view_context_backtrace", json!([v, 6])),
-        Ok(json!([["main", "Packages/Python/Python.sublime-syntax"], ["string", "Packages/Python/Python.sublime-syntax"]]))
+        Ok(json!([
+            ["main", "Packages/Python/Python.sublime-syntax"],
+            ["string", "Packages/Python/Python.sublime-syntax"]
+        ]))
     );
     // `CLASS_WORD_START | CLASS_SUB_WORD_START | CLASS_LINE_START` at 0.
-    assert_eq!(call(&world, &mut editor, "view_classify", json!([v, 0])), Ok(json!(1 | 16 | 64)));
-    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 0, true, 1, ""])), Ok(json!(7)), "the next word start: one");
-    assert_eq!(call(&world, &mut editor, "view_find_by_class", json!([v, 11, false, 64, ""])), Ok(json!(0)));
+    assert_eq!(
+        call(&world, &mut editor, "view_classify", json!([v, 0])),
+        Ok(json!(1 | 16 | 64))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_find_by_class",
+            json!([v, 0, true, 1, ""])
+        ),
+        Ok(json!(7)),
+        "the next word start: one"
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_find_by_class",
+            json!([v, 11, false, 64, ""])
+        ),
+        Ok(json!(0))
+    );
     let syntaxes = call(&world, &mut editor, "list_syntaxes", json!([])).unwrap();
-    assert!(syntaxes.as_array().unwrap().contains(&json!(["Packages/Python/Python.sublime-syntax", "Python", false, "source.python", ["py"]])), "{syntaxes}");
-    assert_eq!(call(&world, &mut editor, "find_syntax_for_file", json!(["b.py", ""])), Ok(json!("Python")));
+    assert!(
+        syntaxes.as_array().unwrap().contains(&json!([
+            "Packages/Python/Python.sublime-syntax",
+            "Python",
+            false,
+            "source.python",
+            ["py"]
+        ])),
+        "{syntaxes}"
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "find_syntax_for_file",
+            json!(["b.py", ""])
+        ),
+        Ok(json!("Python"))
+    );
 }
 
 #[test]
 fn plugins_add_to_the_clipboard_history() {
     let world = plugin_world();
     let mut editor = world.editor();
-    assert_eq!(call(&world, &mut editor, "clipboard_history_push", json!(["from Terminus"])), Ok(Value::Null));
-    assert_eq!(call(&world, &mut editor, "clipboard_history", json!([])), Ok(json!(["from Terminus"])));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "clipboard_history_push",
+            json!(["from Terminus"])
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        call(&world, &mut editor, "clipboard_history", json!([])),
+        Ok(json!(["from Terminus"]))
+    );
     call(&world, &mut editor, "clipboard_history_clear", json!([])).unwrap();
     assert!(editor.clipboard_history().is_empty());
 }
@@ -92,19 +202,48 @@ fn scopes() {
     let mut editor = world.editor_opening(&["/p/a.py"]);
     let v = view_id(&editor);
     let string = "source.python string.quoted.double ";
-    assert_eq!(call(&world, &mut editor, "view_scope_name", json!([v, 5])), Ok(json!(string)));
-    assert_eq!(call(&world, &mut editor, "view_extract_scope", json!([v, 5])), Ok(json!([4, 7])));
-    assert_eq!(call(&world, &mut editor, "view_find_by_selector", json!([v, "string"])), Ok(json!([[4, 7]])));
     assert_eq!(
-        call(&world, &mut editor, "view_extract_tokens_with_scopes", json!([v, 3, 5])),
+        call(&world, &mut editor, "view_scope_name", json!([v, 5])),
+        Ok(json!(string))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_extract_scope", json!([v, 5])),
+        Ok(json!([4, 7]))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_find_by_selector",
+            json!([v, "string"])
+        ),
+        Ok(json!([[4, 7]]))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_extract_tokens_with_scopes",
+            json!([v, 3, 5])
+        ),
         Ok(json!([[[3, 4], "source.python "], [[4, 5], string]]))
     );
-    assert_eq!(call(&world, &mut editor, "score_selector", json!([string, "comment"])), Ok(json!(0)));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "score_selector",
+            json!([string, "comment"])
+        ),
+        Ok(json!(0))
+    );
 }
 
 #[test]
 fn styles_come_from_the_color_scheme_in_use() {
-    let world = plugin_world().with_preferences(json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}));
+    let world = plugin_world().with_preferences(
+        json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}),
+    );
     let mut editor = editor_with(&world, "x");
     let v = view_id(&editor);
     assert_eq!(
@@ -112,15 +251,24 @@ fn styles_come_from_the_color_scheme_in_use() {
         Ok(json!({"foreground": "#ffffff", "background": "#000000", "scheme": "Mariana"}))
     );
     assert_eq!(
-        call(&world, &mut editor, "view_style_for_scope", json!([v, "source.python string.quoted"])),
-        Ok(json!({"foreground": "#ff0000", "bold": true, "scheme": "Mariana", "scope": "source.python string.quoted",
-                  "source_line": 0, "source_column": 0, "source_file": ""}))
+        call(
+            &world,
+            &mut editor,
+            "view_style_for_scope",
+            json!([v, "source.python string.quoted"])
+        ),
+        Ok(
+            json!({"foreground": "#ff0000", "bold": true, "scheme": "Mariana", "scope": "source.python string.quoted",
+                  "source_line": 0, "source_column": 0, "source_file": ""})
+        )
     );
 }
 
 #[test]
 fn ui_info_gives_the_ui_style_and_the_color_scheme_palette() {
-    let world = plugin_world().with_preferences(json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}));
+    let world = plugin_world().with_preferences(
+        json!({"color_scheme": "Packages/Color Scheme - Default/Mariana.sublime-color-scheme"}),
+    );
     let mut editor = editor_with(&world, "x");
     assert_eq!(
         call(&world, &mut editor, "ui_info", json!([])),
@@ -138,11 +286,27 @@ fn lines_and_words() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "one two\nthree\nfour");
     let v = view_id(&editor);
-    assert_eq!(call(&world, &mut editor, "view_line", json!([v, 5, 5])), Ok(json!([0, 7])));
-    assert_eq!(call(&world, &mut editor, "view_full_line", json!([v, 5, 5])), Ok(json!([0, 8])));
-    assert_eq!(call(&world, &mut editor, "view_full_line", json!([v, 15, 15])), Ok(json!([14, 18])), "last line has no newline");
-    assert_eq!(call(&world, &mut editor, "view_lines", json!([v, 2, 10])), Ok(json!([[0, 7], [8, 13]])));
-    assert_eq!(call(&world, &mut editor, "view_word", json!([v, 5, 5])), Ok(json!([4, 7])));
+    assert_eq!(
+        call(&world, &mut editor, "view_line", json!([v, 5, 5])),
+        Ok(json!([0, 7]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_full_line", json!([v, 5, 5])),
+        Ok(json!([0, 8]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_full_line", json!([v, 15, 15])),
+        Ok(json!([14, 18])),
+        "last line has no newline"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_lines", json!([v, 2, 10])),
+        Ok(json!([[0, 7], [8, 13]]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_word", json!([v, 5, 5])),
+        Ok(json!([4, 7]))
+    );
 }
 
 #[test]
@@ -151,17 +315,186 @@ fn inserting_erasing_and_replacing_move_the_selections() {
     let mut editor = editor_with(&world, "abcdef");
     let v = view_id(&editor);
     editor.sync_selection_from_view(v, Selection::caret(4));
-    assert_eq!(call(&world, &mut editor, "view_insert", json!([v, 4, "XY"])), Ok(json!(2)));
+    assert_eq!(
+        call(&world, &mut editor, "view_insert", json!([v, 4, "XY"])),
+        Ok(json!(2))
+    );
     assert_eq!(active_text(&editor), "abcdXYef");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(6), "a caret at the insertion moves after it");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(6),
+        "a caret at the insertion moves after it"
+    );
 
     call(&world, &mut editor, "view_erase", json!([v, 0, 2])).unwrap();
     assert_eq!(active_text(&editor), "cdXYef");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(4)
+    );
 
     call(&world, &mut editor, "view_replace", json!([v, 2, 4, "-"])).unwrap();
     assert_eq!(active_text(&editor), "cd-ef");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(3), "inside the replaced text: its end");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(3),
+        "inside the replaced text: its end"
+    );
+}
+
+#[test]
+fn text_edits_from_plugin_api_keep_the_previous_state_for_widget_undo() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "before");
+    let view = view_id(&editor);
+    editor.sync_selection_from_view(view, Selection::caret(3));
+
+    call(
+        &world,
+        &mut editor,
+        "view_replace",
+        json!([view, 0, 6, "after"]),
+    )
+    .unwrap();
+
+    assert_eq!(active_text(&editor), "after");
+    let window = editor.current_window();
+    assert_eq!(
+        editor.take_plugin_edit_undo_boundaries(window),
+        vec![use_cases::editor::PluginEditUndoBoundary {
+            window: 1,
+            document: view,
+            text: "before".into(),
+            selection: Selection::caret(3),
+        }]
+    );
+}
+
+#[test]
+fn several_plugin_edits_before_the_widget_draws_are_one_undo_step() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "abc");
+    let view = view_id(&editor);
+
+    call(&world, &mut editor, "view_insert", json!([view, 3, "d"])).unwrap();
+    call(&world, &mut editor, "view_insert", json!([view, 4, "e"])).unwrap();
+    call(&world, &mut editor, "view_erase", json!([view, 0, 1])).unwrap();
+
+    assert_eq!(active_text(&editor), "bcde");
+    let boundaries = editor.take_plugin_edit_undo_boundaries(editor.current_window());
+    assert_eq!(
+        boundaries.len(),
+        1,
+        "one boundary per document until the widget takes it"
+    );
+    assert_eq!(boundaries[0].text, "abc", "the state before the first edit");
+
+    call(&world, &mut editor, "view_insert", json!([view, 0, "a"])).unwrap();
+    let boundaries = editor.take_plugin_edit_undo_boundaries(editor.current_window());
+    assert_eq!(
+        boundaries.len(),
+        1,
+        "a new step once the last one was taken"
+    );
+    assert_eq!(boundaries[0].text, "bcde");
+}
+
+#[test]
+fn plugins_read_and_change_what_the_window_shows() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "");
+    editor.sync_window_chrome(vec![("minimap".into(), false), ("side_bar".into(), true)]);
+
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_is_ui_visible",
+            json!(["minimap"])
+        )
+        .unwrap(),
+        json!(false)
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_is_ui_visible",
+            json!(["side_bar"])
+        )
+        .unwrap(),
+        json!(true)
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_is_ui_visible",
+            json!(["status_bar"])
+        )
+        .unwrap(),
+        json!(true),
+        "unknown: shown"
+    );
+
+    call(
+        &world,
+        &mut editor,
+        "window_set_ui_visible",
+        json!(["minimap", true]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "window_set_ui_visible",
+        json!(["side_bar", false]),
+    )
+    .unwrap();
+
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_is_ui_visible",
+            json!(["minimap"])
+        )
+        .unwrap(),
+        json!(true),
+        "answered at once"
+    );
+    assert_eq!(
+        editor.take_window_chrome_requests(),
+        vec![
+            ("minimap".to_string(), true),
+            ("side_bar".to_string(), false)
+        ]
+    );
+    assert!(editor.take_window_chrome_requests().is_empty());
+}
+
+#[test]
+fn plugin_edits_from_another_window_queue_undo_for_the_owning_window() {
+    let world = plugin_world();
+    let mut editor = editor_with(&world, "before");
+    let view = view_id(&editor);
+    editor.new_window();
+
+    call(
+        &world,
+        &mut editor,
+        "view_replace",
+        json!([view, 0, 6, "after"]),
+    )
+    .unwrap();
+
+    assert_eq!(editor.current_window(), 2);
+    assert!(editor.switch_to_window(1));
+    assert_eq!(active_text(&editor), "after");
+    let boundaries = editor.take_plugin_edit_undo_boundaries(1);
+    assert_eq!(boundaries.len(), 1);
+    assert_eq!(boundaries[0].document, view);
+    assert_eq!(boundaries[0].text, "before");
 }
 
 #[test]
@@ -170,8 +503,14 @@ fn read_only_views_are_not_changed() {
     let mut editor = editor_with(&world, "abc");
     let v = view_id(&editor);
     call(&world, &mut editor, "view_set_read_only", json!([v, true])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_is_read_only", json!([v])), Ok(json!(true)));
-    assert_eq!(call(&world, &mut editor, "view_insert", json!([v, 0, "x"])), Ok(json!(0)));
+    assert_eq!(
+        call(&world, &mut editor, "view_is_read_only", json!([v])),
+        Ok(json!(true))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_insert", json!([v, 0, "x"])),
+        Ok(json!(0))
+    );
     assert_eq!(active_text(&editor), "abc");
 }
 
@@ -180,11 +519,24 @@ fn selections_are_read_and_replaced() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "abcdef");
     let v = view_id(&editor);
-    call(&world, &mut editor, "view_selection_set", json!([v, [[0, 1], [5, 3]]])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_selection_set",
+        json!([v, [[0, 1], [5, 3]]]),
+    )
+    .unwrap();
     let doc = editor.active_document().unwrap();
-    assert_eq!(doc.selection(), Selection::new(5, 3), "the last region is the primary one");
+    assert_eq!(
+        doc.selection(),
+        Selection::new(5, 3),
+        "the last region is the primary one"
+    );
     assert_eq!(doc.extra_selections(), &[Selection::new(0, 1)]);
-    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([v])), Ok(json!([[0, 1], [5, 3]])));
+    assert_eq!(
+        call(&world, &mut editor, "view_selection_get", json!([v])),
+        Ok(json!([[0, 1], [5, 3]]))
+    );
 }
 
 #[test]
@@ -192,11 +544,29 @@ fn find_and_find_all_with_sublime_flags() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "a.b A.B a.b");
     let v = view_id(&editor);
-    assert_eq!(call(&world, &mut editor, "view_find", json!([v, "a.b", 1, 0])), Ok(json!([8, 11])), "regex, from 1");
-    assert_eq!(call(&world, &mut editor, "view_find", json!([v, "a.b", 1, 2])), Ok(json!([4, 7])), "IGNORECASE");
-    assert_eq!(call(&world, &mut editor, "view_find", json!([v, "zzz", 0, 0])), Ok(json!([-1, -1])));
-    assert_eq!(call(&world, &mut editor, "view_find_all", json!([v, "a.b", 1])), Ok(json!([[0, 3], [8, 11]])), "LITERAL");
-    assert!(call(&world, &mut editor, "view_find_all", json!([v, "(", 0])).is_err(), "bad regex");
+    assert_eq!(
+        call(&world, &mut editor, "view_find", json!([v, "a.b", 1, 0])),
+        Ok(json!([8, 11])),
+        "regex, from 1"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_find", json!([v, "a.b", 1, 2])),
+        Ok(json!([4, 7])),
+        "IGNORECASE"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_find", json!([v, "zzz", 0, 0])),
+        Ok(json!([-1, -1]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_find_all", json!([v, "a.b", 1])),
+        Ok(json!([[0, 3], [8, 11]])),
+        "LITERAL"
+    );
+    assert!(
+        call(&world, &mut editor, "view_find_all", json!([v, "(", 0])).is_err(),
+        "bad regex"
+    );
 }
 
 #[test]
@@ -205,31 +575,80 @@ fn view_properties() {
     let mut editor = world.editor();
     test_support::open(&mut editor, "/p/a.rs");
     let v = view_id(&editor);
-    assert_eq!(call(&world, &mut editor, "view_file_name", json!([v])), Ok(json!("/p/a.rs")));
-    assert_eq!(call(&world, &mut editor, "view_syntax", json!([v])), Ok(json!("Rust")));
-    assert_eq!(call(&world, &mut editor, "view_encoding", json!([v])), Ok(json!("UTF-8")));
-    assert_eq!(call(&world, &mut editor, "view_line_endings", json!([v])), Ok(json!("Unix")));
-    call(&world, &mut editor, "view_set_line_endings", json!([v, "Windows"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_is_dirty", json!([v])), Ok(json!(true)));
-    call(&world, &mut editor, "view_assign_syntax", json!([v, "Packages/Python/Python.sublime-syntax"])).unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_file_name", json!([v])),
+        Ok(json!("/p/a.rs"))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_syntax", json!([v])),
+        Ok(json!("Rust"))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_encoding", json!([v])),
+        Ok(json!("UTF-8"))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_line_endings", json!([v])),
+        Ok(json!("Unix"))
+    );
+    call(
+        &world,
+        &mut editor,
+        "view_set_line_endings",
+        json!([v, "Windows"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_is_dirty", json!([v])),
+        Ok(json!(true))
+    );
+    call(
+        &world,
+        &mut editor,
+        "view_assign_syntax",
+        json!([v, "Packages/Python/Python.sublime-syntax"]),
+    )
+    .unwrap();
     assert_eq!(editor.active_document().unwrap().syntax, "Python");
     call(&world, &mut editor, "view_set_name", json!([v, "Results"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_name", json!([v])), Ok(json!("Results")));
+    assert_eq!(
+        call(&world, &mut editor, "view_name", json!([v])),
+        Ok(json!("Results"))
+    );
 }
 
 #[test]
 fn closed_views_and_unknown_functions() {
     let world = plugin_world();
     let mut editor = world.editor();
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([999])), Ok(json!(false)));
-    assert_eq!(call(&world, &mut editor, "view_size", json!([999])), Err("the view is closed".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_not_a_real_function", json!([1, {}])),
+        call(&world, &mut editor, "view_is_valid", json!([999])),
+        Ok(json!(false))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_size", json!([999])),
+        Err("the view is closed".into())
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_not_a_real_function",
+            json!([1, {}])
+        ),
         Err("sublime_api.window_not_a_real_function is not implemented yet".into())
     );
-    assert_eq!(call(&world, &mut editor, "view_size", json!(["x"])), Err("argument 1 must be a number".into()));
     assert_eq!(
-        call(&world, &mut editor, "window_show_quick_panel", json!([1, [["a"]], 0, 0, "", "x"])),
+        call(&world, &mut editor, "view_size", json!(["x"])),
+        Err("argument 1 must be a number".into())
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_show_quick_panel",
+            json!([1, [["a"]], 0, 0, "", "x"])
+        ),
         Err("argument 6 must be a callback id".into())
     );
 }
@@ -241,21 +660,69 @@ fn the_window_and_its_views() {
     editor.add_folder("/p".into());
     let first = view_id(&editor);
     let opened = call(&world, &mut editor, "window_open_file", json!(["/p/a.txt"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "window_active_view", json!([])), Ok(opened.clone()));
-    assert_eq!(call(&world, &mut editor, "window_find_open_file", json!(["/p/a.txt"])), Ok(opened.clone()));
-    assert_eq!(call(&world, &mut editor, "window_find_open_file", json!(["/p/b.txt"])), Ok(Value::Null));
-    assert_eq!(call(&world, &mut editor, "window_views", json!([])).unwrap().as_array().unwrap().len(), 1, "a.txt replaced the empty tab");
+    assert_eq!(
+        call(&world, &mut editor, "window_active_view", json!([])),
+        Ok(opened.clone())
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_find_open_file",
+            json!(["/p/a.txt"])
+        ),
+        Ok(opened.clone())
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_find_open_file",
+            json!(["/p/b.txt"])
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_views", json!([]))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "a.txt replaced the empty tab"
+    );
     let new = call(&world, &mut editor, "window_new_file", json!([])).unwrap();
     assert_ne!(new, opened);
     call(&world, &mut editor, "window_focus_view", json!([opened])).unwrap();
     assert_eq!(json!(view_id(&editor)), opened);
     // Package Control moves its messages to the first tab; the active tab stays active.
-    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 0])).unwrap();
-    assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([new, opened])));
+    call(
+        &world,
+        &mut editor,
+        "window_set_view_index",
+        json!([new, 0, 0]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "window_views", json!([])),
+        Ok(json!([new, opened]))
+    );
     assert_eq!(json!(view_id(&editor)), opened);
-    call(&world, &mut editor, "window_set_view_index", json!([new, 0, 99])).unwrap();
-    assert_eq!(call(&world, &mut editor, "window_views", json!([])), Ok(json!([opened, new])));
-    assert_eq!(call(&world, &mut editor, "window_folders", json!([])), Ok(json!(["/p"])));
+    call(
+        &world,
+        &mut editor,
+        "window_set_view_index",
+        json!([new, 0, 99]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "window_views", json!([])),
+        Ok(json!([opened, new]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_folders", json!([])),
+        Ok(json!(["/p"]))
+    );
     assert_ne!(json!(first), new);
 }
 
@@ -277,52 +744,154 @@ fn messages_and_the_clipboard() {
         })
     );
     call(&world, &mut editor, "set_clipboard", json!(["copied"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "get_clipboard", json!([])), Ok(json!("copied")));
+    assert_eq!(
+        call(&world, &mut editor, "get_clipboard", json!([])),
+        Ok(json!("copied"))
+    );
 }
 
 #[test]
 fn questions_answer_with_the_button_pressed() {
     let world = plugin_world();
     let mut editor = world.editor();
-    world.dialogs.message_answers.borrow_mut().extend([MessageAnswer::Ok, MessageAnswer::Cancel, MessageAnswer::No]);
-    assert_eq!(call(&world, &mut editor, "ok_cancel_dialog", json!(["Install?", "Install", ""])), Ok(json!(true)));
+    world.dialogs.message_answers.borrow_mut().extend([
+        MessageAnswer::Ok,
+        MessageAnswer::Cancel,
+        MessageAnswer::No,
+    ]);
     assert_eq!(
-        world.dialogs.messages.borrow().last().unwrap().buttons,
-        MessageButtons::OkCancel { ok: "Install".into(), cancel: "Cancel".into() }
+        call(
+            &world,
+            &mut editor,
+            "ok_cancel_dialog",
+            json!(["Install?", "Install", ""])
+        ),
+        Ok(json!(true))
     );
-    assert_eq!(call(&world, &mut editor, "ok_cancel_dialog", json!(["Install?", "", ""])), Ok(json!(false)));
     assert_eq!(
         world.dialogs.messages.borrow().last().unwrap().buttons,
-        MessageButtons::OkCancel { ok: "OK".into(), cancel: "Cancel".into() },
+        MessageButtons::OkCancel {
+            ok: "Install".into(),
+            cancel: "Cancel".into()
+        }
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "ok_cancel_dialog",
+            json!(["Install?", "", ""])
+        ),
+        Ok(json!(false))
+    );
+    assert_eq!(
+        world.dialogs.messages.borrow().last().unwrap().buttons,
+        MessageButtons::OkCancel {
+            ok: "OK".into(),
+            cancel: "Cancel".into()
+        },
         "default labels"
     );
-    assert_eq!(call(&world, &mut editor, "yes_no_cancel_dialog", json!(["Keep?", "", "Drop", "Tool"])), Ok(json!(2)));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "yes_no_cancel_dialog",
+            json!(["Keep?", "", "Drop", "Tool"])
+        ),
+        Ok(json!(2))
+    );
     let last = world.dialogs.messages.borrow().last().unwrap().clone();
     assert_eq!(last.title, "Tool");
-    assert_eq!(last.buttons, MessageButtons::YesNoCancel { yes: "Yes".into(), no: "Drop".into(), cancel: "Cancel".into() });
-    assert_eq!(call(&world, &mut editor, "yes_no_cancel_dialog", json!(["Keep?", "", "", ""])), Ok(json!(0)), "closed");
+    assert_eq!(
+        last.buttons,
+        MessageButtons::YesNoCancel {
+            yes: "Yes".into(),
+            no: "Drop".into(),
+            cancel: "Cancel".into()
+        }
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "yes_no_cancel_dialog",
+            json!(["Keep?", "", "", ""])
+        ),
+        Ok(json!(0)),
+        "closed"
+    );
 }
 
 #[test]
 fn file_dialogs_answer_with_paths() {
     let world = plugin_world();
     let mut editor = world.editor();
-    assert_eq!(call(&world, &mut editor, "open_dialog", json!([null])), Ok(Value::Null), "cancelled");
+    assert_eq!(
+        call(&world, &mut editor, "open_dialog", json!([null])),
+        Ok(Value::Null),
+        "cancelled"
+    );
     *world.dialogs.files_to_open.borrow_mut() = vec!["/p/a.txt".into(), "/p/b.txt".into()];
-    assert_eq!(call(&world, &mut editor, "open_dialog", json!(["/p"])), Ok(json!(["/p/a.txt", "/p/b.txt"])));
-    assert_eq!(world.dialogs.last_open_dir.borrow().as_deref(), Some(std::path::Path::new("/p")));
+    assert_eq!(
+        call(&world, &mut editor, "open_dialog", json!(["/p"])),
+        Ok(json!(["/p/a.txt", "/p/b.txt"]))
+    );
+    assert_eq!(
+        world.dialogs.last_open_dir.borrow().as_deref(),
+        Some(std::path::Path::new("/p"))
+    );
 
     *world.dialogs.save_path.borrow_mut() = Some("/p/out.json".into());
-    assert_eq!(call(&world, &mut editor, "save_dialog", json!([null, "out", "json"])), Ok(json!("/p/out.json")));
-    assert_eq!(world.dialogs.save_requests.borrow().last().map(String::as_str), Some("out.json"));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "save_dialog",
+            json!([null, "out", "json"])
+        ),
+        Ok(json!("/p/out.json"))
+    );
+    assert_eq!(
+        world
+            .dialogs
+            .save_requests
+            .borrow()
+            .last()
+            .map(String::as_str),
+        Some("out.json")
+    );
 
     *world.dialogs.folder_to_open.borrow_mut() = Some("/p".into());
-    assert_eq!(call(&world, &mut editor, "select_folder_dialog", json!([null])), Ok(json!(["/p"])));
+    assert_eq!(
+        call(&world, &mut editor, "select_folder_dialog", json!([null])),
+        Ok(json!(["/p"]))
+    );
     *world.dialogs.folders_to_open.borrow_mut() = vec!["/a".into(), "/b".into()];
-    assert_eq!(call(&world, &mut editor, "select_folder_dialog", json!([null, true])), Ok(json!(["/a", "/b"])));
-    call(&world, &mut editor, "open_dialog", json!([null, [["Text", ["txt", "md"]]]])).unwrap();
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "select_folder_dialog",
+            json!([null, true])
+        ),
+        Ok(json!(["/a", "/b"]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "open_dialog",
+        json!([null, [["Text", ["txt", "md"]]]]),
+    )
+    .unwrap();
     let filters = world.dialogs.last_filters.borrow().clone();
-    assert_eq!(filters, vec![use_cases::gateways::FileFilter { name: "Text".into(), extensions: vec!["txt".into(), "md".into()] }]);
+    assert_eq!(
+        filters,
+        vec![use_cases::gateways::FileFilter {
+            name: "Text".into(),
+            extensions: vec!["txt".into(), "md".into()]
+        }]
+    );
 }
 
 #[test]
@@ -332,14 +901,49 @@ fn resources_are_found_and_loaded() {
         .with_resource("Packages/Tool/icon.png", vec![0x89, 0x50, 0x00, 0xff]);
     let mut editor = world.editor();
     assert_eq!(
-        call(&world, &mut editor, "find_resources", json!(["*.sublime-settings"])),
+        call(
+            &world,
+            &mut editor,
+            "find_resources",
+            json!(["*.sublime-settings"])
+        ),
         Ok(json!(["Packages/Tool/Tool.sublime-settings"]))
     );
-    assert_eq!(call(&world, &mut editor, "load_resource", json!(["Packages/Tool/Tool.sublime-settings"])), Ok(json!("{\n}")));
-    assert_eq!(call(&world, &mut editor, "load_binary_resource", json!(["Packages/Tool/icon.png"])), Ok(json!("895000ff")));
-    assert!(call(&world, &mut editor, "load_resource", json!(["Packages/Tool/icon.png"])).is_err(), "not text");
     assert_eq!(
-        call(&world, &mut editor, "load_resource", json!(["Packages/Tool/nope"])),
+        call(
+            &world,
+            &mut editor,
+            "load_resource",
+            json!(["Packages/Tool/Tool.sublime-settings"])
+        ),
+        Ok(json!("{\n}"))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "load_binary_resource",
+            json!(["Packages/Tool/icon.png"])
+        ),
+        Ok(json!("895000ff"))
+    );
+    assert!(
+        call(
+            &world,
+            &mut editor,
+            "load_resource",
+            json!(["Packages/Tool/icon.png"])
+        )
+        .is_err(),
+        "not text"
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "load_resource",
+            json!(["Packages/Tool/nope"])
+        ),
         Err("resource not found: Packages/Tool/nope".into())
     );
 }
@@ -349,17 +953,54 @@ fn statuses_by_key_until_erased_or_closed() {
     let world = plugin_world();
     let mut editor = world.editor();
     let v = view_id(&editor);
-    call(&world, &mut editor, "view_set_status", json!([v, "z_git", "main"])).unwrap();
-    call(&world, &mut editor, "view_set_status", json!([v, "a_lint", "2 errors"])).unwrap();
-    assert_eq!(editor.plugin_statuses(v), ["2 errors", "main"], "sorted by key");
-    assert_eq!(call(&world, &mut editor, "view_get_status", json!([v, "z_git"])), Ok(json!("main")));
-    call(&world, &mut editor, "view_erase_status", json!([v, "a_lint"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_set_status",
+        json!([v, "z_git", "main"]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_set_status",
+        json!([v, "a_lint", "2 errors"]),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.plugin_statuses(v),
+        ["2 errors", "main"],
+        "sorted by key"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_get_status", json!([v, "z_git"])),
+        Ok(json!("main"))
+    );
+    call(
+        &world,
+        &mut editor,
+        "view_erase_status",
+        json!([v, "a_lint"]),
+    )
+    .unwrap();
     assert_eq!(editor.plugin_statuses(v), ["main"]);
-    assert_eq!(call(&world, &mut editor, "view_get_status", json!([v, "a_lint"])), Ok(json!("")));
-    assert!(call(&world, &mut editor, "view_set_status", json!([999, "k", "v"])).is_err());
+    assert_eq!(
+        call(&world, &mut editor, "view_get_status", json!([v, "a_lint"])),
+        Ok(json!(""))
+    );
+    assert!(call(
+        &world,
+        &mut editor,
+        "view_set_status",
+        json!([999, "k", "v"])
+    )
+    .is_err());
 
     editor.close_active_document();
-    assert!(editor.plugin_statuses(v).is_empty(), "forgotten with the view");
+    assert!(
+        editor.plugin_statuses(v).is_empty(),
+        "forgotten with the view"
+    );
 }
 
 #[test]
@@ -367,13 +1008,34 @@ fn regions_are_kept_by_the_editor_and_move_with_the_text() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "let x = 1;");
     let v = view_id(&editor);
-    call(&world, &mut editor, "view_add_regions", json!([v, "lint", [[4, 5]], "region.redish", "dot", 2048])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_add_regions",
+        json!([v, "lint", [[4, 5]], "region.redish", "dot", 2048]),
+    )
+    .unwrap();
     let set = &editor.active_document().unwrap().region_sets()[0];
-    assert_eq!((set.scope.as_str(), set.icon.as_str(), set.flags), ("region.redish", "dot", 2048));
+    assert_eq!(
+        (set.scope.as_str(), set.icon.as_str(), set.flags),
+        ("region.redish", "dot", 2048)
+    );
     call(&world, &mut editor, "view_insert", json!([v, 0, "  "])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_get_regions", json!([v, "lint"])), Ok(json!([[6, 7]])));
-    call(&world, &mut editor, "view_erase_regions", json!([v, "lint"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_get_regions", json!([v, "lint"])), Ok(json!([])));
+    assert_eq!(
+        call(&world, &mut editor, "view_get_regions", json!([v, "lint"])),
+        Ok(json!([[6, 7]]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "view_erase_regions",
+        json!([v, "lint"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_get_regions", json!([v, "lint"])),
+        Ok(json!([]))
+    );
 }
 
 #[test]
@@ -383,7 +1045,13 @@ fn show_asks_the_view_to_scroll() {
     let v = view_id(&editor);
     call(&world, &mut editor, "view_show", json!([v, 4, true])).unwrap();
     let doc = editor.active_document().unwrap();
-    assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 4, center: true }));
+    assert_eq!(
+        doc.show_request(),
+        Some(entities::document::ShowRequest {
+            point: 4,
+            center: true
+        })
+    );
 }
 
 #[test]
@@ -391,15 +1059,31 @@ fn scratch_views_close_without_asking() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "unsaved");
     let v = view_id(&editor);
-    assert_eq!(call(&world, &mut editor, "view_is_scratch", json!([v])), Ok(json!(false)));
-    assert_eq!(call(&world, &mut editor, "view_close", json!([v])), Ok(json!(false)), "dirty: the user is asked");
+    assert_eq!(
+        call(&world, &mut editor, "view_is_scratch", json!([v])),
+        Ok(json!(false))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_close", json!([v])),
+        Ok(json!(false)),
+        "dirty: the user is asked"
+    );
     assert!(editor.state().pending_close.is_some());
     editor.resolve_pending_close(use_cases::editor::CloseChoice::Cancel);
 
     call(&world, &mut editor, "view_set_scratch", json!([v, true])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_is_dirty", json!([v])), Ok(json!(false)));
-    assert_eq!(call(&world, &mut editor, "view_close", json!([v])), Ok(json!(true)));
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([v])), Ok(json!(false)));
+    assert_eq!(
+        call(&world, &mut editor, "view_is_dirty", json!([v])),
+        Ok(json!(false))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_close", json!([v])),
+        Ok(json!(true))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([v])),
+        Ok(json!(false))
+    );
 }
 
 #[test]
@@ -409,10 +1093,23 @@ fn the_first_save_of_a_view_starts_in_its_default_dir_setting() {
     editor.add_folder(std::path::PathBuf::from("/p"));
     let target = json!(["view", view_id(&editor)]);
     editor.save_active(false);
-    assert_eq!(world.dialogs.last_save_dir.borrow().as_deref(), Some(std::path::Path::new("/p")), "without it: the open folder");
-    call(&world, &mut editor, "settings_set", json!([target, "default_dir", "/packages/User"])).unwrap();
+    assert_eq!(
+        world.dialogs.last_save_dir.borrow().as_deref(),
+        Some(std::path::Path::new("/p")),
+        "without it: the open folder"
+    );
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "default_dir", "/packages/User"]),
+    )
+    .unwrap();
     editor.save_active(false);
-    assert_eq!(world.dialogs.last_save_dir.borrow().as_deref(), Some(std::path::Path::new("/packages/User")));
+    assert_eq!(
+        world.dialogs.last_save_dir.borrow().as_deref(),
+        Some(std::path::Path::new("/packages/User"))
+    );
 }
 
 #[test]
@@ -420,12 +1117,43 @@ fn view_settings_layer_on_top_of_the_syntax_settings() {
     let world = plugin_world();
     let mut editor = world.editor();
     let target = json!(["view", view_id(&editor)]);
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "tab_size"])), Ok(json!([true, 4])));
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "nope"])), Ok(json!([false, null])));
-    call(&world, &mut editor, "settings_set", json!([target, "tab_size", 2])).unwrap();
-    assert_eq!(editor.view_settings().usize("tab_size", 0), 2, "built-in features see it");
-    assert_eq!(editor.global_settings().usize("tab_size", 0), 4, "only this view");
-    call(&world, &mut editor, "settings_erase", json!([target, "tab_size"])).unwrap();
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "settings_get",
+            json!([target, "tab_size"])
+        ),
+        Ok(json!([true, 4]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "settings_get", json!([target, "nope"])),
+        Ok(json!([false, null]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "tab_size", 2]),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.view_settings().usize("tab_size", 0),
+        2,
+        "built-in features see it"
+    );
+    assert_eq!(
+        editor.global_settings().usize("tab_size", 0),
+        4,
+        "only this view"
+    );
+    call(
+        &world,
+        &mut editor,
+        "settings_erase",
+        json!([target, "tab_size"]),
+    )
+    .unwrap();
     assert_eq!(editor.view_settings().usize("tab_size", 0), 4);
     let all = call(&world, &mut editor, "settings_all", json!([target])).unwrap();
     assert_eq!(all["auto_indent"], json!(true));
@@ -437,37 +1165,86 @@ fn a_view_s_syntax_setting_is_its_syntax_resource() {
     let mut editor = world.editor();
     let target = json!(["view", view_id(&editor)]);
     let plain = json!([true, "Packages/Text/Plain text.tmLanguage"]);
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(plain), "never None (Pretty JSON)");
-    call(&world, &mut editor, "settings_set", json!([target, "syntax", "Packages/Python/Python.sublime-syntax"])).unwrap();
-    assert_eq!(editor.active_document().unwrap().syntax, "Python", "setting it assigns the syntax");
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "settings_get",
+            json!([target, "syntax"])
+        ),
+        Ok(plain),
+        "never None (Pretty JSON)"
+    );
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "syntax", "Packages/Python/Python.sublime-syntax"]),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.active_document().unwrap().syntax,
+        "Python",
+        "setting it assigns the syntax"
+    );
     let python = json!([true, "Packages/Python/Python.sublime-syntax"]);
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "syntax"])), Ok(python));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "settings_get",
+            json!([target, "syntax"])
+        ),
+        Ok(python)
+    );
     let all = call(&world, &mut editor, "settings_all", json!([target])).unwrap();
-    assert_eq!(all["syntax"], json!("Packages/Python/Python.sublime-syntax"));
+    assert_eq!(
+        all["syntax"],
+        json!("Packages/Python/Python.sublime-syntax")
+    );
 }
 
 #[test]
 fn plugin_settings_files_are_loaded_changed_and_saved_to_user() {
     let world = plugin_world();
-    world
-        .resources
-        .settings_files
-        .borrow_mut()
-        .insert("Tool.sublime-settings".into(), json!({"a": 1, "b": 2}).as_object().unwrap().clone());
-    world
-        .resources
-        .user_settings_files
-        .borrow_mut()
-        .insert("Tool.sublime-settings".into(), json!({"b": 3, "keep": true}).as_object().unwrap().clone());
+    world.resources.settings_files.borrow_mut().insert(
+        "Tool.sublime-settings".into(),
+        json!({"a": 1, "b": 2}).as_object().unwrap().clone(),
+    );
+    world.resources.user_settings_files.borrow_mut().insert(
+        "Tool.sublime-settings".into(),
+        json!({"b": 3, "keep": true}).as_object().unwrap().clone(),
+    );
     let mut editor = world.editor();
     let target = json!(["file", "Tool.sublime-settings"]);
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "b"])), Ok(json!([true, 3])), "User wins");
-    call(&world, &mut editor, "settings_set", json!([target, "a", 10])).unwrap();
-    call(&world, &mut editor, "settings_erase", json!([target, "b"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "a"])), Ok(json!([true, 10])));
-    call(&world, &mut editor, "save_settings", json!(["Tool.sublime-settings"])).unwrap();
     assert_eq!(
-        Value::Object(world.resources.user_settings_files.borrow()["Tool.sublime-settings"].clone()),
+        call(&world, &mut editor, "settings_get", json!([target, "b"])),
+        Ok(json!([true, 3])),
+        "User wins"
+    );
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "a", 10]),
+    )
+    .unwrap();
+    call(&world, &mut editor, "settings_erase", json!([target, "b"])).unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "settings_get", json!([target, "a"])),
+        Ok(json!([true, 10]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "save_settings",
+        json!(["Tool.sublime-settings"]),
+    )
+    .unwrap();
+    assert_eq!(
+        Value::Object(
+            world.resources.user_settings_files.borrow()["Tool.sublime-settings"].clone()
+        ),
         json!({"a": 10, "keep": true})
     );
 }
@@ -477,11 +1254,34 @@ fn preferences_set_by_plugins_apply_now_and_persist_on_save() {
     let world = plugin_world();
     let mut editor = world.editor();
     let target = json!(["file", "Preferences.sublime-settings"]);
-    call(&world, &mut editor, "settings_set", json!([target, "font_size", 14])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "font_size", 14]),
+    )
+    .unwrap();
     assert_eq!(editor.global_settings().usize("font_size", 0), 14);
-    assert!(world.resources.user_settings.borrow().get("font_size").is_none(), "not saved yet");
-    call(&world, &mut editor, "save_settings", json!(["Preferences.sublime-settings"])).unwrap();
-    assert_eq!(world.resources.user_settings.borrow()["font_size"], json!(14));
+    assert!(
+        world
+            .resources
+            .user_settings
+            .borrow()
+            .get("font_size")
+            .is_none(),
+        "not saved yet"
+    );
+    call(
+        &world,
+        &mut editor,
+        "save_settings",
+        json!(["Preferences.sublime-settings"]),
+    )
+    .unwrap();
+    assert_eq!(
+        world.resources.user_settings.borrow()["font_size"],
+        json!(14)
+    );
 }
 
 #[test]
@@ -489,41 +1289,109 @@ fn window_settings_live_in_memory() {
     let world = plugin_world();
     let mut editor = world.editor();
     let target = json!(["window", 1]);
-    call(&world, &mut editor, "settings_set", json!([target, "x", [1, 2]])).unwrap();
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([target, "x"])), Ok(json!([true, [1, 2]])));
-    assert!(call(&world, &mut editor, "settings_get", json!([["planet", 3], "x"])).is_err());
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([target, "x", [1, 2]]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "settings_get", json!([target, "x"])),
+        Ok(json!([true, [1, 2]]))
+    );
+    assert!(call(
+        &world,
+        &mut editor,
+        "settings_get",
+        json!([["planet", 3], "x"])
+    )
+    .is_err());
 }
 
 #[test]
 fn the_input_panel_is_a_view() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "");
-    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "Name:", "hello", 3, false])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_size", json!([id])), Ok(json!(5)));
-    assert_eq!(call(&world, &mut editor, "window_active_panel", json!([1])), Ok(json!("input")));
+    let id = call(
+        &world,
+        &mut editor,
+        "window_show_input_panel",
+        json!([1, "Name:", "hello", 3, false]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_size", json!([id])),
+        Ok(json!(5))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_active_panel", json!([1])),
+        Ok(json!("input"))
+    );
 
-    call(&world, &mut editor, "view_selection_set", json!([id, [[0, 5]]])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([id])), Ok(json!([[0, 5]])));
+    call(
+        &world,
+        &mut editor,
+        "view_selection_set",
+        json!([id, [[0, 5]]]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_selection_get", json!([id])),
+        Ok(json!([[0, 5]]))
+    );
     call(&world, &mut editor, "view_insert", json!([id, 5, "!"])).unwrap();
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "hello!");
 
     world.plugins.then([PluginMessage::Done { error: None }]);
     editor.finish_plugin_input_panel(false, &mut |_, _| {});
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([id])), Ok(json!(false)), "gone with the panel");
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([id])),
+        Ok(json!(false)),
+        "gone with the panel"
+    );
 }
 
 #[test]
 fn built_in_commands_that_work_in_panels() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "");
-    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "", "hello", 3, false])).unwrap();
-    call(&world, &mut editor, "run_command", json!(["view", id, "select_all", null])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([id])), Ok(json!([[0, 5]])));
-    call(&world, &mut editor, "run_command", json!(["view", id, "insert", { "characters": "bye" }])).unwrap();
+    let id = call(
+        &world,
+        &mut editor,
+        "window_show_input_panel",
+        json!([1, "", "hello", 3, false]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", id, "select_all", null]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_selection_get", json!([id])),
+        Ok(json!([[0, 5]]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", id, "insert", { "characters": "bye" }]),
+    )
+    .unwrap();
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bye");
     // Commands of tabs, the window or the text widget do not (text commands do: `output_panels.rs`).
-    let refused = call(&world, &mut editor, "run_command", json!(["view", id, "undo", null]));
-    assert!(refused.unwrap_err().starts_with("undo cannot run in a panel"));
+    let refused = call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", id, "undo", null]),
+    );
+    assert!(refused
+        .unwrap_err()
+        .starts_with("undo cannot run in a panel"));
 }
 
 #[test]
@@ -531,12 +1399,29 @@ fn a_view_exports_html() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "x = \"hi\"\n");
     let id = view_id(&editor);
-    let html = call(&world, &mut editor, "view_export_to_html", json!([id, null, false, false, true, true])).unwrap();
+    let html = call(
+        &world,
+        &mut editor,
+        "view_export_to_html",
+        json!([id, null, false, false, true, true]),
+    )
+    .unwrap();
     let html = html.as_str().unwrap();
-    assert!(html.starts_with("<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">x = </span>"), "{html}");
-    assert!(html.contains("<span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span>"), "{html}");
+    assert!(
+        html.starts_with("<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">x = </span>"),
+        "{html}"
+    );
+    assert!(
+        html.contains("<span style=\"color: #ff0000; font-weight: bold;\">\"hi\"</span>"),
+        "{html}"
+    );
     // A region: only it is exported, and the enclosing div adds the colors.
-    let region = call(&world, &mut editor, "view_export_to_html", json!([id, [[4, 8]], false, true, false, false]));
+    let region = call(
+        &world,
+        &mut editor,
+        "view_export_to_html",
+        json!([id, [[4, 8]], false, true, false, false]),
+    );
     assert_eq!(
         region,
         Ok(json!(
@@ -550,29 +1435,64 @@ fn a_view_exports_html() {
 fn an_io_panel_keeps_its_field_and_calls_on_input() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "");
-    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, 7])).unwrap();
+    let ids = call(
+        &world,
+        &mut editor,
+        "window_create_io_panel",
+        json!([1, "exec", false, 7]),
+    )
+    .unwrap();
     let output = ids[0].as_u64().unwrap();
     let input = ids[1].as_u64().unwrap();
-    assert_eq!(call(&world, &mut editor, "window_find_io_panel", json!([1, "exec"])), Ok(json!([output, input])));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_find_io_panel",
+            json!([1, "exec"])
+        ),
+        Ok(json!([output, input]))
+    );
 
     // Enter: `on_input` hears the text, the field empties and stays open.
-    call(&world, &mut editor, "view_insert", json!([input, 0, "hello"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([input, 0, "hello"]),
+    )
+    .unwrap();
     editor.finish_plugin_input_panel(true, &mut |_, _| {});
-    assert_eq!(world.plugins.callbacks.borrow().as_slice(), [(7, "input".to_string(), json!(["hello"]))]);
+    assert_eq!(
+        world.plugins.callbacks.borrow().as_slice(),
+        [(7, "input".to_string(), json!(["hello"]))]
+    );
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "");
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(true)));
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([input])),
+        Ok(json!(true))
+    );
 
     // Esc closes it without a call.
     editor.finish_plugin_input_panel(false, &mut |_, _| {});
     assert!(editor.plugin_input_panel().is_none());
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([input])), Ok(json!(false)));
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([input])),
+        Ok(json!(false))
+    );
 }
 
 #[test]
 fn an_io_panel_without_a_callback_has_no_input_field() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "");
-    let ids = call(&world, &mut editor, "window_create_io_panel", json!([1, "exec", false, null])).unwrap();
+    let ids = call(
+        &world,
+        &mut editor,
+        "window_create_io_panel",
+        json!([1, "exec", false, null]),
+    )
+    .unwrap();
     assert!(ids[0].is_number());
     assert_eq!(ids[1], Value::Null);
     assert!(editor.plugin_input_panel().is_none());
@@ -582,6 +1502,11 @@ fn an_io_panel_without_a_callback_has_no_input_field() {
 fn expand_variables_uses_the_given_values() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "");
-    let answer = call(&world, &mut editor, "expand_variables", json!(["$a ${b:c}", { "a": "x" }]));
+    let answer = call(
+        &world,
+        &mut editor,
+        "expand_variables",
+        json!(["$a ${b:c}", { "a": "x" }]),
+    );
     assert_eq!(answer, Ok(json!("x c")));
 }

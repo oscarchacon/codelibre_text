@@ -32,9 +32,19 @@ impl KeyContext for WithPlugins<'_> {
         self.query_all(key, operator, operand, false)
     }
 
-    fn query_all(&self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
+    fn query_all(
+        &self,
+        key: &str,
+        operator: &str,
+        operand: &Value,
+        match_all: bool,
+    ) -> Option<bool> {
         let known = self.context.query_all(key, operator, operand, match_all);
-        known.or_else(|| self.editor.borrow_mut().plugin_query_context(key, operator, operand, match_all))
+        known.or_else(|| {
+            self.editor
+                .borrow_mut()
+                .plugin_query_context(key, operator, operand, match_all)
+        })
     }
 }
 
@@ -47,16 +57,32 @@ impl Editor {
         }
         // The keymap is set aside while the plugins (which may call the editor) answer.
         let mut keymap = std::mem::take(&mut self.state.keymap);
-        let result = keymap.press(alternatives, &WithPlugins { context, editor: RefCell::new(self) });
+        let result = keymap.press(
+            alternatives,
+            &WithPlugins {
+                context,
+                editor: RefCell::new(self),
+            },
+        );
         self.state.keymap = keymap;
         result
     }
 
     /// `on_query_context(view, key, operator, operand, match_all)`: true or false from the first
     /// listener that knows the key, `None` when none does.
-    fn plugin_query_context(&mut self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
+    fn plugin_query_context(
+        &mut self,
+        key: &str,
+        operator: &str,
+        operand: &Value,
+        match_all: bool,
+    ) -> Option<bool> {
         let view = self.active_document()?.id;
-        let answer = self.plugin_query("on_query_context", Some(view), json!([key, operator, operand, match_all]))?;
+        let answer = self.plugin_query(
+            "on_query_context",
+            Some(view),
+            json!([key, operator, operand, match_all]),
+        )?;
         answer.as_bool()
     }
 
@@ -73,7 +99,9 @@ impl Editor {
         let args = json!([command.name, command.args]);
         match self.plugin_query(event, view, args) {
             Some(Value::Array(answer)) => match answer.first().and_then(Value::as_str) {
-                Some(name) => Command::with_args(name, answer.get(1).cloned().unwrap_or(Value::Null)),
+                Some(name) => {
+                    Command::with_args(name, answer.get(1).cloned().unwrap_or(Value::Null))
+                }
                 None => command.clone(),
             },
             _ => command.clone(),
@@ -96,7 +124,13 @@ impl Editor {
 
     /// Some listener wants to hear about text commands, also the ones the text widget does itself.
     pub fn plugins_hear_text_commands(&self) -> bool {
-        ["on_text_command", "on_post_text_command", "on_post_text_command_async"].iter().any(|e| self.wants_plugin_event(e))
+        [
+            "on_text_command",
+            "on_post_text_command",
+            "on_post_text_command_async",
+        ]
+        .iter()
+        .any(|e| self.wants_plugin_event(e))
     }
 
     pub(crate) fn wants_plugin_event(&self, name: &str) -> bool {
@@ -116,7 +150,12 @@ impl Editor {
 
     /// Sends a query when some listener defines that method; the answer (`None` for `null`).
     /// Built-in commands the listeners run are handled as in events.
-    pub(crate) fn plugin_query(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
+    pub(crate) fn plugin_query(
+        &mut self,
+        name: &str,
+        view: Option<DocumentId>,
+        args: Value,
+    ) -> Option<Value> {
         if !self.wants_plugin_event(name) {
             return None;
         }
@@ -124,16 +163,27 @@ impl Editor {
     }
 
     /// A query the host always understands, whether or not a listener wants it.
-    pub(crate) fn ask_plugins(&mut self, name: &str, view: Option<DocumentId>, args: Value) -> Option<Value> {
+    pub(crate) fn ask_plugins(
+        &mut self,
+        name: &str,
+        view: Option<DocumentId>,
+        args: Value,
+    ) -> Option<Value> {
         if !self.enter_plugin(name) {
             return None;
         }
-        let result = self.gateways.plugins.query(name, view, &args).and_then(|()| self.converse_during_event());
+        let result = self
+            .gateways
+            .plugins
+            .query(name, view, &args)
+            .and_then(|()| self.converse_during_event());
         self.leave_plugin();
         match result {
             Ok(PluginMessage::Answer(Value::Null)) => None,
             Ok(PluginMessage::Answer(value)) => Some(value),
-            Ok(PluginMessage::Done { error: Some(traceback) }) => {
+            Ok(PluginMessage::Done {
+                error: Some(traceback),
+            }) => {
                 self.log(&format!("{name}: {traceback}\n"));
                 None
             }

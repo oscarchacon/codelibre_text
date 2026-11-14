@@ -77,7 +77,9 @@ impl Editor {
         };
         match find::find_from(&pattern, &doc.text, doc.selection(), forward, options.wrap) {
             Some(selection) => doc.set_selection(selection),
-            None => self.notify(self.tr_args("Unable to find {query}", &[("query", &options.query)])),
+            None => {
+                self.notify(self.tr_args("Unable to find {query}", &[("query", &options.query)]))
+            }
         }
         true
     }
@@ -100,7 +102,8 @@ impl Editor {
         let Ok(Some(pattern)) = occurrence_options(&doc.text, selection).pattern() else {
             return;
         };
-        if let Some(next) = find::next_unselected(&pattern, &doc.text, selection, &doc.selections()) {
+        if let Some(next) = find::next_unselected(&pattern, &doc.text, selection, &doc.selections())
+        {
             doc.add_selection(next);
         }
     }
@@ -135,7 +138,15 @@ impl Editor {
             return;
         };
         if let Some(doc) = self.active_document_mut() {
-            doc.edit(|text, sel| Some(find::replace_next(&pattern, text, sel, &replacement, &options)));
+            doc.edit(|text, sel| {
+                Some(find::replace_next(
+                    &pattern,
+                    text,
+                    sel,
+                    &replacement,
+                    &options,
+                ))
+            });
         }
     }
 
@@ -152,7 +163,12 @@ impl Editor {
                 Some(sel.clamped(text.chars().count()))
             });
         }
-        self.notify(self.tr_n("Replaced {count} occurrence", "Replaced {count} occurrences", count, &[]));
+        self.notify(self.tr_n(
+            "Replaced {count} occurrence",
+            "Replaced {count} occurrences",
+            count,
+            &[],
+        ));
     }
 
     /// Byte ranges of every match in the active document (cached between calls).
@@ -167,7 +183,10 @@ impl Editor {
         doc.text.hash(&mut hasher);
         let text_hash = hasher.finish();
         if let Some(cache) = &self.state.find_cache {
-            if cache.options == self.state.find && cache.document == doc.id && cache.text_hash == text_hash {
+            if cache.options == self.state.find
+                && cache.document == doc.id
+                && cache.text_hash == text_hash
+            {
                 return cache.matches.clone();
             }
         }

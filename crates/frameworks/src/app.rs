@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use egui::{Event, Key, Modifiers, RichText};
 use interface_adapters::controllers::keyboard_controller::{self, KeyHandling};
-use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::controllers::ui_controller::UiEvent;
+use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::presenters;
 use interface_adapters::view_models::{ContextMenuViewModel, GroupViewModel};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
@@ -23,12 +23,15 @@ use use_cases::Editor;
 use crate::input;
 use crate::syntax_engine::SharedSyntaxEngine;
 use crate::views::editor_view::{self, EditorText, SelectionSync};
-use crate::views::theme::Chrome;
 #[cfg(not(target_os = "macos"))]
 use crate::views::menu_bar;
 #[cfg(target_os = "macos")]
 use crate::views::native_menu::{Activation, NativeMenu};
-use crate::views::{context_menu, dialogs, find_panel, input_panel, output_panel, quick_panel, side_bar, status_bar, tabs};
+use crate::views::theme::Chrome;
+use crate::views::{
+    context_menu, dialogs, find_panel, input_panel, output_panel, quick_panel, side_bar,
+    status_bar, tabs,
+};
 
 /// What one window shows on screen beyond the editor's state: its panels, side bar, the carets
 /// its text widgets applied, the widget edits waiting for its next frame.
@@ -49,22 +52,42 @@ struct WindowUi {
 /// What the text widget does with a key no binding took, as the command the hooks hear about
 /// and the input to replay when no listener replaces it. Only the keys the widget sees itself:
 /// modifiers with Ctrl/Alt/Cmd are bindings' business.
-fn widget_key_input(key: Key, modifiers: Modifiers) -> Option<(entities::command::Command, WidgetEdit)> {
+fn widget_key_input(
+    key: Key,
+    modifiers: Modifiers,
+) -> Option<(entities::command::Command, WidgetEdit)> {
     if modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd {
         return None;
     }
     let shift = modifiers.shift;
     let move_by = |by: &str, forward: bool| {
-        entities::command::Command::with_args("move", json!({ "by": by, "forward": forward, "extend": shift }))
+        entities::command::Command::with_args(
+            "move",
+            json!({ "by": by, "forward": forward, "extend": shift }),
+        )
     };
-    let move_to = |to: &str| entities::command::Command::with_args("move_to", json!({ "to": to, "extend": shift }));
+    let move_to = |to: &str| {
+        entities::command::Command::with_args("move_to", json!({ "to": to, "extend": shift }))
+    };
     let (command, widget_key) = match key {
-        Key::Backspace => (entities::command::Command::new("left_delete"), WidgetKey::Backspace),
-        Key::Delete => (entities::command::Command::new("right_delete"), WidgetKey::Delete),
-        Key::Enter => (entities::command::Command::with_args("insert", json!({ "characters": "\n" })), WidgetKey::Enter),
+        Key::Backspace => (
+            entities::command::Command::new("left_delete"),
+            WidgetKey::Backspace,
+        ),
+        Key::Delete => (
+            entities::command::Command::new("right_delete"),
+            WidgetKey::Delete,
+        ),
+        Key::Enter => (
+            entities::command::Command::with_args("insert", json!({ "characters": "\n" })),
+            WidgetKey::Enter,
+        ),
         // Shift+Tab unindents (the view turns the key into that event); Tab inserts.
         Key::Tab if shift => (entities::command::Command::new("unindent"), WidgetKey::Tab),
-        Key::Tab => (entities::command::Command::with_args("insert", json!({ "characters": "\t" })), WidgetKey::Tab),
+        Key::Tab => (
+            entities::command::Command::with_args("insert", json!({ "characters": "\t" })),
+            WidgetKey::Tab,
+        ),
         Key::ArrowLeft => (move_by("characters", false), WidgetKey::Left),
         Key::ArrowRight => (move_by("characters", true), WidgetKey::Right),
         Key::ArrowUp => (move_by("lines", false), WidgetKey::Up),
@@ -75,7 +98,13 @@ fn widget_key_input(key: Key, modifiers: Modifiers) -> Option<(entities::command
         Key::PageDown => (move_by("pages", true), WidgetKey::PageDown),
         _ => return None,
     };
-    Some((command, WidgetEdit::Key { key: widget_key, shift }))
+    Some((
+        command,
+        WidgetEdit::Key {
+            key: widget_key,
+            shift,
+        },
+    ))
 }
 
 /// The widget input for a [`WidgetEdit::Key`], as egui gives it.
@@ -99,7 +128,10 @@ fn widget_key_event(key: WidgetKey, shift: bool) -> Event {
         physical_key: None,
         pressed: true,
         repeat: false,
-        modifiers: Modifiers { shift, ..Default::default() },
+        modifiers: Modifiers {
+            shift,
+            ..Default::default()
+        },
     }
 }
 
@@ -122,13 +154,25 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, editor: Editor, view: ViewState, engine: SharedSyntaxEngine) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        editor: Editor,
+        view: ViewState,
+        engine: SharedSyntaxEngine,
+    ) -> Self {
         // Ctrl+=/- are the editor's font size commands, not egui's zoom.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         #[cfg(target_os = "macos")]
         add_key_symbols_font(&cc.egui_ctx);
         let root = editor.window_ids()[0];
-        let windows = HashMap::from([(root, WindowUi { view, shown: true, ..WindowUi::default() })]);
+        let windows = HashMap::from([(
+            root,
+            WindowUi {
+                view,
+                shown: true,
+                ..WindowUi::default()
+            },
+        )]);
         Self {
             editor,
             engine,
@@ -152,15 +196,27 @@ impl App {
         let mut last_combos = Vec::new();
         for (index, event) in events.iter().enumerate().take(real_events) {
             match event {
-                Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
+                Event::Key {
+                    key,
+                    physical_key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => {
                     let combos = input::key_combos(*key, *physical_key, *modifiers);
-                    let handling = keyboard_controller::key_pressed(&mut self.editor, view, &combos);
+                    let handling =
+                        keyboard_controller::key_pressed(&mut self.editor, view, &combos);
                     if let KeyHandling::Consumed = handling {
                         consumed.push(index);
                     } else if view.text_has_focus {
                         // No binding took it: the widget would do it, so the hooks hear about it.
                         if let Some((command, replay)) = widget_key_input(*key, *modifiers) {
-                            if command_controller::hooked_widget_input(&mut self.editor, view, command, replay) {
+                            if command_controller::hooked_widget_input(
+                                &mut self.editor,
+                                view,
+                                command,
+                                replay,
+                            ) {
                                 consumed.push(index);
                             }
                         }
@@ -168,14 +224,19 @@ impl App {
                     last_combos = combos;
                 }
                 // A consumed key must not also type its character (e.g. Alt+1 typing "1").
-                Event::Text(_) if index > 0 && consumed.last() == Some(&(index - 1)) => consumed.push(index),
+                Event::Text(_) if index > 0 && consumed.last() == Some(&(index - 1)) => {
+                    consumed.push(index)
+                }
                 // Keymaps bind symbols by the character (`*`, `"`): asked once it is typed, unless
                 // its key event already had that name.
                 Event::Text(text) => {
-                    let typed = input::typed_combo(text).filter(|combo| !last_combos.contains(combo));
+                    let typed =
+                        input::typed_combo(text).filter(|combo| !last_combos.contains(combo));
                     let mut bound = false;
                     if let Some(combo) = typed {
-                        if let KeyHandling::Consumed = keyboard_controller::key_pressed(&mut self.editor, view, &[combo]) {
+                        if let KeyHandling::Consumed =
+                            keyboard_controller::key_pressed(&mut self.editor, view, &[combo])
+                        {
                             consumed.push(index);
                             bound = true;
                         }
@@ -187,7 +248,10 @@ impl App {
                         && command_controller::hooked_widget_input(
                             &mut self.editor,
                             view,
-                            entities::command::Command::with_args("insert", json!({ "characters": text })),
+                            entities::command::Command::with_args(
+                                "insert",
+                                json!({ "characters": text }),
+                            ),
                             WidgetEdit::Insert(text.clone()),
                         )
                     {
@@ -201,7 +265,9 @@ impl App {
                         Event::Cut => "cut",
                         _ => "paste",
                     };
-                    if let KeyHandling::Consumed = keyboard_controller::clipboard_shortcut(&mut self.editor, view, command) {
+                    if let KeyHandling::Consumed =
+                        keyboard_controller::clipboard_shortcut(&mut self.editor, view, command)
+                    {
                         consumed.push(index);
                     }
                 }
@@ -233,8 +299,17 @@ impl App {
         }
     }
 
-    fn carry_out_view_requests(&mut self, ctx: &egui::Context, id: WindowId, window: &mut WindowUi) {
-        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+    fn carry_out_view_requests(
+        &mut self,
+        ctx: &egui::Context,
+        id: WindowId,
+        window: &mut WindowUi,
+    ) {
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
         let key = |key: Key, modifiers: Modifiers| Event::Key {
             key,
             physical_key: None,
@@ -244,16 +319,26 @@ impl App {
         };
         for request in window.view.take_requests() {
             match request {
-                ViewRequest::SetFullscreen(on) => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on)),
+                ViewRequest::SetFullscreen(on) => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on))
+                }
                 // The last window closes the application; another one just goes.
                 ViewRequest::CloseWindow if self.editor.window_ids().len() > 1 => {
                     self.editor.close_window(id);
                 }
-                ViewRequest::CloseWindow | ViewRequest::Exit => ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close),
+                ViewRequest::CloseWindow | ViewRequest::Exit => {
+                    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close)
+                }
                 ViewRequest::WidgetEdit(edit) => {
                     window.pending_widget_events.push(match edit {
                         WidgetEdit::Undo => key(Key::Z, ctrl),
-                        WidgetEdit::Redo => key(Key::Z, Modifiers { shift: true, ..ctrl }),
+                        WidgetEdit::Redo => key(
+                            Key::Z,
+                            Modifiers {
+                                shift: true,
+                                ..ctrl
+                            },
+                        ),
                         WidgetEdit::SelectAll => key(Key::A, ctrl),
                         WidgetEdit::Copy => Event::Copy,
                         WidgetEdit::Cut => Event::Cut,
@@ -265,6 +350,13 @@ impl App {
                     // The widget gets it in the next frame, which must come even with no input.
                     ctx.request_repaint();
                 }
+                ViewRequest::WidgetUndoBoundary {
+                    document,
+                    text,
+                    selection,
+                } => {
+                    editor_view::add_undo_boundary(ctx, document, text, selection);
+                }
             }
         }
     }
@@ -275,25 +367,43 @@ impl App {
     fn handle_native_menu(&mut self, ctx: &egui::Context, window: &mut WindowUi) {
         for activation in self.native_menu.activations() {
             match activation {
-                Activation::Command(command) => ui_controller::handle(&mut self.editor, &mut window.view, UiEvent::RunCommand(command)),
+                Activation::Command(command) => ui_controller::handle(
+                    &mut self.editor,
+                    &mut window.view,
+                    UiEvent::RunCommand(command),
+                ),
                 Activation::Key(combo) => {
-                    let Some((key, modifiers)) = input::key_event(&combo) else { continue };
-                    let clipboard = modifiers.command && !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
+                    let Some((key, modifiers)) = input::key_event(&combo) else {
+                        continue;
+                    };
+                    let clipboard =
+                        modifiers.command && !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
                     window.replayed_keys.push(match key {
                         Key::C if clipboard => Event::Copy,
                         Key::X if clipboard => Event::Cut,
-                        Key::V if clipboard => match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
-                            Ok(text) if !text.is_empty() => Event::Paste(text.replace("\r\n", "\n")),
-                            _ => continue,
+                        Key::V if clipboard => {
+                            match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+                                Ok(text) if !text.is_empty() => {
+                                    Event::Paste(text.replace("\r\n", "\n"))
+                                }
+                                _ => continue,
+                            }
+                        }
+                        _ => Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
                         },
-                        _ => Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers },
                     });
                     ctx.request_repaint();
                 }
             }
         }
         // A native menu cannot ask when it opens, as the egui one does (`UiEvent::MenuOpen`).
-        if self.command_states_asked.elapsed() >= Duration::from_secs(1) && ctx.input(|i| i.focused) {
+        if self.command_states_asked.elapsed() >= Duration::from_secs(1) && ctx.input(|i| i.focused)
+        {
             self.editor.refresh_plugin_command_states();
             self.command_states_asked = std::time::Instant::now();
         }
@@ -303,7 +413,12 @@ impl App {
     /// viewport shows another one. The last window: hot exit saves the session (every window);
     /// otherwise unsaved changes are asked about. Another window: its files close (asking).
     /// Returns false when the window is gone.
-    fn handle_close_request(&mut self, ctx: &egui::Context, id: WindowId, window: &mut WindowUi) -> bool {
+    fn handle_close_request(
+        &mut self,
+        ctx: &egui::Context,
+        id: WindowId,
+        window: &mut WindowUi,
+    ) -> bool {
         if !ctx.input(|i| i.viewport().close_requested()) {
             return true;
         }
@@ -341,15 +456,23 @@ impl App {
             return false;
         }
 
-        let text_area = self.editor.active_document().map(|d| editor_view::widget_id(d.id));
+        let text_area = self
+            .editor
+            .active_document()
+            .map(|d| editor_view::widget_id(d.id));
         let focused = ctx.memory(|m| m.focused());
         window.view.text_has_focus = text_area.is_some() && focused == text_area;
         // The focus went to another group (a key, a plugin): its text takes the keyboard from the
         // text of the group that had it.
         if focused.is_some() && !window.view.text_has_focus {
-            let shown: Vec<usize> = (0..self.editor.group_count()).filter_map(|g| self.editor.active_index_in_group(g)).collect();
+            let shown: Vec<usize> = (0..self.editor.group_count())
+                .filter_map(|g| self.editor.active_index_in_group(g))
+                .collect();
             let documents = &self.editor.state().documents;
-            if shown.into_iter().any(|i| Some(editor_view::widget_id(documents[i].id)) == focused) {
+            if shown
+                .into_iter()
+                .any(|i| Some(editor_view::widget_id(documents[i].id)) == focused)
+            {
                 window.view.focus_editor = true;
             }
         }
@@ -399,7 +522,14 @@ impl App {
         still_open
     }
 
-    fn draw(&mut self, ctx: &egui::Context, chrome: &Chrome, window: &mut WindowUi, root: bool, dialogs: bool) -> Vec<UiEvent> {
+    fn draw(
+        &mut self,
+        ctx: &egui::Context,
+        chrome: &Chrome,
+        window: &mut WindowUi,
+        root: bool,
+        dialogs: bool,
+    ) -> Vec<UiEvent> {
         let mut events = Vec::new();
         let view = &mut window.view;
         // Views look up their fixed labels in the interface language.
@@ -407,14 +537,19 @@ impl App {
 
         #[cfg(target_os = "macos")]
         if root {
-            self.native_menu.show(presenters::menu::present_for_macos(&self.editor));
+            self.native_menu
+                .show(presenters::menu::present_for_macos(&self.editor));
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = root;
             let menu = presenters::menu::present(&self.editor);
             egui::TopBottomPanel::top("menu_bar")
-                .frame(egui::Frame::new().fill(chrome.panel_bg).inner_margin(egui::Margin::symmetric(6, 3)))
+                .frame(
+                    egui::Frame::new()
+                        .fill(chrome.panel_bg)
+                        .inner_margin(egui::Margin::symmetric(6, 3)),
+                )
                 .show(ctx, |ui| menu_bar::show(ui, &menu, &mut events));
         }
 
@@ -423,7 +558,9 @@ impl App {
             egui::TopBottomPanel::bottom("status_bar")
                 .exact_height(24.0)
                 .frame(egui::Frame::new().fill(chrome.panel_bg))
-                .show(ctx, |ui| status_bar::show(ui, chrome, &translations, &status, &mut events));
+                .show(ctx, |ui| {
+                    status_bar::show(ui, chrome, &translations, &status, &mut events)
+                });
         }
 
         if let Some(input) = presenters::quick_panel::present_input_panel(&self.editor, view) {
@@ -437,7 +574,7 @@ impl App {
                 .show(ctx, |ui| input_panel::show(ui, chrome, &input, &mut events));
         }
 
-        if let Some(output) = presenters::output_panel::present(&self.editor) {
+        if let Some(output) = presenters::output_panel::present(&self.editor, view) {
             let highlighted = output_panel::highlighted(&self.engine, &output);
             egui::TopBottomPanel::bottom("output_panel")
                 .resizable(true)
@@ -449,7 +586,9 @@ impl App {
                         .inner_margin(egui::Margin::symmetric(8, 4))
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
-                .show(ctx, |ui| output_panel::show(ui, chrome, &output, highlighted.as_ref(), &mut events));
+                .show(ctx, |ui| {
+                    output_panel::show(ui, chrome, &output, highlighted.as_ref(), &mut events)
+                });
         }
 
         if let Some(find) = presenters::find_panel::present(&mut self.editor, view) {
@@ -460,7 +599,9 @@ impl App {
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
-                .show(ctx, |ui| find_panel::show(ui, chrome, &translations, &find, &mut events));
+                .show(ctx, |ui| {
+                    find_panel::show(ui, chrome, &translations, &find, &mut events)
+                });
         }
 
         let open_menu = presenters::menu::present_context_menu(&self.editor, view);
@@ -471,7 +612,9 @@ impl App {
                 .default_width(230.0)
                 .width_range(120.0..=600.0)
                 .frame(egui::Frame::new().fill(chrome.panel_bg))
-                .show(ctx, |ui| side_bar::show(ui, chrome, &translations, &side, menu, &mut events));
+                .show(ctx, |ui| {
+                    side_bar::show(ui, chrome, &translations, &side, menu, &mut events)
+                });
         }
 
         let groups = presenters::groups::present(&mut self.editor, view);
@@ -481,22 +624,43 @@ impl App {
             .frame(egui::Frame::new().fill(chrome.editor_bg))
             .show(ctx, |ui| {
                 let area = ui.available_rect_before_wrap();
-                let at = |x: f32, y: f32| egui::pos2(area.left() + x * area.width(), area.top() + y * area.height());
+                let at = |x: f32, y: f32| {
+                    egui::pos2(
+                        area.left() + x * area.width(),
+                        area.top() + y * area.height(),
+                    )
+                };
                 for group in &groups {
                     let [left, top, right, bottom] = group.rect;
                     let rect = egui::Rect::from_min_max(at(left, top), at(right, bottom));
-                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(("group", group.group)));
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rect)
+                            .id_salt(("group", group.group)),
+                    );
                     child.set_clip_rect(rect.intersect(ui.clip_rect()));
-                    show_group(&mut child, &mut self.editor, &self.engine, selection_sync, chrome, group, &hints, open_menu.as_ref(), &mut events);
+                    show_group(
+                        &mut child,
+                        &mut self.editor,
+                        &self.engine,
+                        selection_sync,
+                        chrome,
+                        group,
+                        &hints,
+                        open_menu.as_ref(),
+                        &mut events,
+                    );
                     // A tab dropped on a group's text goes to the end of its tabs.
                     drop_tab_on_group(ui, rect, group.group, chrome, &mut events);
                     // A line between groups.
                     let stroke = egui::Stroke::new(1.0_f32, chrome.border);
                     if right < 1.0 {
-                        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], stroke);
+                        ui.painter()
+                            .line_segment([rect.right_top(), rect.right_bottom()], stroke);
                     }
                     if bottom < 1.0 {
-                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+                        ui.painter()
+                            .line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
                     }
                 }
                 drag_layout_boundaries(ui, area, self.editor.layout(), &mut events);
@@ -540,7 +704,9 @@ impl App {
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        let Some(window) = self.windows.get_mut(&self.root) else { return };
+        let Some(window) = self.windows.get_mut(&self.root) else {
+            return;
+        };
         raw_input.events.append(&mut window.replayed_keys);
         window.injected_event_count = window.pending_widget_events.len();
         raw_input.events.append(&mut window.pending_widget_events);
@@ -560,13 +726,29 @@ impl eframe::App for App {
         let root = self.root;
         self.window_frame(ctx, root, true);
         self.follow_windows();
-        let others: Vec<WindowId> = self.editor.window_ids().into_iter().filter(|id| *id != self.root).collect();
+        let others: Vec<WindowId> = self
+            .editor
+            .window_ids()
+            .into_iter()
+            .filter(|id| *id != self.root)
+            .collect();
         for id in others {
-            let title = self.windows.get(&id).map(|w| w.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "CodeLibre Text".into());
-            let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([1000.0, 700.0]);
-            ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(("window", id)), builder, |ctx, _class| {
-                self.window_frame(ctx, id, false);
-            });
+            let title = self
+                .windows
+                .get(&id)
+                .map(|w| w.title.clone())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "CodeLibre Text".into());
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_inner_size([1000.0, 700.0]);
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of(("window", id)),
+                builder,
+                |ctx, _class| {
+                    self.window_frame(ctx, id, false);
+                },
+            );
         }
         self.follow_windows();
         // Between frames (timers, plugin threads) the window with the focus is the current one.
@@ -586,46 +768,101 @@ impl eframe::App for App {
 
 /// The lines between the layout's columns and rows can be dragged: the boundary follows the
 /// mouse (kept away from its neighbours).
-fn drag_layout_boundaries(ui: &mut egui::Ui, area: egui::Rect, layout: &entities::layout::Layout, events: &mut Vec<UiEvent>) {
+fn drag_layout_boundaries(
+    ui: &mut egui::Ui,
+    area: egui::Rect,
+    layout: &entities::layout::Layout,
+    events: &mut Vec<UiEvent>,
+) {
     let pointer = ui.ctx().pointer_interact_pos();
-    let handles = layout.cols.iter().enumerate().map(|(i, x)| (true, i, *x)).chain(layout.rows.iter().enumerate().map(|(i, y)| (false, i, *y)));
+    let handles = layout
+        .cols
+        .iter()
+        .enumerate()
+        .map(|(i, x)| (true, i, *x))
+        .chain(layout.rows.iter().enumerate().map(|(i, y)| (false, i, *y)));
     for (vertical, index, at) in handles {
-        let count = if vertical { layout.cols.len() } else { layout.rows.len() };
+        let count = if vertical {
+            layout.cols.len()
+        } else {
+            layout.rows.len()
+        };
         if index == 0 || index + 1 >= count {
             continue;
         }
         let rect = if vertical {
             let x = area.left() + at as f32 * area.width();
-            egui::Rect::from_min_max(egui::pos2(x - 3.0, area.top()), egui::pos2(x + 3.0, area.bottom()))
+            egui::Rect::from_min_max(
+                egui::pos2(x - 3.0, area.top()),
+                egui::pos2(x + 3.0, area.bottom()),
+            )
         } else {
             let y = area.top() + at as f32 * area.height();
-            egui::Rect::from_min_max(egui::pos2(area.left(), y - 3.0), egui::pos2(area.right(), y + 3.0))
+            egui::Rect::from_min_max(
+                egui::pos2(area.left(), y - 3.0),
+                egui::pos2(area.right(), y + 3.0),
+            )
         };
-        let response = ui.interact(rect, ui.id().with(("layout_boundary", vertical, index)), egui::Sense::DRAG);
+        let response = ui.interact(
+            rect,
+            ui.id().with(("layout_boundary", vertical, index)),
+            egui::Sense::DRAG,
+        );
         if response.hovered() || response.dragged() {
-            ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+            ui.ctx().set_cursor_icon(if vertical {
+                egui::CursorIcon::ResizeHorizontal
+            } else {
+                egui::CursorIcon::ResizeVertical
+            });
         }
         if let (true, Some(pointer)) = (response.dragged(), pointer) {
-            let fraction = if vertical { (pointer.x - area.left()) / area.width() } else { (pointer.y - area.top()) / area.height() };
-            events.push(UiEvent::LayoutBoundaryDragged { vertical, index, fraction: fraction as f64 });
+            let fraction = if vertical {
+                (pointer.x - area.left()) / area.width()
+            } else {
+                (pointer.y - area.top()) / area.height()
+            };
+            events.push(UiEvent::LayoutBoundaryDragged {
+                vertical,
+                index,
+                fraction: fraction as f64,
+            });
         }
     }
 }
 
 /// While a tab is dragged over a group, the group is marked; let go there, the tab moves to the
 /// end of the group's tabs (dropped on its tab strip, the tab bar placed it already).
-fn drop_tab_on_group(ui: &egui::Ui, rect: egui::Rect, group: usize, chrome: &Chrome, events: &mut Vec<UiEvent>) {
+fn drop_tab_on_group(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    group: usize,
+    chrome: &Chrome,
+    events: &mut Vec<UiEvent>,
+) {
     let ctx = ui.ctx();
-    let Some(dragged) = egui::DragAndDrop::payload::<tabs::DraggedTab>(ctx) else { return };
-    let Some(pointer) = ctx.pointer_hover_pos().filter(|p| rect.contains(*p)) else { return };
+    let Some(dragged) = egui::DragAndDrop::payload::<tabs::DraggedTab>(ctx) else {
+        return;
+    };
+    let Some(pointer) = ctx.pointer_hover_pos().filter(|p| rect.contains(*p)) else {
+        return;
+    };
     let over_tabs = pointer.y < rect.top() + 34.0;
     if over_tabs {
         return;
     }
-    ui.painter().rect_stroke(rect.shrink(2.0), 2.0, egui::Stroke::new(2.0_f32, chrome.accent), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(
+        rect.shrink(2.0),
+        2.0,
+        egui::Stroke::new(2.0_f32, chrome.accent),
+        egui::StrokeKind::Inside,
+    );
     if ctx.input(|i| i.pointer.any_released()) {
         egui::DragAndDrop::clear_payload(ctx);
-        events.push(UiEvent::TabDropped { tab: dragged.0, group, index: usize::MAX });
+        events.push(UiEvent::TabDropped {
+            tab: dragged.0,
+            group,
+            index: usize::MAX,
+        });
     }
 }
 
@@ -644,27 +881,57 @@ fn show_group(
 ) {
     egui::Frame::new()
         .fill(chrome.panel_bg)
-        .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 0 })
+        .inner_margin(egui::Margin {
+            left: 4,
+            right: 4,
+            top: 4,
+            bottom: 0,
+        })
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            tabs::show(ui, chrome, group.group, group.active, &group.tabs, menu, events);
+            tabs::show(
+                ui,
+                chrome,
+                group.group,
+                group.active,
+                &group.tabs,
+                menu,
+                events,
+            );
         });
 
     let Some(model) = &group.editor else {
         let rest = ui.available_rect_before_wrap();
-        if ui.interact(rest, ui.id().with("empty_group"), egui::Sense::CLICK).clicked() {
+        if ui
+            .interact(rest, ui.id().with("empty_group"), egui::Sense::CLICK)
+            .clicked()
+        {
             events.push(UiEvent::FocusGroup(group.group));
         }
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new(hints.join("\n")).color(chrome.fg_dim).size(14.0));
+            ui.label(
+                RichText::new(hints.join("\n"))
+                    .color(chrome.fg_dim)
+                    .size(14.0),
+            );
         });
         return;
     };
     let read_only_copy;
     let text = if editor.text_for_editing(model.document).is_some() {
-        EditorText::Editable(editor.text_for_editing(model.document).expect("checked above"))
+        EditorText::Editable(
+            editor
+                .text_for_editing(model.document)
+                .expect("checked above"),
+        )
     } else {
-        read_only_copy = editor.state().documents.iter().find(|d| d.id == model.document).map(|d| d.text.clone()).unwrap_or_default();
+        read_only_copy = editor
+            .state()
+            .documents
+            .iter()
+            .find(|d| d.id == model.document)
+            .map(|d| d.text.clone())
+            .unwrap_or_default();
         EditorText::ReadOnly(&read_only_copy)
     };
     egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
@@ -681,13 +948,20 @@ fn add_key_symbols_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     for (name, path, position) in [
         ("san_francisco", "/System/Library/Fonts/SFNS.ttf", 1),
-        ("apple_symbols", "/System/Library/Fonts/Apple Symbols.ttf", usize::MAX),
+        (
+            "apple_symbols",
+            "/System/Library/Fonts/Apple Symbols.ttf",
+            usize::MAX,
+        ),
     ] {
         let Ok(bytes) = std::fs::read(path) else {
             tracing::warn!("font {path} not found: some shortcut symbols may not show");
             continue;
         };
-        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+        fonts.font_data.insert(
+            name.into(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             let list = fonts.families.entry(family).or_default();
             list.insert(position.min(list.len()), name.into());

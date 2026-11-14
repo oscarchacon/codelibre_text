@@ -1215,6 +1215,10 @@ msgstr ""
 msgid "Show All"
 msgstr ""
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr ""
+
 #: crates/interface_adapters/src/presenters/quick_panel.rs
 msgid "Goto Anything — file name, :line, @symbol"
 msgstr ""

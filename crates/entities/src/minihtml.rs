@@ -128,7 +128,9 @@ pub fn parse_html(html: &str) -> Block {
     while !rest.is_empty() {
         if let Some(after) = rest.strip_prefix("<!--") {
             rest = after.find("-->").map_or("", |end| &after[end + 3..]);
-        } else if rest.starts_with('<') && rest[1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!') {
+        } else if rest.starts_with('<')
+            && rest[1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!')
+        {
             let end = tag_end(rest);
             let tag = &rest[1..end.saturating_sub(1).max(1)];
             rest = &rest[end..];
@@ -142,7 +144,11 @@ pub fn parse_html(html: &str) -> Block {
                 rest = &rest[at..];
             }
         } else {
-            let end = rest.char_indices().skip(1).find(|(_, c)| *c == '<').map_or(rest.len(), |(i, _)| i);
+            let end = rest
+                .char_indices()
+                .skip(1)
+                .find(|(_, c)| *c == '<')
+                .map_or(rest.len(), |(i, _)| i);
             parser.text(&decode_entities(&rest[..end]));
             rest = &rest[end..];
         }
@@ -158,7 +164,10 @@ pub fn parse(html: &str) -> Vec<Line> {
     while lines.last().is_some_and(Vec::is_empty) {
         lines.pop();
     }
-    let first = lines.iter().position(|l: &Line| !l.is_empty()).unwrap_or(lines.len());
+    let first = lines
+        .iter()
+        .position(|l: &Line| !l.is_empty())
+        .unwrap_or(lines.len());
     lines.drain(..first);
     lines
 }
@@ -175,11 +184,17 @@ fn flatten(block: &Block, lines: &mut Vec<Line>) {
                         let mut cell_lines = Vec::new();
                         flatten(cell, &mut cell_lines);
                         if i > 0 {
-                            line.push(Span { text: "  ".into(), ..Default::default() });
+                            line.push(Span {
+                                text: "  ".into(),
+                                ..Default::default()
+                            });
                         }
                         for (j, cell_line) in cell_lines.into_iter().enumerate() {
                             if j > 0 {
-                                line.push(Span { text: " ".into(), ..Default::default() });
+                                line.push(Span {
+                                    text: " ".into(),
+                                    ..Default::default()
+                                });
                             }
                             line.extend(cell_line);
                         }
@@ -194,7 +209,11 @@ fn flatten(block: &Block, lines: &mut Vec<Line>) {
 
 /// Just the text, lines joined with `\n` (for a plain-text fallback).
 pub fn plain_text(html: &str) -> String {
-    parse(html).iter().map(|line| line.iter().map(|s| s.text.as_str()).collect::<String>()).collect::<Vec<_>>().join("\n")
+    parse(html)
+        .iter()
+        .map(|line| line.iter().map(|s| s.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Where a tag that starts `text` ends (after its `>`), quotes inside attributes respected.
@@ -212,8 +231,37 @@ fn tag_end(text: &str) -> usize {
 }
 
 const BLOCKS: &[&str] = &[
-    "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "blockquote", "table", "tr", "td", "th", "body",
-    "html", "dl", "dt", "dd", "section", "article", "header", "footer", "nav", "thead", "tbody", "tfoot", "caption",
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "li",
+    "pre",
+    "blockquote",
+    "table",
+    "tr",
+    "td",
+    "th",
+    "body",
+    "html",
+    "dl",
+    "dt",
+    "dd",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "nav",
+    "thead",
+    "tbody",
+    "tfoot",
+    "caption",
 ];
 const VOID: &[&str] = &["br", "img", "hr", "input", "meta", "link"];
 /// The pixels of an `em` in box lengths (padding, margins, borders, widths), whose view font is
@@ -279,8 +327,12 @@ impl Compound {
     fn matches(&self, element: &Element) -> bool {
         // The document itself is `html`, `body` and `:root`, written or not.
         let root = element.name.is_empty();
-        self.tag.as_ref().is_none_or(|t| *t == element.name || (root && matches!(t.as_str(), "html" | "body" | ":root")))
-            && self.id.as_ref().is_none_or(|id| element.id.as_ref() == Some(id))
+        self.tag.as_ref().is_none_or(|t| {
+            *t == element.name || (root && matches!(t.as_str(), "html" | "body" | ":root"))
+        }) && self
+            .id
+            .as_ref()
+            .is_none_or(|id| element.id.as_ref() == Some(id))
             && self.classes.iter().all(|c| element.classes.contains(c))
     }
 
@@ -299,19 +351,35 @@ struct Parser {
 impl Parser {
     fn new() -> Self {
         Self {
-            root: vec![OpenBlock { kind: BlockKind::Normal, block: Block::default() }],
-            elements: vec![Element { name: String::new(), classes: Vec::new(), id: None, inline: Inline::default(), block: false }],
+            root: vec![OpenBlock {
+                kind: BlockKind::Normal,
+                block: Block::default(),
+            }],
+            elements: vec![Element {
+                name: String::new(),
+                classes: Vec::new(),
+                id: None,
+                inline: Inline::default(),
+                block: false,
+            }],
             rules: Vec::new(),
             pending_space: false,
         }
     }
 
     fn inline(&self) -> Inline {
-        self.elements.last().map(|e| e.inline.clone()).unwrap_or_default()
+        self.elements
+            .last()
+            .map(|e| e.inline.clone())
+            .unwrap_or_default()
     }
 
     fn current(&mut self) -> &mut Block {
-        &mut self.root.last_mut().expect("the document block stays").block
+        &mut self
+            .root
+            .last_mut()
+            .expect("the document block stays")
+            .block
     }
 
     /// The line text goes to: the last one of the current block, or a new one.
@@ -349,12 +417,19 @@ impl Parser {
         let mut text = css.as_str();
         while let Some(open) = text.find('{') {
             let selector = text[..open].trim();
-            let Some(close) = text[open..].find('}') else { break };
+            let Some(close) = text[open..].find('}') else {
+                break;
+            };
             let body = &text[open + 1..open + close];
             let order = self.rules.len();
-            let selectors: Vec<Vec<Compound>> = selector.split(',').filter_map(parse_selector).collect();
+            let selectors: Vec<Vec<Compound>> =
+                selector.split(',').filter_map(parse_selector).collect();
             if !selectors.is_empty() {
-                self.rules.push(Rule { selectors, declarations: declarations(body), order });
+                self.rules.push(Rule {
+                    selectors,
+                    declarations: declarations(body),
+                    order,
+                });
             }
             text = &text[open + close + 1..];
         }
@@ -364,7 +439,12 @@ impl Parser {
             .rules
             .iter()
             .filter_map(|rule| {
-                let best = rule.selectors.iter().filter(|s| s.len() == 1 && s[0].matches(root)).map(|s| s[0].specificity()).max()?;
+                let best = rule
+                    .selectors
+                    .iter()
+                    .filter(|s| s.len() == 1 && s[0].matches(root))
+                    .map(|s| s[0].specificity())
+                    .max()?;
                 Some((best, rule.order, rule.declarations.clone()))
             })
             .collect();
@@ -372,18 +452,27 @@ impl Parser {
         let mut inline = Inline::default();
         let mut box_style = BoxStyle::default();
         let mut block = false;
-        let declarations: Vec<(String, String)> = found.into_iter().flat_map(|(_, _, d)| d).collect();
+        let declarations: Vec<(String, String)> =
+            found.into_iter().flat_map(|(_, _, d)| d).collect();
         for (property, value) in declarations.iter().filter(|(p, _)| p.starts_with("--")) {
             let value = resolve_variables(value, &inline.variables);
             inline.variables.push((property.clone(), value));
         }
         for (property, value) in declarations.iter().filter(|(p, _)| !p.starts_with("--")) {
-            apply(property, &resolve_variables(value, &inline.variables), &mut inline, &mut box_style, &mut block);
+            apply(
+                property,
+                &resolve_variables(value, &inline.variables),
+                &mut inline,
+                &mut box_style,
+                &mut block,
+            );
         }
         // What the root gave is inherited by the elements already open (normally none).
         for element in &mut self.elements {
             let mut merged = inline.clone();
-            merged.variables.extend(element.inline.variables.iter().cloned());
+            merged
+                .variables
+                .extend(element.inline.variables.iter().cloned());
             element.inline.variables = merged.variables;
             if element.inline.color.is_none() {
                 element.inline.color = inline.color.clone();
@@ -400,19 +489,31 @@ impl Parser {
     fn matching_declarations(&self) -> Vec<(String, String)> {
         let mut found: Vec<BorrowedDeclarations> = Vec::new();
         for rule in &self.rules {
-            let best = rule.selectors.iter().filter(|s| self.selector_matches(s)).map(|s| s.iter().map(Compound::specificity).sum()).max();
+            let best = rule
+                .selectors
+                .iter()
+                .filter(|s| self.selector_matches(s))
+                .map(|s| s.iter().map(Compound::specificity).sum())
+                .max();
             if let Some(specificity) = best {
                 found.push((specificity, rule.order, &rule.declarations));
             }
         }
         found.sort_by_key(|(specificity, order, _)| (*specificity, *order));
-        found.into_iter().flat_map(|(_, _, d)| d.iter().cloned()).collect()
+        found
+            .into_iter()
+            .flat_map(|(_, _, d)| d.iter().cloned())
+            .collect()
     }
 
     /// The last compound matches the element on top; the others, ancestors in order.
     fn selector_matches(&self, selector: &[Compound]) -> bool {
-        let Some((last, ancestors)) = selector.split_last() else { return false };
-        let Some((element, parents)) = self.elements.split_last() else { return false };
+        let Some((last, ancestors)) = selector.split_last() else {
+            return false;
+        };
+        let Some((element, parents)) = self.elements.split_last() else {
+            return false;
+        };
         if !last.matches(element) {
             return false;
         }
@@ -434,7 +535,11 @@ impl Parser {
         }
         let closing = tag.starts_with('/');
         let body = tag.trim_start_matches('/').trim_end_matches('/').trim();
-        let name: String = body.chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+        let name: String = body
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase();
         if name.is_empty() {
             return None;
         }
@@ -446,11 +551,19 @@ impl Parser {
             return Some(name);
         }
         let attributes = &body[name.len()..];
-        let classes = attribute(attributes, "class").map(|c| c.split_whitespace().map(String::from).collect()).unwrap_or_default();
+        let classes = attribute(attributes, "class")
+            .map(|c| c.split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
         let id = attribute(attributes, "id");
         // The element is on the stack while its CSS is worked out.
         let parent = self.inline();
-        self.elements.push(Element { name: name.clone(), classes, id, inline: parent.clone(), block: false });
+        self.elements.push(Element {
+            name: name.clone(),
+            classes,
+            id,
+            inline: parent.clone(),
+            block: false,
+        });
         let mut inline = parent;
         let mut box_style = BoxStyle::default();
         let mut display_block = BLOCKS.contains(&name.as_str());
@@ -470,7 +583,13 @@ impl Parser {
         for (property, value) in &declarations {
             if !property.starts_with("--") {
                 let value = resolve_variables(value, &inline.variables);
-                apply(property, &value, &mut inline, &mut box_style, &mut display_block);
+                apply(
+                    property,
+                    &value,
+                    &mut inline,
+                    &mut box_style,
+                    &mut display_block,
+                );
             }
         }
         let is_void = VOID.contains(&name.as_str()) || body.ends_with('/');
@@ -483,8 +602,16 @@ impl Parser {
                 }
             }
             "img" if !inline.hidden => {
-                let size = |key: &str| attribute(attributes, key).and_then(|v| length(&v, None)).or_else(|| css_length(&declarations, key));
-                let image = Image { src: attribute(attributes, "src").unwrap_or_default(), width: size("width"), height: size("height") };
+                let size = |key: &str| {
+                    attribute(attributes, key)
+                        .and_then(|v| length(&v, None))
+                        .or_else(|| css_length(&declarations, key))
+                };
+                let image = Image {
+                    src: attribute(attributes, "src").unwrap_or_default(),
+                    width: size("width"),
+                    height: size("height"),
+                };
                 let alt = attribute(attributes, "alt").unwrap_or_default();
                 self.push(alt, &inline, Some(image));
             }
@@ -502,7 +629,16 @@ impl Parser {
         }
         if name == "li" {
             let inline = self.inline();
-            self.push("• ".into(), &Inline { bold: false, underline: false, link: None, ..inline }, None);
+            self.push(
+                "• ".into(),
+                &Inline {
+                    bold: false,
+                    underline: false,
+                    link: None,
+                    ..inline
+                },
+                None,
+            );
         }
         None
     }
@@ -516,12 +652,20 @@ impl Parser {
         };
         // Text before the block stays above it.
         self.block_break();
-        self.root.push(OpenBlock { kind, block: Block { style, content: Vec::new() } });
+        self.root.push(OpenBlock {
+            kind,
+            block: Block {
+                style,
+                content: Vec::new(),
+            },
+        });
         self.pending_space = false;
     }
 
     fn close(&mut self, name: &str) {
-        let Some(at) = self.elements.iter().rposition(|e| e.name == name) else { return };
+        let Some(at) = self.elements.iter().rposition(|e| e.name == name) else {
+            return;
+        };
         if at == 0 {
             return;
         }
@@ -538,7 +682,9 @@ impl Parser {
         if self.root.len() < 2 {
             return;
         }
-        let OpenBlock { kind, mut block, .. } = self.root.pop().expect("checked above");
+        let OpenBlock {
+            kind, mut block, ..
+        } = self.root.pop().expect("checked above");
         trim_lines(&mut block.content);
         let parent = self.root.last_mut().expect("checked above");
         match kind {
@@ -568,7 +714,12 @@ impl Parser {
             }
             // `thead` / `tbody` in a table: their rows are the table's.
             BlockKind::Normal if parent.kind == BlockKind::Table => {
-                parent.block.content.extend(block.content.into_iter().filter(|c| matches!(c, Content::Table(_))));
+                parent.block.content.extend(
+                    block
+                        .content
+                        .into_iter()
+                        .filter(|c| matches!(c, Content::Table(_))),
+                );
             }
             BlockKind::Cell | BlockKind::Normal => parent.block.content.push(Content::Block(block)),
         }
@@ -581,7 +732,10 @@ impl Parser {
             return;
         }
         // Text between table elements (indentation) is not content.
-        if matches!(self.root.last().map(|b| b.kind), Some(BlockKind::Table | BlockKind::Row)) {
+        if matches!(
+            self.root.last().map(|b| b.kind),
+            Some(BlockKind::Table | BlockKind::Row)
+        ) {
             return;
         }
         if inline.preformatted {
@@ -636,7 +790,11 @@ impl Parser {
         };
         let line = self.line();
         match line.last_mut() {
-            Some(last) if span.image.is_none() && last.image.is_none() && same_style(last, &span) => last.text.push_str(&span.text),
+            Some(last)
+                if span.image.is_none() && last.image.is_none() && same_style(last, &span) =>
+            {
+                last.text.push_str(&span.text)
+            }
             _ => line.push(span),
         }
     }
@@ -652,7 +810,13 @@ impl Parser {
 }
 
 fn same_style(a: &Span, b: &Span) -> bool {
-    Span { text: String::new(), ..a.clone() } == Span { text: String::new(), ..b.clone() }
+    Span {
+        text: String::new(),
+        ..a.clone()
+    } == Span {
+        text: String::new(),
+        ..b.clone()
+    }
 }
 
 /// Empty lines at the start and end of a block are not content.
@@ -660,7 +824,10 @@ fn trim_lines(content: &mut Vec<Content>) {
     while matches!(content.last(), Some(Content::Line(l)) if l.is_empty()) {
         content.pop();
     }
-    let first = content.iter().position(|c| !matches!(c, Content::Line(l) if l.is_empty())).unwrap_or(content.len());
+    let first = content
+        .iter()
+        .position(|c| !matches!(c, Content::Line(l) if l.is_empty()))
+        .unwrap_or(content.len());
     content.drain(..first);
 }
 
@@ -705,7 +872,13 @@ fn default_style(name: &str, attributes: &str, inline: &mut Inline) {
 }
 
 /// Applies one CSS declaration.
-fn apply(property: &str, value: &str, inline: &mut Inline, box_style: &mut BoxStyle, display_block: &mut bool) {
+fn apply(
+    property: &str,
+    value: &str,
+    inline: &mut Inline,
+    box_style: &mut BoxStyle,
+    display_block: &mut bool,
+) {
     let parent_size = inline.font_size.unwrap_or(FontSize::Em(1.0));
     match property {
         "color" => inline.color = Some(value.to_string()),
@@ -714,14 +887,26 @@ fn apply(property: &str, value: &str, inline: &mut Inline, box_style: &mut BoxSt
             box_style.background = Some(value.to_string());
         }
         "background" => {
-            let color = value.split_whitespace().find(|v| !v.starts_with("url(")).unwrap_or(value);
+            let color = value
+                .split_whitespace()
+                .find(|v| !v.starts_with("url("))
+                .unwrap_or(value);
             inline.background = Some(color.to_string());
             box_style.background = Some(color.to_string());
         }
-        "font-weight" => inline.bold = value == "bold" || value == "bolder" || value.parse::<u32>().is_ok_and(|w| w >= 600),
+        "font-weight" => {
+            inline.bold =
+                value == "bold" || value == "bolder" || value.parse::<u32>().is_ok_and(|w| w >= 600)
+        }
         "font-style" => inline.italic = value == "italic" || value == "oblique",
-        "text-decoration" | "text-decoration-line" => inline.underline = value.contains("underline"),
-        "font-family" => inline.monospace = value.contains("monospace") || value.contains("Courier") || value.contains("Consolas"),
+        "text-decoration" | "text-decoration-line" => {
+            inline.underline = value.contains("underline")
+        }
+        "font-family" => {
+            inline.monospace = value.contains("monospace")
+                || value.contains("Courier")
+                || value.contains("Consolas")
+        }
         "font-size" => {
             if let Some(size) = font_size(value, parent_size) {
                 inline.font_size = Some(size);
@@ -736,8 +921,12 @@ fn apply(property: &str, value: &str, inline: &mut Inline, box_style: &mut BoxSt
         "white-space" => inline.preformatted = value.starts_with("pre"),
         "padding" => box_style.padding = sides(value),
         "margin" => box_style.margin = sides(value),
-        "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => set_side(&mut box_style.padding, property, value),
-        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" => set_side(&mut box_style.margin, property, value),
+        "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => {
+            set_side(&mut box_style.padding, property, value)
+        }
+        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" => {
+            set_side(&mut box_style.margin, property, value)
+        }
         "border" | "border-top" | "border-bottom" | "border-left" | "border-right" => {
             for part in value.split_whitespace() {
                 if let Some(width) = length(part, None) {
@@ -752,7 +941,10 @@ fn apply(property: &str, value: &str, inline: &mut Inline, box_style: &mut BoxSt
         }
         "border-width" => box_style.border_width = length(value, None).unwrap_or(0.0),
         "border-color" => box_style.border_color = Some(value.to_string()),
-        "border-radius" => box_style.border_radius = length(value.split_whitespace().next().unwrap_or(value), None).unwrap_or(0.0),
+        "border-radius" => {
+            box_style.border_radius =
+                length(value.split_whitespace().next().unwrap_or(value), None).unwrap_or(0.0)
+        }
         "width" | "max-width" => box_style.width = length(value, None),
         _ => {}
     }
@@ -760,12 +952,35 @@ fn apply(property: &str, value: &str, inline: &mut Inline, box_style: &mut BoxSt
 
 /// `margin` / `padding` shorthands: one to four lengths.
 fn sides(value: &str) -> Sides {
-    let values: Vec<f32> = value.split_whitespace().map(|v| length(v, None).unwrap_or(0.0)).collect();
+    let values: Vec<f32> = value
+        .split_whitespace()
+        .map(|v| length(v, None).unwrap_or(0.0))
+        .collect();
     match values.as_slice() {
-        [all] => Sides { top: *all, right: *all, bottom: *all, left: *all },
-        [vertical, horizontal] => Sides { top: *vertical, right: *horizontal, bottom: *vertical, left: *horizontal },
-        [top, horizontal, bottom] => Sides { top: *top, right: *horizontal, bottom: *bottom, left: *horizontal },
-        [top, right, bottom, left, ..] => Sides { top: *top, right: *right, bottom: *bottom, left: *left },
+        [all] => Sides {
+            top: *all,
+            right: *all,
+            bottom: *all,
+            left: *all,
+        },
+        [vertical, horizontal] => Sides {
+            top: *vertical,
+            right: *horizontal,
+            bottom: *vertical,
+            left: *horizontal,
+        },
+        [top, horizontal, bottom] => Sides {
+            top: *top,
+            right: *horizontal,
+            bottom: *bottom,
+            left: *horizontal,
+        },
+        [top, right, bottom, left, ..] => Sides {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+        },
         [] => Sides::default(),
     }
 }
@@ -783,7 +998,11 @@ fn set_side(sides: &mut Sides, property: &str, value: &str) {
 /// A CSS length in pixels (`4px`, `0.5em`, `1rem`, `3pt`, `0`); `percent_of` for `%`.
 fn length(value: &str, percent_of: Option<f32>) -> Option<f32> {
     let value = value.trim();
-    let number = |suffix: &str| value.strip_suffix(suffix).and_then(|n| n.trim().parse::<f32>().ok());
+    let number = |suffix: &str| {
+        value
+            .strip_suffix(suffix)
+            .and_then(|n| n.trim().parse::<f32>().ok())
+    };
     if let Some(px) = number("px") {
         Some(px)
     } else if let Some(em) = number("rem").or_else(|| number("em")) {
@@ -799,13 +1018,21 @@ fn length(value: &str, percent_of: Option<f32>) -> Option<f32> {
 
 /// The `width` / `height` of an image given in its CSS.
 fn css_length(declarations: &[(String, String)], key: &str) -> Option<f32> {
-    declarations.iter().rev().find(|(p, _)| p == key).and_then(|(_, v)| length(v, None))
+    declarations
+        .iter()
+        .rev()
+        .find(|(p, _)| p == key)
+        .and_then(|(_, v)| length(v, None))
 }
 
 /// `font-size`: lengths, `em` / `%` of the parent's, `rem` of the view's, keywords.
 fn font_size(value: &str, parent: FontSize) -> Option<FontSize> {
     let value = value.trim();
-    let number = |suffix: &str| value.strip_suffix(suffix).and_then(|n| n.trim().parse::<f32>().ok());
+    let number = |suffix: &str| {
+        value
+            .strip_suffix(suffix)
+            .and_then(|n| n.trim().parse::<f32>().ok())
+    };
     if let Some(px) = number("px") {
         return Some(FontSize::Px(px));
     }
@@ -855,7 +1082,9 @@ fn resolve_variables(value: &str, variables: &[(String, String)]) -> String {
         };
         match variables.iter().rev().find(|(n, _)| n == name) {
             Some((_, defined)) => out.push_str(defined),
-            None if fallback.is_some() && !is_scheme_variable(name) => out.push_str(&resolve_variables(fallback.unwrap_or_default(), variables)),
+            None if fallback.is_some() && !is_scheme_variable(name) => {
+                out.push_str(&resolve_variables(fallback.unwrap_or_default(), variables))
+            }
             None => out.push_str(&rest[at..inner_start + close + 1]),
         }
         rest = &rest[inner_start + close + 1..];
@@ -889,7 +1118,9 @@ fn strip_css_comments(css: &str) -> String {
     let mut rest = css;
     while let Some(at) = rest.find("/*") {
         out.push_str(&rest[..at]);
-        rest = rest[at + 2..].find("*/").map_or("", |end| &rest[at + 2 + end + 2..]);
+        rest = rest[at + 2..]
+            .find("*/")
+            .map_or("", |end| &rest[at + 2 + end + 2..]);
     }
     out.push_str(rest);
     out
@@ -901,8 +1132,19 @@ fn declarations(css: &str) -> Vec<(String, String)> {
         .filter_map(|declaration| {
             let (property, value) = declaration.split_once(':')?;
             let property = property.trim();
-            let property = if property.starts_with("--") { property.to_string() } else { property.to_ascii_lowercase() };
-            Some((property, value.trim().trim_end_matches("!important").trim().to_string()))
+            let property = if property.starts_with("--") {
+                property.to_string()
+            } else {
+                property.to_ascii_lowercase()
+            };
+            Some((
+                property,
+                value
+                    .trim()
+                    .trim_end_matches("!important")
+                    .trim()
+                    .to_string(),
+            ))
         })
         .filter(|(p, _)| !p.is_empty())
         .collect()
@@ -928,7 +1170,10 @@ fn parse_selector(text: &str) -> Option<Vec<Compound>> {
             }
         };
         if part == ":root" {
-            compounds.push(Compound { tag: Some(":root".into()), ..Compound::default() });
+            compounds.push(Compound {
+                tag: Some(":root".into()),
+                ..Compound::default()
+            });
             continue;
         }
         for c in part.chars() {
@@ -963,7 +1208,10 @@ fn attribute(attributes: &str, name: &str) -> Option<String> {
         let value = rest[1..].trim_start();
         let raw = match value.chars().next() {
             Some(q @ ('"' | '\'')) => value[1..].split(q).next().unwrap_or_default(),
-            _ => value.split(|c: char| c.is_whitespace() || c == '>').next().unwrap_or_default(),
+            _ => value
+                .split(|c: char| c.is_whitespace() || c == '>')
+                .next()
+                .unwrap_or_default(),
         };
         return Some(decode_entities(raw));
     }
@@ -977,7 +1225,9 @@ pub fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let end = rest[1..].find(|c: char| c == ';' || c.is_whitespace() || c == '&').map(|i| i + 1);
+        let end = rest[1..]
+            .find(|c: char| c == ';' || c.is_whitespace() || c == '&')
+            .map(|i| i + 1);
         let decoded = end.filter(|&e| rest[e..].starts_with(';')).and_then(|e| {
             let name = &rest[1..e];
             let c = match name {
@@ -987,7 +1237,11 @@ pub fn decode_entities(text: &str) -> String {
                 "quot" => Some('"'),
                 "apos" => Some('\''),
                 "nbsp" => Some('\u{a0}'),
-                _ if name.starts_with("#x") || name.starts_with("#X") => u32::from_str_radix(&name[2..], 16).ok().and_then(char::from_u32),
+                _ if name.starts_with("#x") || name.starts_with("#X") => {
+                    u32::from_str_radix(&name[2..], 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                }
                 _ if name.starts_with('#') => name[1..].parse().ok().and_then(char::from_u32),
                 _ => None,
             };
@@ -1028,10 +1282,17 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
         b'/' | b'_' => Some(63),
         _ => None,
     };
-    let digits: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').map(value).collect::<Option<_>>()?;
+    let digits: Vec<u8> = text
+        .bytes()
+        .filter(|c| !c.is_ascii_whitespace() && *c != b'=')
+        .map(value)
+        .collect::<Option<_>>()?;
     let mut out = Vec::with_capacity(digits.len() * 3 / 4);
     for chunk in digits.chunks(4) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, d)| n | (u32::from(*d) << (18 - 6 * i)));
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, d)| n | (u32::from(*d) << (18 - 6 * i)));
         let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
         out.extend_from_slice(&bytes[..chunk.len().saturating_sub(1)]);
     }
@@ -1044,7 +1305,10 @@ fn percent_decode(text: &str) -> Vec<u8> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(byte) = text.get(i + 1..i + 3).and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+            if let Some(byte) = text
+                .get(i + 1..i + 3)
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
                 out.push(byte);
                 i += 3;
                 continue;

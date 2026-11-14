@@ -15,7 +15,11 @@ pub fn score_selector(scope: &str, selector: &str) -> u64 {
     if tokens.is_empty() {
         return 1;
     }
-    let mut parser = Parser { tokens: &tokens, at: 0, scopes: &scopes };
+    let mut parser = Parser {
+        tokens: &tokens,
+        at: 0,
+        scopes: &scopes,
+    };
     let mut score = parser.alternatives();
     // A stray `)` ends the selector early: what follows is read as more alternatives, so a
     // selector with unbalanced parentheses still matches what it names.
@@ -46,7 +50,12 @@ enum Token<'a> {
 /// The selector's tokens. A `-` is an operator where a name cannot go on: at the start, or after a
 /// space, a parenthesis or another operator; inside a name it is part of it (`text.html.markdown-gfm`).
 fn tokens(selector: &str) -> Vec<Token<'_>> {
-    fn finish<'a>(selector: &'a str, tokens: &mut Vec<Token<'a>>, start: &mut Option<usize>, end: usize) {
+    fn finish<'a>(
+        selector: &'a str,
+        tokens: &mut Vec<Token<'a>>,
+        start: &mut Option<usize>,
+        end: usize,
+    ) {
         if let Some(begin) = start.take() {
             tokens.push(Token::Name(&selector[begin..end]));
         }
@@ -107,7 +116,11 @@ impl<'a> Parser<'_, 'a> {
                 Some(Token::And) => {
                     self.at += 1;
                     let other = self.term().unwrap_or(1);
-                    score = if score > 0 && other > 0 { score.max(other) } else { 0 };
+                    score = if score > 0 && other > 0 {
+                        score.max(other)
+                    } else {
+                        0
+                    };
                 }
                 Some(Token::Minus) => {
                     self.at += 1;
@@ -118,7 +131,11 @@ impl<'a> Parser<'_, 'a> {
                 // Two terms side by side, as in `(a) b`: both must match.
                 Some(Token::Name(_)) | Some(Token::Open) => {
                     let other = self.term().unwrap_or(1);
-                    score = if score > 0 && other > 0 { score.max(other) } else { 0 };
+                    score = if score > 0 && other > 0 {
+                        score.max(other)
+                    } else {
+                        0
+                    };
                 }
                 _ => return Some(score),
             }
@@ -166,11 +183,16 @@ fn path_score(scopes: &[&str], path: &[&str]) -> u64 {
     let mut score = 0u64;
     let mut position = 0;
     for element in path {
-        let found = scopes[position..].iter().enumerate().find_map(|(offset, scope)| match element_score(scope, element) {
-            0 => None,
-            matched => Some((offset, matched)),
-        });
-        let Some((offset, matched)) = found else { return 0 };
+        let found = scopes[position..]
+            .iter()
+            .enumerate()
+            .find_map(|(offset, scope)| match element_score(scope, element) {
+                0 => None,
+                matched => Some((offset, matched)),
+            });
+        let Some((offset, matched)) = found else {
+            return 0;
+        };
         position += offset;
         score = score.wrapping_add(matched << (3 * (position + 1).min(20)));
         position += 1;

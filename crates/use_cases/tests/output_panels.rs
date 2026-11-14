@@ -10,68 +10,204 @@ use use_cases::Editor;
 
 /// The editor's answer when a plugin calls `function(args...)`.
 fn call(world: &World, editor: &mut Editor, function: &str, args: Value) -> Result<Value, String> {
-    world.plugins.then([plugin_call(function, args), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call(function, args),
+        PluginMessage::Done { error: None },
+    ]);
     editor.run_plugin_command(&Command::new("probe"), &mut |_, _| {});
-    world.plugins.replies.borrow_mut().pop().expect("the editor answered")
+    world
+        .plugins
+        .replies
+        .borrow_mut()
+        .pop()
+        .expect("the editor answered")
 }
 
 fn setup() -> (World, Editor, u64) {
     let world = World::new().with_plugin_commands(&[("probe", Text)]);
     let mut editor = world.editor();
-    let panel = call(&world, &mut editor, "window_create_output_panel", json!([1, "exec"])).unwrap();
+    let panel = call(
+        &world,
+        &mut editor,
+        "window_create_output_panel",
+        json!([1, "exec"]),
+    )
+    .unwrap();
     let id = panel.as_u64().expect("a view id");
     (world, editor, id)
 }
 
 fn panel_text(editor: &Editor) -> String {
-    editor.shown_output_panel().map(|p| p.document.text.clone()).unwrap_or_default()
+    editor
+        .shown_output_panel()
+        .map(|p| p.document.text.clone())
+        .unwrap_or_default()
 }
 
 #[test]
 fn a_panel_is_a_view_but_not_a_tab() {
     let (world, mut editor, panel) = setup();
-    assert_eq!(call(&world, &mut editor, "window_views", json!([1])).unwrap().as_array().unwrap().len(), 1);
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([panel])), Ok(json!(true)));
-    call(&world, &mut editor, "view_insert", json!([panel, 0, "built"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_size", json!([panel])), Ok(json!(5)));
+    assert_eq!(
+        call(&world, &mut editor, "window_views", json!([1]))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([panel])),
+        Ok(json!(true))
+    );
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([panel, 0, "built"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_size", json!([panel])),
+        Ok(json!(5))
+    );
     let settings = json!(["view", panel]);
-    call(&world, &mut editor, "settings_set", json!([settings, "result_file_regex", "^(.*):(\\d+)"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "settings_get", json!([settings, "result_file_regex"])), Ok(json!([true, "^(.*):(\\d+)"])));
-    assert_eq!(call(&world, &mut editor, "view_is_dirty", json!([panel])), Ok(json!(false)), "panels never ask to save");
+    call(
+        &world,
+        &mut editor,
+        "settings_set",
+        json!([settings, "result_file_regex", "^(.*):(\\d+)"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "settings_get",
+            json!([settings, "result_file_regex"])
+        ),
+        Ok(json!([true, "^(.*):(\\d+)"]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_is_dirty", json!([panel])),
+        Ok(json!(false)),
+        "panels never ask to save"
+    );
     assert_ne!(editor.active_document().unwrap().id, panel);
+}
+
+#[test]
+fn focusing_a_panel_view_shows_it_and_marks_its_caret_focused() {
+    let (world, mut editor, panel) = setup();
+    editor.hide_output_panel();
+
+    call(&world, &mut editor, "window_focus_view", json!([panel])).unwrap();
+
+    assert_eq!(editor.shown_output_panel().unwrap().document.id, panel);
+    assert!(editor.is_output_panel_focused(panel));
 }
 
 #[test]
 fn panels_are_found_listed_emptied_and_destroyed() {
     let (world, mut editor, panel) = setup();
-    assert_eq!(call(&world, &mut editor, "window_find_output_panel", json!([1, "exec"])), Ok(json!(panel)));
-    assert_eq!(call(&world, &mut editor, "window_find_output_panel", json!([1, "nope"])), Ok(Value::Null));
-    assert_eq!(call(&world, &mut editor, "window_panels", json!([1])), Ok(json!(["output.exec"])));
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_find_output_panel",
+            json!([1, "exec"])
+        ),
+        Ok(json!(panel))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_find_output_panel",
+            json!([1, "nope"])
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_panels", json!([1])),
+        Ok(json!(["output.exec"]))
+    );
 
-    call(&world, &mut editor, "view_insert", json!([panel, 0, "old output"])).unwrap();
-    call(&world, &mut editor, "view_set_read_only", json!([panel, true])).unwrap();
-    assert_eq!(call(&world, &mut editor, "window_create_output_panel", json!([1, "exec"])), Ok(json!(panel)), "the same view");
-    assert_eq!(call(&world, &mut editor, "view_size", json!([panel])), Ok(json!(0)), "emptied, even read-only");
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([panel, 0, "old output"]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_set_read_only",
+        json!([panel, true]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_create_output_panel",
+            json!([1, "exec"])
+        ),
+        Ok(json!(panel)),
+        "the same view"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_size", json!([panel])),
+        Ok(json!(0)),
+        "emptied, even read-only"
+    );
 
-    call(&world, &mut editor, "window_destroy_output_panel", json!([1, "exec"])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([panel])), Ok(json!(false)));
-    assert_eq!(call(&world, &mut editor, "window_panels", json!([1])), Ok(json!([])));
+    call(
+        &world,
+        &mut editor,
+        "window_destroy_output_panel",
+        json!([1, "exec"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([panel])),
+        Ok(json!(false))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_panels", json!([1])),
+        Ok(json!([]))
+    );
 }
 
 #[test]
 fn shown_panel() {
     let (world, mut editor, _) = setup();
     assert!(!editor.show_output_panel("nope"));
-    assert_eq!(call(&world, &mut editor, "window_active_panel", json!([1])), Ok(Value::Null));
+    assert_eq!(
+        call(&world, &mut editor, "window_active_panel", json!([1])),
+        Ok(Value::Null)
+    );
     assert!(editor.show_output_panel("exec"));
     assert_eq!(editor.shown_output_panel().unwrap().name, "exec");
-    assert_eq!(call(&world, &mut editor, "window_active_panel", json!([1])), Ok(json!("output.exec")));
+    assert_eq!(
+        call(&world, &mut editor, "window_active_panel", json!([1])),
+        Ok(json!("output.exec"))
+    );
     editor.hide_output_panel();
     assert!(editor.shown_output_panel().is_none());
 
     editor.show_output_panel("exec");
-    call(&world, &mut editor, "window_destroy_output_panel", json!([1, "exec"])).unwrap();
-    assert!(editor.shown_output_panel().is_none(), "a destroyed panel is no longer shown");
+    call(
+        &world,
+        &mut editor,
+        "window_destroy_output_panel",
+        json!([1, "exec"]),
+    )
+    .unwrap();
+    assert!(
+        editor.shown_output_panel().is_none(),
+        "a destroyed panel is no longer shown"
+    );
 }
 
 #[test]
@@ -80,63 +216,156 @@ fn append_writes_at_the_end_and_force_writes_to_read_only_panels() {
     editor.show_output_panel("exec");
     let append = |characters: &str, force: bool| json!(["view", panel, "append", {"characters": characters, "force": force}]);
     call(&world, &mut editor, "run_command", append("one\n", false)).unwrap();
-    call(&world, &mut editor, "view_set_read_only", json!([panel, true])).unwrap();
-    call(&world, &mut editor, "run_command", append("ignored\n", false)).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_set_read_only",
+        json!([panel, true]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        append("ignored\n", false),
+    )
+    .unwrap();
     call(&world, &mut editor, "run_command", append("two\n", true)).unwrap();
     assert_eq!(panel_text(&editor), "one\ntwo\n");
-    assert_eq!(call(&world, &mut editor, "view_is_read_only", json!([panel])), Ok(json!(true)), "still read-only");
+    assert_eq!(
+        call(&world, &mut editor, "view_is_read_only", json!([panel])),
+        Ok(json!(true)),
+        "still read-only"
+    );
 }
 
 #[test]
 fn append_also_works_in_tabs_and_commands_of_tabs_or_the_window_do_not_run_in_panels() {
     let (world, mut editor, panel) = setup();
     let tab = editor.active_document().unwrap().id;
-    call(&world, &mut editor, "run_command", json!(["view", tab, "append", {"characters": "x"}])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", tab, "append", {"characters": "x"}]),
+    )
+    .unwrap();
     assert_eq!(editor.active_document().unwrap().text, "x");
     assert_eq!(
-        call(&world, &mut editor, "run_command", json!(["view", panel, "save", {}])),
+        call(
+            &world,
+            &mut editor,
+            "run_command",
+            json!(["view", panel, "save", {}])
+        ),
         Err("save cannot run in a panel (it acts on tabs, the window or the text widget)".into())
     );
 }
 
 /// The editor's answer when a plugin runs a command, with the commands it runs going to `run`
 /// (the command controller's place in these tests).
-fn call_running(world: &World, editor: &mut Editor, args: Value, run: &mut dyn FnMut(&mut Editor, &Command)) -> Result<Value, String> {
-    world.plugins.then([plugin_call("run_command", args), PluginMessage::Done { error: None }]);
-    editor.run_plugin_command(&Command::new("probe"), &mut |editor: &mut Editor, command: &Command| run(editor, command));
-    world.plugins.replies.borrow_mut().pop().expect("the editor answered")
+fn call_running(
+    world: &World,
+    editor: &mut Editor,
+    args: Value,
+    run: &mut dyn FnMut(&mut Editor, &Command),
+) -> Result<Value, String> {
+    world.plugins.then([
+        plugin_call("run_command", args),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.run_plugin_command(
+        &Command::new("probe"),
+        &mut |editor: &mut Editor, command: &Command| run(editor, command),
+    );
+    world
+        .plugins
+        .replies
+        .borrow_mut()
+        .pop()
+        .expect("the editor answered")
 }
 
 #[test]
 fn text_commands_run_in_a_panel_with_the_panel_as_the_active_view_for_a_moment() {
     let (world, mut editor, panel) = setup();
     let tab = editor.active_document().unwrap().id;
-    call(&world, &mut editor, "view_insert", json!([panel, 0, "b\na\n"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([panel, 0, "b\na\n"]),
+    )
+    .unwrap();
     let mut seen = Vec::new();
-    let answer = call_running(&world, &mut editor, json!(["view", panel, "sort_lines", {}]), &mut |editor, command| {
-        // What the command controller does with it: the active view's text.
-        let id = editor.active_document().map(|d| d.id);
-        seen.push((command.name.clone(), id));
-        let text = editor.text_for_editing(id.unwrap()).unwrap();
-        let mut lines: Vec<String> = text.lines().map(String::from).collect();
-        lines.sort();
-        *text = lines.join("\n") + "\n";
-    });
+    let answer = call_running(
+        &world,
+        &mut editor,
+        json!(["view", panel, "sort_lines", {}]),
+        &mut |editor, command| {
+            // What the command controller does with it: the active view's text.
+            let id = editor.active_document().map(|d| d.id);
+            seen.push((command.name.clone(), id));
+            let text = editor.text_for_editing(id.unwrap()).unwrap();
+            let mut lines: Vec<String> = text.lines().map(String::from).collect();
+            lines.sort();
+            *text = lines.join("\n") + "\n";
+        },
+    );
     assert_eq!(answer, Ok(Value::Null));
     assert_eq!(seen, [("sort_lines".to_string(), Some(panel))]);
     editor.show_output_panel("exec");
-    assert_eq!(panel_text(&editor), "a\nb\n", "the panel's own document changed");
-    assert_eq!(editor.active_document().unwrap().id, tab, "the tab is active again");
-    assert_eq!(call(&world, &mut editor, "window_views", json!([1])).unwrap().as_array().unwrap().len(), 1, "still not a tab");
-    assert_eq!(call(&world, &mut editor, "view_is_valid", json!([panel])), Ok(json!(true)));
+    assert_eq!(
+        panel_text(&editor),
+        "a\nb\n",
+        "the panel's own document changed"
+    );
+    assert_eq!(
+        editor.active_document().unwrap().id,
+        tab,
+        "the tab is active again"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_views", json!([1]))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "still not a tab"
+    );
+    assert_eq!(
+        call(&world, &mut editor, "view_is_valid", json!([panel])),
+        Ok(json!(true))
+    );
 }
 
 /// A panel with results, as a plugin would make it.
 fn results_panel(world: &World, editor: &mut Editor, text: &str) -> u64 {
-    let id = call(world, editor, "window_create_output_panel", json!([1, "mine"])).unwrap().as_u64().unwrap();
+    let id = call(
+        world,
+        editor,
+        "window_create_output_panel",
+        json!([1, "mine"]),
+    )
+    .unwrap()
+    .as_u64()
+    .unwrap();
     let setting = |key: &str, value: &str| json!([["view", id], key, value]);
-    call(world, editor, "settings_set", setting("result_file_regex", "^(.*):(\\d+):(\\d+) (.*)$")).unwrap();
-    call(world, editor, "settings_set", setting("result_base_dir", "/p")).unwrap();
+    call(
+        world,
+        editor,
+        "settings_set",
+        setting("result_file_regex", "^(.*):(\\d+):(\\d+) (.*)$"),
+    )
+    .unwrap();
+    call(
+        world,
+        editor,
+        "settings_set",
+        setting("result_base_dir", "/p"),
+    )
+    .unwrap();
     call(world, editor, "view_insert", json!([id, 0, text])).unwrap();
     assert!(editor.show_output_panel("mine"));
     id
@@ -159,7 +388,11 @@ fn results_world() -> (World, Editor) {
 #[test]
 fn next_and_previous_result_walk_the_panel_and_wrap_around() {
     let (world, mut editor) = results_world();
-    results_panel(&world, &mut editor, "a.txt:2:2 first\nnoise\nb.txt:1:3 second\n");
+    results_panel(
+        &world,
+        &mut editor,
+        "a.txt:2:2 first\nnoise\nb.txt:1:3 second\n",
+    );
 
     assert!(editor.next_result(true));
     assert_eq!(caret(&editor), ("a.txt".to_string(), 5));
@@ -199,7 +432,11 @@ fn a_file_that_is_not_there_is_reported_and_no_buffer_opens() {
     let tabs = editor.state().documents.len();
     assert!(editor.next_result(true));
     assert_eq!(editor.state().documents.len(), tabs);
-    assert!(status(&editor).starts_with("File not found: "), "{}", status(&editor));
+    assert!(
+        status(&editor).starts_with("File not found: "),
+        "{}",
+        status(&editor)
+    );
 }
 
 #[test]
@@ -216,7 +453,13 @@ fn emptying_a_panel_forgets_its_current_result() {
     let (world, mut editor) = results_world();
     results_panel(&world, &mut editor, "a.txt:1:1 x\n");
     editor.next_result(true);
-    call(&world, &mut editor, "window_create_output_panel", json!([1, "mine"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "window_create_output_panel",
+        json!([1, "mine"]),
+    )
+    .unwrap();
     assert_eq!(editor.shown_output_panel().unwrap().current_result, None);
 }
 
@@ -224,7 +467,13 @@ fn emptying_a_panel_forgets_its_current_result() {
 fn a_destroyed_panel_has_no_more_results() {
     let (world, mut editor) = results_world();
     results_panel(&world, &mut editor, "a.txt:1:1 x\n");
-    call(&world, &mut editor, "window_destroy_output_panel", json!([1, "mine"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "window_destroy_output_panel",
+        json!([1, "mine"]),
+    )
+    .unwrap();
     assert!(!editor.next_result(true));
 }
 
@@ -232,7 +481,10 @@ fn a_destroyed_panel_has_no_more_results() {
 fn plugins_can_list_the_results() {
     let (world, mut editor) = results_world();
     let id = results_panel(&world, &mut editor, "a.txt:2:1 bad\n");
-    assert_eq!(call(&world, &mut editor, "view_find_all_results", json!([id])), Ok(json!([["a.txt", 2, 1, "bad"]])));
+    assert_eq!(
+        call(&world, &mut editor, "view_find_all_results", json!([id])),
+        Ok(json!([["a.txt", 2, 1, "bad"]]))
+    );
 }
 
 #[test]
@@ -240,9 +492,16 @@ fn the_results_of_a_build_are_followed() {
     let world = World::new().with_file("/p/a.txt", "one\ntwo\n");
     let mut editor = world.editor();
     editor.exec(&json!({ "cmd": ["x"], "file_regex": "^(.*):(\\d+)$", "working_dir": "/p" }));
-    world.processes.events.borrow_mut().push_back(ProcessEvent::Output("a.txt:2\n".into()));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(ProcessEvent::Output("a.txt:2\n".into()));
     editor.poll_builds();
-    assert!(editor.next_result(true), "the panel need not have been shown");
+    assert!(
+        editor.next_result(true),
+        "the panel need not have been shown"
+    );
     assert_eq!(active_text(&editor), "one\ntwo\n");
     open(&mut editor, "/p/a.txt");
     assert_eq!(editor.active_document().unwrap().selection().head, 4);
@@ -251,25 +510,72 @@ fn the_results_of_a_build_are_followed() {
 #[test]
 fn a_plugin_goes_to_the_end_of_an_output_panel() {
     let (world, mut editor, panel) = setup();
-    call(&world, &mut editor, "view_insert", json!([panel, 0, "one\ntwo\n"])).unwrap();
-    call(&world, &mut editor, "view_selection_set", json!([panel, [[0, 0]]])).unwrap();
-    call(&world, &mut editor, "run_command", json!(["view", panel, "move_to", { "to": "eof" }])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([panel])), Ok(json!([[8, 8]])));
-    call(&world, &mut editor, "run_command", json!(["view", panel, "move", { "by": "lines", "forward": false }])).unwrap();
-    assert_eq!(call(&world, &mut editor, "view_selection_get", json!([panel])), Ok(json!([[4, 4]])));
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([panel, 0, "one\ntwo\n"]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_selection_set",
+        json!([panel, [[0, 0]]]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", panel, "move_to", { "to": "eof" }]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_selection_get", json!([panel])),
+        Ok(json!([[8, 8]]))
+    );
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", panel, "move", { "by": "lines", "forward": false }]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_selection_get", json!([panel])),
+        Ok(json!([[4, 4]]))
+    );
 }
 
 #[test]
 fn a_plugin_deletes_in_the_input_panel() {
     let (world, mut editor, _) = setup();
-    let id = call(&world, &mut editor, "window_show_input_panel", json!([1, "", "abc", 3, false])).unwrap();
-    call(&world, &mut editor, "run_command", json!(["view", id, "left_delete", null])).unwrap();
+    let id = call(
+        &world,
+        &mut editor,
+        "window_show_input_panel",
+        json!([1, "", "abc", 3, false]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", id, "left_delete", null]),
+    )
+    .unwrap();
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "ab");
 }
 
 #[test]
 fn an_unknown_motion_is_an_error_for_the_plugin() {
     let (world, mut editor, panel) = setup();
-    let answer = call(&world, &mut editor, "run_command", json!(["view", panel, "move_to", { "to": "nowhere" }]));
+    let answer = call(
+        &world,
+        &mut editor,
+        "run_command",
+        json!(["view", panel, "move_to", { "to": "nowhere" }]),
+    );
     assert_eq!(answer, Err("move_to to nowhere is not supported".into()));
 }

@@ -25,15 +25,17 @@ use entities::document::DocumentId;
 use entities::keymap::{Binding, Keymap};
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
+use entities::meta_info::MetaPreference;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
 use use_cases::gateways::{
-    ArchiveFolder, ClipboardGateway, DialogGateway, DirectoryEntry, DownloadGateway, ErrorLogGateway, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog, PackagePaths,
-    FileFilter, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent, ProcessGateway, ProcessRequest,
-    ResourceGateway, ScopeSpan, SessionGateway, ShellGateway, SyntaxGateway, UiResources, ContextFrame, SyntaxInfo,
+    ArchiveFolder, ClipboardGateway, ContextFrame, DialogGateway, DirectoryEntry, DownloadGateway,
+    ErrorLogGateway, FileFilter, FileIndexGateway, FileSystemGateway, MessageAnswer, MessageDialog,
+    PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, ProcessEvent,
+    ProcessGateway, ProcessRequest, ResourceGateway, ScopeSpan, SessionGateway, ShellGateway,
+    SyntaxGateway, SyntaxInfo, UiResources,
 };
-use entities::meta_info::MetaPreference;
 use use_cases::project::matches_pattern;
 use use_cases::session::Session;
 use use_cases::{Editor, Gateways};
@@ -44,7 +46,13 @@ pub const PACKAGES: &str = "/packages";
 pub const INSTALLED_PACKAGES: &str = "/data/Installed Packages";
 
 /// Syntaxes the fake syntax gateway knows, by file extension.
-const SYNTAXES: &[(&str, &str)] = &[("rs", "Rust"), ("py", "Python"), ("json", "JSON"), ("md", "Markdown"), ("html", "HTML")];
+const SYNTAXES: &[(&str, &str)] = &[
+    ("rs", "Rust"),
+    ("py", "Python"),
+    ("json", "JSON"),
+    ("md", "Markdown"),
+    ("html", "HTML"),
+];
 
 // ----- file system ---------------------------------------------------------------------------------
 
@@ -88,14 +96,19 @@ impl MemoryDisk {
     }
 
     pub fn bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
-        self.files.borrow().get(path.as_ref()).map(|(b, _)| b.clone())
+        self.files
+            .borrow()
+            .get(path.as_ref())
+            .map(|(b, _)| b.clone())
     }
 
     /// Deletes a folder and everything in it.
     pub fn remove_dir(&self, path: impl AsRef<Path>) {
         let path = path.as_ref();
         self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
-        self.files.borrow_mut().retain(|file, _| !file.starts_with(path));
+        self.files
+            .borrow_mut()
+            .retain(|file, _| !file.starts_with(path));
     }
 }
 
@@ -103,7 +116,9 @@ struct FakeFileSystem(Rc<MemoryDisk>);
 
 impl FileSystemGateway for FakeFileSystem {
     fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-        self.0.bytes(path).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
+        self.0
+            .bytes(path)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
     }
 
     fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -136,14 +151,23 @@ impl FileSystemGateway for FakeFileSystem {
         let children = |p: &&PathBuf| p.parent() == Some(path);
         dirs.iter()
             .filter(children)
-            .map(|p| DirectoryEntry { path: p.clone(), is_dir: true })
-            .chain(files.keys().filter(children).map(|p| DirectoryEntry { path: p.clone(), is_dir: false }))
+            .map(|p| DirectoryEntry {
+                path: p.clone(),
+                is_dir: true,
+            })
+            .chain(files.keys().filter(children).map(|p| DirectoryEntry {
+                path: p.clone(),
+                is_dir: false,
+            }))
             .collect()
     }
 
     fn create_dir(&self, path: &Path) -> std::io::Result<()> {
         if self.0.files.borrow().contains_key(path) {
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "a file is there"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "a file is there",
+            ));
         }
         let mut dir = Some(path);
         while let Some(at) = dir.filter(|d| !d.as_os_str().is_empty()) {
@@ -156,17 +180,28 @@ impl FileSystemGateway for FakeFileSystem {
     /// Moves the file, or the folder with everything in it.
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         if !self.exists(from) {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "not found",
+            ));
         }
         let moved = |path: &PathBuf| to.join(path.strip_prefix(from).expect("under from"));
         let mut files = self.0.files.borrow_mut();
-        let inside: Vec<PathBuf> = files.keys().filter(|p| p.starts_with(from)).cloned().collect();
+        let inside: Vec<PathBuf> = files
+            .keys()
+            .filter(|p| p.starts_with(from))
+            .cloned()
+            .collect();
         for path in inside {
             let entry = files.remove(&path).expect("listed");
             files.insert(moved(&path), entry);
         }
         let mut dirs = self.0.dirs.borrow_mut();
-        let inside: Vec<PathBuf> = dirs.iter().filter(|p| p.starts_with(from)).cloned().collect();
+        let inside: Vec<PathBuf> = dirs
+            .iter()
+            .filter(|p| p.starts_with(from))
+            .cloned()
+            .collect();
         for path in inside {
             dirs.remove(&path);
             dirs.insert(moved(&path));
@@ -176,7 +211,10 @@ impl FileSystemGateway for FakeFileSystem {
 
     fn move_to_trash(&self, path: &Path) -> std::io::Result<()> {
         if !self.exists(path) {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "not found",
+            ));
         }
         self.0.remove_dir(path);
         self.0.trashed.borrow_mut().push(path.to_path_buf());
@@ -229,16 +267,28 @@ impl DialogGateway for FakeDialogs {
         self.0.folders_to_open.borrow().clone()
     }
 
-    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+    fn pick_save_path(
+        &self,
+        start_dir: Option<&Path>,
+        file_name: &str,
+        filters: &[FileFilter],
+    ) -> Option<PathBuf> {
         *self.0.last_save_dir.borrow_mut() = start_dir.map(Path::to_path_buf);
         *self.0.last_filters.borrow_mut() = filters.to_vec();
-        self.0.save_requests.borrow_mut().push(file_name.to_string());
+        self.0
+            .save_requests
+            .borrow_mut()
+            .push(file_name.to_string());
         self.0.save_path.borrow().clone()
     }
 
     fn show_message(&self, dialog: &MessageDialog) -> MessageAnswer {
         self.0.messages.borrow_mut().push(dialog.clone());
-        self.0.message_answers.borrow_mut().pop_front().unwrap_or(MessageAnswer::Cancel)
+        self.0
+            .message_answers
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or(MessageAnswer::Cancel)
     }
 }
 
@@ -390,28 +440,65 @@ impl ResourceGateway for FakeResources {
         (file_name == "Preferences.sublime-settings").then(|| "{ \"tab_size\": 4 }".to_string())
     }
 
-    fn load_settings_file(&self, file_name: &str, _include_sublime: bool, _errors: &mut Vec<String>) -> Map<String, Value> {
-        let mut values = self.0.settings_files.borrow().get(file_name).cloned().unwrap_or_default();
+    fn load_settings_file(
+        &self,
+        file_name: &str,
+        _include_sublime: bool,
+        _errors: &mut Vec<String>,
+    ) -> Map<String, Value> {
+        let mut values = self
+            .0
+            .settings_files
+            .borrow()
+            .get(file_name)
+            .cloned()
+            .unwrap_or_default();
         values.extend(self.read_user_settings_file(file_name));
         values
     }
 
     fn read_user_settings_file(&self, file_name: &str) -> Map<String, Value> {
-        self.0.user_settings_files.borrow().get(file_name).cloned().unwrap_or_default()
+        self.0
+            .user_settings_files
+            .borrow()
+            .get(file_name)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String> {
-        self.0.user_settings_files.borrow_mut().insert(file_name.to_string(), values.clone());
+    fn write_user_settings_file(
+        &self,
+        file_name: &str,
+        values: &Map<String, Value>,
+    ) -> Result<(), String> {
+        self.0
+            .user_settings_files
+            .borrow_mut()
+            .insert(file_name.to_string(), values.clone());
         Ok(())
     }
 
     fn languages(&self, _include_sublime: bool) -> Vec<Language> {
-        self.0.translations.borrow().iter().map(|(language, _)| language.clone()).collect()
+        self.0
+            .translations
+            .borrow()
+            .iter()
+            .map(|(language, _)| language.clone())
+            .collect()
     }
 
-    fn load_translations(&self, language: &str, _include_sublime: bool, _errors: &mut Vec<String>) -> Catalog {
+    fn load_translations(
+        &self,
+        language: &str,
+        _include_sublime: bool,
+        _errors: &mut Vec<String>,
+    ) -> Catalog {
         let translations = self.0.translations.borrow();
-        translations.iter().find(|(l, _)| l.code == language).map(|(_, c)| c.clone()).unwrap_or_default()
+        translations
+            .iter()
+            .find(|(l, _)| l.code == language)
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default()
     }
 
     fn system_language(&self) -> Option<String> {
@@ -421,11 +508,20 @@ impl ResourceGateway for FakeResources {
     fn find_resources(&self, pattern: &str, _include_sublime: bool) -> Vec<String> {
         let files = self.0.package_files.borrow();
         let file_name = |name: &str| name.rsplit('/').next().unwrap_or_default().to_string();
-        files.keys().filter(|name| matches_pattern(pattern, &file_name(name))).cloned().collect()
+        files
+            .keys()
+            .filter(|name| matches_pattern(pattern, &file_name(name)))
+            .cloned()
+            .collect()
     }
 
     fn load_resource(&self, name: &str, _include_sublime: bool) -> Result<Vec<u8>, String> {
-        self.0.package_files.borrow().get(name).cloned().ok_or_else(|| format!("resource not found: {name}"))
+        self.0
+            .package_files
+            .borrow()
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("resource not found: {name}"))
     }
 
     fn unpack_packages(&self, include_sublime: bool, _errors: &mut Vec<String>) {
@@ -445,7 +541,11 @@ impl ResourceGateway for FakeResources {
         serde_json::from_slice(&bytes).map_err(|e| e.to_string())
     }
 
-    fn load_meta_preferences(&self, _include_sublime: bool, _errors: &mut Vec<String>) -> Vec<MetaPreference> {
+    fn load_meta_preferences(
+        &self,
+        _include_sublime: bool,
+        _errors: &mut Vec<String>,
+    ) -> Vec<MetaPreference> {
         self.0.meta_preferences.borrow().clone()
     }
 }
@@ -512,11 +612,18 @@ impl SyntaxGateway for FakeSyntaxes {
     }
 
     fn syntax_names(&self) -> Vec<String> {
-        std::iter::once("Plain Text").chain(SYNTAXES.iter().map(|(_, n)| *n)).map(String::from).collect()
+        std::iter::once("Plain Text")
+            .chain(SYNTAXES.iter().map(|(_, n)| *n))
+            .map(String::from)
+            .collect()
     }
 
     fn color_scheme_names(&self) -> Vec<String> {
-        vec!["Daylight".into(), "Monokai".into(), "Solarized (dark)".into()]
+        vec![
+            "Daylight".into(),
+            "Monokai".into(),
+            "Solarized (dark)".into(),
+        ]
     }
 
     /// White on black, and the scheme asked for under `scheme`.
@@ -549,8 +656,16 @@ impl SyntaxGateway for FakeSyntaxes {
 
     /// The syntax's base scope; text between double quotes (quotes included) is also
     /// `string.quoted.double`.
-    fn line_scopes(&self, _document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan> {
-        let Some(line_text) = text.split_inclusive('\n').nth(line) else { return Vec::new() };
+    fn line_scopes(
+        &self,
+        _document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+    ) -> Vec<ScopeSpan> {
+        let Some(line_text) = text.split_inclusive('\n').nth(line) else {
+            return Vec::new();
+        };
         let base = self.base_scope(syntax);
         let string = format!("{base} string.quoted.double");
         let mut spans = Vec::new();
@@ -558,32 +673,62 @@ impl SyntaxGateway for FakeSyntaxes {
         for (at, c) in line_text.char_indices().filter(|(_, c)| *c == '"') {
             let end = if quoted { at + c.len_utf8() } else { at };
             if end > start {
-                spans.push(ScopeSpan { range: start..end, scope: if quoted { string.clone() } else { base.clone() } });
+                spans.push(ScopeSpan {
+                    range: start..end,
+                    scope: if quoted { string.clone() } else { base.clone() },
+                });
             }
             (start, quoted) = (end, !quoted);
         }
         if start < line_text.len() {
-            spans.push(ScopeSpan { range: start..line_text.len(), scope: if quoted { string } else { base } });
+            spans.push(ScopeSpan {
+                range: start..line_text.len(),
+                scope: if quoted { string } else { base },
+            });
         }
         spans
     }
 
-    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: std::ops::Range<usize>) -> Vec<Vec<ScopeSpan>> {
+    fn lines_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        lines: std::ops::Range<usize>,
+    ) -> Vec<Vec<ScopeSpan>> {
         let count = text.split_inclusive('\n').count();
         let lines = lines.start.min(count)..lines.end.min(count);
-        self.0.lines_copied.set(self.0.lines_copied.get() + lines.len());
-        lines.map(|line| self.line_scopes(document, text, syntax, line)).collect()
+        self.0
+            .lines_copied
+            .set(self.0.lines_copied.get() + lines.len());
+        lines
+            .map(|line| self.line_scopes(document, text, syntax, line))
+            .collect()
     }
 
     /// `main`, and `string` inside double quotes, of `Packages/<syntax>/<syntax>.sublime-syntax`.
-    fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame> {
+    fn context_backtrace(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+        column: usize,
+    ) -> Vec<ContextFrame> {
         let file = format!("Packages/{syntax}/{syntax}.sublime-syntax");
-        let frame = |name: &str| ContextFrame { context_name: name.to_string(), source_file: file.clone() };
+        let frame = |name: &str| ContextFrame {
+            context_name: name.to_string(),
+            source_file: file.clone(),
+        };
         let in_string = self
             .line_scopes(document, text, syntax, line)
             .iter()
             .any(|s| s.range.start < column && column < s.range.end && s.scope.contains("string"));
-        if in_string { vec![frame("main"), frame("string")] } else { vec![frame("main")] }
+        if in_string {
+            vec![frame("main"), frame("string")]
+        } else {
+            vec![frame("main")]
+        }
     }
 
     fn syntax_infos(&self) -> Vec<SyntaxInfo> {
@@ -593,7 +738,11 @@ impl SyntaxGateway for FakeSyntaxes {
                 path: format!("Packages/{name}/{name}.sublime-syntax"),
                 scope: self.base_scope(&name),
                 hidden: false,
-                file_extensions: SYNTAXES.iter().filter(|(_, n)| *n == name).map(|(e, _)| e.to_string()).collect(),
+                file_extensions: SYNTAXES
+                    .iter()
+                    .filter(|(_, n)| *n == name)
+                    .map(|(e, _)| e.to_string())
+                    .collect(),
                 name,
             })
             .collect()
@@ -647,7 +796,11 @@ impl PluginScript {
 
     /// The names of the events sent so far.
     pub fn event_names(&self) -> Vec<String> {
-        self.events.borrow().iter().map(|(name, _)| name.clone()).collect()
+        self.events
+            .borrow()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 }
 
@@ -670,8 +823,17 @@ impl PluginHostGateway for FakePluginHost {
         }
     }
 
-    fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String> {
-        self.0.runs.borrow_mut().push((kind, name.to_string(), args.clone(), view));
+    fn run(
+        &mut self,
+        kind: PluginCommandKind,
+        name: &str,
+        args: &Value,
+        view: Option<DocumentId>,
+    ) -> Result<(), String> {
+        self.0
+            .runs
+            .borrow_mut()
+            .push((kind, name.to_string(), args.clone(), view));
         Ok(())
     }
 
@@ -681,12 +843,18 @@ impl PluginHostGateway for FakePluginHost {
     }
 
     fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String> {
-        self.0.callbacks.borrow_mut().push((id, name.to_string(), args.clone()));
+        self.0
+            .callbacks
+            .borrow_mut()
+            .push((id, name.to_string(), args.clone()));
         Ok(())
     }
 
     fn query(&mut self, name: &str, view: Option<DocumentId>, args: &Value) -> Result<(), String> {
-        self.0.queries.borrow_mut().push((name.to_string(), view, args.clone()));
+        self.0
+            .queries
+            .borrow_mut()
+            .push((name.to_string(), view, args.clone()));
         Ok(())
     }
 
@@ -696,7 +864,11 @@ impl PluginHostGateway for FakePluginHost {
     }
 
     fn receive(&mut self) -> Result<PluginMessage, String> {
-        self.0.messages.borrow_mut().pop_front().ok_or_else(|| "the plugin host stopped".to_string())
+        self.0
+            .messages
+            .borrow_mut()
+            .pop_front()
+            .ok_or_else(|| "the plugin host stopped".to_string())
     }
 
     fn try_receive(&mut self) -> Result<Option<PluginMessage>, String> {
@@ -758,7 +930,10 @@ struct FakeDownloads(Rc<DownloadScript>);
 
 impl DownloadGateway for FakeDownloads {
     fn start(&mut self, url: &str, destination: &Path) -> Result<(), String> {
-        self.0.started.borrow_mut().push((url.to_string(), destination.to_path_buf()));
+        self.0
+            .started
+            .borrow_mut()
+            .push((url.to_string(), destination.to_path_buf()));
         Ok(())
     }
 
@@ -799,8 +974,16 @@ struct FakeFileIndex {
 }
 
 impl FileIndexGateway for FakeFileIndex {
-    fn rebuild(&mut self, folders: Vec<PathBuf>, folder_excludes: Vec<String>, file_excludes: Vec<String>) {
-        self.shared.rebuilds.borrow_mut().push((folders, folder_excludes, file_excludes));
+    fn rebuild(
+        &mut self,
+        folders: Vec<PathBuf>,
+        folder_excludes: Vec<String>,
+        file_excludes: Vec<String>,
+    ) {
+        self.shared
+            .rebuilds
+            .borrow_mut()
+            .push((folders, folder_excludes, file_excludes));
         self.scanning = true;
     }
 
@@ -913,7 +1096,10 @@ impl World {
     pub fn with_plugins(self, commands: &[(&str, PluginCommandKind)], events: &[&str]) -> Self {
         self.disk.put(format!("{PACKAGES}/MyPlugin/plugin.py"), "");
         self.plugins.then([PluginMessage::Loaded {
-            commands: commands.iter().map(|(name, kind)| (name.to_string(), *kind)).collect(),
+            commands: commands
+                .iter()
+                .map(|(name, kind)| (name.to_string(), *kind))
+                .collect(),
             events: events.iter().map(|e| e.to_string()).collect(),
             errors: Vec::new(),
         }]);
@@ -932,15 +1118,28 @@ impl World {
 
     /// A package file plugins can find and load (`Packages/<package>/<path>`).
     pub fn with_resource(self, name: &str, contents: impl Into<Vec<u8>>) -> Self {
-        self.resources.package_files.borrow_mut().insert(name.to_string(), contents.into());
+        self.resources
+            .package_files
+            .borrow_mut()
+            .insert(name.to_string(), contents.into());
         self
     }
 
     /// A `.tmPreferences` of a package: where it applies and its `settings`.
     pub fn with_meta_preference(self, selector: &str, settings: Value) -> Self {
         let settings = settings.as_object().cloned().unwrap_or_default();
-        let name = format!("Packages/Test/{}.tmPreferences", self.resources.meta_preferences.borrow().len());
-        self.resources.meta_preferences.borrow_mut().push(MetaPreference { name, selector: selector.to_string(), settings });
+        let name = format!(
+            "Packages/Test/{}.tmPreferences",
+            self.resources.meta_preferences.borrow().len()
+        );
+        self.resources
+            .meta_preferences
+            .borrow_mut()
+            .push(MetaPreference {
+                name,
+                selector: selector.to_string(),
+                settings,
+            });
         self
     }
 
@@ -951,7 +1150,10 @@ impl World {
     }
 
     pub fn with_syntax_settings(self, syntax: &str, layer: Value) -> Self {
-        self.resources.syntax_settings.borrow_mut().push((syntax.to_string(), layer));
+        self.resources
+            .syntax_settings
+            .borrow_mut()
+            .push((syntax.to_string(), layer));
         self
     }
 
@@ -971,8 +1173,14 @@ impl World {
         for (msgid, translation) in messages {
             catalog.insert(None, msgid, vec![translation.to_string()]);
         }
-        let language = Language { code: code.into(), name: name.into() };
-        self.resources.translations.borrow_mut().push((language, catalog));
+        let language = Language {
+            code: code.into(),
+            name: name.into(),
+        };
+        self.resources
+            .translations
+            .borrow_mut()
+            .push((language, catalog));
         self
     }
 
@@ -1042,7 +1250,10 @@ impl World {
             plugins: Box::new(FakePluginHost(self.plugins.clone())),
             processes: Box::new(FakeProcesses(self.processes.clone())),
             downloads: Box::new(FakeDownloads(self.downloads.clone())),
-            error_log: Box::new(FakeErrorLog { disk: self.disk.clone(), errors: self.logged_errors.clone() }),
+            error_log: Box::new(FakeErrorLog {
+                disk: self.disk.clone(),
+                errors: self.logged_errors.clone(),
+            }),
         }
     }
 
@@ -1060,7 +1271,12 @@ impl World {
 
     /// Text of a file on the fake disk.
     pub fn file_text(&self, path: &str) -> String {
-        String::from_utf8(self.disk.bytes(path).unwrap_or_else(|| panic!("no file {path}"))).expect("utf-8")
+        String::from_utf8(
+            self.disk
+                .bytes(path)
+                .unwrap_or_else(|| panic!("no file {path}")),
+        )
+        .expect("utf-8")
     }
 
     pub fn file_exists(&self, path: &str) -> bool {
@@ -1070,15 +1286,27 @@ impl World {
 
 /// The text of the status bar message, if any.
 pub fn status(editor: &Editor) -> String {
-    editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default()
+    editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default()
 }
 
 /// Opens a file that must exist and returns its text.
 pub fn open(editor: &mut Editor, path: &str) -> String {
-    assert!(editor.open_file(Path::new(path)), "could not open {path}: {}", status(editor));
+    assert!(
+        editor.open_file(Path::new(path)),
+        "could not open {path}: {}",
+        status(editor)
+    );
     active_text(editor)
 }
 
 pub fn active_text(editor: &Editor) -> String {
-    editor.active_document().map(|d| d.text.clone()).unwrap_or_default()
+    editor
+        .active_document()
+        .map(|d| d.text.clone())
+        .unwrap_or_default()
 }

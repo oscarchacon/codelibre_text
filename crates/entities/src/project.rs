@@ -23,20 +23,39 @@ pub struct Project {
 impl Project {
     /// A project from the object a `.sublime-project` file holds. `None` if it is not an object.
     pub fn from_json(file: Option<PathBuf>, data: &Value) -> Option<Self> {
-        Some(Self { file, data: data.as_object()?.clone() })
+        Some(Self {
+            file,
+            data: data.as_object()?.clone(),
+        })
     }
 
     /// The folders a project opens: the `folders` entries' `path`s, relative to the project file
     /// (or to `.` when there is no file). A missing `path` is the project's own folder.
     pub fn folder_paths(&self) -> Vec<PathBuf> {
-        let base = self.file.as_deref().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default();
+        let base = self
+            .file
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
         self.data
             .get("folders")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|folder| folder.get("path").and_then(Value::as_str).or_else(|| folder.as_str()))
-            .map(|path| if path == "." { base.clone() } else { base.join(path) })
+            .filter_map(|folder| {
+                folder
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .or_else(|| folder.as_str())
+            })
+            .map(|path| {
+                if path == "." {
+                    base.clone()
+                } else {
+                    base.join(path)
+                }
+            })
             .collect()
     }
 
@@ -46,11 +65,14 @@ impl Project {
         let entries: Vec<Value> = folders
             .iter()
             .map(|folder| {
-                let path = base.and_then(|base| folder.strip_prefix(base).ok()).unwrap_or(folder);
+                let path = base
+                    .and_then(|base| folder.strip_prefix(base).ok())
+                    .unwrap_or(folder);
                 json!({ "path": path.display().to_string() })
             })
             .collect();
-        self.data.insert("folders".to_string(), Value::Array(entries));
+        self.data
+            .insert("folders".to_string(), Value::Array(entries));
     }
 
     /// The build systems a project defines (its `build_systems` array), by name.
@@ -79,10 +101,19 @@ impl Project {
                 ("project_extension".to_string(), String::new()),
             ]);
         };
-        let part = |value: Option<&std::ffi::OsStr>| value.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default();
+        let part = |value: Option<&std::ffi::OsStr>| {
+            value
+                .map(|v| v.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
         HashMap::from([
             ("project".to_string(), file.display().to_string()),
-            ("project_path".to_string(), file.parent().map(|p| p.display().to_string()).unwrap_or_default()),
+            (
+                "project_path".to_string(),
+                file.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            ),
             ("project_name".to_string(), self.name()),
             ("project_base_name".to_string(), part(file.file_stem())),
             ("project_extension".to_string(), part(file.extension())),
@@ -95,7 +126,12 @@ impl Project {
             .get("name")
             .and_then(Value::as_str)
             .map(String::from)
-            .or_else(|| self.file.as_deref().and_then(Path::file_stem).map(|s| s.to_string_lossy().into_owned()))
+            .or_else(|| {
+                self.file
+                    .as_deref()
+                    .and_then(Path::file_stem)
+                    .map(|s| s.to_string_lossy().into_owned())
+            })
             .unwrap_or_default()
     }
 

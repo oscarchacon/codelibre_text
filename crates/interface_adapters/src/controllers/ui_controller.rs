@@ -9,6 +9,7 @@ use entities::find::FindOptions;
 use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text_commands::CaretMotion;
+use serde_json::Value;
 use use_cases::editing::TextCommand;
 use use_cases::editor::CloseChoice;
 use use_cases::plugin_popups::HoverZone;
@@ -35,9 +36,17 @@ pub enum UiEvent {
     FocusGroup(usize),
     /// The line between two columns (`vertical`) or rows was dragged: boundary `index` is now at
     /// `fraction` of the window.
-    LayoutBoundaryDragged { vertical: bool, index: usize, fraction: f64 },
+    LayoutBoundaryDragged {
+        vertical: bool,
+        index: usize,
+        fraction: f64,
+    },
     /// A tab (the document at `tab` in the window) was dropped on `group`, at `index` among its tabs.
-    TabDropped { tab: usize, group: usize, index: usize },
+    TabDropped {
+        tab: usize,
+        group: usize,
+        index: usize,
+    },
 
     /// A double click on a preview's tab: it stays open as a tab of its own.
     KeepTab(usize),
@@ -50,30 +59,53 @@ pub enum UiEvent {
     QuickPanelQueryChanged(String),
     QuickPanelHighlighted(usize),
     QuickPanelAccepted(usize),
+    /// A plugin quick-panel item was accepted; the event carries the modifiers held at selection.
+    PluginQuickPanelAccepted {
+        index: usize,
+        event: Value,
+    },
     QuickPanelDismissed,
     /// A link in an item's details was clicked (its `href`): it opens in the browser.
     QuickPanelLinkClicked(String),
 
     /// A plugin's input panel: the text changed, the caret moved, Enter was pressed.
     InputPanelChanged(String),
-    InputPanelSelected { anchor: usize, head: usize },
+    InputPanelSelected {
+        anchor: usize,
+        head: usize,
+    },
     InputPanelDone,
+    /// A plugin input panel was submitted with the event modifiers.
+    PluginInputPanelDone(Value),
     /// Backspace in the empty field of a panel an input handler asks in (the quick or the input
     /// panel): back to the previous argument.
     PluginPanelBack,
 
     /// A line of the output panel was double-clicked (counting from the start of its text).
     OutputPanelLineOpened(usize),
+    /// A click in the output panel gave its view focus.
+    OutputPanelFocused(DocumentId),
 
     /// A link in a plugin's popup or phantom was clicked (its `href`).
     PopupLinkClicked(String),
-    PhantomLinkClicked { phantom: u64, href: String },
+    PhantomLinkClicked {
+        phantom: u64,
+        href: String,
+    },
     /// A link in an annotation of the region set `key` was clicked.
-    AnnotationLinkClicked { document: DocumentId, key: String, href: String },
+    AnnotationLinkClicked {
+        document: DocumentId,
+        key: String,
+        href: String,
+    },
     /// Esc, or the mouse moved away from a popup that asked for it.
     PopupDismissed,
     /// The mouse rests over a view (for `on_hover`).
-    Hover { document: DocumentId, point: usize, zone: HoverZone },
+    Hover {
+        document: DocumentId,
+        point: usize,
+        zone: HoverZone,
+    },
 
     FindOptionsChanged(FindOptions),
     ReplacementChanged(String),
@@ -104,7 +136,9 @@ pub enum UiEvent {
     EnterPressed,
     /// Keys the editor applies at every selection while there are several (Ctrl+D).
     TypedAtSelections(String),
-    DeleteAtSelections { forward: bool },
+    DeleteAtSelections {
+        forward: bool,
+    },
     MoveCarets(CaretMotion),
 
     CloseDialogAnswered(CloseChoice),
@@ -131,6 +165,9 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         }
 
         UiEvent::ActivateTab(index) => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
             editor.activate(index);
             view.focus_editor = true;
         }
@@ -139,15 +176,30 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 editor.close_documents(vec![id]);
             }
         }
-        UiEvent::NewTab => editor.new_file(),
+        UiEvent::NewTab => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
+            editor.new_file();
+        }
         UiEvent::FocusGroup(group) => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
             if group != editor.active_group() {
                 editor.focus_group(group);
             }
             view.focus_editor = true;
         }
-        UiEvent::LayoutBoundaryDragged { vertical, index, fraction } => editor.move_layout_boundary(vertical, index, fraction),
+        UiEvent::LayoutBoundaryDragged {
+            vertical,
+            index,
+            fraction,
+        } => editor.move_layout_boundary(vertical, index, fraction),
         UiEvent::TabDropped { tab, group, index } => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
             if let Some(id) = editor.state().documents.get(tab).map(|d| d.id) {
                 editor.drop_view_in_group(id, group, index);
                 view.focus_editor = true;
@@ -179,6 +231,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         }
 
         UiEvent::QuickPanelQueryChanged(query) => {
+            let text_input = command_controller::palette_asks_text_input(editor, view);
             if let Some(panel) = &mut view.quick_panel {
                 panel.query = query;
                 panel.selected = 0;
@@ -189,6 +242,11 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                     }
                 }
             }
+            if text_input {
+                if let Some(query) = view.quick_panel.as_ref().map(|panel| panel.query.clone()) {
+                    command_controller::change_plugin_input(editor, view, &query);
+                }
+            }
         }
         UiEvent::QuickPanelHighlighted(index) => {
             let mut plugin_item = None;
@@ -196,7 +254,9 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 panel.selected = index;
                 match panel.results.get(index).map(|c| &c.target) {
                     Some(CandidateTarget::PluginItem(item)) => plugin_item = Some(*item),
-                    Some(target) if panel.kind == SearchKind::ColorSchemes => editor.preview_candidate(target),
+                    Some(target) if panel.kind == SearchKind::ColorSchemes => {
+                        editor.preview_candidate(target)
+                    }
                     _ => {}
                 }
             }
@@ -208,14 +268,39 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             view.focus_editor = true;
             if let Some(panel) = view.quick_panel.take() {
                 match panel.results.into_iter().nth(index).map(|c| c.target) {
-                    Some(CandidateTarget::PluginItem(item)) => command_controller::answer_plugin_quick_panel(editor, view, Some(item)),
+                    Some(CandidateTarget::PluginItem(item)) => {
+                        command_controller::answer_plugin_quick_panel(editor, view, Some(item))
+                    }
                     Some(target) => {
                         if let Some(command) = editor.accept_candidate(target) {
                             command_controller::run_from_palette(editor, view, command);
                         }
                     }
-                    None if panel.kind == SearchKind::PluginItems => command_controller::answer_plugin_quick_panel(editor, view, None),
+                    None if panel.kind == SearchKind::PluginItems => {
+                        command_controller::answer_plugin_quick_panel(editor, view, None)
+                    }
                     None => {}
+                }
+            }
+        }
+        UiEvent::PluginQuickPanelAccepted { index, event } => {
+            view.focus_editor = true;
+            if let Some(panel) = view.quick_panel.take() {
+                match panel.results.into_iter().nth(index).map(|c| c.target) {
+                    Some(CandidateTarget::PluginItem(item)) => {
+                        command_controller::answer_plugin_quick_panel_with_event(
+                            editor,
+                            view,
+                            Some(item),
+                            event,
+                        )
+                    }
+                    None if panel.kind == SearchKind::PluginItems => {
+                        command_controller::answer_plugin_quick_panel_with_event(
+                            editor, view, None, event,
+                        )
+                    }
+                    _ => {}
                 }
             }
         }
@@ -227,21 +312,48 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 command_controller::change_plugin_input(editor, view, &text);
             }
         }
-        UiEvent::InputPanelSelected { anchor, head } => editor.select_in_plugin_input_panel(Selection::new(anchor, head)),
+        UiEvent::InputPanelSelected { anchor, head } => {
+            editor.select_in_plugin_input_panel(Selection::new(anchor, head))
+        }
         UiEvent::InputPanelDone => command_controller::finish_plugin_input(editor, view, true),
+        UiEvent::PluginInputPanelDone(event) => {
+            command_controller::finish_plugin_input_with_event(editor, view, true, event)
+        }
         UiEvent::PluginPanelBack => command_controller::go_back_in_plugin_panel(editor, view),
 
         UiEvent::OutputPanelLineOpened(line) => {
             if editor.open_result_at_line(line) {
+                editor.blur_output_panel();
+                view.focused_output_panel = None;
+                view.output_panel_focus_requested = None;
                 view.focus_editor = true;
             }
         }
+        UiEvent::OutputPanelFocused(document) => {
+            if editor.focus_output_panel(document) {
+                view.focused_output_panel = Some(document);
+                view.output_panel_focus_requested = Some(document);
+            }
+            view.focus_editor = false;
+        }
 
-        UiEvent::PopupLinkClicked(href) => command_controller::navigate_plugin_popup(editor, view, &href),
-        UiEvent::PhantomLinkClicked { phantom, href } => command_controller::navigate_plugin_phantom(editor, view, phantom, &href),
-        UiEvent::AnnotationLinkClicked { document, key, href } => command_controller::navigate_plugin_annotation(editor, view, document, &key, &href),
+        UiEvent::PopupLinkClicked(href) => {
+            command_controller::navigate_plugin_popup(editor, view, &href)
+        }
+        UiEvent::PhantomLinkClicked { phantom, href } => {
+            command_controller::navigate_plugin_phantom(editor, view, phantom, &href)
+        }
+        UiEvent::AnnotationLinkClicked {
+            document,
+            key,
+            href,
+        } => command_controller::navigate_plugin_annotation(editor, view, document, &key, &href),
         UiEvent::PopupDismissed => editor.hide_plugin_popup(),
-        UiEvent::Hover { document, point, zone } => editor.plugin_hover(document, point, zone),
+        UiEvent::Hover {
+            document,
+            point,
+            zone,
+        } => editor.plugin_hover(document, point, zone),
 
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
@@ -264,12 +376,22 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 Some(LineEnding::Windows) => "unix",
                 _ => "windows",
             };
-            view.queue_command(Command::with_args("set_line_ending", serde_json::json!({ "type": next })));
+            view.queue_command(Command::with_args(
+                "set_line_ending",
+                serde_json::json!({ "type": next }),
+            ));
         }
 
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
-        UiEvent::SelectionChanged(document, selection) => editor.sync_selection_from_view(document, selection),
-        UiEvent::VisibleRange(document, start, end) => editor.sync_visible_range(document, start, end),
+        UiEvent::SelectionChanged(document, selection) => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
+            editor.sync_selection_from_view(document, selection)
+        }
+        UiEvent::VisibleRange(document, start, end) => {
+            editor.sync_visible_range(document, start, end)
+        }
         UiEvent::TextTyped(document, text) => editor.typed_in_view(document, &text),
         UiEvent::CompletionClicked(index) => {
             editor.commit_completion(Some(index));

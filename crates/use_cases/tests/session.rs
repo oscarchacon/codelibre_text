@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use entities::selection::Selection;
 use entities::document::RegionSet;
+use entities::selection::Selection;
 use serde_json::json;
 use test_support::{open, World};
 use use_cases::editing::TextCommand;
@@ -61,7 +61,10 @@ fn without_hot_exit_and_without_changes_quitting_is_immediate() {
 
 #[test]
 fn the_session_keeps_folders_files_unsaved_text_and_carets() {
-    let world = World::new().with_dir("/p").with_file("/p/clean.txt", "c").with_file("/p/dirty.txt", "d");
+    let world = World::new()
+        .with_dir("/p")
+        .with_file("/p/clean.txt", "c")
+        .with_file("/p/dirty.txt", "d");
     let mut editor = world.editor_opening(&["/p"]);
     open(&mut editor, "/p/clean.txt");
     open(&mut editor, "/p/dirty.txt");
@@ -72,7 +75,10 @@ fn the_session_keeps_folders_files_unsaved_text_and_carets() {
     assert_eq!(session.folders, vec![PathBuf::from("/p")]);
     assert_eq!(session.active, 1);
     assert_eq!(session.documents.len(), 2);
-    assert_eq!(session.documents[0].unsaved_text, None, "clean files are re-read from disk");
+    assert_eq!(
+        session.documents[0].unsaved_text, None,
+        "clean files are re-read from disk"
+    );
     assert_eq!(session.documents[1].unsaved_text.as_deref(), Some("xd"));
     assert_eq!(session.documents[1].selection, Selection::caret(1));
 }
@@ -94,7 +100,11 @@ fn empty_untitled_tabs_and_read_only_views_are_not_saved() {
 
 // ----- restoring the session -----------------------------------------------------------------------
 
-fn session_document(path: Option<&str>, unsaved: Option<&str>, selection: Selection) -> SessionDocument {
+fn session_document(
+    path: Option<&str>,
+    unsaved: Option<&str>,
+    selection: Selection,
+) -> SessionDocument {
     SessionDocument {
         path: path.map(PathBuf::from),
         unsaved_text: unsaved.map(String::from),
@@ -107,28 +117,38 @@ fn session_document(path: Option<&str>, unsaved: Option<&str>, selection: Select
 
 #[test]
 fn startup_restores_the_previous_session() {
-    let world = World::new().with_dir("/p").with_file("/p/a.py", "saved").with_session(Session {
-        folders: vec![PathBuf::from("/p"), PathBuf::from("/gone")],
-        documents: vec![
-            session_document(Some("/p/a.py"), None, Selection::caret(2)),
-            session_document(Some("/p/a.py"), Some("changed"), Selection::caret(1)),
-            session_document(Some("/p/deleted.py"), Some("kept"), Selection::caret(0)),
-            session_document(None, Some("scratch notes"), Selection::caret(0)),
-        ],
-        active: 3,
-        layout: layout(),
-        ..Default::default()
-    });
+    let world = World::new()
+        .with_dir("/p")
+        .with_file("/p/a.py", "saved")
+        .with_session(Session {
+            folders: vec![PathBuf::from("/p"), PathBuf::from("/gone")],
+            documents: vec![
+                session_document(Some("/p/a.py"), None, Selection::caret(2)),
+                session_document(Some("/p/a.py"), Some("changed"), Selection::caret(1)),
+                session_document(Some("/p/deleted.py"), Some("kept"), Selection::caret(0)),
+                session_document(None, Some("scratch notes"), Selection::caret(0)),
+            ],
+            active: 3,
+            layout: layout(),
+            ..Default::default()
+        });
     let editor = world.editor();
     let state = editor.state();
 
-    assert_eq!(state.folders, vec![PathBuf::from("/p")], "missing folders are skipped");
+    assert_eq!(
+        state.folders,
+        vec![PathBuf::from("/p")],
+        "missing folders are skipped"
+    );
     let texts: Vec<&str> = state.documents.iter().map(|d| d.text.as_str()).collect();
     assert_eq!(texts, vec!["saved", "changed", "kept", "scratch notes"]);
     assert!(!state.documents[0].is_dirty());
     assert!(state.documents[1].is_dirty());
     assert_eq!(state.documents[0].selection(), Selection::caret(2));
-    assert_eq!(state.documents[2].path, Some(PathBuf::from("/p/deleted.py")));
+    assert_eq!(
+        state.documents[2].path,
+        Some(PathBuf::from("/p/deleted.py"))
+    );
     assert_eq!(state.documents[0].syntax, "Python");
     assert_eq!(state.active, 3);
 }
@@ -136,20 +156,34 @@ fn startup_restores_the_previous_session() {
 #[test]
 fn persistent_regions_come_back_with_the_session() {
     let mut document = session_document(Some("/p/a.py"), None, Selection::caret(0));
-    document.regions.push(RegionSet { key: "lint".into(), regions: vec![(1, 2)], flags: 16, ..RegionSet::default() });
-    let world = World::new().with_file("/p/a.py", "abc").with_session(Session {
-        folders: vec![PathBuf::from("/p")],
-        documents: vec![document],
-        ..Default::default()
+    document.regions.push(RegionSet {
+        key: "lint".into(),
+        regions: vec![(1, 2)],
+        flags: 16,
+        ..RegionSet::default()
     });
+    let world = World::new()
+        .with_file("/p/a.py", "abc")
+        .with_session(Session {
+            folders: vec![PathBuf::from("/p")],
+            documents: vec![document],
+            ..Default::default()
+        });
     let editor = world.editor();
-    assert_eq!(editor.active_document().unwrap().regions("lint"), vec![(1, 2)]);
+    assert_eq!(
+        editor.active_document().unwrap().regions("lint"),
+        vec![(1, 2)]
+    );
 }
 
 #[test]
-fn the_session_is_not_restored_without_hot_exit() {    let world = World::new()
+fn the_session_is_not_restored_without_hot_exit() {
+    let world = World::new()
         .with_preferences(json!({ "hot_exit": false }))
-        .with_session(Session { documents: vec![session_document(None, Some("old"), Selection::caret(0))], ..Default::default() });
+        .with_session(Session {
+            documents: vec![session_document(None, Some("old"), Selection::caret(0))],
+            ..Default::default()
+        });
     let editor = world.editor();
     assert_eq!(editor.state().documents.len(), 1);
     assert!(editor.state().documents[0].text.is_empty());
@@ -157,7 +191,10 @@ fn the_session_is_not_restored_without_hot_exit() {    let world = World::new()
 
 #[test]
 fn session_layout_returns_the_saved_ui_flags() {
-    let world = World::new().with_session(Session { layout: layout(), ..Default::default() });
+    let world = World::new().with_session(Session {
+        layout: layout(),
+        ..Default::default()
+    });
     let editor = world.editor();
     assert_eq!(editor.session_layout(), layout());
 }
@@ -181,13 +218,22 @@ fn listeners_hear_on_load_for_the_files_of_the_session() {
     };
     let session = Session {
         folders: vec![],
-        documents: vec![document(Some("/p/a.txt".into()), None), document(None, Some("x"))],
+        documents: vec![
+            document(Some("/p/a.txt".into()), None),
+            document(None, Some("x")),
+        ],
         active: 0,
         layout: vec![],
         ..Default::default()
     };
-    let world = World::new().with_file("/p/a.txt", "a").with_session(session).with_plugins(&[], &["on_load"]);
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_session(session)
+        .with_plugins(&[], &["on_load"]);
     world.plugins.then([PluginMessage::Done { error: None }]);
     let editor = world.editor();
-    assert_eq!(world.plugins.events.borrow().clone(), vec![("on_load".to_string(), editor.state().documents[0].id)]);
+    assert_eq!(
+        world.plugins.events.borrow().clone(),
+        vec![("on_load".to_string(), editor.state().documents[0].id)]
+    );
 }

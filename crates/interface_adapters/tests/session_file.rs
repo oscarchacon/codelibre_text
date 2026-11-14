@@ -2,11 +2,11 @@
 
 use std::path::PathBuf;
 
-use entities::selection::Selection;
 use entities::document::RegionSet;
+use entities::layout::Layout;
+use entities::selection::Selection;
 use interface_adapters::gateways::session_file::SessionFileGateway;
 use use_cases::gateways::SessionGateway;
-use entities::layout::Layout;
 use use_cases::session::{Session, SessionDocument};
 
 fn sample() -> Session {
@@ -46,7 +46,14 @@ fn sample() -> Session {
         // A second window, with a folder and a file of its own.
         windows: vec![Session {
             folders: vec![PathBuf::from("/q")],
-            documents: vec![SessionDocument { path: Some(PathBuf::from("/q/b.py")), unsaved_text: None, syntax: "Python".into(), selection: Selection::caret(2), group: 0, regions: Vec::new() }],
+            documents: vec![SessionDocument {
+                path: Some(PathBuf::from("/q/b.py")),
+                unsaved_text: None,
+                syntax: "Python".into(),
+                selection: Selection::caret(2),
+                group: 0,
+                regions: Vec::new(),
+            }],
             ..Session::default()
         }],
     }
@@ -64,14 +71,19 @@ fn a_saved_session_loads_back_identically() {
 fn saving_creates_the_folder() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a").join("b").join("session.json");
-    SessionFileGateway::new(path.clone()).save(&Session::default()).unwrap();
+    SessionFileGateway::new(path.clone())
+        .save(&Session::default())
+        .unwrap();
     assert!(path.is_file());
 }
 
 #[test]
 fn a_missing_session_is_none() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(SessionFileGateway::new(dir.path().join("none.json")).load(), None);
+    assert_eq!(
+        SessionFileGateway::new(dir.path().join("none.json")).load(),
+        None
+    );
 }
 
 #[test]

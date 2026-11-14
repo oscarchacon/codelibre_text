@@ -57,9 +57,16 @@ impl Editor {
     /// The newest of this session's errors that fit in the report's link, without the user's
     /// home folder. It is for the maintainers, so it is not translated.
     fn report_errors(&self) -> String {
-        let home = self.gateways.shell.home_folder().map(|h| h.display().to_string()).filter(|h| !h.is_empty());
+        let home = self
+            .gateways
+            .shell
+            .home_folder()
+            .map(|h| h.display().to_string())
+            .filter(|h| !h.is_empty());
         let hide_home = |text: &str| match &home {
-            Some(home) => text.replace(home.as_str(), "~").replace(&home.replace('\\', "/"), "~"),
+            Some(home) => text
+                .replace(home.as_str(), "~")
+                .replace(&home.replace('\\', "/"), "~"),
             None => text.to_string(),
         };
         let separator = encode_query_value("\n\n").len();
@@ -124,7 +131,9 @@ fn encode_query_value(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()

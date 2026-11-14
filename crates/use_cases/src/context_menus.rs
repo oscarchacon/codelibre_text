@@ -22,7 +22,10 @@ impl Editor {
     /// A context menu opened on `target`: asks the plugins about its commands.
     pub fn open_context_menu(&mut self, target: &ContextMenuTarget) {
         let mut commands = Vec::new();
-        menu_commands(&fill_menu(&target.items(&self.state.context_menus), target), &mut commands);
+        menu_commands(
+            &fill_menu(&target.items(&self.state.context_menus), target),
+            &mut commands,
+        );
         if let Some(states) = self.ask_plugin_command_states(commands) {
             self.state.plugins.command_states.extend(states);
         }
@@ -40,7 +43,9 @@ impl Editor {
     fn add_event(&self, items: &mut [MenuItem], event: &Value) {
         for item in items {
             if let Some(command) = &mut item.command {
-                let wants = self.plugin_command_state(command).is_some_and(|s| s.want_event);
+                let wants = self
+                    .plugin_command_state(command)
+                    .is_some_and(|s| s.want_event);
                 if let (true, Value::Object(args)) = (wants, &mut command.args) {
                     args.insert("event".into(), event.clone());
                 } else if wants {
@@ -56,7 +61,12 @@ impl Editor {
         let ContextMenuTarget::Text { document, point } = target else {
             return None;
         };
-        let text = &self.state.documents.iter().find(|d| d.id == *document)?.text;
+        let text = &self
+            .state
+            .documents
+            .iter()
+            .find(|d| d.id == *document)?
+            .text;
         let (row, col) = line_col(text, (*point).min(text.chars().count()));
         Some(json!({
             "x": (col as f64 + 0.5) * EM_WIDTH,
@@ -73,13 +83,22 @@ impl Editor {
         let tabs = self.group_indexes(group);
         let chosen: Vec<usize> = match command.name.as_str() {
             "close_by_index" => tabs.get(index).copied().into_iter().collect(),
-            "close_others_by_index" if index < tabs.len() => {
-                tabs.iter().enumerate().filter(|&(i, _)| i != index).map(|(_, &t)| t).collect()
+            "close_others_by_index" if index < tabs.len() => tabs
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| i != index)
+                .map(|(_, &t)| t)
+                .collect(),
+            "close_to_right_by_index" => {
+                tabs.iter().skip(index.saturating_add(1)).copied().collect()
             }
-            "close_to_right_by_index" => tabs.iter().skip(index.saturating_add(1)).copied().collect(),
             _ => Vec::new(),
         };
-        let ids = chosen.iter().filter_map(|&i| self.state.documents.get(i)).map(|d| d.id).collect::<Vec<_>>();
+        let ids = chosen
+            .iter()
+            .filter_map(|&i| self.state.documents.get(i))
+            .map(|d| d.id)
+            .collect::<Vec<_>>();
         if !ids.is_empty() {
             self.close_documents(ids);
         }
@@ -95,13 +114,27 @@ impl Editor {
     /// `open_containing_folder {"files"}` (or `paths`): the system's file manager in the folder of
     /// the first one.
     pub fn open_containing_folder(&mut self, command: &Command) {
-        let first = string_list(command, "files").into_iter().chain(string_list(command, "paths")).next();
-        if let Some(parent) = first.as_deref().and_then(|f| std::path::Path::new(f).parent()) {
+        let first = string_list(command, "files")
+            .into_iter()
+            .chain(string_list(command, "paths"))
+            .next();
+        if let Some(parent) = first
+            .as_deref()
+            .and_then(|f| std::path::Path::new(f).parent())
+        {
             self.gateways.shell.open_in_file_manager(parent);
         }
     }
 }
 
 fn string_list(command: &Command, key: &str) -> Vec<String> {
-    command.args.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect()
+    command
+        .args
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(String::from)
+        .collect()
 }

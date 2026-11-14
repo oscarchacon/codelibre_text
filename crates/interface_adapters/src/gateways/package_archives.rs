@@ -22,7 +22,11 @@ const NOT_IMPORTED: &[&str] = &["Default", "Package Control"];
 /// start unpacks everything Sublime Text ships), after which they are loaded again.
 pub fn unpack_all(paths: &PackagePaths, include_sublime: bool, errors: &mut Vec<String>) -> bool {
     let mut changed = false;
-    for folder in paths.archive_folders.iter().filter(|f| include_sublime || !f.sublime) {
+    for folder in paths
+        .archive_folders
+        .iter()
+        .filter(|f| include_sublime || !f.sublime)
+    {
         changed |= unpack_folder(folder, errors);
     }
     changed
@@ -42,7 +46,11 @@ fn unpack_folder(folder: &ArchiveFolder, errors: &mut Vec<String>) -> bool {
     let _ = fs::remove_dir_all(&staging);
     let mut changed = false;
     let mut names = Vec::new();
-    for entry in fs::read_dir(&folder.archives).into_iter().flatten().flatten() {
+    for entry in fs::read_dir(&folder.archives)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let Some(name) = file_name.strip_suffix(EXTENSION).map(String::from) else {
             continue;
@@ -50,7 +58,12 @@ fn unpack_folder(folder: &ArchiveFolder, errors: &mut Vec<String>) -> bool {
         if folder.sublime && NOT_IMPORTED.contains(&name.as_str()) {
             continue;
         }
-        match unpack_if_changed(&entry.path(), &folder.unpacked.join(&name), &staging.join(&name), folder.shipped) {
+        match unpack_if_changed(
+            &entry.path(),
+            &folder.unpacked.join(&name),
+            &staging.join(&name),
+            folder.shipped,
+        ) {
             Ok(unpacked) => changed |= unpacked,
             Err(e) => errors.push(format!("{}: {e}", entry.path().display())),
         }
@@ -58,8 +71,15 @@ fn unpack_folder(folder: &ArchiveFolder, errors: &mut Vec<String>) -> bool {
     }
     let _ = fs::remove_dir_all(&staging);
     // Packages that are gone (removed by the user or by Package Control).
-    for entry in fs::read_dir(&folder.unpacked).into_iter().flatten().flatten() {
-        if !names.iter().any(|n| entry.file_name().to_string_lossy() == *n) {
+    for entry in fs::read_dir(&folder.unpacked)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if !names
+            .iter()
+            .any(|n| entry.file_name().to_string_lossy() == *n)
+        {
             let _ = fs::remove_dir_all(entry.path());
             changed = true;
         }
@@ -69,7 +89,12 @@ fn unpack_folder(folder: &ArchiveFolder, errors: &mut Vec<String>) -> bool {
 
 /// Unpacks `archive` to `staging` and moves it to `target`, unless `target` is that archive
 /// already. Answers whether it unpacked it.
-fn unpack_if_changed(archive: &Path, target: &Path, staging: &Path, shipped: bool) -> Result<bool, String> {
+fn unpack_if_changed(
+    archive: &Path,
+    target: &Path,
+    staging: &Path,
+    shipped: bool,
+) -> Result<bool, String> {
     let stamp = stamp_of(archive).map_err(|e| e.to_string())?;
     if fs::read_to_string(target.join(STAMP_FILE)).is_ok_and(|old| old == stamp) {
         return Ok(false);
@@ -104,7 +129,10 @@ fn move_folder(from: &Path, to: &Path) -> io::Result<()> {
 /// Size and date: Package Control replaces a package's file when it upgrades it.
 fn stamp_of(archive: &Path) -> io::Result<String> {
     let metadata = fs::metadata(archive)?;
-    let modified = metadata.modified()?.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let modified = metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
     Ok(format!("{} {modified}", metadata.len()))
 }
 

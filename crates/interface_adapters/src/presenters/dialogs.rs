@@ -33,5 +33,6 @@ pub fn present_about(editor: &Editor, view: &ViewState) -> Option<AboutViewModel
 }
 
 pub fn present_load_errors(editor: &Editor, view: &ViewState) -> Option<Vec<String>> {
-    view.show_load_errors.then(|| editor.state().load_errors.clone())
+    view.show_load_errors
+        .then(|| editor.state().load_errors.clone())
 }

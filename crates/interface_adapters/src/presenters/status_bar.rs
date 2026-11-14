@@ -31,10 +31,18 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
 
     let selection = doc.selection();
     let (line, column) = line_col(&doc.text, selection.head);
-    let mut position = editor.tr_args("Line {line}, Column {column}", &[("line", &(line + 1)), ("column", &(column + 1))]);
+    let mut position = editor.tr_args(
+        "Line {line}, Column {column}",
+        &[("line", &(line + 1)), ("column", &(column + 1))],
+    );
     if !selection.is_empty() {
         position.push_str("; ");
-        position.push_str(&editor.tr_n("{count} character selected", "{count} characters selected", selection.len(), &[]));
+        position.push_str(&editor.tr_n(
+            "{count} character selected",
+            "{count} characters selected",
+            selection.len(),
+            &[],
+        ));
     }
 
     let settings = editor.view_settings();
@@ -42,7 +50,11 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
     StatusBarViewModel {
         position,
         overwrite: editor.overwrite_status(doc.id),
-        plugin_statuses: editor.plugin_statuses(doc.id).into_iter().map(str::to_string).collect(),
+        plugin_statuses: editor
+            .plugin_statuses(doc.id)
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
         message,
         indentation: if settings.bool("translate_tabs_to_spaces", false) {
             editor.tr_args("Spaces: {size}", &[("size", &tab_size)])

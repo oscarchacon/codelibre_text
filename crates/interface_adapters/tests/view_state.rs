@@ -27,7 +27,13 @@ fn requests_are_taken_in_order_once() {
     let mut view = ViewState::default();
     view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo));
     view.request(ViewRequest::CloseWindow);
-    assert_eq!(view.take_requests(), vec![ViewRequest::WidgetEdit(WidgetEdit::Undo), ViewRequest::CloseWindow]);
+    assert_eq!(
+        view.take_requests(),
+        vec![
+            ViewRequest::WidgetEdit(WidgetEdit::Undo),
+            ViewRequest::CloseWindow
+        ]
+    );
     assert!(view.take_requests().is_empty());
 }
 
@@ -39,7 +45,11 @@ fn the_layout_round_trips_through_the_session() {
     let layout = view.layout();
     assert_eq!(
         layout,
-        vec![("side_bar".to_string(), false), ("status_bar".to_string(), true), ("minimap".to_string(), false)]
+        vec![
+            ("side_bar".to_string(), false),
+            ("status_bar".to_string(), true),
+            ("minimap".to_string(), false)
+        ]
     );
 
     let mut restored = ViewState::default();
@@ -60,5 +70,9 @@ fn a_new_quick_panel_asks_for_focus() {
     assert!(panel.focus_requested);
     assert_eq!(panel.query, ":");
     assert_eq!(panel.selected, 0);
-    assert!(panel.results.is_empty() && panel.results_query.is_none() && panel.color_scheme_before.is_none());
+    assert!(
+        panel.results.is_empty()
+            && panel.results_query.is_none()
+            && panel.color_scheme_before.is_none()
+    );
 }

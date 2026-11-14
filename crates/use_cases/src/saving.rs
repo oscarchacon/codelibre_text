@@ -38,7 +38,11 @@ impl Editor {
         let settings = self.view_settings();
         // A view's `default_dir` setting is where its first save starts (plugins set it on the
         // files they create: Package Control's new repository, PackageDev's new resources).
-        let default_dir = settings.get("default_dir").and_then(|v| v.as_str()).filter(|d| !d.is_empty()).map(std::path::PathBuf::from);
+        let default_dir = settings
+            .get("default_dir")
+            .and_then(|v| v.as_str())
+            .filter(|d| !d.is_empty())
+            .map(std::path::PathBuf::from);
         let start_dir = self.current_directory();
         let Some(doc) = self.active_document() else {
             return false;
@@ -51,7 +55,11 @@ impl Editor {
             (Some(path), false) => path.clone(),
             _ => {
                 let start_dir = default_dir.filter(|_| doc.path.is_none()).or(start_dir);
-                match self.gateways.dialogs.pick_save_path(start_dir.as_deref(), &self.document_name(doc), &[]) {
+                match self.gateways.dialogs.pick_save_path(
+                    start_dir.as_deref(),
+                    &self.document_name(doc),
+                    &[],
+                ) {
                     Some(path) => path,
                     None => return false,
                 }
@@ -74,10 +82,16 @@ impl Editor {
         if let Some(trim_on_caret) = trim_on_caret {
             let saved = doc.saved_text().to_string();
             let options = TrimOptions {
-                only_modified_since: settings.bool("trim_only_modified_white_space", true).then_some(saved.as_str()),
+                only_modified_since: settings
+                    .bool("trim_only_modified_white_space", true)
+                    .then_some(saved.as_str()),
                 trim_on_caret,
             };
-            doc.edit(|text, sel| Some(text_commands::trim_trailing_whitespace_with(text, sel, &options)));
+            doc.edit(|text, sel| {
+                Some(text_commands::trim_trailing_whitespace_with(
+                    text, sel, &options,
+                ))
+            });
         }
         if settings.bool("ensure_newline_at_eof_on_save", false) {
             let length = doc.text.len();
@@ -109,10 +123,19 @@ impl Editor {
     /// open views meanwhile.
     pub fn save_all(&mut self) {
         let active = self.active_document().map(|d| d.id);
-        let ids: Vec<_> = self.state.documents.iter().filter(|d| d.is_dirty() && d.path.is_some()).map(|d| d.id).collect();
+        let ids: Vec<_> = self
+            .state
+            .documents
+            .iter()
+            .filter(|d| d.is_dirty() && d.path.is_some())
+            .map(|d| d.id)
+            .collect();
         for id in ids {
             // A clone saved before it, or a listener, may have saved it already.
-            let Some(index) = self.index_of(id).filter(|&i| self.state.documents[i].is_dirty()) else {
+            let Some(index) = self
+                .index_of(id)
+                .filter(|&i| self.state.documents[i].is_dirty())
+            else {
                 continue;
             };
             self.state.active = index;
@@ -128,10 +151,16 @@ impl Editor {
         if !path.starts_with(&self.gateways.resources.paths().packages) {
             return;
         }
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if name.ends_with(".sublime-settings") {
             self.reload_settings();
-        } else if PACKAGE_RESOURCE_EXTENSIONS.iter().any(|ext| name.ends_with(ext)) {
+        } else if PACKAGE_RESOURCE_EXTENSIONS
+            .iter()
+            .any(|ext| name.ends_with(ext))
+        {
             self.load_packages();
         } else if name.ends_with(".py") {
             self.reload_plugins();

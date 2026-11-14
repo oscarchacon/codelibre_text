@@ -25,7 +25,11 @@ pub fn present(editor: &Editor) -> Vec<MenuEntryViewModel> {
 /// Entries hidden by their plugin are left out, as in the main menu.
 pub fn present_context_menu(editor: &Editor, view: &ViewState) -> Option<ContextMenuViewModel> {
     let target = view.context_menu.clone()?;
-    let entries = entries(&editor.context_menu_items(&target), editor, &editor.global_settings());
+    let entries = entries(
+        &editor.context_menu_items(&target),
+        editor,
+        &editor.global_settings(),
+    );
     Some(ContextMenuViewModel { target, entries })
 }
 
@@ -33,7 +37,11 @@ pub fn present_context_menu(editor: &Editor, view: &ViewState) -> Option<Context
 fn entries(items: &[MenuItem], editor: &Editor, settings: &Settings) -> Vec<MenuEntryViewModel> {
     let mut entries = Vec::new();
     for item in items {
-        if item.command.as_ref().is_some_and(|c| c.name == "$build_systems") {
+        if item
+            .command
+            .as_ref()
+            .is_some_and(|c| c.name == "$build_systems")
+        {
             entries.extend(build_system_entries(editor));
         } else {
             entries.extend(entry(item, editor, settings));
@@ -73,21 +81,38 @@ fn build_system_entries(editor: &Editor) -> Vec<MenuEntryViewModel> {
 
 fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEntryViewModel> {
     let state = editor.state();
-    let plugin = item.command.as_ref().and_then(|c| editor.plugin_command_state(c));
+    let plugin = item
+        .command
+        .as_ref()
+        .and_then(|c| editor.plugin_command_state(c));
     if plugin.is_some_and(|p| !p.visible) {
         return None;
     }
     // Sublime's side bar commands hide themselves without the files or folders they act on.
-    if plugin.is_none() && item.command.as_ref().is_some_and(|c| !editor.side_bar_command_visible(c)) {
+    if plugin.is_none()
+        && item
+            .command
+            .as_ref()
+            .is_some_and(|c| !editor.side_bar_command_visible(c))
+    {
         return None;
     }
     let checked = item.checkbox.then(|| match (plugin, &item.command) {
         (Some(plugin), _) => plugin.checked,
-        (None, Some(c)) if c.name == "set_build_system" => editor.is_build_system_set(c.str_arg("file"), c.str_arg("variant")),
-        (None, Some(c)) if c.name == "set_max_columns" => editor.max_columns() == c.usize_arg("columns", 0),
-        (None, command) => command.as_ref().map(|c| c.str_arg("setting")).is_some_and(|setting| settings.bool(setting, false)),
+        (None, Some(c)) if c.name == "set_build_system" => {
+            editor.is_build_system_set(c.str_arg("file"), c.str_arg("variant"))
+        }
+        (None, Some(c)) if c.name == "set_max_columns" => {
+            editor.max_columns() == c.usize_arg("columns", 0)
+        }
+        (None, command) => command
+            .as_ref()
+            .map(|c| c.str_arg("setting"))
+            .is_some_and(|setting| settings.bool(setting, false)),
     });
-    let caption = plugin.and_then(|p| p.description.clone()).filter(|_| item.caption.is_empty());
+    let caption = plugin
+        .and_then(|p| p.description.clone())
+        .filter(|_| item.caption.is_empty());
     let children = entries(&item.children, editor, settings);
     if item.command.is_none() && !item.is_separator() && children.is_empty() {
         return None;
@@ -96,8 +121,15 @@ fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEn
         caption: caption.unwrap_or_else(|| state.translations.tr(&item.caption).to_string()),
         id: item.id.clone(),
         separator: item.is_separator(),
-        shortcut: item.command.as_ref().and_then(|c| state.keymap.binding_for(c)),
-        key: item.command.as_ref().and_then(|c| state.keymap.key_for(c)).cloned(),
+        shortcut: item
+            .command
+            .as_ref()
+            .and_then(|c| state.keymap.binding_for(c)),
+        key: item
+            .command
+            .as_ref()
+            .and_then(|c| state.keymap.key_for(c))
+            .cloned(),
         checked,
         enabled: plugin.is_none_or(|p| p.enabled),
         command: item.command.clone(),
@@ -135,7 +167,10 @@ pub fn present_for_macos(editor: &Editor) -> MacMenuViewModel {
 /// Removes the first entry of a top menu that runs `command`.
 fn take_command(menus: &mut [MenuEntryViewModel], command: &str) -> Option<MenuEntryViewModel> {
     for menu in menus {
-        let found = menu.children.iter().position(|e| e.command.as_ref().is_some_and(|c| c.name == command));
+        let found = menu
+            .children
+            .iter()
+            .position(|e| e.command.as_ref().is_some_and(|c| c.name == command));
         if let Some(index) = found {
             let entry = menu.children.remove(index);
             menu.children = tidy(std::mem::take(&mut menu.children));

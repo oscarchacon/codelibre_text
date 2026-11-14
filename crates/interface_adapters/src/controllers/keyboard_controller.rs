@@ -14,33 +14,54 @@ use crate::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 /// Commands the text widget already does when it receives the key itself.
 /// Bindings to them let the key through instead of running the command.
 const WIDGET_COMMANDS: &[&str] = &[
-    "undo", "redo", "redo_or_repeat", "soft_undo", "soft_redo", "copy", "cut", "paste",
-    "select_all", "move", "move_to", "left_delete", "right_delete",
+    "undo",
+    "redo",
+    "redo_or_repeat",
+    "soft_undo",
+    "soft_redo",
+    "copy",
+    "cut",
+    "paste",
+    "select_all",
+    "move",
+    "move_to",
+    "left_delete",
+    "right_delete",
     "insert",
 ];
 
 /// Keys that move in the auto-complete list while it shows, and by how many rows.
-const AUTO_COMPLETE_KEYS: &[(&str, isize)] = &[("up", -1), ("down", 1), ("pageup", -8), ("pagedown", 8)];
+const AUTO_COMPLETE_KEYS: &[(&str, isize)] =
+    &[("up", -1), ("down", 1), ("pageup", -8), ("pagedown", 8)];
 
 /// Whether the text widget does a [`WIDGET_COMMANDS`] binding's command when it gets the key:
 /// it moves by characters, lines, words and pages and to the ends of lines and of the text, not
 /// to brackets, by sub-words or by Sublime's `stops`, which then run as commands.
 fn widget_does(command: &Command) -> bool {
     match command.name.as_str() {
-        "move" => matches!(command.str_arg("by"), "characters" | "lines" | "words" | "word_ends" | "pages"),
-        "move_to" => matches!(command.str_arg("to"), "bol" | "eol" | "hardbol" | "hardeol" | "bof" | "eof"),
+        "move" => matches!(
+            command.str_arg("by"),
+            "characters" | "lines" | "words" | "word_ends" | "pages"
+        ),
+        "move_to" => matches!(
+            command.str_arg("to"),
+            "bol" | "eol" | "hardbol" | "hardeol" | "bof" | "eof"
+        ),
         _ => true,
     }
 }
 
 /// The find / input panel or the quick panel is open and the text does not have the focus.
 fn typing_goes_to_a_panel(view: &ViewState) -> bool {
-    !view.text_has_focus && (view.find_panel.visible || view.input_panel.is_some() || view.quick_panel.is_some())
+    !view.text_has_focus
+        && (view.find_panel.visible || view.input_panel.is_some() || view.quick_panel.is_some())
 }
 
 /// A key that types a symbol (`)`, `"`, `]`), with no modifier but Shift.
 fn typed_character(alternatives: &[KeyCombo]) -> bool {
-    alternatives.iter().any(|c| c.is_symbol() && !c.ctrl && !c.alt && !c.super_key)
+    alternatives
+        .iter()
+        .any(|c| c.is_symbol() && !c.ctrl && !c.alt && !c.super_key)
 }
 
 pub enum KeyHandling {
@@ -51,15 +72,23 @@ pub enum KeyHandling {
 }
 
 /// `alternatives`: equivalent readings of the key (logical and physical), see `Keymap::press`.
-pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[KeyCombo]) -> KeyHandling {
+pub fn key_pressed(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    alternatives: &[KeyCombo],
+) -> KeyHandling {
     // Esc closes a plugin's popup first, as in Sublime.
-    if editor.plugin_popup().is_some() && KeyCombo::parse("escape").is_some_and(|escape| alternatives.contains(&escape)) {
+    if editor.plugin_popup().is_some()
+        && KeyCombo::parse("escape").is_some_and(|escape| alternatives.contains(&escape))
+    {
         editor.hide_plugin_popup();
         return KeyHandling::Consumed;
     }
     // The auto-complete list takes the arrow keys while it shows (Enter, Tab and Esc are bindings).
     if editor.auto_complete_visible() && view.text_has_focus {
-        let moved = AUTO_COMPLETE_KEYS.iter().find(|(name, _)| KeyCombo::parse(name).is_some_and(|combo| alternatives.contains(&combo)));
+        let moved = AUTO_COMPLETE_KEYS.iter().find(|(name, _)| {
+            KeyCombo::parse(name).is_some_and(|combo| alternatives.contains(&combo))
+        });
         if let Some(&(_, rows)) = moved {
             editor.move_auto_complete_selection(rows);
             return KeyHandling::Consumed;
@@ -68,21 +97,31 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
     let context = ViewKeyContext {
         auto_complete_visible: editor.auto_complete_visible(),
         overlay_visible: view.quick_panel.is_some(),
-        panel_visible: view.find_panel.visible || view.input_panel.is_some() || editor.shown_output_panel().is_some(),
+        panel_visible: view.find_panel.visible
+            || view.input_panel.is_some()
+            || editor.shown_output_panel().is_some(),
         // Output panels are not focused: the caret stays in the text.
         panel_has_focus: view.find_panel.visible || view.input_panel.is_some(),
-        num_selections: editor.active_document().map_or(1, |d| d.extra_selections().len() + 1),
+        num_selections: editor
+            .active_document()
+            .map_or(1, |d| d.extra_selections().len() + 1),
         settings: editor.view_settings(),
         // The scopes come from the highlighting cache. Not while a panel takes the typing: `(` in
         // the find panel must not pair brackets in the file.
-        carets: if typing_goes_to_a_panel(view) { Vec::new() } else { editor.caret_contexts() },
+        carets: if typing_goes_to_a_panel(view) {
+            Vec::new()
+        } else {
+            editor.caret_contexts()
+        },
         has_next_field: editor.has_snippet_field(true),
         has_prev_field: editor.has_snippet_field(false),
         // Typing is not a command here: what Tab completed counts only while nothing changed.
         last_command: if editor.last_command_was_completion() {
             Some("insert_best_completion".to_string())
         } else {
-            view.last_command.clone().filter(|c| c != "insert_best_completion")
+            view.last_command
+                .clone()
+                .filter(|c| c != "insert_best_completion")
         },
     };
     let was_waiting = editor.state().keymap.is_waiting_for_chord();
@@ -100,7 +139,10 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
 
     let keymap = &editor.state().keymap;
     if keymap.is_waiting_for_chord() {
-        let message = editor.tr_args("{keys} was pressed. Waiting for second key…", &[("keys", &keymap.pending_chord_display())]);
+        let message = editor.tr_args(
+            "{keys} was pressed. Waiting for second key…",
+            &[("keys", &keymap.pending_chord_display())],
+        );
         editor.notify(message);
     } else if was_waiting {
         editor.clear_status();
@@ -112,13 +154,23 @@ pub fn key_pressed(editor: &mut Editor, view: &mut ViewState, alternatives: &[Ke
 /// given to it as its own input (its undo history keeps them, as when the key is the widget's
 /// own), also for a key the widget would not understand (`ctrl+h` bound to `left_delete`); with
 /// listeners of text commands they are asked about first. Other commands run as commands.
-fn bound_command(editor: &mut Editor, view: &mut ViewState, command: Command, alternatives: &[KeyCombo], hooked: bool) -> KeyHandling {
+fn bound_command(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    command: Command,
+    alternatives: &[KeyCombo],
+    hooked: bool,
+) -> KeyHandling {
     // The widget only knows the primary selection; with several, the use cases edit them all
     // (the view turns the widget's own keys into edits at every selection).
-    let several = editor.active_document().is_some_and(|d| !d.extra_selections().is_empty());
+    let several = editor
+        .active_document()
+        .is_some_and(|d| !d.extra_selections().is_empty());
     let in_widget = view.text_has_focus && !several;
     let replay = widget_replay(&command);
-    let own_key = replay.as_ref().is_some_and(|replay| is_widget_key(replay, alternatives));
+    let own_key = replay
+        .as_ref()
+        .is_some_and(|replay| is_widget_key(replay, alternatives));
     match replay {
         Some(replay) if in_widget && hooked => {
             hooked_widget_input(editor, view, command, replay);
@@ -133,7 +185,11 @@ fn bound_command(editor: &mut Editor, view: &mut ViewState, command: Command, al
             view.queue_command(command);
             KeyHandling::Consumed
         }
-        _ if !hooked && WIDGET_COMMANDS.contains(&command.name.as_str()) && widget_does(&command) && !typed_character(alternatives) => {
+        _ if !hooked
+            && WIDGET_COMMANDS.contains(&command.name.as_str())
+            && widget_does(&command)
+            && !typed_character(alternatives) =>
+        {
             KeyHandling::PassThrough
         }
         _ => {
@@ -148,21 +204,50 @@ fn bound_command(editor: &mut Editor, view: &mut ViewState, command: Command, al
 /// Moves by words or to the ends of the text need Ctrl, which a replayed key does not carry, so
 /// they stay commands.
 fn widget_replay(command: &Command) -> Option<WidgetEdit> {
-    let key = |key| Some(WidgetEdit::Key { key, shift: command.bool_arg("extend", false) });
+    let key = |key| {
+        Some(WidgetEdit::Key {
+            key,
+            shift: command.bool_arg("extend", false),
+        })
+    };
     let forward = command.bool_arg("forward", true);
     match command.name.as_str() {
-        "left_delete" => Some(WidgetEdit::Key { key: WidgetKey::Backspace, shift: false }),
-        "right_delete" => Some(WidgetEdit::Key { key: WidgetKey::Delete, shift: false }),
+        "left_delete" => Some(WidgetEdit::Key {
+            key: WidgetKey::Backspace,
+            shift: false,
+        }),
+        "right_delete" => Some(WidgetEdit::Key {
+            key: WidgetKey::Delete,
+            shift: false,
+        }),
         "insert" => match command.str_arg("characters") {
             "" => None,
-            "\n" => Some(WidgetEdit::Key { key: WidgetKey::Enter, shift: false }),
-            "\t" => Some(WidgetEdit::Key { key: WidgetKey::Tab, shift: false }),
+            "\n" => Some(WidgetEdit::Key {
+                key: WidgetKey::Enter,
+                shift: false,
+            }),
+            "\t" => Some(WidgetEdit::Key {
+                key: WidgetKey::Tab,
+                shift: false,
+            }),
             characters => Some(WidgetEdit::Insert(characters.to_string())),
         },
         "move" => match command.str_arg("by") {
-            "characters" => key(if forward { WidgetKey::Right } else { WidgetKey::Left }),
-            "lines" => key(if forward { WidgetKey::Down } else { WidgetKey::Up }),
-            "pages" => key(if forward { WidgetKey::PageDown } else { WidgetKey::PageUp }),
+            "characters" => key(if forward {
+                WidgetKey::Right
+            } else {
+                WidgetKey::Left
+            }),
+            "lines" => key(if forward {
+                WidgetKey::Down
+            } else {
+                WidgetKey::Up
+            }),
+            "pages" => key(if forward {
+                WidgetKey::PageDown
+            } else {
+                WidgetKey::PageUp
+            }),
             _ => None,
         },
         "move_to" => match command.str_arg("to") {
@@ -194,7 +279,11 @@ fn is_widget_key(replay: &WidgetEdit, alternatives: &[KeyCombo]) -> bool {
         WidgetKey::PageUp => "pageup",
         WidgetKey::PageDown => "pagedown",
     };
-    let combo = if *shift { format!("shift+{name}") } else { name.to_string() };
+    let combo = if *shift {
+        format!("shift+{name}")
+    } else {
+        name.to_string()
+    };
     KeyCombo::parse(&combo).is_some_and(|combo| alternatives.contains(&combo))
 }
 
@@ -216,7 +305,11 @@ pub fn clipboard_shortcut(editor: &mut Editor, view: &mut ViewState, command: &s
             "cut" => "x",
             _ => "v",
         };
-        let modifier = if cfg!(target_os = "macos") { "super" } else { "ctrl" };
+        let modifier = if cfg!(target_os = "macos") {
+            "super"
+        } else {
+            "ctrl"
+        };
         if let Some(combo) = KeyCombo::parse(&format!("{modifier}+{key}")) {
             return key_pressed(editor, view, &[combo]);
         }
@@ -261,13 +354,21 @@ struct ViewKeyContext {
 
 impl ViewKeyContext {
     /// A condition asked of each selection: true when one answers true (all, with `match_all`).
-    fn per_caret(&self, match_all: bool, answer: impl Fn(&CaretContext) -> Option<bool>) -> Option<bool> {
+    fn per_caret(
+        &self,
+        match_all: bool,
+        answer: impl Fn(&CaretContext) -> Option<bool>,
+    ) -> Option<bool> {
         if self.carets.is_empty() {
             return None;
         }
         let answers: Option<Vec<bool>> = self.carets.iter().map(answer).collect();
         let answers = answers?;
-        Some(if match_all { answers.iter().all(|a| *a) } else { answers.iter().any(|a| *a) })
+        Some(if match_all {
+            answers.iter().all(|a| *a)
+        } else {
+            answers.iter().any(|a| *a)
+        })
     }
 }
 
@@ -276,7 +377,13 @@ impl KeyContext for ViewKeyContext {
         self.query_all(key, operator, operand, false)
     }
 
-    fn query_all(&self, key: &str, operator: &str, operand: &Value, match_all: bool) -> Option<bool> {
+    fn query_all(
+        &self,
+        key: &str,
+        operator: &str,
+        operand: &Value,
+        match_all: bool,
+    ) -> Option<bool> {
         let equal = |value: bool| match operator {
             "equal" => Some(value == operand.as_bool().unwrap_or(true)),
             "not_equal" => Some(value != operand.as_bool().unwrap_or(true)),
@@ -287,7 +394,9 @@ impl KeyContext for ViewKeyContext {
             "selector" | "eol_selector" => {
                 let selector = operand.as_str()?;
                 let eol = key == "eol_selector";
-                let matches = |c: &CaretContext| matches_selector(if eol { &c.eol_scope } else { &c.scope }, selector);
+                let matches = |c: &CaretContext| {
+                    matches_selector(if eol { &c.eol_scope } else { &c.scope }, selector)
+                };
                 return match operator {
                     "equal" => self.per_caret(match_all, |c| Some(matches(c))),
                     "not_equal" => self.per_caret(match_all, |c| Some(!matches(c))),
@@ -295,9 +404,19 @@ impl KeyContext for ViewKeyContext {
                 };
             }
             "selection_empty" => return self.per_caret(match_all, |c| equal(c.text.is_empty())),
-            "preceding_text" => return self.per_caret(match_all, |c| compare_text(operator, &c.preceding_text, operand)),
-            "following_text" => return self.per_caret(match_all, |c| compare_text(operator, &c.following_text, operand)),
-            "text" => return self.per_caret(match_all, |c| compare_text(operator, &c.text, operand)),
+            "preceding_text" => {
+                return self.per_caret(match_all, |c| {
+                    compare_text(operator, &c.preceding_text, operand)
+                })
+            }
+            "following_text" => {
+                return self.per_caret(match_all, |c| {
+                    compare_text(operator, &c.following_text, operand)
+                })
+            }
+            "text" => {
+                return self.per_caret(match_all, |c| compare_text(operator, &c.text, operand))
+            }
             _ => {}
         }
         let value = match key {
@@ -310,7 +429,11 @@ impl KeyContext for ViewKeyContext {
             "has_prev_field" => Value::Bool(self.has_prev_field),
             "last_command" => self.last_command.clone().map_or(Value::Null, Value::String),
             "is_recording" | "popup_visible" => Value::Bool(false),
-            k if k.starts_with("setting.") => self.settings.get(&k["setting.".len()..]).cloned().unwrap_or_default(),
+            k if k.starts_with("setting.") => self
+                .settings
+                .get(&k["setting.".len()..])
+                .cloned()
+                .unwrap_or_default(),
             _ => return None,
         };
         match operator {

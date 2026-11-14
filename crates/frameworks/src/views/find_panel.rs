@@ -8,7 +8,13 @@ use interface_adapters::view_models::FindPanelViewModel;
 
 use super::theme::Chrome;
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, panel: &FindPanelViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    text: &Translations,
+    panel: &FindPanelViewModel,
+    events: &mut Vec<UiEvent>,
+) {
     let mut options = FindOptions {
         query: panel.query.clone(),
         regex: panel.regex,
@@ -20,9 +26,27 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, panel: &FindPanel
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        toggle(ui, chrome, &mut options.regex, ".*", text.tr("Regular expression"));
-        toggle(ui, chrome, &mut options.case_sensitive, "Aa", text.tr("Case sensitive"));
-        toggle(ui, chrome, &mut options.whole_word, "“ ”", text.tr("Whole word"));
+        toggle(
+            ui,
+            chrome,
+            &mut options.regex,
+            ".*",
+            text.tr("Regular expression"),
+        );
+        toggle(
+            ui,
+            chrome,
+            &mut options.case_sensitive,
+            "Aa",
+            text.tr("Case sensitive"),
+        );
+        toggle(
+            ui,
+            chrome,
+            &mut options.whole_word,
+            "“ ”",
+            text.tr("Whole word"),
+        );
         toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
         ui.add_space(6.0);
 
@@ -38,15 +62,27 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, panel: &FindPanel
         }
         if query.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             let backwards = ui.input(|i| i.modifiers.shift);
-            events.push(if backwards { UiEvent::FindPrevious } else { UiEvent::FindNext });
+            events.push(if backwards {
+                UiEvent::FindPrevious
+            } else {
+                UiEvent::FindNext
+            });
             query.request_focus();
         }
 
-        let color = if panel.has_error { egui::Color32::from_rgb(240, 100, 90) } else { chrome.fg_dim };
+        let color = if panel.has_error {
+            egui::Color32::from_rgb(240, 100, 90)
+        } else {
+            chrome.fg_dim
+        };
         ui.label(RichText::new(&panel.status).size(11.5).color(color));
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("×").on_hover_text(text.tr("Close (Esc)")).clicked() {
+            if ui
+                .small_button("×")
+                .on_hover_text(text.tr("Close (Esc)"))
+                .clicked()
+            {
                 events.push(UiEvent::CloseFindPanel);
             }
             if ui.button(text.tr("Find Prev")).clicked() {
@@ -100,8 +136,13 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, panel: &FindPanel
 }
 
 fn toggle(ui: &mut Ui, chrome: &Chrome, value: &mut bool, label: &str, tooltip: &str) {
-    let text = RichText::new(label).monospace().color(if *value { chrome.accent } else { chrome.fg_dim });
-    let button = egui::Button::new(text).selected(*value).min_size(egui::vec2(28.0, 22.0));
+    let text =
+        RichText::new(label)
+            .monospace()
+            .color(if *value { chrome.accent } else { chrome.fg_dim });
+    let button = egui::Button::new(text)
+        .selected(*value)
+        .min_size(egui::vec2(28.0, 22.0));
     if ui.add(button).on_hover_text(tooltip).clicked() {
         *value = !*value;
     }

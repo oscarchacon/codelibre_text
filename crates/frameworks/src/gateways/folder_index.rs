@@ -15,7 +15,12 @@ pub struct FolderIndex {
 }
 
 impl FileIndexGateway for FolderIndex {
-    fn rebuild(&mut self, folders: Vec<PathBuf>, folder_excludes: Vec<String>, file_excludes: Vec<String>) {
+    fn rebuild(
+        &mut self,
+        folders: Vec<PathBuf>,
+        folder_excludes: Vec<String>,
+        file_excludes: Vec<String>,
+    ) {
         let (sender, receiver) = channel();
         self.scan = Some(receiver);
         std::thread::spawn(move || {

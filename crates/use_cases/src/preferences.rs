@@ -55,13 +55,21 @@ impl Editor {
 
     /// Back to `default_font_size` if set (as in Sublime), otherwise to the default `font_size`.
     pub fn reset_font_size(&mut self) {
-        let default = self.global_settings().get("default_font_size").cloned().unwrap_or(Value::Null);
+        let default = self
+            .global_settings()
+            .get("default_font_size")
+            .cloned()
+            .unwrap_or(Value::Null);
         self.persist_setting("font_size", default);
     }
 
     /// File stem of the `color_scheme` setting (e.g. `Monokai`).
     pub fn color_scheme_name(&self) -> String {
-        let setting = self.global_settings().str("color_scheme").unwrap_or(DEFAULT_COLOR_SCHEME).to_string();
+        let setting = self
+            .global_settings()
+            .str("color_scheme")
+            .unwrap_or(DEFAULT_COLOR_SCHEME)
+            .to_string();
         Path::new(&setting)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -75,7 +83,10 @@ impl Editor {
 
     /// Saves the chosen color scheme in the user's settings.
     pub fn apply_color_scheme(&mut self, name: &str) {
-        self.persist_setting("color_scheme", Value::String(format!("{name}.sublime-color-scheme")));
+        self.persist_setting(
+            "color_scheme",
+            Value::String(format!("{name}.sublime-color-scheme")),
+        );
         self.set_setting("color_scheme", Value::String(name.to_string()));
     }
 
@@ -86,7 +97,11 @@ impl Editor {
     /// `Default` package are built in.
     pub fn edit_settings(&mut self, base_file: &str, default_contents: &str) {
         let base_file = expand_variable(base_file, "platform", platform_name());
-        let file_name = base_file.rsplit('/').next().unwrap_or(&base_file).to_string();
+        let file_name = base_file
+            .rsplit('/')
+            .next()
+            .unwrap_or(&base_file)
+            .to_string();
 
         if let Some(defaults) = self.default_settings(&base_file, &file_name) {
             self.open_scratch(&format!("{file_name} — Default"), &defaults, "JSON", true);
@@ -94,7 +109,11 @@ impl Editor {
         let user_file = self.gateways.resources.paths().user_dir().join(&file_name);
         if !self.gateways.file_system.exists(&user_file) {
             let contents = default_contents.replace("$0", "");
-            if let Err(e) = self.gateways.file_system.write(&user_file, contents.as_bytes()) {
+            if let Err(e) = self
+                .gateways
+                .file_system
+                .write(&user_file, contents.as_bytes())
+            {
                 self.notify(format!("{}: {e}", user_file.display()));
             }
         }
@@ -105,11 +124,17 @@ impl Editor {
 
     /// The text of `edit_settings`'s left view: a package's own file, or our built-in one.
     fn default_settings(&self, base_file: &str, file_name: &str) -> Option<String> {
-        let in_packages = ["${packages}/", "$packages/"].iter().find_map(|prefix| base_file.strip_prefix(prefix));
+        let in_packages = ["${packages}/", "$packages/"]
+            .iter()
+            .find_map(|prefix| base_file.strip_prefix(prefix));
         match in_packages {
             Some(path) if !path.starts_with("Default/") => {
                 let include_sublime = self.global_settings().bool("import_sublime_packages", true);
-                let bytes = self.gateways.resources.load_resource(&format!("Packages/{path}"), include_sublime).ok()?;
+                let bytes = self
+                    .gateways
+                    .resources
+                    .load_resource(&format!("Packages/{path}"), include_sublime)
+                    .ok()?;
                 Some(String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
             }
             _ => self.gateways.resources.default_resource(file_name),

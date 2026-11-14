@@ -5,18 +5,25 @@ use serde_json::json;
 
 #[test]
 fn plain_json_is_accepted() {
-    assert_eq!(parse(r#"{"a": [1, 2], "b": null}"#).unwrap(), json!({ "a": [1, 2], "b": null }));
+    assert_eq!(
+        parse(r#"{"a": [1, 2], "b": null}"#).unwrap(),
+        json!({ "a": [1, 2], "b": null })
+    );
 }
 
 #[test]
 fn line_and_block_comments_are_ignored() {
-    let source = "{\n  // a comment\n  \"a\": 1, /* inline */ \"b\": 2\n  /* multi\n     line */\n}";
+    let source =
+        "{\n  // a comment\n  \"a\": 1, /* inline */ \"b\": 2\n  /* multi\n     line */\n}";
     assert_eq!(parse(source).unwrap(), json!({ "a": 1, "b": 2 }));
 }
 
 #[test]
 fn trailing_commas_are_allowed_in_objects_and_arrays() {
-    assert_eq!(parse("{ \"a\": [1, 2,], }").unwrap(), json!({ "a": [1, 2] }));
+    assert_eq!(
+        parse("{ \"a\": [1, 2,], }").unwrap(),
+        json!({ "a": [1, 2] })
+    );
 }
 
 #[test]

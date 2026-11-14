@@ -207,7 +207,7 @@ class _CommandInput:
         if type(handler).preview is not CommandInputHandler.preview:
             on_change = lambda value: self._preview(handler, value)
         panel = self.window.show_input_panel(
-            caption, text, lambda value: self._answer(handler, value, value), on_change, handler.cancel,
+            caption, text, lambda value, event=None: self._answer(handler, value, value, event), on_change, handler.cancel,
             _input=self._input(handler),
         )
         if on_change is not None:
@@ -227,18 +227,19 @@ class _CommandInput:
         values = [_item_value(item) for item in items]
         rows = [item[0] if isinstance(item, tuple) else item for item in items]
 
-        def select(index):
+        def select(index, event=None):
             if index < 0:
                 handler.cancel()
             else:
-                self._answer(handler, values[index], _item_caption(rows[index]))
+                self._answer(handler, values[index], _item_caption(rows[index]), event)
 
         on_highlight = None
         if type(handler).preview is not CommandInputHandler.preview:
             on_highlight = lambda index: self._preview(handler, values[index])
         placeholder = handler.placeholder() or self.description
         # The editor highlights the first selected item itself, which shows its preview.
-        self.window.show_quick_panel(rows, select, 0, selected, on_highlight, placeholder, _input=self._input(handler))
+        flags = sublime.WANT_EVENT if handler.want_event() else 0
+        self.window.show_quick_panel(rows, select, flags, selected, on_highlight, placeholder, _input=self._input(handler))
 
     def _preview(self, handler, value):
         preview = handler.preview(value)
@@ -247,16 +248,16 @@ class _CommandInput:
         else:
             self.window._set_input_preview(str(preview or ""), False)
 
-    def _answer(self, handler, value, text):
+    def _answer(self, handler, value, text, event=None):
         wants_event = handler.want_event()
-        event = (_INPUT_EVENT,) if wants_event else ()
-        if not handler.validate(value, *event):
+        event_args = (event if event is not None else _INPUT_EVENT,) if wants_event else ()
+        if not handler.validate(value, *event_args):
             if isinstance(handler, ListInputHandler):
                 self.ask(handler)
             else:
                 self._ask_text(handler, value)
             return
-        handler.confirm(value, *event)
+        handler.confirm(value, *event_args)
         if handler.name():
             self.args[handler.name()] = value
         following = handler.next_input(self.args)

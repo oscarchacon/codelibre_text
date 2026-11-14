@@ -33,6 +33,8 @@ pub(crate) struct WindowSlot {
     settings: Map<String, Value>,
     /// The user asked to close it (its unsaved files may still be asked about).
     closing: bool,
+    chrome: Vec<(String, bool)>,
+    chrome_requests: Vec<(String, bool)>,
 }
 
 impl Editor {
@@ -41,9 +43,48 @@ impl Editor {
         self.state.window_id
     }
 
+    /// What the current window's view shows around the text (`side_bar`, `status_bar`,
+    /// `minimap`), so plugins can ask (`window.is_minimap_visible()`…). The controller reports it
+    /// every frame: those flags are the view's.
+    pub fn sync_window_chrome(&mut self, shown: Vec<(String, bool)>) {
+        self.state.window_chrome = shown;
+    }
+
+    /// What plugins asked the current window to show or hide since the last call, in order.
+    pub fn take_window_chrome_requests(&mut self) -> Vec<(String, bool)> {
+        std::mem::take(&mut self.state.window_chrome_requests)
+    }
+
+    /// `window.is_*_visible()`: shown unless the view reported it hidden.
+    pub(crate) fn window_chrome_visible(&self, part: &str) -> bool {
+        self.state
+            .window_chrome
+            .iter()
+            .find(|(name, _)| name == part)
+            .is_none_or(|(_, shown)| *shown)
+    }
+
+    /// `window.set_*_visible(flag)`: asked of the view, and answered at once to the plugin.
+    pub(crate) fn set_window_chrome_visible(&mut self, part: &str, visible: bool) {
+        match self
+            .state
+            .window_chrome
+            .iter_mut()
+            .find(|(name, _)| name == part)
+        {
+            Some((_, shown)) => *shown = visible,
+            None => self.state.window_chrome.push((part.to_string(), visible)),
+        }
+        self.state
+            .window_chrome_requests
+            .push((part.to_string(), visible));
+    }
+
     /// Every window, oldest first.
     pub fn window_ids(&self) -> Vec<WindowId> {
-        let mut ids: Vec<WindowId> = std::iter::once(self.state.window_id).chain(self.state.windows.iter().map(|w| w.id)).collect();
+        let mut ids: Vec<WindowId> = std::iter::once(self.state.window_id)
+            .chain(self.state.windows.iter().map(|w| w.id))
+            .collect();
         ids.sort_unstable();
         ids
     }
@@ -54,7 +95,9 @@ impl Editor {
         if id == self.state.window_id {
             return true;
         }
-        let Some(at) = self.state.windows.iter().position(|w| w.id == id) else { return false };
+        let Some(at) = self.state.windows.iter().position(|w| w.id == id) else {
+            return false;
+        };
         let mut slot = self.state.windows.remove(at);
         self.swap_window(&mut slot);
         // The slot now holds the window that was current.
@@ -76,6 +119,8 @@ impl Editor {
         std::mem::swap(&mut state.output_panels, &mut slot.output_panels);
         std::mem::swap(&mut state.plugins.window_settings, &mut slot.settings);
         std::mem::swap(&mut state.window_closing, &mut slot.closing);
+        std::mem::swap(&mut state.window_chrome, &mut slot.chrome);
+        std::mem::swap(&mut state.window_chrome_requests, &mut slot.chrome_requests);
         // What belongs to a view of the window that was current goes with it.
         state.auto_complete = None;
         state.auto_complete_due = None;
@@ -86,7 +131,10 @@ impl Editor {
     pub fn new_window(&mut self) -> WindowId {
         self.state.next_window_id += 1;
         let id = self.state.next_window_id;
-        self.state.windows.push(WindowSlot { id, ..WindowSlot::default() });
+        self.state.windows.push(WindowSlot {
+            id,
+            ..WindowSlot::default()
+        });
         self.switch_to_window(id);
         self.plugin_window_event("on_new_window", id);
         id
@@ -121,9 +169,19 @@ impl Editor {
     /// Windows being closed whose files are all closed now go; the current window becomes another
     /// one if it went.
     pub fn finish_closing_windows(&mut self) {
-        if self.state.window_closing && self.state.documents.is_empty() && self.state.pending_close.is_none() && !self.state.windows.is_empty() {
+        if self.state.window_closing
+            && self.state.documents.is_empty()
+            && self.state.pending_close.is_none()
+            && !self.state.windows.is_empty()
+        {
             let gone = self.state.window_id;
-            let next = self.state.windows.iter().map(|w| w.id).min().expect("checked above");
+            let next = self
+                .state
+                .windows
+                .iter()
+                .map(|w| w.id)
+                .min()
+                .expect("checked above");
             self.switch_to_window(next);
             self.state.windows.retain(|w| w.id != gone);
         }
@@ -140,15 +198,36 @@ impl Editor {
             return self.active_document().map(|d| self.document_name(d));
         }
         let slot = self.state.windows.iter().find(|w| w.id == id)?;
-        slot.documents.get(slot.active).map(|d| self.document_name(d))
+        slot.documents
+            .get(slot.active)
+            .map(|d| self.document_name(d))
     }
 
     /// The views of every window but the current one, by window (for the session).
-    pub(crate) fn other_windows(&self) -> impl Iterator<Item = (WindowId, &[Document], usize, &Layout, usize, &[PathBuf], Option<&Path>)> {
-        self.state
-            .windows
-            .iter()
-            .map(|w| (w.id, w.documents.as_slice(), w.active, &w.layout, w.active_group, w.folders.as_slice(), w.project.as_ref().and_then(|p| p.file.as_deref())))
+    pub(crate) fn other_windows(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            WindowId,
+            &[Document],
+            usize,
+            &Layout,
+            usize,
+            &[PathBuf],
+            Option<&Path>,
+        ),
+    > {
+        self.state.windows.iter().map(|w| {
+            (
+                w.id,
+                w.documents.as_slice(),
+                w.active,
+                &w.layout,
+                w.active_group,
+                w.folders.as_slice(),
+                w.project.as_ref().and_then(|p| p.file.as_deref()),
+            )
+        })
     }
 
     /// An `EventListener` method that takes the window (`on_new_window`, `on_pre_close_window`).

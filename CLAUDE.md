@@ -122,7 +122,12 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 
 ## Pending work (read before starting new features)
 - `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
-  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows, completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done, and the scopes are down to `extract_scope`'s exact extent (no specification of Sublime's). The items still unticked there are what remains, with the files to touch.
+  dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
+  and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
+  completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done;
+  since 2026-11-14 also plugins' edits in the widget's undo, text input handlers in the palette's field, modifier keys,
+  the console as a panel and the window's `is_*_visible`. Package Control's part of phase C is done. The items still
+  unticked there are what remains (scopes: only `extract_scope`'s exact extent), with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.

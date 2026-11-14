@@ -22,14 +22,17 @@ impl SessionFileGateway {
 impl SessionGateway for SessionFileGateway {
     fn load(&self) -> Option<Session> {
         let text = std::fs::read_to_string(&self.path).ok()?;
-        serde_json::from_str::<SessionFile>(&text).ok().map(Into::into)
+        serde_json::from_str::<SessionFile>(&text)
+            .ok()
+            .map(Into::into)
     }
 
     fn save(&self, session: &Session) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let json = serde_json::to_string_pretty(&SessionFile::from(session)).map_err(|e| e.to_string())?;
+        let json =
+            serde_json::to_string_pretty(&SessionFile::from(session)).map_err(|e| e.to_string())?;
         std::fs::write(&self.path, json).map_err(|e| e.to_string())
     }
 }

@@ -70,7 +70,11 @@ impl CompletionKind {
             "snippet" => (8, "s", "Snippet"),
             _ => return None,
         };
-        Some(Self { id, letter: letter.into(), name: name.into() })
+        Some(Self {
+            id,
+            letter: letter.into(),
+            name: name.into(),
+        })
     }
 
     /// `[id, letter, name]` (a plugin's tuple) or a name.
@@ -78,7 +82,11 @@ impl CompletionKind {
         match value {
             Value::String(name) => Self::named(name).unwrap_or_default(),
             Value::Array(parts) => Self {
-                id: parts.first().and_then(Value::as_u64).unwrap_or(0).min(u8::MAX as u64) as u8,
+                id: parts
+                    .first()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(u8::MAX as u64) as u8,
                 letter: parts.get(1).and_then(Value::as_str).unwrap_or("").into(),
                 name: parts.get(2).and_then(Value::as_str).unwrap_or("").into(),
             },
@@ -131,16 +139,25 @@ impl Completion {
             }
         };
         match value {
-            Value::String(text) => Some(with_hint(text, text.split_once('\t').map_or(text, |(t, _)| t))),
+            Value::String(text) => Some(with_hint(
+                text,
+                text.split_once('\t').map_or(text, |(t, _)| t),
+            )),
             Value::Array(pair) => {
                 let trigger = pair.first()?.as_str()?;
-                let contents = pair.get(1).and_then(Value::as_str).unwrap_or_else(|| trigger.split('\t').next().unwrap_or(""));
+                let contents = pair
+                    .get(1)
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| trigger.split('\t').next().unwrap_or(""));
                 Some(with_hint(trigger, contents))
             }
             Value::Object(object) => {
                 let text = |key: &str| object.get(key).and_then(Value::as_str);
                 let trigger = text("trigger")?;
-                let mut completion = with_hint(trigger, text("contents").or(text("completion")).unwrap_or(trigger));
+                let mut completion = with_hint(
+                    trigger,
+                    text("contents").or(text("completion")).unwrap_or(trigger),
+                );
                 if let Some(annotation) = text("annotation") {
                     completion.annotation = annotation.into();
                 }
@@ -148,10 +165,17 @@ impl Completion {
                 if let Some(kind) = object.get("kind") {
                     completion.kind = CompletionKind::from_json(kind);
                 }
-                if let Some(format) = object.get("format").or(object.get("completion_format")).and_then(Value::as_u64) {
+                if let Some(format) = object
+                    .get("format")
+                    .or(object.get("completion_format"))
+                    .and_then(Value::as_u64)
+                {
                     completion.format = CompletionFormat::from_number(format);
                 }
-                completion.keep_prefix = object.get("flags").and_then(Value::as_u64).is_some_and(|f| f & 1 != 0);
+                completion.keep_prefix = object
+                    .get("flags")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|f| f & 1 != 0);
                 Some(completion)
             }
             _ => None,
@@ -169,10 +193,21 @@ pub struct CompletionSet {
 impl CompletionSet {
     /// `{"scope": "…", "completions": […]}` (a `.sublime-completions` file).
     pub fn from_completions_file(value: &Value) -> Self {
-        let completions = value.get("completions").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let completions = value
+            .get("completions")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         Self {
-            scope: value.get("scope").and_then(Value::as_str).unwrap_or("").into(),
-            completions: completions.iter().filter_map(|c| Completion::from_json(c, CompletionSource::Package)).collect(),
+            scope: value
+                .get("scope")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            completions: completions
+                .iter()
+                .filter_map(|c| Completion::from_json(c, CompletionSource::Package))
+                .collect(),
         }
     }
 
@@ -183,7 +218,11 @@ impl CompletionSet {
         let contents = xml_element(xml, "content")?;
         let description = xml_element(xml, "description").unwrap_or_default();
         let completion = Completion {
-            annotation: if description.is_empty() { trigger.clone() } else { description },
+            annotation: if description.is_empty() {
+                trigger.clone()
+            } else {
+                description
+            },
             trigger: trigger.trim().into(),
             contents,
             format: CompletionFormat::Snippet,
@@ -218,7 +257,11 @@ fn xml_element(xml: &str, name: &str) -> Option<String> {
 }
 
 fn decode_xml_entities(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// The distinct words of `text` (letters, digits, `_`; not only digits; at least two chars),
@@ -226,27 +269,47 @@ fn decode_xml_entities(text: &str) -> String {
 pub fn words_near(text: &str, caret: usize, exclude: &str, limit: usize) -> Vec<String> {
     let mut words: Vec<(usize, &str)> = Vec::new();
     let mut start: Option<(usize, usize)> = None; // (byte, char) where the current word began
-    for (chars, (byte, c)) in text.char_indices().chain(std::iter::once((text.len(), ' '))).enumerate() {
+    for (chars, (byte, c)) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+        .enumerate()
+    {
         if is_word_char(c) {
             start.get_or_insert((byte, chars));
         } else if let Some((begin, begin_char)) = start.take() {
             let word = &text[begin..byte];
-            if word.chars().nth(1).is_some() && !word.chars().all(|c| c.is_ascii_digit()) && word != exclude {
-                let distance = if caret < begin_char { begin_char - caret } else { caret.saturating_sub(chars) };
+            if word.chars().nth(1).is_some()
+                && !word.chars().all(|c| c.is_ascii_digit())
+                && word != exclude
+            {
+                let distance = if caret < begin_char {
+                    begin_char - caret
+                } else {
+                    caret.saturating_sub(chars)
+                };
                 words.push((distance, word));
             }
         }
     }
     words.sort_by_key(|&(distance, _)| distance);
     let mut seen = std::collections::HashSet::new();
-    words.into_iter().map(|(_, w)| w).filter(|w| seen.insert(*w)).take(limit).map(String::from).collect()
+    words
+        .into_iter()
+        .map(|(_, w)| w)
+        .filter(|w| seen.insert(*w))
+        .take(limit)
+        .map(String::from)
+        .collect()
 }
 
 /// A command completion's contents (`name {"arg": …}`, or just `name`) as name and arguments.
 pub fn parse_command_completion(contents: &str) -> (String, Value) {
     let contents = contents.trim();
     match contents.split_once(char::is_whitespace) {
-        Some((name, args)) => (name.into(), serde_json::from_str(args.trim()).unwrap_or(Value::Null)),
+        Some((name, args)) => (
+            name.into(),
+            serde_json::from_str(args.trim()).unwrap_or(Value::Null),
+        ),
         None => (contents.into(), Value::Null),
     }
 }

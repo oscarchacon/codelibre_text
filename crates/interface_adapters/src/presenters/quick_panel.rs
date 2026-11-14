@@ -3,39 +3,86 @@ use use_cases::plugin_panels::CommandInputPanel;
 use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
-use crate::view_models::{CommandInputViewModel, InputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel};
+use crate::view_models::{
+    CommandInputViewModel, InputPanelViewModel, QuickPanelItemViewModel, QuickPanelViewModel,
+};
 use crate::view_state::ViewState;
 
 /// The open quick panel, searching again only when the query changed.
 pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewModel> {
+    let input_handler = editor
+        .plugin_input_panel()
+        .filter(|input| input.input.is_some())
+        .map(|input| {
+            let selection = input.document.selection();
+            (
+                input.document.id,
+                input.document.text.clone(),
+                input.document.selection_revision(),
+                selection.anchor,
+                selection.head,
+                input.caption.clone(),
+                input.input.as_ref().map(command_input),
+            )
+        });
     let panel = view.quick_panel.as_mut()?;
-    if panel.results_query.as_deref() != Some(panel.query.as_str()) {
+    let text_input = panel.kind == SearchKind::PluginItems && input_handler.is_some();
+    if !text_input && panel.results_query.as_deref() != Some(panel.query.as_str()) {
         panel.results = editor.search(panel.kind, &panel.query);
         panel.results_query = Some(panel.query.clone());
         panel.selected = panel.selected.min(panel.results.len().saturating_sub(1));
     }
-    let plugin_panel = editor.plugin_quick_panel().filter(|_| panel.kind == SearchKind::PluginItems);
+    let plugin_panel = editor
+        .plugin_quick_panel()
+        .filter(|_| panel.kind == SearchKind::PluginItems);
     Some(QuickPanelViewModel {
-        placeholder: match panel.kind {
-            SearchKind::Commands => editor.tr("Command Palette"),
-            SearchKind::Goto => editor.tr("Goto Anything — file name, :line, @symbol"),
-            SearchKind::ColorSchemes => editor.tr("Select Color Scheme"),
-            SearchKind::Languages => editor.tr("Select Language"),
-            SearchKind::BuildSystems => editor.tr("Select Build System"),
-            SearchKind::ClipboardHistory => editor.tr("Paste from History"),
-            SearchKind::PluginItems => editor.plugin_quick_panel().map_or("", |p| p.placeholder.as_str()),
-        }
-        .to_string(),
+        placeholder: if text_input {
+            input_handler
+                .as_ref()
+                .map_or("", |input| input.5.as_str())
+                .to_string()
+        } else {
+            match panel.kind {
+                SearchKind::Commands => editor.tr("Command Palette"),
+                SearchKind::Goto => editor.tr("Goto Anything — file name, :line, @symbol"),
+                SearchKind::ColorSchemes => editor.tr("Select Color Scheme"),
+                SearchKind::Languages => editor.tr("Select Language"),
+                SearchKind::BuildSystems => editor.tr("Select Build System"),
+                SearchKind::ClipboardHistory => editor.tr("Paste from History"),
+                SearchKind::PluginItems => editor
+                    .plugin_quick_panel()
+                    .map_or("", |p| p.placeholder.as_str()),
+            }
+            .to_string()
+        },
         no_matches: editor.tr("No matches").to_string(),
-        query: panel.query.clone(),
+        query: input_handler
+            .as_ref()
+            .filter(|_| text_input)
+            .map_or_else(|| panel.query.clone(), |input| input.1.clone()),
         selected: panel.selected,
         take_focus: std::mem::take(&mut panel.focus_requested),
         monospace: plugin_panel.is_some_and(|p| p.monospace),
-        input: plugin_panel.and_then(|p| p.input.as_ref()).map(command_input),
+        wants_event: plugin_panel.is_some_and(|p| p.wants_event),
+        text_input,
+        input_selection: input_handler
+            .as_ref()
+            .filter(|_| text_input)
+            .map(|input| (input.0, input.2, input.3, input.4)),
+        input: input_handler
+            .as_ref()
+            .filter(|_| text_input)
+            .and_then(|input| input.6.clone())
+            .or_else(|| {
+                plugin_panel
+                    .and_then(|p| p.input.as_ref())
+                    .map(command_input)
+            }),
         keep_open: plugin_panel.is_some_and(|p| p.keep_open),
         items: panel
             .results
             .iter()
+            .take(if text_input { 0 } else { usize::MAX })
             .map(|c| {
                 let plugin_item = match (&c.target, plugin_panel) {
                     (CandidateTarget::PluginItem(item), Some(plugin)) => plugin.items.get(*item),
@@ -46,10 +93,15 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<QuickPanelViewMo
                     details: match plugin_item {
                         Some(item) => item.details.clone(),
                         None if c.detail.is_empty() => Vec::new(),
-                        None => vec![vec![Span { text: c.detail.clone(), ..Default::default() }]],
+                        None => vec![vec![Span {
+                            text: c.detail.clone(),
+                            ..Default::default()
+                        }]],
                     },
                     hint: c.hint.clone(),
-                    kind: plugin_item.map(|item| item.kind.clone()).unwrap_or_default(),
+                    kind: plugin_item
+                        .map(|item| item.kind.clone())
+                        .unwrap_or_default(),
                 }
             })
             .collect(),
@@ -73,5 +125,9 @@ pub fn present_input_panel(editor: &Editor, view: &mut ViewState) -> Option<Inpu
 }
 
 fn command_input(input: &CommandInputPanel) -> CommandInputViewModel {
-    CommandInputViewModel { breadcrumb: input.breadcrumb.clone(), can_go_back: input.can_go_back, preview: input.preview.clone() }
+    CommandInputViewModel {
+        breadcrumb: input.breadcrumb.clone(),
+        can_go_back: input.can_go_back,
+        preview: input.preview.clone(),
+    }
 }

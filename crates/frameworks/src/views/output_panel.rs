@@ -20,56 +20,116 @@ pub fn highlighted(engine: &SharedSyntaxEngine, panel: &OutputPanelViewModel) ->
     let highlight = panel.highlight.as_ref()?;
     let font = FontId::monospace(panel.font_size);
     let mut engine = engine.borrow_mut();
-    let whole = engine.layout_job(highlight.document, &highlight.full_text, &highlight.syntax, &highlight.color_scheme, font);
+    let whole = engine.layout_job(
+        highlight.document,
+        &highlight.full_text,
+        &highlight.syntax,
+        &highlight.color_scheme,
+        font,
+    );
     let start = highlight.start;
     let sections = whole
         .sections
         .into_iter()
         .filter(|section| section.byte_range.end > start)
         .map(|mut section| {
-            section.byte_range = section.byte_range.start.max(start) - start..section.byte_range.end - start;
+            section.byte_range =
+                section.byte_range.start.max(start) - start..section.byte_range.end - start;
             section
         })
         .collect();
-    Some(LayoutJob { text: whole.text[start..].to_string(), sections, ..Default::default() })
+    Some(LayoutJob {
+        text: whole.text[start..].to_string(),
+        sections,
+        ..Default::default()
+    })
 }
 
 /// `highlighted`: the text already colored by [`highlighted`] (else it is drawn in one color).
-pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &OutputPanelViewModel, highlighted: Option<&LayoutJob>, events: &mut Vec<UiEvent>) {
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    panel: &OutputPanelViewModel,
+    highlighted: Option<&LayoutJob>,
+    events: &mut Vec<UiEvent>,
+) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(&panel.name).color(chrome.fg_dim).size(11.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let close = ui.add(egui::Label::new(RichText::new("×").size(15.0).color(chrome.fg_dim)).sense(Sense::CLICK));
+            let close = ui.add(
+                egui::Label::new(RichText::new("×").size(15.0).color(chrome.fg_dim))
+                    .sense(Sense::CLICK),
+            );
             if close.clicked() {
                 events.push(UiEvent::RunCommand(Command::new("hide_panel")));
             }
         });
     });
-    let scroll = if panel.word_wrap { egui::ScrollArea::vertical() } else { egui::ScrollArea::both() };
+    let scroll = if panel.word_wrap {
+        egui::ScrollArea::vertical()
+    } else {
+        egui::ScrollArea::both()
+    };
     scroll
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
             let galley = lay_out(ui, chrome, panel, highlighted);
-            let text = ui.add(egui::Label::new(galley.clone()).selectable(false).sense(Sense::CLICK));
+            let text = ui.add(
+                egui::Label::new(galley.clone())
+                    .selectable(false)
+                    .sense(Sense::CLICK),
+            );
+            if panel.take_focus {
+                text.request_focus();
+            }
+            if text.clicked() {
+                events.push(UiEvent::OutputPanelFocused(panel.id));
+            }
+            if let Some(caret) = panel.caret {
+                let at = galley.pos_from_ccursor(CCursor::new(caret));
+                let origin = text.rect.min.to_vec2();
+                ui.painter().line_segment(
+                    [at.left_top() + origin, at.left_bottom() + origin],
+                    egui::Stroke::new(1.0_f32, chrome.fg),
+                );
+            }
             if text.double_clicked() {
                 if let Some(pointer) = text.interact_pointer_pos() {
                     let cursor = galley.cursor_from_pos(pointer - text.rect.min);
-                    events.push(UiEvent::OutputPanelLineOpened(panel.first_line + cursor.pcursor.paragraph));
+                    events.push(UiEvent::OutputPanelLineOpened(
+                        panel.first_line + cursor.pcursor.paragraph,
+                    ));
                 }
             }
             scroll_to_new_result(ui, panel, &galley, text.rect.min);
         });
 }
 
-fn lay_out(ui: &Ui, chrome: &Chrome, panel: &OutputPanelViewModel, highlighted: Option<&LayoutJob>) -> Arc<Galley> {
+fn lay_out(
+    ui: &Ui,
+    chrome: &Chrome,
+    panel: &OutputPanelViewModel,
+    highlighted: Option<&LayoutJob>,
+) -> Arc<Galley> {
     let mut job = highlighted.cloned().unwrap_or_else(|| {
         let mut job = LayoutJob::default();
-        job.append(&panel.text, 0.0, TextFormat::simple(FontId::monospace(panel.font_size), chrome.fg));
+        job.append(
+            &panel.text,
+            0.0,
+            TextFormat::simple(FontId::monospace(panel.font_size), chrome.fg),
+        );
         job
     });
-    job.wrap.max_width = if panel.word_wrap { ui.available_width() } else { f32::INFINITY };
-    if let Some((start, end)) = panel.current_line.and_then(|line| line_range(&panel.text, line)) {
+    job.wrap.max_width = if panel.word_wrap {
+        ui.available_width()
+    } else {
+        f32::INFINITY
+    };
+    if let Some((start, end)) = panel
+        .current_line
+        .and_then(|line| line_range(&panel.text, line))
+    {
         paint_background(&mut job, start..end, chrome.hover_bg);
     }
     let selection = chrome.accent.gamma_multiply(0.35);
@@ -114,16 +174,29 @@ fn line_range(text: &str, line: usize) -> Option<(usize, usize)> {
         0 => 0,
         n => text.match_indices('\n').nth(n - 1)?.0 + 1,
     };
-    Some((start, text[start..].find('\n').map_or(text.len(), |length| start + length)))
+    Some((
+        start,
+        text[start..]
+            .find('\n')
+            .map_or(text.len(), |length| start + length),
+    ))
 }
 
-fn scroll_to_new_result(ui: &mut Ui, panel: &OutputPanelViewModel, galley: &Galley, origin: egui::Pos2) {
+fn scroll_to_new_result(
+    ui: &mut Ui,
+    panel: &OutputPanelViewModel,
+    galley: &Galley,
+    origin: egui::Pos2,
+) {
     let seen = Id::new("output_panel_result_revision");
     if ui.data(|data| data.get_temp::<u64>(seen)) == Some(panel.result_revision) {
         return;
     }
     ui.data_mut(|data| data.insert_temp(seen, panel.result_revision));
-    if let Some((start, _)) = panel.current_line.and_then(|line| line_range(&panel.text, line)) {
+    if let Some((start, _)) = panel
+        .current_line
+        .and_then(|line| line_range(&panel.text, line))
+    {
         let at = galley.pos_from_ccursor(CCursor::new(panel.text[..start].chars().count()));
         ui.scroll_to_rect(at.translate(origin.to_vec2()), Some(Align::Center));
     }

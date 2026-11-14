@@ -394,6 +394,10 @@ msgstr "Andere ausblenden"
 msgid "Show All"
 msgstr "Alle einblenden"
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr "Konsole"
+
 #: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Hilfe"

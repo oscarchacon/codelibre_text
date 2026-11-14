@@ -33,7 +33,12 @@ pub struct SublimeResourceGateway {
 impl SublimeResourceGateway {
     pub fn new(paths: PackagePaths) -> Self {
         let _ = std::fs::create_dir_all(paths.user_dir());
-        Self { paths, system_language: None, waker: None, unpacking: RefCell::new(None) }
+        Self {
+            paths,
+            system_language: None,
+            waker: None,
+            unpacking: RefCell::new(None),
+        }
     }
 
     /// Makes `start_unpacking` unpack in a thread, which runs `waker` when it ends so the
@@ -53,12 +58,21 @@ impl SublimeResourceGateway {
     fn translation_files(&self, include_sublime: bool) -> Vec<PathBuf> {
         find_resources(&self.paths, include_sublime, |n| n.ends_with(".po"))
             .into_iter()
-            .filter(|p| p.parent().and_then(|d| d.file_name()).is_some_and(|d| d == "Localization"))
+            .filter(|p| {
+                p.parent()
+                    .and_then(|d| d.file_name())
+                    .is_some_and(|d| d == "Localization")
+            })
             .collect()
     }
 
     /// Built-in file followed by the matching files of every package (except Sublime's `Default`).
-    fn sources(&self, include_sublime: bool, builtin: &str, matches: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+    fn sources(
+        &self,
+        include_sublime: bool,
+        builtin: &str,
+        matches: impl Fn(&str) -> bool,
+    ) -> Vec<(String, String)> {
         let mut sources = vec![("Default".to_string(), builtin.to_string())];
         for path in find_resources(&self.paths, include_sublime, matches) {
             if is_in_default_package(&path) {
@@ -79,18 +93,26 @@ impl ResourceGateway for SublimeResourceGateway {
 
     fn load_settings(&self, errors: &mut Vec<String>) -> SettingsLayers {
         let mut layers = SettingsLayers::default();
-        let mut add = |origin: &str, text: &str, layers: &mut SettingsLayers, name: &str| match sublime_json::parse(text) {
-            Ok(value) => {
-                let platform_prefs = format!("Preferences ({}).sublime-settings", platform_name());
-                if name == "Preferences.sublime-settings" || name == platform_prefs {
-                    layers.add_preferences(&value);
-                } else {
-                    layers.add_syntax_layer(name.trim_end_matches(".sublime-settings"), value);
+        let mut add = |origin: &str, text: &str, layers: &mut SettingsLayers, name: &str| {
+            match sublime_json::parse(text) {
+                Ok(value) => {
+                    let platform_prefs =
+                        format!("Preferences ({}).sublime-settings", platform_name());
+                    if name == "Preferences.sublime-settings" || name == platform_prefs {
+                        layers.add_preferences(&value);
+                    } else {
+                        layers.add_syntax_layer(name.trim_end_matches(".sublime-settings"), value);
+                    }
                 }
+                Err(e) => errors.push(format!("{origin}: {e}")),
             }
-            Err(e) => errors.push(format!("{origin}: {e}")),
         };
-        add("Default", builtin_resources::PREFERENCES, &mut layers, "Preferences.sublime-settings");
+        add(
+            "Default",
+            builtin_resources::PREFERENCES,
+            &mut layers,
+            "Preferences.sublime-settings",
+        );
 
         // The user decides whether Sublime Text's own packages are read too.
         let include_sublime = self
@@ -98,8 +120,14 @@ impl ResourceGateway for SublimeResourceGateway {
             .get("import_sublime_packages")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        for path in find_resources(&self.paths, include_sublime, |n| n.ends_with(".sublime-settings")) {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        for path in find_resources(&self.paths, include_sublime, |n| {
+            n.ends_with(".sublime-settings")
+        }) {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
             if let Ok(text) = std::fs::read_to_string(&path) {
                 add(&path.display().to_string(), &text, &mut layers, &name);
             }
@@ -114,7 +142,10 @@ impl ResourceGateway for SublimeResourceGateway {
             n == "Default.sublime-keymap" || n == platform_keymap
         }) {
             match sublime_json::parse(&text) {
-                Ok(Value::Array(items)) => items.iter().filter_map(parse_binding).for_each(|b| keymap.add(b)),
+                Ok(Value::Array(items)) => items
+                    .iter()
+                    .filter_map(parse_binding)
+                    .for_each(|b| keymap.add(b)),
                 Ok(_) => {}
                 Err(e) => errors.push(format!("{origin}: {e}")),
             }
@@ -124,7 +155,10 @@ impl ResourceGateway for SublimeResourceGateway {
             let mut menu = Vec::new();
             for (origin, text) in self.sources(include_sublime, builtin, |n| n == file) {
                 match sublime_json::parse(&text) {
-                    Ok(Value::Array(items)) => merge_menu(&mut menu, items.iter().filter_map(parse_menu_item).collect()),
+                    Ok(Value::Array(items)) => merge_menu(
+                        &mut menu,
+                        items.iter().filter_map(parse_menu_item).collect(),
+                    ),
                     Ok(_) => {}
                     Err(e) => errors.push(format!("{origin}: {e}")),
                 }
@@ -135,22 +169,37 @@ impl ResourceGateway for SublimeResourceGateway {
         let context_menus = ContextMenus {
             text: menu(builtin_resources::CONTEXT_MENU, "Context.sublime-menu"),
             side_bar: menu(builtin_resources::SIDE_BAR_MENU, "Side Bar.sublime-menu"),
-            mount_point: menu(builtin_resources::MOUNT_POINT_MENU, "Side Bar Mount Point.sublime-menu"),
-            tab: menu(builtin_resources::TAB_CONTEXT_MENU, "Tab Context.sublime-menu"),
+            mount_point: menu(
+                builtin_resources::MOUNT_POINT_MENU,
+                "Side Bar Mount Point.sublime-menu",
+            ),
+            tab: menu(
+                builtin_resources::TAB_CONTEXT_MENU,
+                "Tab Context.sublime-menu",
+            ),
         };
 
         let mut palette = Vec::new();
-        for (origin, text) in self.sources(include_sublime, builtin_resources::PALETTE_COMMANDS, |n| {
-            n.ends_with(".sublime-commands")
-        }) {
+        for (origin, text) in
+            self.sources(include_sublime, builtin_resources::PALETTE_COMMANDS, |n| {
+                n.ends_with(".sublime-commands")
+            })
+        {
             match sublime_json::parse(&text) {
-                Ok(Value::Array(items)) => palette.extend(items.iter().filter_map(parse_palette_command)),
+                Ok(Value::Array(items)) => {
+                    palette.extend(items.iter().filter_map(parse_palette_command))
+                }
                 Ok(_) => {}
                 Err(e) => errors.push(format!("{origin}: {e}")),
             }
         }
 
-        UiResources { keymap, main_menu, context_menus, palette }
+        UiResources {
+            keymap,
+            main_menu,
+            context_menus,
+            palette,
+        }
     }
 
     fn read_user_settings(&self) -> Map<String, Value> {
@@ -161,7 +210,12 @@ impl ResourceGateway for SublimeResourceGateway {
         self.write_user_settings_file(PREFERENCES, values)
     }
 
-    fn load_settings_file(&self, file_name: &str, include_sublime: bool, errors: &mut Vec<String>) -> Map<String, Value> {
+    fn load_settings_file(
+        &self,
+        file_name: &str,
+        include_sublime: bool,
+        errors: &mut Vec<String>,
+    ) -> Map<String, Value> {
         let stem = file_name.trim_end_matches(".sublime-settings");
         let platform_file = format!("{stem} ({}).sublime-settings", platform_name());
         let mut values = Map::new();
@@ -169,8 +223,15 @@ impl ResourceGateway for SublimeResourceGateway {
         // which it installs again where missing): Sublime's are about Sublime's `Installed Packages`,
         // not ours, so they are not adopted.
         let sublime_user = self.paths.sublime_packages.as_ref().map(|p| p.join("User"));
-        let foreign = |path: &Path| stem.starts_with("Package Control") && sublime_user.as_ref().is_some_and(|user| path.starts_with(user));
-        for path in find_resources(&self.paths, include_sublime, |n| n == file_name || n == platform_file) {
+        let foreign = |path: &Path| {
+            stem.starts_with("Package Control")
+                && sublime_user
+                    .as_ref()
+                    .is_some_and(|user| path.starts_with(user))
+        };
+        for path in find_resources(&self.paths, include_sublime, |n| {
+            n == file_name || n == platform_file
+        }) {
             if is_in_default_package(&path) || foreign(&path) {
                 continue;
             }
@@ -194,7 +255,11 @@ impl ResourceGateway for SublimeResourceGateway {
             .unwrap_or_default()
     }
 
-    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String> {
+    fn write_user_settings_file(
+        &self,
+        file_name: &str,
+        values: &Map<String, Value>,
+    ) -> Result<(), String> {
         let path = self.paths.user_dir().join(file_name);
         let text = serde_json::to_string_pretty(values).map_err(|e| e.to_string())?;
         std::fs::write(&path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))
@@ -203,7 +268,10 @@ impl ResourceGateway for SublimeResourceGateway {
     fn default_resource(&self, file_name: &str) -> Option<String> {
         if file_name == "Preferences.sublime-settings" {
             Some(builtin_resources::PREFERENCES.to_string())
-        } else if Path::new(file_name).extension().is_some_and(|e| e == "sublime-keymap") {
+        } else if Path::new(file_name)
+            .extension()
+            .is_some_and(|e| e == "sublime-keymap")
+        {
             Some(builtin_resources::KEYMAP.to_string())
         } else {
             None
@@ -216,14 +284,20 @@ impl ResourceGateway for SublimeResourceGateway {
             if languages.iter().any(|l| l.code == code) {
                 return;
             }
-            let name = po_file::parse(text).ok().and_then(|po| po.language_name).unwrap_or_else(|| code.clone());
+            let name = po_file::parse(text)
+                .ok()
+                .and_then(|po| po.language_name)
+                .unwrap_or_else(|| code.clone());
             languages.push(Language { code, name });
         };
         for (code, text) in builtin_resources::TRANSLATIONS {
             add(code.to_string(), text);
         }
         for path in self.translation_files(include_sublime) {
-            let code = path.file_stem().map(|s| normalize_language_code(&s.to_string_lossy())).unwrap_or_default();
+            let code = path
+                .file_stem()
+                .map(|s| normalize_language_code(&s.to_string_lossy()))
+                .unwrap_or_default();
             if let Ok(text) = std::fs::read_to_string(&path) {
                 add(code, &text);
             }
@@ -232,14 +306,21 @@ impl ResourceGateway for SublimeResourceGateway {
         languages
     }
 
-    fn load_translations(&self, language: &str, include_sublime: bool, errors: &mut Vec<String>) -> Catalog {
+    fn load_translations(
+        &self,
+        language: &str,
+        include_sublime: bool,
+        errors: &mut Vec<String>,
+    ) -> Catalog {
         let mut sources: Vec<(String, String)> = builtin_resources::TRANSLATIONS
             .iter()
             .filter(|(code, _)| *code == language)
             .map(|(code, text)| (format!("Default/Localization/{code}.po"), text.to_string()))
             .collect();
         for path in self.translation_files(include_sublime) {
-            let code = path.file_stem().map(|s| normalize_language_code(&s.to_string_lossy()));
+            let code = path
+                .file_stem()
+                .map(|s| normalize_language_code(&s.to_string_lossy()));
             if code.as_deref() == Some(language) {
                 match std::fs::read_to_string(&path) {
                     Ok(text) => sources.push((path.display().to_string(), text)),
@@ -259,7 +340,9 @@ impl ResourceGateway for SublimeResourceGateway {
 
     fn find_resources(&self, pattern: &str, include_sublime: bool) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
-        for path in find_resources(&self.paths, include_sublime, |n| matches_pattern(pattern, n)) {
+        for path in find_resources(&self.paths, include_sublime, |n| {
+            matches_pattern(pattern, n)
+        }) {
             match resource_name(&self.paths, include_sublime, &path) {
                 Some(name) if !names.contains(&name) => names.push(name),
                 _ => {}
@@ -321,11 +404,20 @@ impl ResourceGateway for SublimeResourceGateway {
         self.system_language.clone()
     }
 
-    fn load_meta_preferences(&self, include_sublime: bool, errors: &mut Vec<String>) -> Vec<MetaPreference> {
+    fn load_meta_preferences(
+        &self,
+        include_sublime: bool,
+        errors: &mut Vec<String>,
+    ) -> Vec<MetaPreference> {
         let mut preferences = Vec::new();
-        for path in find_resources(&self.paths, include_sublime, |n| n.ends_with(".tmPreferences")) {
-            let name = resource_name(&self.paths, include_sublime, &path).unwrap_or_else(|| path.display().to_string());
-            let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| plist::parse(&text));
+        for path in find_resources(&self.paths, include_sublime, |n| {
+            n.ends_with(".tmPreferences")
+        }) {
+            let name = resource_name(&self.paths, include_sublime, &path)
+                .unwrap_or_else(|| path.display().to_string());
+            let parsed = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| plist::parse(&text));
             match parsed {
                 Ok(value) => preferences.extend(MetaPreference::from_plist(&name, &value)),
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
@@ -336,7 +428,10 @@ impl ResourceGateway for SublimeResourceGateway {
 }
 
 fn command_from(name: Option<&Value>, args: Option<&Value>) -> Option<Command> {
-    Some(Command::with_args(name?.as_str()?, args.cloned().unwrap_or(Value::Null)))
+    Some(Command::with_args(
+        name?.as_str()?,
+        args.cloned().unwrap_or(Value::Null),
+    ))
 }
 
 /// `{"keys": ["ctrl+k", "ctrl+b"], "command": "...", "args": {...}, "context": [...]}`
@@ -350,7 +445,11 @@ fn parse_binding(item: &Value) -> Option<Binding> {
     Some(Binding {
         keys,
         command: command_from(item.get("command"), item.get("args"))?,
-        context: item.get("context").and_then(Value::as_array).cloned().unwrap_or_default(),
+        context: item
+            .get("context")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
     })
 }
 
@@ -368,7 +467,10 @@ fn parse_menu_item(item: &Value) -> Option<MenuItem> {
         caption,
         id: item.get("id").and_then(Value::as_str).map(String::from),
         command,
-        checkbox: item.get("checkbox").and_then(Value::as_bool).unwrap_or(false),
+        checkbox: item
+            .get("checkbox")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         children: item
             .get("children")
             .and_then(Value::as_array)

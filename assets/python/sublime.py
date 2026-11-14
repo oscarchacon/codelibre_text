@@ -1935,11 +1935,11 @@ class Window:
     def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None, _input=None):
         """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled.
         ``_input`` (input handlers only, ``sublime_plugin``): the palette's breadcrumb and ``on_back``."""
-        def select(index):
+        def select(index, event=None):
             if on_select is None:
                 return
             if flags & WANT_EVENT:
-                on_select(index, {"modifier_keys": {}})
+                on_select(index, event or {"modifier_keys": {}})
             else:
                 on_select(index)
         on_back = (_input or {}).get("on_back")
@@ -1952,8 +1952,16 @@ class Window:
     def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel, _input=None):
         """A one-line text field at the bottom. Returns its view. ``_input``: see ``show_quick_panel``."""
         on_back = (_input or {}).get("on_back")
+        def done(text, event=None):
+            if on_done is None:
+                return
+            if _input is not None:
+                on_done(text, event or {"modifier_keys": {}})
+            else:
+                on_done(text)
+
         callback = _register_callbacks(
-            ("done", "cancel", "back"), done=on_done, change=on_change, cancel=on_cancel, back=on_back
+            ("done", "cancel", "back"), done=done, change=on_change, cancel=on_cancel, back=on_back
         )
         return View(sublime_api.window_show_input_panel(
             self.window_id, str(caption), str(initial_text), callback, on_change is not None,
@@ -1979,7 +1987,7 @@ class Window:
         return sublime_api.window_project_data(self._window_arg())
 
     def set_project_data(self, data):
-        sublime_api.window_set_project_data(self._window_arg(), data)
+        sublime_api.window_set_project_data(data, self._window_arg())
 
     def layout(self):
         return sublime_api.window_get_layout(self._window_arg())
@@ -2073,7 +2081,7 @@ class Window:
             location["path"], location["display_name"], location["row"], location["col"],
             location["syntax"], location["type"],
             (location["kind_id"], location["kind_letter"], location["kind_description"]))
-            for location in sublime_api.window_symbol_locations(self._window_arg(), str(sym), int(source), int(type))]
+            for location in sublime_api.window_symbol_locations(str(sym), int(source), int(type), self._window_arg())]
         if kind_id != KIND_ID_AMBIGUOUS:
             found = [location for location in found if location.kind[0] == kind_id]
         if kind_letter:
@@ -2081,23 +2089,22 @@ class Window:
         return found
 
     def is_sidebar_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("side_bar", self._window_arg())
 
     def set_sidebar_visible(self, flag, animate=True):
-        pass
+        sublime_api.window_set_ui_visible("side_bar", bool(flag), self._window_arg())
 
     def is_minimap_visible(self):
-        # Shown unless `toggle_minimap` hid it; plugins do not see that window state yet.
-        return True
+        return sublime_api.window_is_ui_visible("minimap", self._window_arg())
 
     def set_minimap_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("minimap", bool(flag), self._window_arg())
 
     def is_status_bar_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("status_bar", self._window_arg())
 
     def set_status_bar_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("status_bar", bool(flag), self._window_arg())
 
     def get_tabs_visible(self):
         return True

@@ -2,7 +2,9 @@
 //! `extract_scope`, `find_by_selector`…) and the `selector` key binding context. Points are chars.
 
 use entities::document::{Document, DocumentId};
-use entities::meta_info::{meta_value, selectors_where_on, shell_variable, symbol_kind, transform_symbol, SymbolKind};
+use entities::meta_info::{
+    meta_value, selectors_where_on, shell_variable, symbol_kind, transform_symbol, SymbolKind,
+};
 use entities::selector::matches_selector;
 use entities::text::{byte_to_char, char_to_byte};
 use serde_json::Value;
@@ -105,10 +107,15 @@ impl Editor {
         let line_start = doc.text[..byte].rfind('\n').map_or(0, |at| at + 1);
         let spans = self.line_spans(doc, line);
         let column = byte - line_start;
-        let span = spans.iter().find(|s| s.range.contains(&column)).or(spans.last());
+        let span = spans
+            .iter()
+            .find(|s| s.range.contains(&column))
+            .or(spans.last());
         let scope = match span {
             Some(span) => span.scope.clone(),
-            None if line > 0 && byte == doc.text.len() => return self.scope_name(id, point.saturating_sub(1)),
+            None if line > 0 && byte == doc.text.len() => {
+                return self.scope_name(id, point.saturating_sub(1))
+            }
             None => self.gateways.syntaxes.base_scope(&doc.syntax),
         };
         Some(format!("{scope} "))
@@ -121,7 +128,9 @@ impl Editor {
 
     /// What the key binding contexts of each selection of the active document look at, in order.
     pub fn caret_contexts(&self) -> Vec<CaretContext> {
-        let Some(doc) = self.active_document() else { return Vec::new() };
+        let Some(doc) = self.active_document() else {
+            return Vec::new();
+        };
         let text = &doc.text;
         doc.selections()
             .iter()
@@ -131,7 +140,9 @@ impl Editor {
                 let line_end = text[end..].find('\n').map_or(text.len(), |at| end + at);
                 CaretContext {
                     scope: self.scope_name(doc.id, s.head).unwrap_or_default(),
-                    eol_scope: self.scope_name(doc.id, byte_to_char(text, line_end)).unwrap_or_default(),
+                    eol_scope: self
+                        .scope_name(doc.id, byte_to_char(text, line_end))
+                        .unwrap_or_default(),
                     preceding_text: text[line_begin..start].to_string(),
                     following_text: text[end..line_end].to_string(),
                     text: text[start..end].to_string(),
@@ -164,20 +175,36 @@ impl Editor {
     pub fn extract_scope(&self, id: DocumentId, point: usize) -> Option<(usize, usize)> {
         let scope = self.scope_name(id, point)?;
         let doc = self.any_document(id)?;
-        let line = doc.text[..char_to_byte(&doc.text, point)].matches('\n').count();
+        let line = doc.text[..char_to_byte(&doc.text, point)]
+            .matches('\n')
+            .count();
         let line_count = doc.text.split_inclusive('\n').count();
-        let same = |t: &ScopedRange| t.scope == scope.trim_end() || t.scope.starts_with(scope.as_str());
+        let same =
+            |t: &ScopedRange| t.scope == scope.trim_end() || t.scope.starts_with(scope.as_str());
         let mut reach = EXTRACT_SCOPE_LINES;
         loop {
             let lines = line.saturating_sub(reach)..(line + reach + 1).min(line_count.max(1));
             let tokens = self.line_tokens(doc, lines.clone());
-            let at = tokens.iter().position(|t| t.start <= point && point < t.end).or(tokens.len().checked_sub(1))?;
-            let first = tokens[..at].iter().rposition(|t| !same(t)).map_or(0, |i| i + 1);
-            let last = tokens[at..].iter().position(|t| !same(t)).map_or(tokens.len(), |i| at + i);
+            let at = tokens
+                .iter()
+                .position(|t| t.start <= point && point < t.end)
+                .or(tokens.len().checked_sub(1))?;
+            let first = tokens[..at]
+                .iter()
+                .rposition(|t| !same(t))
+                .map_or(0, |i| i + 1);
+            let last = tokens[at..]
+                .iter()
+                .position(|t| !same(t))
+                .map_or(tokens.len(), |i| at + i);
             let cut_before = first == 0 && lines.start > 0;
             let cut_after = last == tokens.len() && lines.end < line_count;
             if !cut_before && !cut_after {
-                return Some(if first < last { (tokens[first].start, tokens[last - 1].end) } else { (point, point) });
+                return Some(if first < last {
+                    (tokens[first].start, tokens[last - 1].end)
+                } else {
+                    (point, point)
+                });
             }
             reach = reach.saturating_mul(4);
         }
@@ -186,13 +213,23 @@ impl Editor {
     /// The pieces of the text between `start` and `end` (chars) and their scopes, in order. Only
     /// the lines of that range are read from the highlighting cache (nothing is parsed again).
     pub fn scoped_ranges(&self, id: DocumentId, start: usize, end: usize) -> Vec<ScopedRange> {
-        let Some(doc) = self.any_document(id) else { return Vec::new() };
-        let first_line = doc.text[..char_to_byte(&doc.text, start)].matches('\n').count();
-        let last_line = doc.text[..char_to_byte(&doc.text, end)].matches('\n').count();
+        let Some(doc) = self.any_document(id) else {
+            return Vec::new();
+        };
+        let first_line = doc.text[..char_to_byte(&doc.text, start)]
+            .matches('\n')
+            .count();
+        let last_line = doc.text[..char_to_byte(&doc.text, end)]
+            .matches('\n')
+            .count();
         self.line_tokens(doc, first_line..last_line + 1)
             .into_iter()
             .filter(|t| t.end > start && t.start < end)
-            .map(|t| ScopedRange { start: t.start.max(start), end: t.end.min(end), scope: t.scope })
+            .map(|t| ScopedRange {
+                start: t.start.max(start),
+                end: t.end.min(end),
+                scope: t.scope,
+            })
             .collect()
     }
 
@@ -201,16 +238,28 @@ impl Editor {
         let first_byte = if lines.start == 0 {
             0
         } else {
-            doc.text.match_indices('\n').nth(lines.start - 1).map_or(doc.text.len(), |(at, _)| at + 1)
+            doc.text
+                .match_indices('\n')
+                .nth(lines.start - 1)
+                .map_or(doc.text.len(), |(at, _)| at + 1)
         };
-        let scopes = self.gateways.syntaxes.lines_scopes(doc.id, &doc.text, &doc.syntax, lines);
+        let scopes = self
+            .gateways
+            .syntaxes
+            .lines_scopes(doc.id, &doc.text, &doc.syntax, lines);
         let (mut line_char, mut tokens) = (byte_to_char(&doc.text, first_byte), Vec::new());
         for (line_text, spans) in doc.text[first_byte..].split_inclusive('\n').zip(scopes) {
             for span in spans {
-                let Some(text) = line_text.get(..span.range.end) else { continue };
+                let Some(text) = line_text.get(..span.range.end) else {
+                    continue;
+                };
                 let a = line_char + line_text[..span.range.start].chars().count();
                 let b = line_char + text.chars().count();
-                tokens.push(ScopedRange { start: a, end: b, scope: span.scope });
+                tokens.push(ScopedRange {
+                    start: a,
+                    end: b,
+                    scope: span.scope,
+                });
             }
             line_char += line_text.chars().count();
         }
@@ -231,16 +280,27 @@ impl Editor {
 
     /// `view.context_backtrace(point)`: the syntax's contexts at `point`, outermost first.
     pub fn context_backtrace(&self, id: DocumentId, point: usize) -> Vec<ContextFrame> {
-        let Some(doc) = self.any_document(id) else { return Vec::new() };
+        let Some(doc) = self.any_document(id) else {
+            return Vec::new();
+        };
         let byte = char_to_byte(&doc.text, point);
         let line = doc.text[..byte].matches('\n').count();
         let line_start = doc.text[..byte].rfind('\n').map_or(0, |at| at + 1);
-        self.gateways.syntaxes.context_backtrace(doc.id, &doc.text, &doc.syntax, line, byte - line_start)
+        self.gateways.syntaxes.context_backtrace(
+            doc.id,
+            &doc.text,
+            &doc.syntax,
+            line,
+            byte - line_start,
+        )
     }
 
     /// Some package's `.tmPreferences` says what goes in symbol lists.
     pub fn has_symbol_preferences(&self) -> bool {
-        self.state.meta_preferences.iter().any(|p| p.settings.contains_key("showInSymbolList"))
+        self.state
+            .meta_preferences
+            .iter()
+            .any(|p| p.settings.contains_key("showInSymbolList"))
     }
 
     /// The symbols of a document (`view.symbol_regions()`, Goto Symbol): the text of the runs the
@@ -249,7 +309,9 @@ impl Editor {
     /// scopes (but tags and labels). `indexed` uses `showInIndexedSymbolList` instead, and
     /// `references` `showInIndexedReferenceList` (calls…), which have no default.
     pub fn symbol_regions(&self, id: DocumentId, list: SymbolList) -> Vec<SymbolRegion> {
-        let Some(doc) = self.any_document(id) else { return Vec::new() };
+        let Some(doc) = self.any_document(id) else {
+            return Vec::new();
+        };
         let (key, transformation_key) = match list {
             SymbolList::Symbols => ("showInSymbolList", "symbolTransformation"),
             SymbolList::Indexed => ("showInIndexedSymbolList", "symbolIndexTransformation"),
@@ -270,14 +332,26 @@ impl Editor {
         let mut symbols: Vec<SymbolRegion> = Vec::new();
         let mut run: Option<(usize, usize, String)> = None;
         let finish = |run: Option<(usize, usize, String)>, symbols: &mut Vec<SymbolRegion>| {
-            let Some((start, end, scope)) = run else { return };
-            let text: String = doc.text[char_to_byte(&doc.text, start)..char_to_byte(&doc.text, end)].to_string();
+            let Some((start, end, scope)) = run else {
+                return;
+            };
+            let text: String =
+                doc.text[char_to_byte(&doc.text, start)..char_to_byte(&doc.text, end)].to_string();
             let transformation = meta_value(preferences, &scope, transformation_key)
                 .or_else(|| meta_value(preferences, &scope, "symbolTransformation"))
                 .and_then(Value::as_str);
-            let name = transformation.map_or_else(|| text.trim().to_string(), |t| transform_symbol(&text, t).trim().to_string());
+            let name = transformation.map_or_else(
+                || text.trim().to_string(),
+                |t| transform_symbol(&text, t).trim().to_string(),
+            );
             if !name.is_empty() {
-                symbols.push(SymbolRegion { name, start, end, kind: symbol_kind(&scope), scope });
+                symbols.push(SymbolRegion {
+                    name,
+                    start,
+                    end,
+                    kind: symbol_kind(&scope),
+                    scope,
+                });
             }
         };
         for token in tokens {
@@ -288,7 +362,11 @@ impl Editor {
             // A run stays on its line: a symbol is one line, even when its scope spans several.
             let starts_line = doc.text[..char_to_byte(&doc.text, token.start)].ends_with('\n');
             match &mut run {
-                Some((_, end, scope)) if *end == token.start && scope.as_str() == token.scope && !starts_line => *end = token.end,
+                Some((_, end, scope))
+                    if *end == token.start && scope.as_str() == token.scope && !starts_line =>
+                {
+                    *end = token.end
+                }
                 _ => {
                     finish(run.take(), &mut symbols);
                     run = Some((token.start, token.end, token.scope));
@@ -302,7 +380,12 @@ impl Editor {
     /// `window.symbol_locations(symbol, source, type)`: where a symbol is, in the open files (the
     /// ones that have a path, and all of them for `OpenFiles`). The index is not kept on disk, so
     /// `Index` answers the saved open files too.
-    pub fn symbol_locations(&self, symbol: &str, source: SymbolSource, wanted: SymbolType) -> Vec<SymbolLocation> {
+    pub fn symbol_locations(
+        &self,
+        symbol: &str,
+        source: SymbolSource,
+        wanted: SymbolType,
+    ) -> Vec<SymbolLocation> {
         let definitions = wanted != SymbolType::Reference;
         let references = wanted != SymbolType::Definition;
         let mut locations = Vec::new();
@@ -312,12 +395,23 @@ impl Editor {
             }
             let mut found: Vec<(SymbolRegion, bool)> = Vec::new();
             if definitions {
-                found.extend(self.symbol_regions(doc.id, SymbolList::Indexed).into_iter().map(|s| (s, false)));
+                found.extend(
+                    self.symbol_regions(doc.id, SymbolList::Indexed)
+                        .into_iter()
+                        .map(|s| (s, false)),
+                );
             }
             if references {
-                found.extend(self.symbol_regions(doc.id, SymbolList::References).into_iter().map(|s| (s, true)));
+                found.extend(
+                    self.symbol_regions(doc.id, SymbolList::References)
+                        .into_iter()
+                        .map(|s| (s, true)),
+                );
             }
-            for (region, reference) in found.into_iter().filter(|(region, _)| region.name == symbol) {
+            for (region, reference) in found
+                .into_iter()
+                .filter(|(region, _)| region.name == symbol)
+            {
                 let (row, column) = line_col(&doc.text, region.start);
                 locations.push(SymbolLocation {
                     path: doc.path.clone(),
@@ -335,16 +429,23 @@ impl Editor {
 
     /// A file's path as the user sees it: relative to the first open folder, else its own path.
     fn display_path(&self, path: Option<&std::path::Path>) -> String {
-        let Some(path) = path else { return String::new() };
+        let Some(path) = path else {
+            return String::new();
+        };
         self.state
             .folders
             .iter()
             .find_map(|folder| path.strip_prefix(folder).ok())
-            .map_or_else(|| path.display().to_string(), |relative| relative.display().to_string())
+            .map_or_else(
+                || path.display().to_string(),
+                |relative| relative.display().to_string(),
+            )
     }
 
     pub(crate) fn line_spans(&self, doc: &Document, line: usize) -> Vec<ScopeSpan> {
-        self.gateways.syntaxes.line_scopes(doc.id, &doc.text, &doc.syntax, line)
+        self.gateways
+            .syntaxes
+            .line_scopes(doc.id, &doc.text, &doc.syntax, line)
     }
 }
 

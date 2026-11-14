@@ -30,6 +30,7 @@ pub struct OutputPanel {
 pub struct OutputPanels {
     panels: Vec<OutputPanel>,
     shown: Option<String>,
+    focused: Option<String>,
     /// The panel `next_result` goes through: the last one shown that has results.
     results: Option<String>,
 }
@@ -57,16 +58,31 @@ impl Editor {
         let id = self.next_document_id();
         let mut document = Document::new_untitled(id, LineEnding::Unix);
         document.scratch = true;
-        self.state.output_panels.panels.push(OutputPanel { name: name.to_string(), document, unlisted, current_result: None, result_revision: 0 });
+        self.state.output_panels.panels.push(OutputPanel {
+            name: name.to_string(),
+            document,
+            unlisted,
+            current_result: None,
+            result_revision: 0,
+        });
         id
     }
 
     fn panel_mut(&mut self, name: &str) -> Option<&mut OutputPanel> {
-        self.state.output_panels.panels.iter_mut().find(|p| p.name == name)
+        self.state
+            .output_panels
+            .panels
+            .iter_mut()
+            .find(|p| p.name == name)
     }
 
     pub(crate) fn find_output_panel(&self, name: &str) -> Option<DocumentId> {
-        self.state.output_panels.panels.iter().find(|p| p.name == name).map(|p| p.document.id)
+        self.state
+            .output_panels
+            .panels
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.document.id)
     }
 
     pub(crate) fn destroy_output_panel(&mut self, name: &str) {
@@ -82,6 +98,9 @@ impl Editor {
         if self.state.output_panels.shown.as_deref() == Some(name) {
             self.state.output_panels.shown = None;
         }
+        if self.state.output_panels.focused.as_deref() == Some(name) {
+            self.state.output_panels.focused = None;
+        }
         if self.state.output_panels.results.as_deref() == Some(name) {
             self.state.output_panels.results = None;
         }
@@ -89,7 +108,13 @@ impl Editor {
 
     /// Names of every listed panel, as `window.panels()` lists them (`output.<name>`).
     pub(crate) fn output_panel_names(&self) -> Vec<String> {
-        self.state.output_panels.panels.iter().filter(|p| !p.unlisted).map(|p| format!("output.{}", p.name)).collect()
+        self.state
+            .output_panels
+            .panels
+            .iter()
+            .filter(|p| !p.unlisted)
+            .map(|p| format!("output.{}", p.name))
+            .collect()
     }
 
     /// `show_panel {"panel": "output.<name>"}`. False when there is no such panel.
@@ -104,18 +129,63 @@ impl Editor {
 
     pub fn hide_output_panel(&mut self) {
         self.state.output_panels.shown = None;
+        self.state.output_panels.focused = None;
+    }
+
+    /// Focuses an output panel's view, showing it if it was hidden.
+    pub fn focus_output_panel(&mut self, id: DocumentId) -> bool {
+        let Some(name) = self
+            .state
+            .output_panels
+            .panels
+            .iter()
+            .find(|panel| panel.document.id == id)
+            .map(|panel| panel.name.clone())
+        else {
+            return false;
+        };
+        self.state.output_panels.shown = Some(name.clone());
+        self.state.output_panels.focused = Some(name.clone());
+        self.remember_results_panel(&name);
+        true
+    }
+
+    /// Whether `id` is the output panel whose view has the focus.
+    pub fn is_output_panel_focused(&self, id: DocumentId) -> bool {
+        self.state
+            .output_panels
+            .focused
+            .as_deref()
+            .is_some_and(|name| {
+                self.state
+                    .output_panels
+                    .panels
+                    .iter()
+                    .any(|panel| panel.name == name && panel.document.id == id)
+            })
+    }
+
+    /// Returns keyboard focus to the editor or another panel without hiding this one.
+    pub fn blur_output_panel(&mut self) {
+        self.state.output_panels.focused = None;
     }
 
     pub fn shown_output_panel(&self) -> Option<&OutputPanel> {
         let name = self.state.output_panels.shown.as_deref()?;
-        self.state.output_panels.panels.iter().find(|p| p.name == name)
+        self.state
+            .output_panels
+            .panels
+            .iter()
+            .find(|p| p.name == name)
     }
 
     /// `next_result` / `prev_result` go through this panel from now on, if it has results.
     pub(crate) fn remember_results_panel(&mut self, name: &str) {
         let has_results = self.find_output_panel(name).is_some_and(|id| {
             let settings = self.settings_of(id);
-            ["result_file_regex", "result_line_regex"].iter().any(|key| settings.str(key).is_some_and(|r| !r.is_empty()))
+            ["result_file_regex", "result_line_regex"]
+                .iter()
+                .any(|key| settings.str(key).is_some_and(|r| !r.is_empty()))
         });
         if has_results {
             self.state.output_panels.results = Some(name.to_string());
@@ -129,7 +199,12 @@ impl Editor {
         };
         let settings = self.settings_of(id);
         let regex = |key: &str| settings.str(key).unwrap_or_default().to_string();
-        find_results(&doc.text, &regex("result_file_regex"), &regex("result_line_regex")).unwrap_or_default()
+        find_results(
+            &doc.text,
+            &regex("result_file_regex"),
+            &regex("result_line_regex"),
+        )
+        .unwrap_or_default()
     }
 
     /// `next_result` / `prev_result`: goes to the next result of the last panel that had them,
@@ -145,9 +220,16 @@ impl Editor {
         let current = self.panel_mut(&panel).and_then(|p| p.current_result);
         // Past the last one it starts again.
         let result = if forward {
-            results.iter().find(|r| current.is_none_or(|line| r.line > line)).or(results.first())
+            results
+                .iter()
+                .find(|r| current.is_none_or(|line| r.line > line))
+                .or(results.first())
         } else {
-            results.iter().rev().find(|r| current.is_none_or(|line| r.line < line)).or(results.last())
+            results
+                .iter()
+                .rev()
+                .find(|r| current.is_none_or(|line| r.line < line))
+                .or(results.last())
         };
         let Some(result) = result.cloned() else {
             return false;
@@ -159,7 +241,10 @@ impl Editor {
 
     /// The user double-clicked a line of the panel shown. False when it is not a result.
     pub fn open_result_at_line(&mut self, line: usize) -> bool {
-        let Some((name, id)) = self.shown_output_panel().map(|p| (p.name.clone(), p.document.id)) else {
+        let Some((name, id)) = self
+            .shown_output_panel()
+            .map(|p| (p.name.clone(), p.document.id))
+        else {
             return false;
         };
         let Some(result) = self.output_results(id).into_iter().find(|r| r.line == line) else {
@@ -171,7 +256,11 @@ impl Editor {
     }
 
     fn visit_result(&mut self, panel: &str, result: &ResultLocation) {
-        let base = self.find_output_panel(panel).and_then(|id| self.settings_of(id).str("result_base_dir").map(String::from));
+        let base = self.find_output_panel(panel).and_then(|id| {
+            self.settings_of(id)
+                .str("result_base_dir")
+                .map(String::from)
+        });
         if let Some(panel) = self.panel_mut(panel) {
             panel.current_result = Some(result.line);
             panel.result_revision += 1;
@@ -194,31 +283,64 @@ impl Editor {
     pub(crate) fn any_document(&self, id: DocumentId) -> Option<&Document> {
         let panels = self.state.output_panels.panels.iter().map(|p| &p.document);
         let input = self.state.plugin_panels.input_document();
-        self.state.documents.iter().chain(panels).chain(input).find(|d| d.id == id)
+        self.state
+            .documents
+            .iter()
+            .chain(panels)
+            .chain(input)
+            .find(|d| d.id == id)
     }
 
     pub(crate) fn any_document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
-        let panels = self.state.output_panels.panels.iter_mut().map(|p| &mut p.document);
+        let panels = self
+            .state
+            .output_panels
+            .panels
+            .iter_mut()
+            .map(|p| &mut p.document);
         let input = self.state.plugin_panels.input_document_mut();
-        self.state.documents.iter_mut().chain(panels).chain(input).find(|d| d.id == id)
+        self.state
+            .documents
+            .iter_mut()
+            .chain(panels)
+            .chain(input)
+            .find(|d| d.id == id)
     }
 
     /// The document of a view that is not a tab (an output panel's, the input panel's).
     pub(crate) fn panel_document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
-        let panels = self.state.output_panels.panels.iter_mut().map(|p| &mut p.document);
+        let panels = self
+            .state
+            .output_panels
+            .panels
+            .iter_mut()
+            .map(|p| &mut p.document);
         let input = self.state.plugin_panels.input_document_mut();
         panels.chain(input).find(|d| d.id == id)
     }
 
     /// A view that is not a tab.
     pub(crate) fn is_panel_view(&self, id: DocumentId) -> bool {
-        self.state.output_panels.panels.iter().any(|p| p.document.id == id)
-            || self.state.plugin_panels.input_document().is_some_and(|d| d.id == id)
+        self.state
+            .output_panels
+            .panels
+            .iter()
+            .any(|p| p.document.id == id)
+            || self
+                .state
+                .plugin_panels
+                .input_document()
+                .is_some_and(|d| d.id == id)
     }
 
     /// Sublime's `append` command: adds text at the end of a view; `force` also writes to a
     /// read-only one (build output panels are read-only).
-    pub(crate) fn append_text(&mut self, id: DocumentId, characters: &str, force: bool) -> Result<(), String> {
+    pub(crate) fn append_text(
+        &mut self,
+        id: DocumentId,
+        characters: &str,
+        force: bool,
+    ) -> Result<(), String> {
         let doc = self.any_document_mut(id).ok_or("the view is closed")?;
         let read_only = doc.read_only;
         doc.read_only = read_only && !force;

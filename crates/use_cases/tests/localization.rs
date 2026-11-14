@@ -8,9 +8,19 @@ use use_cases::search::{CandidateTarget, SearchKind};
 
 fn spanish_world() -> World {
     World::new()
-        .with_language("es", "Español", &[("File: Save", "Archivo: Guardar"), ("Language: {name}", "Idioma: {name}")])
+        .with_language(
+            "es",
+            "Español",
+            &[
+                ("File: Save", "Archivo: Guardar"),
+                ("Language: {name}", "Idioma: {name}"),
+            ],
+        )
         .with_language("fr", "Français", &[("File: Save", "Fichier : Enregistrer")])
-        .with_palette(PaletteCommand { caption: "File: Save".into(), command: Command::new("save") })
+        .with_palette(PaletteCommand {
+            caption: "File: Save".into(),
+            command: Command::new("save"),
+        })
 }
 
 #[test]
@@ -32,7 +42,9 @@ fn auto_follows_the_operating_system_language() {
 
 #[test]
 fn the_language_setting_wins_over_the_operating_system() {
-    let world = spanish_world().with_system_language("es").with_preferences(json!({ "language": "fr" }));
+    let world = spanish_world()
+        .with_system_language("es")
+        .with_preferences(json!({ "language": "fr" }));
     let editor = world.editor();
     assert_eq!(editor.tr("File: Save"), "Fichier : Enregistrer");
 }
@@ -57,7 +69,10 @@ fn select_language_saves_the_setting_and_switches_at_once() {
     let world = spanish_world();
     let mut editor = world.editor();
     editor.select_language("es");
-    assert_eq!(world.resources.user_settings.borrow().get("language"), Some(&Value::from("es")));
+    assert_eq!(
+        world.resources.user_settings.borrow().get("language"),
+        Some(&Value::from("es"))
+    );
     assert_eq!(editor.tr("File: Save"), "Archivo: Guardar");
     assert_eq!(status(&editor), "Idioma: Español");
 
@@ -83,7 +98,9 @@ fn the_language_picker_offers_automatic_and_every_language() {
     let targets: Vec<CandidateTarget> = results.iter().map(|c| c.target.clone()).collect();
     assert_eq!(
         targets,
-        ["auto", "en", "es", "fr"].map(|code| CandidateTarget::Language(code.into())).to_vec()
+        ["auto", "en", "es", "fr"]
+            .map(|code| CandidateTarget::Language(code.into()))
+            .to_vec()
     );
     assert_eq!(results[2].caption, "Español");
     assert_eq!(results[2].hint, "es");
