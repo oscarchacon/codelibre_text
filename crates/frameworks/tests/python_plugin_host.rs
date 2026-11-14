@@ -783,7 +783,9 @@ class ProbeCommand(sublime_plugin.WindowCommand):
         from distutils.spawn import find_executable
         from distutils.dir_util import mkpath
         g_clipboard_history.push_text("copied in Terminus")
-        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on"), asynchat.async_chat.__name__))
+        # Our shim answers 1, as Python's distutils did; setuptools' copy (which shadows it where
+        # setuptools is installed) answers True.
+        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on") == 1, asynchat.async_chat.__name__))
 "#;
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
