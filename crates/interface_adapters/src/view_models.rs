@@ -129,6 +129,12 @@ pub struct QuickPanelViewModel {
     pub take_focus: bool,
     /// Items in the monospace font (a plugin's `sublime.MONOSPACE_FONT`).
     pub monospace: bool,
+    /// Whether accepting a plugin item includes the current modifier-key event.
+    pub wants_event: bool,
+    /// A text input handler is being asked in the palette's existing query field.
+    pub text_input: bool,
+    /// The text handler's selection, with its document revision, for syncing the reused field.
+    pub input_selection: Option<(u64, u64, usize, usize)>,
     /// An input handler asks in it: see [`CommandInputViewModel`].
     pub input: Option<CommandInputViewModel>,
 }
@@ -161,6 +167,7 @@ pub struct InputPanelViewModel {
 
 /// The output panel shown at the bottom (a build's or a plugin's output).
 pub struct OutputPanelViewModel {
+    pub id: DocumentId,
     pub name: String,
     /// The end of the panel's text (at most [`presenters::output_panel::MAX_LINES`] lines).
     ///
@@ -180,6 +187,12 @@ pub struct OutputPanelViewModel {
     pub highlight: Option<OutputPanelHighlight>,
     /// What is selected in the panel's view (a plugin's `view.sel()`), as bytes of `text`.
     pub selections: Vec<Range<usize>>,
+    /// The panel's view currently has focus; only then is its collapsed selection drawn.
+    pub focused: bool,
+    /// Give the output-panel view keyboard focus on this frame.
+    pub take_focus: bool,
+    /// The collapsed selection's char index in `text`, shown as a caret when focused.
+    pub caret: Option<usize>,
 }
 
 /// What the syntax engine needs to highlight an output panel. It highlights the whole text (its
@@ -198,6 +211,9 @@ pub struct FindPanelViewModel {
     pub query: String,
     pub replacement: String,
     pub replace_mode: bool,
+    /// Find in Files: the "Where" field shows.
+    pub in_files: bool,
+    pub where_text: String,
     pub regex: bool,
     pub case_sensitive: bool,
     pub whole_word: bool,

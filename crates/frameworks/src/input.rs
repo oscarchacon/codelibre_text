@@ -2,6 +2,41 @@
 
 use egui::{Key, Modifiers};
 use entities::keymap::KeyCombo;
+use serde_json::{json, Value};
+
+/// Sublime's event object for quick-panel selections and command input handlers.
+pub fn plugin_event(modifiers: Modifiers) -> Value {
+    let ctrl = modifiers.ctrl || (modifiers.command && !cfg!(target_os = "macos"));
+    let super_key = modifiers.mac_cmd || (modifiers.command && cfg!(target_os = "macos"));
+    let mut keys = serde_json::Map::new();
+    for (name, pressed) in [
+        ("ctrl", ctrl),
+        ("alt", modifiers.alt),
+        ("shift", modifiers.shift),
+        ("super", super_key),
+    ] {
+        if pressed {
+            keys.insert(name.into(), Value::Bool(true));
+        }
+    }
+    json!({ "modifier_keys": keys })
+}
+
+/// The most recent input event's modifiers, falling back to egui's frame-wide state.
+pub fn current_modifiers(ctx: &egui::Context) -> Modifiers {
+    ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::Key { modifiers, .. }
+                | egui::Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or(input.modifiers)
+    })
+}
 
 /// The ways a key press can be written in a keymap: by the character it produced (logical key)
 /// and by its position on the keyboard (physical key). They differ on non-US layouts.
@@ -22,7 +57,13 @@ pub fn typed_combo(text: &str) -> Option<KeyCombo> {
     if chars.next().is_some() || c.is_alphanumeric() || c.is_whitespace() || c.is_control() {
         return None;
     }
-    Some(KeyCombo { ctrl: false, alt: false, shift: false, super_key: false, key: c.to_string() })
+    Some(KeyCombo {
+        ctrl: false,
+        alt: false,
+        shift: false,
+        super_key: false,
+        key: c.to_string(),
+    })
 }
 
 fn combo(key: Key, modifiers: Modifiers) -> Option<KeyCombo> {
@@ -37,13 +78,20 @@ fn combo(key: Key, modifiers: Modifiers) -> Option<KeyCombo> {
 
 /// The egui key press a keymap combo stands for (the reverse of [`key_combos`]).
 pub fn key_event(combo: &KeyCombo) -> Option<(Key, Modifiers)> {
-    let key = Key::ALL.iter().copied().find(|k| key_name(*k) == Some(combo.key.as_str()))?;
+    let key = Key::ALL
+        .iter()
+        .copied()
+        .find(|k| key_name(*k) == Some(combo.key.as_str()))?;
     let modifiers = Modifiers {
         alt: combo.alt,
         ctrl: combo.ctrl,
         shift: combo.shift,
         mac_cmd: combo.super_key && cfg!(target_os = "macos"),
-        command: if cfg!(target_os = "macos") { combo.super_key } else { combo.ctrl },
+        command: if cfg!(target_os = "macos") {
+            combo.super_key
+        } else {
+            combo.ctrl
+        },
     };
     Some((key, modifiers))
 }

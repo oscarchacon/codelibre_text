@@ -9,7 +9,12 @@ use interface_adapters::view_models::ContextMenuViewModel;
 use super::menu_bar;
 
 /// The context menu of `response` (opened by a right click on it), for `target`.
-pub fn attach(response: &egui::Response, target: ContextMenuTarget, menu: Option<&ContextMenuViewModel>, events: &mut Vec<UiEvent>) {
+pub fn attach(
+    response: &egui::Response,
+    target: ContextMenuTarget,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
     response.context_menu(|ui| {
         let ours = menu.filter(|m| m.target == target);
         events.push(UiEvent::ContextMenu(Some(target)));
@@ -25,7 +30,10 @@ pub fn attach(response: &egui::Response, target: ContextMenuTarget, menu: Option
 
 /// After the views: no context menu is open when none said so this frame.
 pub fn report_closed(events: &mut Vec<UiEvent>) {
-    if !events.iter().any(|e| matches!(e, UiEvent::ContextMenu(Some(_)))) {
+    if !events
+        .iter()
+        .any(|e| matches!(e, UiEvent::ContextMenu(Some(_))))
+    {
         events.push(UiEvent::ContextMenu(None));
     }
 }

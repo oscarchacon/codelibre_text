@@ -21,10 +21,17 @@ pub struct Chrome {
 impl Chrome {
     pub fn from_scheme(theme: &Theme) -> Self {
         let s = &theme.settings;
-        let editor_bg = s.background.map(to_color32).unwrap_or(Color32::from_rgb(39, 40, 34));
+        let editor_bg = s
+            .background
+            .map(to_color32)
+            .unwrap_or(Color32::from_rgb(39, 40, 34));
         let fg = s.foreground.map(to_color32).unwrap_or(Color32::LIGHT_GRAY);
         let dark = luminance(editor_bg) < 0.5;
-        let shade = if dark { Color32::BLACK } else { Color32::from_gray(60) };
+        let shade = if dark {
+            Color32::BLACK
+        } else {
+            Color32::from_gray(60)
+        };
         Self {
             dark,
             editor_bg,
@@ -43,7 +50,11 @@ impl Chrome {
     }
 
     pub fn visuals(&self) -> Visuals {
-        let mut v = if self.dark { Visuals::dark() } else { Visuals::light() };
+        let mut v = if self.dark {
+            Visuals::dark()
+        } else {
+            Visuals::light()
+        };
         v.panel_fill = self.panel_bg;
         v.window_fill = self.panel_bg;
         v.extreme_bg_color = self.editor_bg;

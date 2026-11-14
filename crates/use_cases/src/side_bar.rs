@@ -17,7 +17,14 @@ use crate::plugin_panels::BuiltinInput;
 use crate::plugins::CommandRunner;
 
 /// The side bar commands built in, which [`Editor::side_bar_command_visible`] knows about.
-pub const SIDE_BAR_COMMANDS: &[&str] = &["new_file_at", "new_folder", "rename_path", "delete_file", "delete_folder"];
+pub const SIDE_BAR_COMMANDS: &[&str] = &[
+    "new_file_at",
+    "new_folder",
+    "rename_path",
+    "delete_file",
+    "delete_folder",
+    "find_in_folder",
+];
 
 impl Editor {
     /// Whether a built-in side bar command shows in a menu with these arguments, as Sublime's
@@ -29,23 +36,44 @@ impl Editor {
             "new_file_at" | "new_folder" => count("dirs") == 1,
             "rename_path" => count("paths") == 1,
             "delete_file" => count("files") > 0,
-            "delete_folder" => count("dirs") > 0,
+            "delete_folder" | "find_in_folder" => count("dirs") > 0,
             _ => true,
         }
+    }
+
+    /// `find_in_folder {"dirs"}`: Find in Files' "Where" becomes those folders (and the
+    /// project's filters), as Sublime's `side_bar.py` does; the panel opens after.
+    pub fn find_in_folder(&mut self, command: &Command) {
+        let mut entries: Vec<String> = paths(command, "dirs")
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect();
+        entries.push("<project filters>".to_string());
+        self.set_find_where(entries.join(","));
     }
 
     /// `new_file_at {"dirs"}`: a new file whose first save starts in that folder (`default_dir`).
     pub fn new_file_at(&mut self, command: &Command) {
         self.new_file();
-        let (Some(dir), Some(id)) = (paths(command, "dirs").into_iter().next(), self.active_document().map(|d| d.id)) else {
+        let (Some(dir), Some(id)) = (
+            paths(command, "dirs").into_iter().next(),
+            self.active_document().map(|d| d.id),
+        ) else {
             return;
         };
-        self.state.plugins.view_settings.entry(id).or_default().insert("default_dir".into(), json!(dir.display().to_string()));
+        self.state
+            .plugins
+            .view_settings
+            .entry(id)
+            .or_default()
+            .insert("default_dir".into(), json!(dir.display().to_string()));
     }
 
     /// `new_folder {"dirs"}`: asks for a name (`Folder Name:`), then makes it in the first folder.
     pub fn new_folder(&mut self, command: &Command, run_command: &mut CommandRunner) {
-        let Some(dir) = paths(command, "dirs").into_iter().next() else { return };
+        let Some(dir) = paths(command, "dirs").into_iter().next() else {
+            return;
+        };
         let caption = self.tr("Folder Name:").to_string();
         self.show_builtin_input_panel(caption, "", 0..0, BuiltinInput::NewFolder(dir), run_command);
     }
@@ -53,15 +81,25 @@ impl Editor {
     /// `rename_path {"paths"}`: asks for a new name (`New Name:`) with the old one, its name
     /// without the extension selected for a file, then renames it.
     pub fn rename_path(&mut self, command: &Command, run_command: &mut CommandRunner) {
-        let Some(path) = paths(command, "paths").into_iter().next() else { return };
-        let Some(leaf) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
+        let Some(path) = paths(command, "paths").into_iter().next() else {
+            return;
+        };
+        let Some(leaf) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            return;
+        };
         let is_dir = self.gateways.file_system.is_dir(&path);
         let stem = match leaf.rfind('.') {
             Some(dot) if !is_dir && dot > 0 => leaf[..dot].chars().count(),
             _ => leaf.chars().count(),
         };
         let caption = self.tr("New Name:").to_string();
-        self.show_builtin_input_panel(caption, &leaf, 0..stem, BuiltinInput::RenamePath(path), run_command);
+        self.show_builtin_input_panel(
+            caption,
+            &leaf,
+            0..stem,
+            BuiltinInput::RenamePath(path),
+            run_command,
+        );
     }
 
     /// `delete_file {"files", "prompt"}`: after asking (unless `prompt` is false), the files go to
@@ -74,14 +112,25 @@ impl Editor {
         if command.bool_arg("prompt", true) {
             let text = match files.as_slice() {
                 [file] => self.tr_args("Delete File {path}?", &[("path", &file.display())]),
-                _ => self.tr_n("Delete {count} File?", "Delete {count} Files?", files.len(), &[]),
+                _ => self.tr_n(
+                    "Delete {count} File?",
+                    "Delete {count} Files?",
+                    files.len(),
+                    &[],
+                ),
             };
             if !self.confirm_delete(self.tr("Delete File").to_string(), text) {
                 return;
             }
         }
         for file in &files {
-            let clean: Vec<_> = self.state.documents.iter().filter(|d| d.path.as_ref() == Some(file) && !d.is_dirty()).map(|d| d.id).collect();
+            let clean: Vec<_> = self
+                .state
+                .documents
+                .iter()
+                .filter(|d| d.path.as_ref() == Some(file) && !d.is_dirty())
+                .map(|d| d.id)
+                .collect();
             self.close_documents(clean);
             self.trash(file);
         }
@@ -97,7 +146,12 @@ impl Editor {
         }
         let text = match dirs.as_slice() {
             [dir] => self.tr_args("Delete Folder {path}?", &[("path", &dir.display())]),
-            _ => self.tr_n("Delete {count} Folder?", "Delete {count} Folders?", dirs.len(), &[]),
+            _ => self.tr_n(
+                "Delete {count} Folder?",
+                "Delete {count} Folders?",
+                dirs.len(),
+                &[],
+            ),
         };
         if !self.confirm_delete(self.tr("Delete Folder").to_string(), text) {
             return;
@@ -117,7 +171,9 @@ impl Editor {
         match input {
             BuiltinInput::NewFolder(dir) => {
                 if let Err(error) = self.gateways.file_system.create_dir(&dir.join(name)) {
-                    self.notify(self.tr_args("Unable to create the folder: {error}", &[("error", &error)]));
+                    self.notify(
+                        self.tr_args("Unable to create the folder: {error}", &[("error", &error)]),
+                    );
                 }
             }
             BuiltinInput::RenamePath(old) => self.rename(&old, name),
@@ -132,9 +188,13 @@ impl Editor {
         if new == old {
             return;
         }
-        let case_change = new.to_string_lossy().to_lowercase() == old.to_string_lossy().to_lowercase();
+        let case_change =
+            new.to_string_lossy().to_lowercase() == old.to_string_lossy().to_lowercase();
         if self.gateways.file_system.exists(&new) && !case_change {
-            self.notify(self.tr_args("Unable to rename: {path} already exists", &[("path", &new.display())]));
+            self.notify(self.tr_args(
+                "Unable to rename: {path} already exists",
+                &[("path", &new.display())],
+            ));
             return;
         }
         if let Err(error) = self.gateways.file_system.rename(old, &new) {
@@ -142,9 +202,17 @@ impl Editor {
             return;
         }
         for index in 0..self.state.documents.len() {
-            let Some(path) = self.state.documents[index].path.clone() else { continue };
-            let Ok(inside) = path.strip_prefix(old) else { continue };
-            let moved = if inside.as_os_str().is_empty() { new.clone() } else { new.join(inside) };
+            let Some(path) = self.state.documents[index].path.clone() else {
+                continue;
+            };
+            let Ok(inside) = path.strip_prefix(old) else {
+                continue;
+            };
+            let moved = if inside.as_os_str().is_empty() {
+                new.clone()
+            } else {
+                new.join(inside)
+            };
             let modified = self.gateways.file_system.modified(&moved);
             let extension_changed = moved.extension() != path.extension();
             let doc = &mut self.state.documents[index];
@@ -166,14 +234,20 @@ impl Editor {
             level: MessageLevel::Warning,
             title,
             text,
-            buttons: MessageButtons::OkCancel { ok: self.tr("Delete").to_string(), cancel: self.tr("Cancel").to_string() },
+            buttons: MessageButtons::OkCancel {
+                ok: self.tr("Delete").to_string(),
+                cancel: self.tr("Cancel").to_string(),
+            },
         };
         self.gateways.dialogs.show_message(&dialog) == MessageAnswer::Ok
     }
 
     fn trash(&mut self, path: &Path) {
         if let Err(error) = self.gateways.file_system.move_to_trash(path) {
-            let message = self.tr_args("Unable to delete {path}: {error}", &[("path", &path.display()), ("error", &error)]);
+            let message = self.tr_args(
+                "Unable to delete {path}: {error}",
+                &[("path", &path.display()), ("error", &error)],
+            );
             self.record_errors(std::slice::from_ref(&message));
             self.notify(message);
         }
@@ -182,5 +256,13 @@ impl Editor {
 
 /// The paths of a list argument (`files`, `dirs`, `paths`).
 fn paths(command: &Command, key: &str) -> Vec<PathBuf> {
-    command.args.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(PathBuf::from).collect()
+    command
+        .args
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(PathBuf::from)
+        .collect()
 }

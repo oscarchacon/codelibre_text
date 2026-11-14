@@ -3,18 +3,29 @@
 
 macro_rules! asset {
     ($file:literal) => {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/Default/", $file))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/Default/",
+            $file
+        ))
     };
 }
 
 /// The key bindings of this platform: [`OSX_KEYMAP`] on macOS, [`PC_KEYMAP`] elsewhere.
-pub const KEYMAP: &str = if cfg!(target_os = "macos") { OSX_KEYMAP } else { PC_KEYMAP };
+pub const KEYMAP: &str = if cfg!(target_os = "macos") {
+    OSX_KEYMAP
+} else {
+    PC_KEYMAP
+};
 /// Key bindings for Windows and Linux (Ctrl).
 pub const PC_KEYMAP: &str = asset!("Default.sublime-keymap");
 /// Key bindings for macOS (Cmd), as Sublime's `Default (OSX).sublime-keymap`.
 pub const OSX_KEYMAP: &str = asset!("Default (OSX).sublime-keymap");
 /// Every built-in keymap with its file name, to check them all whatever the platform.
-pub const KEYMAPS: &[(&str, &str)] = &[("Default.sublime-keymap", PC_KEYMAP), ("Default (OSX).sublime-keymap", OSX_KEYMAP)];
+pub const KEYMAPS: &[(&str, &str)] = &[
+    ("Default.sublime-keymap", PC_KEYMAP),
+    ("Default (OSX).sublime-keymap", OSX_KEYMAP),
+];
 pub const PALETTE_COMMANDS: &str = asset!("Default.sublime-commands");
 pub const MAIN_MENU: &str = asset!("Main.sublime-menu");
 /// Right-click menus: the text, a side bar entry, a top folder of the side bar (added after the

@@ -17,7 +17,11 @@ fn to_strict_json(source: &str) -> String {
     // Index just after the comment starting at `i`, if there is one.
     let skip_comment = |i: usize| -> Option<usize> {
         match (chars.get(i), chars.get(i + 1)) {
-            (Some('/'), Some('/')) => Some((i..chars.len()).find(|&j| chars[j] == '\n').unwrap_or(chars.len())),
+            (Some('/'), Some('/')) => Some(
+                (i..chars.len())
+                    .find(|&j| chars[j] == '\n')
+                    .unwrap_or(chars.len()),
+            ),
             (Some('/'), Some('*')) => {
                 let mut j = i + 2;
                 while j + 1 < chars.len() && !(chars[j] == '*' && chars[j + 1] == '/') {

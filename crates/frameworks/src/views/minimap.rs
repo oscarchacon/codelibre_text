@@ -113,14 +113,23 @@ pub struct Text<'a> {
 }
 
 /// Draws the minimap in `area`; returns the text area's new scroll when it was clicked or dragged.
-pub fn show(ui: &egui::Ui, id: egui::Id, area: Rect, settings: &MinimapViewModel, text: &Text, geometry: Geometry, colors: &Colors) -> Option<f32> {
+pub fn show(
+    ui: &egui::Ui,
+    id: egui::Id,
+    area: Rect,
+    settings: &MinimapViewModel,
+    text: &Text,
+    geometry: Geometry,
+    colors: &Colors,
+) -> Option<f32> {
     let response = ui.interact(area, id, Sense::CLICK | Sense::DRAG);
     let painter = ui.painter().with_clip_rect(area);
     painter.rect_filled(area, 0.0, colors.background);
     let scroll = geometry.scroll();
     let rows = RowStarts::new(text.galley);
     let shown = scroll / SCALE..(scroll + area.height()) / SCALE;
-    let to_screen = |x: f32, y: f32| egui::pos2(area.left() + x * SCALE, area.top() + y * SCALE - scroll);
+    let to_screen =
+        |x: f32, y: f32| egui::pos2(area.left() + x * SCALE, area.top() + y * SCALE - scroll);
     let line = (text.row_height * SCALE).max(1.0);
 
     let mut shapes = Vec::new();
@@ -136,21 +145,36 @@ pub fn show(ui: &egui::Ui, id: egui::Id, area: Rect, settings: &MinimapViewModel
     if !text.selection.is_empty() {
         mark(&text.selection, colors.selection);
     }
-    for (regions, &color) in text.regions.iter().zip(text.region_colors).filter(|(r, _)| r.on_minimap) {
+    for (regions, &color) in text
+        .regions
+        .iter()
+        .zip(text.region_colors)
+        .filter(|(r, _)| r.on_minimap)
+    {
         for range in &regions.ranges {
             mark(range, color.gamma_multiply(0.6));
         }
     }
     // The text, a bar for each word in its color.
     let sections = &text.galley.job.sections;
-    for row in text.galley.rows.iter().filter(|r| r.rect.bottom() >= shown.start && r.rect.top() <= shown.end) {
+    for row in text
+        .galley
+        .rows
+        .iter()
+        .filter(|r| r.rect.bottom() >= shown.start && r.rect.top() <= shown.end)
+    {
         let mut word: Option<(f32, f32, u32)> = None;
         let mut flush = |word: &mut Option<(f32, f32, u32)>| {
             if let Some((start, end, section)) = word.take() {
-                let color = sections.get(section as usize).map_or(colors.foreground, |s| s.format.color);
+                let color = sections
+                    .get(section as usize)
+                    .map_or(colors.foreground, |s| s.format.color);
                 let min = to_screen(start, row.rect.top());
                 shapes.push(Shape::rect_filled(
-                    Rect::from_min_max(min, egui::pos2(area.left() + end * SCALE, min.y + line * 0.7)),
+                    Rect::from_min_max(
+                        min,
+                        egui::pos2(area.left() + end * SCALE, min.y + line * 0.7),
+                    ),
                     0.0,
                     color.gamma_multiply(0.75),
                 ));
@@ -178,15 +202,33 @@ pub fn show(ui: &egui::Ui, id: egui::Id, area: Rect, settings: &MinimapViewModel
     let hovered = response.hovered() || response.dragged();
     if settings.always_show_viewport || hovered {
         let span = geometry.viewport_box();
-        let rect = Rect::from_min_max(egui::pos2(area.left(), area.top() + span.start), egui::pos2(area.right(), area.top() + span.end));
-        painter.rect_filled(rect, 0.0, colors.foreground.gamma_multiply(if hovered { 0.12 } else { 0.07 }));
+        let rect = Rect::from_min_max(
+            egui::pos2(area.left(), area.top() + span.start),
+            egui::pos2(area.right(), area.top() + span.end),
+        );
+        painter.rect_filled(
+            rect,
+            0.0,
+            colors
+                .foreground
+                .gamma_multiply(if hovered { 0.12 } else { 0.07 }),
+        );
         if settings.draw_border {
-            let border = colors.border.unwrap_or_else(|| colors.foreground.gamma_multiply(0.4));
-            painter.rect_stroke(rect.shrink(0.5), 0.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
+            let border = colors
+                .border
+                .unwrap_or_else(|| colors.foreground.gamma_multiply(0.4));
+            painter.rect_stroke(
+                rect.shrink(0.5),
+                0.0,
+                Stroke::new(1.0_f32, border),
+                egui::StrokeKind::Inside,
+            );
         }
     }
 
-    let pointer = response.interact_pointer_pos().filter(|_| response.is_pointer_button_down_on() || response.clicked())?;
+    let pointer = response
+        .interact_pointer_pos()
+        .filter(|_| response.is_pointer_button_down_on() || response.clicked())?;
     Some(geometry.offset_for_pointer(pointer.y - area.top()))
 }
 
@@ -210,14 +252,19 @@ impl RowStarts {
     }
 
     fn row_of(&self, char: usize) -> usize {
-        self.0.partition_point(|&start| start <= char).saturating_sub(1)
+        self.0
+            .partition_point(|&start| start <= char)
+            .saturating_sub(1)
     }
 
     /// The x of a char in its row.
     fn x(&self, galley: &Galley, row: usize, char: usize) -> f32 {
         let row_data = &galley.rows[row];
         let column = char - self.0[row];
-        row_data.glyphs.get(column).map_or(row_data.rect.right(), |g| g.pos.x)
+        row_data
+            .glyphs
+            .get(column)
+            .map_or(row_data.rect.right(), |g| g.pos.x)
     }
 
     /// The rectangles (in galley coordinates) of a char range, one per row, only of rows that
@@ -228,12 +275,26 @@ impl RowStarts {
         }
         let (first, last) = (self.row_of(range.start), self.row_of(range.end));
         (first..=last)
-            .filter(|&row| galley.rows[row].rect.bottom() >= shown.start && galley.rows[row].rect.top() <= shown.end)
+            .filter(|&row| {
+                galley.rows[row].rect.bottom() >= shown.start
+                    && galley.rows[row].rect.top() <= shown.end
+            })
             .map(|row| {
                 let rect = galley.rows[row].rect;
-                let left = if row == first { self.x(galley, row, range.start) } else { 0.0 };
-                let right = if row == last { self.x(galley, row, range.end) } else { rect.right() };
-                Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()))
+                let left = if row == first {
+                    self.x(galley, row, range.start)
+                } else {
+                    0.0
+                };
+                let right = if row == last {
+                    self.x(galley, row, range.end)
+                } else {
+                    rect.right()
+                };
+                Rect::from_min_max(
+                    egui::pos2(left, rect.top()),
+                    egui::pos2(right.max(left), rect.bottom()),
+                )
             })
             .collect()
     }

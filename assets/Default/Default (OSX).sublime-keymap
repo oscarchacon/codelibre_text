@@ -35,6 +35,7 @@
 
 	{ "keys": ["super+f"], "command": "show_panel", "args": { "panel": "find" } },
 	{ "keys": ["super+alt+f"], "command": "show_panel", "args": { "panel": "replace" } },
+	{ "keys": ["super+shift+f"], "command": "show_panel", "args": { "panel": "find_in_files" } },
 	{ "keys": ["super+g"], "command": "find_next" },
 	{ "keys": ["super+shift+g"], "command": "find_prev" },
 	{ "keys": ["super+alt+g"], "command": "find_under" },

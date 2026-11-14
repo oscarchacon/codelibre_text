@@ -46,14 +46,23 @@ impl ProcessGateway for ChildProcesses {
         for (name, value) in &request.env {
             command.env(name, expand_environment(value));
         }
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         hide_and_group(&mut command);
 
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let (sender, events) = channel();
         let readers: Vec<_> = [
-            child.stdout.take().map(|out| Box::new(out) as Box<dyn Read + Send>),
-            child.stderr.take().map(|err| Box::new(err) as Box<dyn Read + Send>),
+            child
+                .stdout
+                .take()
+                .map(|out| Box::new(out) as Box<dyn Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|err| Box::new(err) as Box<dyn Read + Send>),
         ]
         .into_iter()
         .flatten()
@@ -69,7 +78,11 @@ impl ProcessGateway for ChildProcesses {
             for reader in readers {
                 let _ = reader.join();
             }
-            send(&sender, waker.as_ref(), ProcessEvent::Finished(status.ok().and_then(|s| s.code())));
+            send(
+                &sender,
+                waker.as_ref(),
+                ProcessEvent::Finished(status.ok().and_then(|s| s.code())),
+            );
         });
         // A new channel: what the previous process still writes goes nowhere.
         self.running = Some(Running { pid, events });
@@ -77,7 +90,9 @@ impl ProcessGateway for ChildProcesses {
     }
 
     fn poll(&mut self) -> Vec<ProcessEvent> {
-        self.running.as_ref().map_or_else(Vec::new, |running| running.events.try_iter().collect())
+        self.running
+            .as_ref()
+            .map_or_else(Vec::new, |running| running.events.try_iter().collect())
     }
 
     fn kill(&mut self) {
@@ -101,7 +116,11 @@ fn send(sender: &Sender<ProcessEvent>, waker: Option<&Waker>, event: ProcessEven
 }
 
 /// Sends the text of a stream as it arrives, keeping a char cut between two reads for the next one.
-fn read_output(mut stream: Box<dyn Read + Send>, sender: &Sender<ProcessEvent>, waker: Option<&Waker>) {
+fn read_output(
+    mut stream: Box<dyn Read + Send>,
+    sender: &Sender<ProcessEvent>,
+    waker: Option<&Waker>,
+) {
     let mut buffer = [0; 4096];
     let mut pending = Vec::new();
     while let Ok(count) = stream.read(&mut buffer) {
@@ -114,12 +133,20 @@ fn read_output(mut stream: Box<dyn Read + Send>, sender: &Sender<ProcessEvent>, 
             _ => pending.len(),
         };
         if complete > 0 {
-            send(sender, waker, ProcessEvent::Output(String::from_utf8_lossy(&pending[..complete]).into_owned()));
+            send(
+                sender,
+                waker,
+                ProcessEvent::Output(String::from_utf8_lossy(&pending[..complete]).into_owned()),
+            );
             pending.drain(..complete);
         }
     }
     if !pending.is_empty() {
-        send(sender, waker, ProcessEvent::Output(String::from_utf8_lossy(&pending).into_owned()));
+        send(
+            sender,
+            waker,
+            ProcessEvent::Output(String::from_utf8_lossy(&pending).into_owned()),
+        );
     }
 }
 
@@ -172,7 +199,10 @@ fn hide_and_group(command: &mut Command) {
 #[cfg(windows)]
 fn kill_tree(pid: u32) {
     use std::os::windows::process::CommandExt;
-    let result = Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).creation_flags(CREATE_NO_WINDOW).output();
+    let result = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     if let Err(e) = result {
         tracing::warn!("could not kill process {pid}: {e}");
     }
@@ -180,7 +210,10 @@ fn kill_tree(pid: u32) {
 
 #[cfg(not(windows))]
 fn kill_tree(pid: u32) {
-    if let Err(e) = Command::new("kill").args(["-TERM", "--", &format!("-{pid}")]).output() {
+    if let Err(e) = Command::new("kill")
+        .args(["-TERM", "--", &format!("-{pid}")])
+        .output()
+    {
         tracing::warn!("could not kill process {pid}: {e}");
     }
 }
@@ -197,7 +230,10 @@ fn expand_environment(value: &str) -> String {
         let (name, after) = match (marker, tail.strip_prefix('{')) {
             ("$", Some(inner)) => inner.split_once('}').unwrap_or(("", tail)),
             ("$", None) => tail.split_at(tail.find(|c| !is_name(c)).unwrap_or(tail.len())),
-            _ => tail.split_once('%').filter(|(name, _)| name.chars().all(is_name)).unwrap_or(("", tail)),
+            _ => tail
+                .split_once('%')
+                .filter(|(name, _)| name.chars().all(is_name))
+                .unwrap_or(("", tail)),
         };
         match std::env::var(name) {
             Ok(found) if !name.is_empty() => {

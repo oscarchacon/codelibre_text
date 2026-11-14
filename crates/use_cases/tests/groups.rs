@@ -1,16 +1,20 @@
 //! Tests for the groups of the window (`use_cases::groups`): layouts, focus, moving views.
 
-use entities::layout::Layout;
 use entities::command::Command;
+use entities::layout::Layout;
 use serde_json::{json, Value};
 use test_support::{open, plugin_call, World};
+use use_cases::editing::TextCommand;
 use use_cases::gateways::PluginCommandKind::Text;
 use use_cases::gateways::PluginMessage;
-use use_cases::editing::TextCommand;
 use use_cases::Editor;
 
 fn names_in(editor: &Editor, group: usize) -> Vec<String> {
-    editor.group_indexes(group).into_iter().map(|i| editor.state().documents[i].name()).collect()
+    editor
+        .group_indexes(group)
+        .into_iter()
+        .map(|i| editor.state().documents[i].name())
+        .collect()
 }
 
 fn active_name(editor: &Editor) -> Option<String> {
@@ -29,7 +33,11 @@ fn two_columns(world: &World) -> Editor {
 }
 
 fn world() -> World {
-    World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b").with_file("/p/c.txt", "c").with_file("/p/d.txt", "d")
+    World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b")
+        .with_file("/p/c.txt", "c")
+        .with_file("/p/d.txt", "d")
 }
 
 #[test]
@@ -122,7 +130,11 @@ fn tab_keys_stay_in_the_focused_group() {
     assert_eq!(active_name(&editor).as_deref(), Some("a.txt"));
     editor.focus_group(1);
     editor.activate_in_group(1);
-    assert_eq!(active_name(&editor).as_deref(), Some("c.txt"), "group 1 has one tab");
+    assert_eq!(
+        active_name(&editor).as_deref(),
+        Some("c.txt"),
+        "group 1 has one tab"
+    );
     editor.focus_neighboring_group(true);
     assert_eq!(editor.active_group(), 0);
     editor.move_active_to_neighboring_group(false);
@@ -131,32 +143,92 @@ fn tab_keys_stay_in_the_focused_group() {
 
 /// The editor's answer when a plugin calls `function(args...)`.
 fn call(world: &World, editor: &mut Editor, function: &str, args: Value) -> Result<Value, String> {
-    world.plugins.then([plugin_call(function, args), PluginMessage::Done { error: None }]);
+    world.plugins.then([
+        plugin_call(function, args),
+        PluginMessage::Done { error: None },
+    ]);
     editor.run_plugin_command(&Command::new("probe"), &mut |_, _| {});
-    world.plugins.replies.borrow_mut().pop().expect("the editor answered")
+    world
+        .plugins
+        .replies
+        .borrow_mut()
+        .pop()
+        .expect("the editor answered")
 }
 
 #[test]
 fn plugins_see_and_change_the_groups() {
     let world = world().with_plugin_commands(&[("probe", Text)]);
     let mut editor = two_columns(&world);
-    assert_eq!(call(&world, &mut editor, "window_num_groups", json!([])), Ok(json!(2)));
-    assert_eq!(call(&world, &mut editor, "window_active_group", json!([])), Ok(json!(1)));
-    assert_eq!(call(&world, &mut editor, "window_get_layout", json!([])), Ok(Layout::columns(2).to_json()));
+    assert_eq!(
+        call(&world, &mut editor, "window_num_groups", json!([])),
+        Ok(json!(2))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_active_group", json!([])),
+        Ok(json!(1))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_get_layout", json!([])),
+        Ok(Layout::columns(2).to_json())
+    );
     let ids: Vec<u64> = editor.state().documents.iter().map(|d| d.id).collect();
-    assert_eq!(call(&world, &mut editor, "window_views_in_group", json!([0])), Ok(json!([ids[0], ids[1]])));
-    assert_eq!(call(&world, &mut editor, "window_active_view_in_group", json!([0])), Ok(json!(ids[1])));
-    assert_eq!(call(&world, &mut editor, "window_get_view_index", json!([ids[2]])), Ok(json!([1, 0])));
-    assert_eq!(call(&world, &mut editor, "window_get_view_index", json!([999])), Ok(json!([-1, -1])));
+    assert_eq!(
+        call(&world, &mut editor, "window_views_in_group", json!([0])),
+        Ok(json!([ids[0], ids[1]]))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_active_view_in_group",
+            json!([0])
+        ),
+        Ok(json!(ids[1]))
+    );
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "window_get_view_index",
+            json!([ids[2]])
+        ),
+        Ok(json!([1, 0]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "window_get_view_index", json!([999])),
+        Ok(json!([-1, -1]))
+    );
     // A view moved to another group: the focus stays.
-    call(&world, &mut editor, "window_set_view_index", json!([ids[0], 1, 0])).unwrap();
-    assert_eq!(call(&world, &mut editor, "window_views_in_group", json!([1])), Ok(json!([ids[0], ids[2]])));
+    call(
+        &world,
+        &mut editor,
+        "window_set_view_index",
+        json!([ids[0], 1, 0]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "window_views_in_group", json!([1])),
+        Ok(json!([ids[0], ids[2]]))
+    );
     assert_eq!(editor.active_group(), 1);
     call(&world, &mut editor, "window_focus_group", json!([0])).unwrap();
     assert_eq!(active_name(&editor).as_deref(), Some("b.txt"));
-    call(&world, &mut editor, "window_set_layout", json!([Layout::grid().to_json()])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "window_set_layout",
+        json!([Layout::grid().to_json()]),
+    )
+    .unwrap();
     assert_eq!(editor.group_count(), 4);
-    assert!(call(&world, &mut editor, "window_set_layout", json!([{ "cols": [0.0] }])).is_err());
+    assert!(call(
+        &world,
+        &mut editor,
+        "window_set_layout",
+        json!([{ "cols": [0.0] }])
+    )
+    .is_err());
 }
 
 #[test]
@@ -166,7 +238,14 @@ fn the_session_keeps_the_groups() {
     editor.save_session(Vec::new());
     let session = world.session.borrow().clone().unwrap();
     assert_eq!(session.groups, Some(Layout::columns(2)));
-    assert_eq!(session.documents.iter().map(|d| d.group).collect::<Vec<_>>(), vec![0, 0, 1]);
+    assert_eq!(
+        session
+            .documents
+            .iter()
+            .map(|d| d.group)
+            .collect::<Vec<_>>(),
+        vec![0, 0, 1]
+    );
 
     let restored = world.with_session(session);
     let editor = restored.editor();
@@ -183,19 +262,31 @@ fn new_pane_and_close_pane_flow_in_rows_of_max_columns() {
     open(&mut editor, "/p/b.txt");
     editor.new_pane(true);
     assert_eq!(editor.group_count(), 2);
-    assert_eq!((names_in(&editor, 0), names_in(&editor, 1)), (vec!["a.txt".to_string()], vec!["b.txt".to_string()]), "b went along");
+    assert_eq!(
+        (names_in(&editor, 0), names_in(&editor, 1)),
+        (vec!["a.txt".to_string()], vec!["b.txt".to_string()]),
+        "b went along"
+    );
     assert_eq!(editor.active_group(), 1);
 
     editor.set_max_columns(2);
     editor.new_pane(false);
     assert_eq!(editor.layout(), &Layout::flow(3, 2), "a second row");
-    assert_eq!(editor.active_group(), 2, "the new, empty group has the focus");
+    assert_eq!(
+        editor.active_group(),
+        2,
+        "the new, empty group has the focus"
+    );
     assert!(editor.active_document().is_none());
 
     editor.focus_group(1);
     editor.close_pane(None);
     assert_eq!(editor.group_count(), 2);
-    assert_eq!(names_in(&editor, 0), vec!["a.txt", "b.txt"], "the closed group's files join the one before it");
+    assert_eq!(
+        names_in(&editor, 0),
+        vec!["a.txt", "b.txt"],
+        "the closed group's files join the one before it"
+    );
     assert_eq!(editor.max_columns(), 2);
 }
 
@@ -208,7 +299,13 @@ fn dragging_a_boundary_or_a_tab() {
     editor.move_layout_boundary(true, 1, 0.999);
     assert_eq!(editor.layout().cols[1], 0.95, "kept away from the edge");
 
-    let a = editor.state().documents.iter().find(|d| d.name() == "a.txt").unwrap().id;
+    let a = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.name() == "a.txt")
+        .unwrap()
+        .id;
     editor.drop_view_in_group(a, 1, 0);
     assert_eq!(names_in(&editor, 1), vec!["a.txt", "c.txt"]);
     assert_eq!(active_name(&editor).as_deref(), Some("a.txt"));
@@ -222,9 +319,16 @@ fn a_preview_takes_the_place_of_the_last_one_until_it_is_edited() {
     assert!(editor.preview_file(std::path::Path::new("/p/b.txt")));
     assert!(editor.active_document().unwrap().transient);
     editor.preview_file(std::path::Path::new("/p/c.txt"));
-    assert_eq!(names_in(&editor, 0), vec!["a.txt", "c.txt"], "b's preview gave way");
+    assert_eq!(
+        names_in(&editor, 0),
+        vec!["a.txt", "c.txt"],
+        "b's preview gave way"
+    );
     editor.run_text_command(TextCommand::Insert("x".into()));
-    assert!(!editor.active_document().unwrap().transient, "edited: it stays");
+    assert!(
+        !editor.active_document().unwrap().transient,
+        "edited: it stays"
+    );
     editor.preview_file(std::path::Path::new("/p/d.txt"));
     assert_eq!(names_in(&editor, 0), vec!["a.txt", "c.txt", "d.txt"]);
     let d = editor.active_document().unwrap().id;

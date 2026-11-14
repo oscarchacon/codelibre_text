@@ -23,7 +23,10 @@ pub fn line_start(text: &str, byte: usize) -> usize {
 
 /// Byte offset of the end of the line containing `byte` (before its newline).
 pub fn line_end(text: &str, byte: usize) -> usize {
-    text[byte..].find('\n').map(|i| byte + i).unwrap_or(text.len())
+    text[byte..]
+        .find('\n')
+        .map(|i| byte + i)
+        .unwrap_or(text.len())
 }
 
 /// Zero-based (line, column) of a char index.

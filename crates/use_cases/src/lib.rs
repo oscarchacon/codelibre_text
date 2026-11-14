@@ -43,6 +43,7 @@ pub mod context_menus;
 pub mod documents;
 pub mod editing;
 pub mod editor;
+pub mod find_in_files;
 pub mod find_replace;
 pub mod gateways;
 pub mod groups;

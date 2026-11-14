@@ -394,6 +394,10 @@ msgstr "Ocultar Outros"
 msgid "Show All"
 msgstr "Mostrar Tudo"
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr "Console"
+
 #: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Ajuda"
@@ -1275,3 +1279,133 @@ msgstr "Excluir"
 
 msgid "Unable to delete {path}: {error}"
 msgstr "Não foi possível excluir {path}: {error}"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "0 matches"
+msgstr "0 ocorrências"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "<skipped {count} character>"
+msgid_plural "<skipped {count} characters>"
+msgstr[0] "<{count} caractere omitido>"
+msgstr[1] "<{count} caracteres omitidos>"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Current File"
+msgstr "Adicionar arquivo atual"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Exclude Filter"
+msgstr "Adicionar filtro de exclusão"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Folder"
+msgstr "Adicionar pasta"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Include Filter"
+msgstr "Adicionar filtro de inclusão"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Files"
+msgstr "Adicionar arquivos abertos"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Folders"
+msgstr "Adicionar pastas abertas"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Project Filters"
+msgstr "Adicionar filtros do projeto"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Find in Files"
+msgstr "Cancelar localização em arquivos"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Clear"
+msgstr "Limpar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Results"
+msgstr "Resultados da localização"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Find in Files cancelled"
+msgstr "Localização em arquivos cancelada"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find in Files…"
+msgstr "Localizar em arquivos…"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Find in Folder…"
+msgstr "Localizar na pasta…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Cancel Find in Files"
+msgstr "Localizar: Cancelar localização em arquivos"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Find in Files…"
+msgstr "Localizar: Localizar em arquivos…"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "No open folders or files to search"
+msgstr "Nenhuma pasta ou arquivo aberto para localizar"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace in Files"
+msgstr "Substituir em arquivos"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace {count} occurrence across {files} files?"
+msgid_plural "Replace {count} occurrences across {files} files?"
+msgstr[0] "Substituir {count} ocorrência em {files} arquivos?"
+msgstr[1] "Substituir {count} ocorrências em {files} arquivos?"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Searching {count} file for \"{query}\""
+msgid_plural "Searching {count} files for \"{query}\""
+msgstr[0] "Localizando \"{query}\" em {count} arquivo"
+msgstr[1] "Localizando \"{query}\" em {count} arquivos"
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Searching…"
+msgstr "Localizando…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Results Panel"
+msgstr "Mostrar painel de resultados"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where"
+msgstr "Onde"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where to search"
+msgstr "Onde localizar"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "case sensitive"
+msgstr "diferencia maiúsculas"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "regex"
+msgstr "regex"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "whole word"
+msgstr "palavra inteira"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match across {files} files"
+msgid_plural "{count} matches across {files} files"
+msgstr[0] "{count} ocorrência em {files} arquivos"
+msgstr[1] "{count} ocorrências em {files} arquivos"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match in 1 file"
+msgid_plural "{count} matches in 1 file"
+msgstr[0] "{count} ocorrência em 1 arquivo"
+msgstr[1] "{count} ocorrências em 1 arquivo"

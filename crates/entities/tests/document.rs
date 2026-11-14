@@ -229,9 +229,16 @@ fn added_selections_are_kept_until_the_caret_is_moved_by_hand() {
     doc.add_selection(Selection::new(3, 5));
     assert_eq!(doc.selection(), Selection::new(3, 5));
     assert_eq!(doc.extra_selections(), &[Selection::new(0, 2)]);
-    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(3, 5)]);
+    assert_eq!(
+        doc.selections(),
+        vec![Selection::new(0, 2), Selection::new(3, 5)]
+    );
     doc.sync_selection_from_view(Selection::new(3, 5));
-    assert_eq!(doc.extra_selections().len(), 1, "the view reporting the same caret changes nothing");
+    assert_eq!(
+        doc.extra_selections().len(),
+        1,
+        "the view reporting the same caret changes nothing"
+    );
     doc.sync_selection_from_view(Selection::caret(7));
     assert!(doc.extra_selections().is_empty());
 }
@@ -286,11 +293,26 @@ fn read_only_documents_cannot_be_edited() {
 
 #[test]
 fn line_ending_settings() {
-    assert_eq!(LineEnding::from_setting(Some("windows"), LineEnding::Unix), LineEnding::Windows);
-    assert_eq!(LineEnding::from_setting(Some("unix"), LineEnding::Windows), LineEnding::Unix);
-    assert_eq!(LineEnding::from_setting(Some("mac"), LineEnding::Windows), LineEnding::Unix);
-    assert_eq!(LineEnding::from_setting(Some("system"), LineEnding::Windows), LineEnding::Windows);
-    assert_eq!(LineEnding::from_setting(None, LineEnding::Unix), LineEnding::Unix);
+    assert_eq!(
+        LineEnding::from_setting(Some("windows"), LineEnding::Unix),
+        LineEnding::Windows
+    );
+    assert_eq!(
+        LineEnding::from_setting(Some("unix"), LineEnding::Windows),
+        LineEnding::Unix
+    );
+    assert_eq!(
+        LineEnding::from_setting(Some("mac"), LineEnding::Windows),
+        LineEnding::Unix
+    );
+    assert_eq!(
+        LineEnding::from_setting(Some("system"), LineEnding::Windows),
+        LineEnding::Windows
+    );
+    assert_eq!(
+        LineEnding::from_setting(None, LineEnding::Unix),
+        LineEnding::Unix
+    );
 }
 
 #[test]
@@ -307,30 +329,70 @@ fn set_selections_replaces_every_selection() {
     let mut doc = from_bytes(b"abcdef");
     doc.add_selection(Selection::caret(1));
     let revision = doc.selection_revision();
-    doc.set_selections(Selection::caret(4), [Selection::caret(5), Selection::caret(2), Selection::caret(4), Selection::caret(9)]);
+    doc.set_selections(
+        Selection::caret(4),
+        [
+            Selection::caret(5),
+            Selection::caret(2),
+            Selection::caret(4),
+            Selection::caret(9),
+        ],
+    );
     assert_eq!(doc.selection(), Selection::caret(4));
-    assert_eq!(doc.extra_selections(), &[Selection::caret(2), Selection::caret(5), Selection::caret(6)], "sorted, clamped, without the primary");
-    assert!(doc.selection_revision() > revision, "the view follows the new primary selection");
+    assert_eq!(
+        doc.extra_selections(),
+        &[
+            Selection::caret(2),
+            Selection::caret(5),
+            Selection::caret(6)
+        ],
+        "sorted, clamped, without the primary"
+    );
+    assert!(
+        doc.selection_revision() > revision,
+        "the view follows the new primary selection"
+    );
 }
 
 #[test]
 fn replace_range_moves_the_selections_like_sublime() {
     let mut doc = from_bytes(b"abcdef");
-    doc.set_selections(Selection::caret(4), [Selection::caret(1), Selection::new(2, 5)]);
+    doc.set_selections(
+        Selection::caret(4),
+        [Selection::caret(1), Selection::new(2, 5)],
+    );
     assert!(doc.replace_range(4, 4, "XY"));
     assert_eq!(doc.text, "abcdXYef");
-    assert_eq!(doc.selection(), Selection::caret(6), "a caret where text is inserted ends after it");
-    assert_eq!(doc.extra_selections(), &[Selection::caret(1), Selection::new(2, 7)]);
+    assert_eq!(
+        doc.selection(),
+        Selection::caret(6),
+        "a caret where text is inserted ends after it"
+    );
+    assert_eq!(
+        doc.extra_selections(),
+        &[Selection::caret(1), Selection::new(2, 7)]
+    );
 
     doc.replace_range(1, 3, "");
     assert_eq!(doc.text, "adXYef");
-    assert_eq!(doc.extra_selections(), &[Selection::caret(1), Selection::new(1, 5)], "positions inside go to the end");
+    assert_eq!(
+        doc.extra_selections(),
+        &[Selection::caret(1), Selection::new(1, 5)],
+        "positions inside go to the end"
+    );
 
     let mut doc = from_bytes(b"hello");
     doc.set_selection(Selection::new(0, 5));
     doc.replace_range(0, 5, "héllo!");
-    assert_eq!(doc.selection(), Selection::new(0, 6), "replacing the selection keeps the new text selected");
-    assert!(doc.replace_range(10, 2, "x"), "out of range positions are clamped");
+    assert_eq!(
+        doc.selection(),
+        Selection::new(0, 6),
+        "replacing the selection keeps the new text selected"
+    );
+    assert!(
+        doc.replace_range(10, 2, "x"),
+        "out of range positions are clamped"
+    );
     assert_eq!(doc.text, "héllo!x");
 }
 
@@ -358,27 +420,50 @@ fn the_change_count_grows_with_text_changes_only() {
 }
 
 fn region_set(key: &str, regions: &[(usize, usize)]) -> RegionSet {
-    RegionSet { key: key.into(), regions: regions.to_vec(), scope: "region.redish".into(), icon: String::new(), flags: 0, ..RegionSet::default() }
+    RegionSet {
+        key: key.into(),
+        regions: regions.to_vec(),
+        scope: "region.redish".into(),
+        icon: String::new(),
+        flags: 0,
+        ..RegionSet::default()
+    }
 }
 
 #[test]
 fn phantoms_move_with_the_text_and_are_erased_by_key_or_id() {
     let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
-    let phantom = |id: u64, key: &str, region: (usize, usize)| Phantom { id, key: key.into(), region, content: "<b>x</b>".into(), layout: 2 };
+    let phantom = |id: u64, key: &str, region: (usize, usize)| Phantom {
+        id,
+        key: key.into(),
+        region,
+        content: "<b>x</b>".into(),
+        layout: 2,
+    };
     doc.add_phantom(phantom(1, "lint", (4, 7)));
     doc.add_phantom(phantom(2, "lint", (8, 13)));
     doc.add_phantom(phantom(3, "other", (0, 0)));
     doc.replace_range(0, 0, ">> ");
     let regions: Vec<_> = doc.phantoms().iter().map(|p| p.region).collect();
-    assert_eq!(regions, vec![(7, 10), (11, 16), (3, 3)], "an insertion at a caret-like region goes before it");
+    assert_eq!(
+        regions,
+        vec![(7, 10), (11, 16), (3, 3)],
+        "an insertion at a caret-like region goes before it"
+    );
     // The widget edits the text in place.
     doc.text.insert(0, '#');
     doc.note_text_changed();
     assert_eq!(doc.phantoms()[0].region, (8, 11));
     doc.erase_phantom(1);
-    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(
+        doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
     doc.erase_phantoms("lint");
-    assert_eq!(doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(), vec![3]);
+    assert_eq!(
+        doc.phantoms().iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![3]
+    );
 }
 
 #[test]
@@ -404,12 +489,24 @@ fn plugin_regions_move_with_the_text() {
     let mut doc = Document::scratch(1, "s", "one two three", "Plain Text", false);
     doc.add_regions(region_set("lint", &[(4, 7), (8, 13)]));
     doc.replace_range(0, 0, ">> ");
-    assert_eq!(doc.regions("lint"), vec![(7, 10), (11, 16)], "after an insertion before them");
+    assert_eq!(
+        doc.regions("lint"),
+        vec![(7, 10), (11, 16)],
+        "after an insertion before them"
+    );
     doc.replace_range(7, 10, "2");
-    assert_eq!(doc.regions("lint"), vec![(7, 8), (9, 14)], "a replaced region covers the new text");
+    assert_eq!(
+        doc.regions("lint"),
+        vec![(7, 8), (9, 14)],
+        "a replaced region covers the new text"
+    );
     doc.text.truncate(5);
     doc.note_text_changed();
-    assert_eq!(doc.regions("lint"), vec![(5, 5), (5, 5)], "edits made in place: kept within the text");
+    assert_eq!(
+        doc.regions("lint"),
+        vec![(5, 5), (5, 5)],
+        "edits made in place: kept within the text"
+    );
 }
 
 #[test]
@@ -418,7 +515,14 @@ fn region_sets_are_replaced_and_erased_by_key() {
     doc.add_regions(region_set("a", &[(0, 1)]));
     doc.add_regions(region_set("b", &[(2, 3)]));
     doc.add_regions(region_set("a", &[(4, 5)]));
-    assert_eq!(doc.region_sets().iter().map(|s| s.key.as_str()).collect::<Vec<_>>(), ["a", "b"], "first-added order");
+    assert_eq!(
+        doc.region_sets()
+            .iter()
+            .map(|s| s.key.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"],
+        "first-added order"
+    );
     assert_eq!(doc.regions("a"), vec![(4, 5)]);
     doc.erase_regions("a");
     assert!(doc.regions("a").is_empty());
@@ -430,7 +534,13 @@ fn show_requests_are_counted_and_clamped() {
     let mut doc = Document::scratch(1, "s", "abc", "Plain Text", false);
     assert_eq!(doc.show_request(), None);
     doc.request_show(99, true);
-    assert_eq!(doc.show_request(), Some(ShowRequest { point: 3, center: true }));
+    assert_eq!(
+        doc.show_request(),
+        Some(ShowRequest {
+            point: 3,
+            center: true
+        })
+    );
     doc.request_show(1, false);
     assert_eq!(doc.show_revision(), 2);
 }
@@ -438,21 +548,39 @@ fn show_requests_are_counted_and_clamped() {
 fn regions_follow_edits_the_widget_makes_in_place() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "héllo world".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(6, 11)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
+    let set = RegionSet {
+        key: "k".into(),
+        regions: vec![(6, 11)],
+        scope: String::new(),
+        icon: String::new(),
+        flags: 0,
+        ..RegionSet::default()
+    };
     doc.add_regions(set);
     doc.text = "XXhéllo world".into();
     doc.note_text_changed();
     assert_eq!(doc.regions("k"), vec![(8, 13)]);
     doc.text = "XXhéllo wor".into();
     doc.note_text_changed();
-    assert_eq!(doc.regions("k"), vec![(8, 11)], "deleted text inside the region shrinks it");
+    assert_eq!(
+        doc.regions("k"),
+        vec![(8, 11)],
+        "deleted text inside the region shrinks it"
+    );
 }
 
 #[test]
 fn text_typed_right_before_a_region_stays_out_of_it() {
     let mut doc = Document::new_untitled(1, LineEnding::Unix);
     doc.text = "hello".into();
-    let set = RegionSet { key: "k".into(), regions: vec![(0, 5)], scope: String::new(), icon: String::new(), flags: 0, ..RegionSet::default() };
+    let set = RegionSet {
+        key: "k".into(),
+        regions: vec![(0, 5)],
+        scope: String::new(),
+        icon: String::new(),
+        flags: 0,
+        ..RegionSet::default()
+    };
     doc.add_regions(set);
     // The caret is at 0: the "h" went in front, even though the texts read the same either way.
     doc.text = "hhello".into();
@@ -470,9 +598,15 @@ fn the_change_log_has_each_edit_with_positions_before_it() {
     doc.replace_range(0, 3, "1");
     let changes = doc.take_text_changes();
     assert_eq!(changes.len(), 2);
-    assert_eq!((changes[0].start, changes[0].end, changes[0].text.as_str()), (6, 6, "a"));
+    assert_eq!(
+        (changes[0].start, changes[0].end, changes[0].text.as_str()),
+        (6, 6, "a")
+    );
     assert_eq!(changes[0].start_position, (1, 2));
-    assert_eq!((changes[1].start, changes[1].end, changes[1].text.as_str()), (0, 3, "1"));
+    assert_eq!(
+        (changes[1].start, changes[1].end, changes[1].text.as_str()),
+        (0, 3, "1")
+    );
     assert_eq!(changes[1].end_position, (0, 3));
     assert!(doc.take_text_changes().is_empty());
 }

@@ -18,10 +18,18 @@ fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(DIALOG_MARGIN))
 }
 
-pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &DialogViewModel, events: &mut Vec<UiEvent>) {
+pub fn show_close_dialog(
+    ctx: &egui::Context,
+    text: &Translations,
+    dialog: &DialogViewModel,
+    events: &mut Vec<UiEvent>,
+) {
     let (body, choices): (String, Vec<(&str, CloseChoice)>) = match dialog {
         DialogViewModel::SaveChanges { document_name } => (
-            text.tr_args("Save changes to {name} before closing?", &[("name", document_name)]),
+            text.tr_args(
+                "Save changes to {name} before closing?",
+                &[("name", document_name)],
+            ),
             vec![
                 (text.tr("Save"), CloseChoice::Save),
                 (text.tr("Don't Save"), CloseChoice::DontSave),
@@ -29,8 +37,12 @@ pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &Dial
             ],
         ),
         DialogViewModel::ExitWithUnsavedChanges => (
-            text.tr("Some files have unsaved changes. Exit anyway?").to_string(),
-            vec![(text.tr("Exit"), CloseChoice::DontSave), (text.tr("Cancel"), CloseChoice::Cancel)],
+            text.tr("Some files have unsaved changes. Exit anyway?")
+                .to_string(),
+            vec![
+                (text.tr("Exit"), CloseChoice::DontSave),
+                (text.tr("Cancel"), CloseChoice::Cancel),
+            ],
         ),
     };
     egui::Window::new(text.tr("Unsaved changes"))
@@ -46,7 +58,10 @@ pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &Dial
             let row = egui::vec2(DIALOG_WIDTH, BUTTON_SIZE.y);
             ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
                 for (label, choice) in choices.iter().rev() {
-                    if ui.add(egui::Button::new(*label).min_size(BUTTON_SIZE)).clicked() {
+                    if ui
+                        .add(egui::Button::new(*label).min_size(BUTTON_SIZE))
+                        .clicked()
+                    {
                         events.push(UiEvent::CloseDialogAnswered(*choice));
                     }
                 }
@@ -54,7 +69,12 @@ pub fn show_close_dialog(ctx: &egui::Context, text: &Translations, dialog: &Dial
         });
 }
 
-pub fn show_about(ctx: &egui::Context, text: &Translations, about: &AboutViewModel, events: &mut Vec<UiEvent>) {
+pub fn show_about(
+    ctx: &egui::Context,
+    text: &Translations,
+    about: &AboutViewModel,
+    events: &mut Vec<UiEvent>,
+) {
     let mut open = true;
     egui::Window::new(text.tr("About CodeLibre Text"))
         .open(&mut open)
@@ -67,11 +87,9 @@ pub fn show_about(ctx: &egui::Context, text: &Translations, about: &AboutViewMod
             ui.heading("CodeLibre Text");
             ui.label(text.tr_args("Version {version}", &[("version", &about.version)]));
             ui.add_space(PARAGRAPH_SPACE);
-            ui.label(text.tr(
-                "An open-source native editor written in Rust,
+            ui.label(text.tr("An open-source native editor written in Rust,
 compatible with Sublime Text packages (syntaxes, color schemes,
-key bindings, menus, command palette and settings).",
-            ));
+key bindings, menus, command palette and settings)."));
             ui.add_space(PARAGRAPH_SPACE);
             ui.label(text.tr_args("Packages: {path}", &[("path", &about.packages)]));
             if let Some(sublime) = &about.sublime_packages {
@@ -83,7 +101,12 @@ key bindings, menus, command palette and settings).",
     }
 }
 
-pub fn show_load_errors(ctx: &egui::Context, text: &Translations, errors: &[String], events: &mut Vec<UiEvent>) {
+pub fn show_load_errors(
+    ctx: &egui::Context,
+    text: &Translations,
+    errors: &[String],
+    events: &mut Vec<UiEvent>,
+) {
     let mut open = true;
     egui::Window::new(text.tr("Package Load Errors"))
         .open(&mut open)
@@ -95,8 +118,14 @@ pub fn show_load_errors(ctx: &egui::Context, text: &Translations, errors: &[Stri
             }
             // Above the list, which takes the rest of the window.
             ui.horizontal(|ui| {
-                for (label, command) in [(text.tr("Report an Issue…"), "report_issue"), (text.tr("Error Log"), "open_error_log")] {
-                    if ui.add(egui::Button::new(label).sense(egui::Sense::CLICK)).clicked() {
+                for (label, command) in [
+                    (text.tr("Report an Issue…"), "report_issue"),
+                    (text.tr("Error Log"), "open_error_log"),
+                ] {
+                    if ui
+                        .add(egui::Button::new(label).sense(egui::Sense::CLICK))
+                        .clicked()
+                    {
                         events.push(UiEvent::RunCommand(Command::new(command)));
                     }
                 }

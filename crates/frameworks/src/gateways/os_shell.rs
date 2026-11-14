@@ -13,7 +13,11 @@ impl OsShell {
             command.args(["url.dll,FileProtocolHandler", url]);
             command
         } else {
-            let mut command = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+            let mut command = std::process::Command::new(if cfg!(target_os = "macos") {
+                "open"
+            } else {
+                "xdg-open"
+            });
             command.arg(url);
             command
         }

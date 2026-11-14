@@ -1,6 +1,9 @@
 //! Tests for `entities::minihtml`.
 
-use entities::minihtml::{data_uri_bytes, decode_entities, parse, parse_html, plain_text, Block, Content, FontSize, Sides, Span};
+use entities::minihtml::{
+    data_uri_bytes, decode_entities, parse, parse_html, plain_text, Block, Content, FontSize,
+    Sides, Span,
+};
 
 #[test]
 fn style_rules_apply_by_class_id_and_tag_most_specific_last() {
@@ -15,10 +18,23 @@ fn style_rules_apply_by_class_id_and_tag_most_specific_last() {
     <span>a</span> <span class="note">b</span> <span class="note" id="only">c</span>
     <div><span class="inside">d</span></div> <span class="inside">e</span>"#;
     let spans: Vec<Span> = parse(html).into_iter().flatten().collect();
-    let find = |t: &str| spans.iter().find(|s| s.text.trim() == t).unwrap_or_else(|| panic!("{t} in {spans:?}")).clone();
+    let find = |t: &str| {
+        spans
+            .iter()
+            .find(|s| s.text.trim() == t)
+            .unwrap_or_else(|| panic!("{t} in {spans:?}"))
+            .clone()
+    };
     assert_eq!(find("a").color.as_deref(), Some("red"));
-    assert_eq!((find("b").color.as_deref(), find("b").bold), (Some("green"), true));
-    assert_eq!(find("c").color.as_deref(), Some("blue"), "an id is more specific than a class");
+    assert_eq!(
+        (find("b").color.as_deref(), find("b").bold),
+        (Some("green"), true)
+    );
+    assert_eq!(
+        find("c").color.as_deref(),
+        Some("blue"),
+        "an id is more specific than a class"
+    );
     assert!(find("d").italic && !find("e").italic, "descendant selector");
 }
 
@@ -31,7 +47,11 @@ fn custom_properties_font_sizes_and_display_none() {
     let spans: Vec<Span> = parse(html).into_iter().flatten().collect();
     let find = |t: &str| spans.iter().find(|s| s.text.trim() == t).unwrap().clone();
     assert_eq!(find("w").color.as_deref(), Some("#ff8800"));
-    assert_eq!(find("r").color.as_deref(), Some("var(--redish)"), "the color scheme's variables are the view's");
+    assert_eq!(
+        find("r").color.as_deref(),
+        Some("var(--redish)"),
+        "the color scheme's variables are the view's"
+    );
     assert_eq!(find("x").font_size, Some(FontSize::Em(1.5)));
     assert_eq!(find("y").font_size, Some(FontSize::Em(0.75)));
     assert_eq!(find("z").font_size, Some(FontSize::Px(20.0)));
@@ -48,17 +68,43 @@ fn blocks_keep_their_box_and_tables_their_cells() {
         <img src="data:image/png;base64,iVBORw0KGgo=" width="16" height=8 alt="pic">
     </div>"#;
     let document = parse_html(html);
-    let Some(Content::Block(boxed)) = document.content.first() else { panic!("{document:?}") };
-    assert_eq!(boxed.style.padding, Sides { top: 4.0, right: 8.0, bottom: 4.0, left: 8.0 });
+    let Some(Content::Block(boxed)) = document.content.first() else {
+        panic!("{document:?}")
+    };
+    assert_eq!(
+        boxed.style.padding,
+        Sides {
+            top: 4.0,
+            right: 8.0,
+            bottom: 4.0,
+            left: 8.0
+        }
+    );
     assert_eq!(boxed.style.margin.top, 2.0);
-    assert_eq!((boxed.style.border_width, boxed.style.border_color.as_deref(), boxed.style.border_radius), (1.0, Some("#333"), 3.0));
+    assert_eq!(
+        (
+            boxed.style.border_width,
+            boxed.style.border_color.as_deref(),
+            boxed.style.border_radius
+        ),
+        (1.0, Some("#333"), 3.0)
+    );
     assert_eq!(boxed.style.background.as_deref(), Some("#eee"));
-    let Some(Content::Table(rows)) = boxed.content.iter().find(|c| matches!(c, Content::Table(_))) else { panic!("{boxed:?}") };
+    let Some(Content::Table(rows)) = boxed
+        .content
+        .iter()
+        .find(|c| matches!(c, Content::Table(_)))
+    else {
+        panic!("{boxed:?}")
+    };
     let cell_text = |cell: &Block| match cell.content.first() {
         Some(Content::Line(line)) => line.iter().map(|s| s.text.as_str()).collect::<String>(),
         _ => String::new(),
     };
-    let texts: Vec<Vec<String>> = rows.iter().map(|row| row.iter().map(cell_text).collect()).collect();
+    let texts: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| row.iter().map(cell_text).collect())
+        .collect();
     assert_eq!(texts, [["k", "v"], ["a", "b"]]);
     assert!(boxed.content.contains(&Content::Rule));
     let image = boxed.content.iter().find_map(|c| match c {
@@ -67,12 +113,21 @@ fn blocks_keep_their_box_and_tables_their_cells() {
     });
     let image = image.expect("the image");
     assert_eq!((image.width, image.height), (Some(16.0), Some(8.0)));
-    assert_eq!(data_uri_bytes(&image.src), Some(vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]));
-    assert_eq!(plain_text("<table><tr><td>a</td><td>b</td></tr></table>"), "a  b");
+    assert_eq!(
+        data_uri_bytes(&image.src),
+        Some(vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+    assert_eq!(
+        plain_text("<table><tr><td>a</td><td>b</td></tr></table>"),
+        "a  b"
+    );
 }
 
 fn text(s: &str) -> Span {
-    Span { text: s.into(), ..Default::default() }
+    Span {
+        text: s.into(),
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -82,10 +137,23 @@ fn styles_nest_and_whitespace_collapses() {
         lines,
         vec![vec![
             // A space between words goes with the next one.
-            Span { text: "bold".into(), bold: true, ..Default::default() },
-            Span { text: " both".into(), bold: true, italic: true, ..Default::default() },
+            Span {
+                text: "bold".into(),
+                bold: true,
+                ..Default::default()
+            },
+            Span {
+                text: " both".into(),
+                bold: true,
+                italic: true,
+                ..Default::default()
+            },
             text(" and"),
-            Span { text: " x()".into(), monospace: true, ..Default::default() },
+            Span {
+                text: " x()".into(),
+                monospace: true,
+                ..Default::default()
+            },
         ]]
     );
 }
@@ -109,9 +177,23 @@ fn links_colors_and_skipped_contents() {
     assert_eq!(spans[0].text, "open");
     assert_eq!(spans[0].link.as_deref(), Some(r#"subl:open {"x": 1}"#));
     assert!(spans[0].underline);
-    let red = spans.iter().find(|s| s.text.trim() == "red").unwrap_or_else(|| panic!("{spans:?}"));
-    assert_eq!((red.color.as_deref(), red.background.as_deref(), red.bold), (Some("#f00"), Some("var(--bg)"), true));
-    assert_eq!(spans.iter().find(|s| s.text.trim() == "blue").unwrap().color.as_deref(), Some("blue"));
+    let red = spans
+        .iter()
+        .find(|s| s.text.trim() == "red")
+        .unwrap_or_else(|| panic!("{spans:?}"));
+    assert_eq!(
+        (red.color.as_deref(), red.background.as_deref(), red.bold),
+        (Some("#f00"), Some("var(--bg)"), true)
+    );
+    assert_eq!(
+        spans
+            .iter()
+            .find(|s| s.text.trim() == "blue")
+            .unwrap()
+            .color
+            .as_deref(),
+        Some("blue")
+    );
     assert_eq!(plain_text(html), "open red blue");
     assert!(!plain_text(html).contains("ignored") && !plain_text(html).contains("color: red"));
 }
@@ -123,6 +205,9 @@ fn preformatted_text_keeps_its_lines_and_spaces() {
 
 #[test]
 fn entities_are_decoded() {
-    assert_eq!(decode_entities("a &amp; b &lt;&gt; &#65;&#x42; &unknown; &"), "a & b <> AB &unknown; &");
+    assert_eq!(
+        decode_entities("a &amp; b &lt;&gt; &#65;&#x42; &unknown; &"),
+        "a & b <> AB &unknown; &"
+    );
     assert_eq!(plain_text("x&nbsp;&nbsp;y é<!-- comment -->"), "x  y é");
 }

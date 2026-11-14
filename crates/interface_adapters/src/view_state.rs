@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use entities::command::Command;
+use entities::document::DocumentId;
 use entities::menu::ContextMenuTarget;
+use entities::selection::Selection;
 use use_cases::plugin_hooks::CommandTarget;
 use use_cases::search::{Candidate, SearchKind};
 
@@ -46,6 +48,8 @@ pub struct InputPanelState {
 pub struct FindPanelState {
     pub visible: bool,
     pub replace_mode: bool,
+    /// Find in Files: the "Where" field shows, and Find searches the files it lists.
+    pub in_files: bool,
     /// The query field should take keyboard focus on the next frame.
     pub focus_requested: bool,
 }
@@ -62,7 +66,10 @@ pub enum WidgetEdit {
     /// Characters typed, replayed so the widget keeps its undo history and IME.
     Insert(String),
     /// A key the widget handles itself (deleting, moving the caret), replayed after the hooks.
-    Key { key: WidgetKey, shift: bool },
+    Key {
+        key: WidgetKey,
+        shift: bool,
+    },
 }
 
 /// A key of [`WidgetEdit::Key`]; the framework maps it to the widget's own key.
@@ -86,6 +93,12 @@ pub enum WidgetKey {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewRequest {
     WidgetEdit(WidgetEdit),
+    /// Commit the pre-plugin text state to egui's undo history before the next widget frame.
+    WidgetUndoBoundary {
+        document: DocumentId,
+        text: String,
+        selection: Selection,
+    },
     SetFullscreen(bool),
     /// Close this window (the application, when it is the last one).
     CloseWindow,
@@ -102,6 +115,10 @@ pub struct ViewState {
     pub quick_panel: Option<QuickPanel>,
     pub find_panel: FindPanelState,
     pub input_panel: Option<InputPanelState>,
+    /// Output panel whose view currently has the focus.
+    pub focused_output_panel: Option<DocumentId>,
+    /// The output panel whose widget should receive keyboard focus on the next draw.
+    pub output_panel_focus_requested: Option<DocumentId>,
     pub show_about: bool,
     pub show_load_errors: bool,
     pub expanded_folders: HashSet<PathBuf>,
@@ -144,6 +161,8 @@ impl Default for ViewState {
             quick_panel: None,
             find_panel: FindPanelState::default(),
             input_panel: None,
+            focused_output_panel: None,
+            output_panel_focus_requested: None,
             show_about: false,
             show_load_errors: false,
             expanded_folders: HashSet::new(),
@@ -169,16 +188,26 @@ impl ViewState {
     }
 
     pub(crate) fn widget_edits_requested(&self) -> usize {
-        self.requests.iter().filter(|r| matches!(r, ViewRequest::WidgetEdit(_))).count()
+        self.requests
+            .iter()
+            .filter(|r| matches!(r, ViewRequest::WidgetEdit(_)))
+            .count()
     }
 
     /// Every frame, after the widgets: the edits the widget has done by now.
     pub(crate) fn take_finished_widget_edits(&mut self) -> Vec<(Command, CommandTarget)> {
-        let (finished, waiting) = std::mem::take(&mut self.widget_edits_in_progress).into_iter().partition(|e| !e.applied_next_frame);
+        let (finished, waiting) = std::mem::take(&mut self.widget_edits_in_progress)
+            .into_iter()
+            .partition(|e| !e.applied_next_frame);
         self.widget_edits_in_progress = waiting;
-        self.widget_edits_in_progress.iter_mut().for_each(|e| e.applied_next_frame = false);
+        self.widget_edits_in_progress
+            .iter_mut()
+            .for_each(|e| e.applied_next_frame = false);
         let finished: Vec<WidgetEditInProgress> = finished;
-        finished.into_iter().map(|e| (e.command, e.target)).collect()
+        finished
+            .into_iter()
+            .map(|e| (e.command, e.target))
+            .collect()
     }
 
     pub fn take_commands(&mut self) -> VecDeque<Command> {
@@ -198,6 +227,20 @@ impl ViewState {
     }
 
     /// Flags saved with the session.
+    /// The find panel shown, as Sublime names it (`window.active_panel()`, the `panel` context).
+    pub fn find_panel_name(&self) -> Option<&'static str> {
+        let find = &self.find_panel;
+        if !find.visible {
+            None
+        } else if find.in_files {
+            Some("find_in_files")
+        } else if find.replace_mode {
+            Some("replace")
+        } else {
+            Some("find")
+        }
+    }
+
     pub fn layout(&self) -> Vec<(String, bool)> {
         vec![
             ("side_bar".into(), self.show_side_bar),

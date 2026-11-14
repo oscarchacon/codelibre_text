@@ -22,11 +22,17 @@ impl Settings {
     }
 
     pub fn f32(&self, key: &str, default: f32) -> f32 {
-        self.get(key).and_then(Value::as_f64).map(|v| v as f32).unwrap_or(default)
+        self.get(key)
+            .and_then(Value::as_f64)
+            .map(|v| v as f32)
+            .unwrap_or(default)
     }
 
     pub fn usize(&self, key: &str, default: usize) -> usize {
-        self.get(key).and_then(Value::as_u64).map(|v| v as usize).unwrap_or(default)
+        self.get(key)
+            .and_then(Value::as_u64)
+            .map(|v| v as usize)
+            .unwrap_or(default)
     }
 
     pub fn str(&self, key: &str) -> Option<&str> {
@@ -36,14 +42,22 @@ impl Settings {
     pub fn strings(&self, key: &str) -> Vec<String> {
         self.get(key)
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     pub fn numbers(&self, key: &str) -> Vec<usize> {
         self.get(key)
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as usize))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -80,7 +94,10 @@ impl SettingsLayers {
 
     /// Adds a `<Syntax>.sublime-settings` layer.
     pub fn add_syntax_layer(&mut self, syntax: &str, layer: Value) {
-        self.by_syntax.entry(syntax.to_string()).or_default().push(layer);
+        self.by_syntax
+            .entry(syntax.to_string())
+            .or_default()
+            .push(layer);
     }
 
     /// Settings for a view showing a document with the given syntax.

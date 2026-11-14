@@ -31,9 +31,19 @@ impl Editor {
     /// `copy` / `cut` of the selections of the active document (the text widget copies them, one
     /// per line, as Sublime does): what reaches the clipboard goes to the history.
     pub fn remember_copied_selections(&mut self) {
-        let Some(doc) = self.active_document() else { return };
-        let selections: Vec<_> = doc.selections().into_iter().filter(|s| !s.is_empty()).collect();
-        let text = selections.iter().map(|&s| selected_text(&doc.text, s)).collect::<Vec<_>>().join("\n");
+        let Some(doc) = self.active_document() else {
+            return;
+        };
+        let selections: Vec<_> = doc
+            .selections()
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        let text = selections
+            .iter()
+            .map(|&s| selected_text(&doc.text, s))
+            .collect::<Vec<_>>()
+            .join("\n");
         self.push_clipboard_history(&text);
     }
 
@@ -44,12 +54,19 @@ impl Editor {
             let flat: String = text.replace(['\n', '\r'], "");
             let flat = flat.trim_start();
             if flat.chars().count() > CAPTION_LENGTH {
-                format!("{}...", flat.chars().take(CAPTION_LENGTH).collect::<String>())
+                format!(
+                    "{}...",
+                    flat.chars().take(CAPTION_LENGTH).collect::<String>()
+                )
             } else {
                 flat.to_string()
             }
         };
-        self.state.clipboard_history.iter().map(|text| caption(text)).collect()
+        self.state
+            .clipboard_history
+            .iter()
+            .map(|text| caption(text))
+            .collect()
     }
 
     /// The entry chosen in Paste from History: it goes back on the clipboard and first in the

@@ -16,6 +16,8 @@ use crate::plugins::CommandRunner;
 const MONOSPACE_FONT: u64 = 1;
 /// `sublime.KEEP_OPEN_ON_FOCUS_LOST`.
 const KEEP_OPEN_ON_FOCUS_LOST: u64 = 2;
+/// `sublime.WANT_EVENT`.
+const WANT_EVENT: u64 = 4;
 
 /// The detail lines of a row: a list of lines (or one string), each minihtml when `html`.
 fn detail_lines(value: Option<&Value>, html: bool) -> Vec<minihtml::Line> {
@@ -27,9 +29,16 @@ fn detail_lines(value: Option<&Value>, html: bool) -> Vec<minihtml::Line> {
     let mut lines = Vec::new();
     for text in texts.into_iter().filter(|t| !t.is_empty()) {
         if html {
-            lines.extend(minihtml::parse(text).into_iter().filter(|line| !line.is_empty()));
+            lines.extend(
+                minihtml::parse(text)
+                    .into_iter()
+                    .filter(|line| !line.is_empty()),
+            );
         } else {
-            lines.push(vec![minihtml::Span { text: text.to_string(), ..Default::default() }]);
+            lines.push(vec![minihtml::Span {
+                text: text.to_string(),
+                ..Default::default()
+            }]);
         }
     }
     lines
@@ -62,9 +71,16 @@ impl CommandInputPanel {
     /// The panel's last argument, sent by `sublime.py` for input handlers only (else `null`).
     fn from_json(value: Option<&Value>) -> Option<Self> {
         let value = value.filter(|v| v.is_object())?;
-        let breadcrumb = value.get("breadcrumb").and_then(Value::as_array).into_iter().flatten();
+        let breadcrumb = value
+            .get("breadcrumb")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
         Some(Self {
-            breadcrumb: breadcrumb.filter_map(Value::as_str).map(String::from).collect(),
+            breadcrumb: breadcrumb
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect(),
             can_go_back: value.get("back").and_then(Value::as_bool).unwrap_or(false),
             preview: Vec::new(),
         })
@@ -81,6 +97,7 @@ pub struct PluginQuickPanel {
     pub monospace: bool,
     /// A click outside does not close it.
     pub keep_open: bool,
+    pub wants_event: bool,
     wants_highlight: bool,
     /// Asked by an input handler: the palette's breadcrumb, Backspace and preview.
     pub input: Option<CommandInputPanel>,
@@ -136,7 +153,11 @@ impl PluginPanels {
 
     /// Closes the field typing into the output panel `name` (its panel is gone).
     pub(crate) fn close_io_panel(&mut self, name: &str) -> Option<DocumentId> {
-        if self.input_panel.as_ref().is_some_and(|p| p.io.as_deref() == Some(name)) {
+        if self
+            .input_panel
+            .as_ref()
+            .is_some_and(|p| p.io.as_deref() == Some(name))
+        {
             return self.input_panel.take().map(|p| p.document.id);
         }
         None
@@ -146,16 +167,30 @@ impl PluginPanels {
 impl Editor {
     /// `window_show_quick_panel(window, rows, flags, selected_index, placeholder, callback, wants_highlight)`.
     /// A plugin quick panel that is still open is cancelled first, as in Sublime.
-    pub(crate) fn plugin_show_quick_panel(&mut self, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
-        let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_string();
+    pub(crate) fn plugin_show_quick_panel(
+        &mut self,
+        args: &[Value],
+        run_command: &mut CommandRunner,
+    ) -> Result<Value, String> {
+        let text = |value: Option<&Value>| {
+            value
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
         let items: Vec<PluginPanelItem> = args
             .get(1)
             .and_then(Value::as_array)
             .ok_or("argument 2 must be a list of items")?
             .iter()
             .map(|row| {
-                let details = detail_lines(row.get(1), row.get(4).and_then(Value::as_bool).unwrap_or(false));
-                let plain = |line: &minihtml::Line| line.iter().map(|s| s.text.as_str()).collect::<String>();
+                let details = detail_lines(
+                    row.get(1),
+                    row.get(4).and_then(Value::as_bool).unwrap_or(false),
+                );
+                let plain = |line: &minihtml::Line| {
+                    line.iter().map(|s| s.text.as_str()).collect::<String>()
+                };
                 PluginPanelItem {
                     caption: text(row.get(0)),
                     detail: details.iter().map(plain).collect::<Vec<_>>().join(" · "),
@@ -167,27 +202,48 @@ impl Editor {
             .collect();
         let flags = args.get(2).and_then(Value::as_u64).unwrap_or(0);
         let selected = args.get(3).and_then(Value::as_i64).unwrap_or(-1);
-        let callback = args.get(5).and_then(Value::as_u64).ok_or("argument 6 must be a callback id")?;
+        let callback = args
+            .get(5)
+            .and_then(Value::as_u64)
+            .ok_or("argument 6 must be a callback id")?;
         self.answer_plugin_quick_panel(None, run_command);
         self.state.plugin_panels.quick_panel = Some(PluginQuickPanel {
             callback,
-            selected: usize::try_from(selected).unwrap_or(0).min(items.len().saturating_sub(1)),
+            selected: usize::try_from(selected)
+                .unwrap_or(0)
+                .min(items.len().saturating_sub(1)),
             items,
             placeholder: text(args.get(4)),
             monospace: flags & MONOSPACE_FONT != 0,
             keep_open: flags & KEEP_OPEN_ON_FOCUS_LOST != 0,
+            wants_event: flags & WANT_EVENT != 0,
             wants_highlight: args.get(6).and_then(Value::as_bool).unwrap_or(false),
             input: CommandInputPanel::from_json(args.get(7)),
         });
-        self.state.plugin_panels.requests.push(PluginPanelRequest::QuickPanel);
+        self.state
+            .plugin_panels
+            .requests
+            .push(PluginPanelRequest::QuickPanel);
         Ok(Value::Null)
     }
 
     /// `window_show_input_panel(window, caption, initial_text, callback, wants_changes)`. Answers
     /// the panel's view id.
-    pub(crate) fn plugin_show_input_panel(&mut self, args: &[Value], run_command: &mut CommandRunner) -> Result<Value, String> {
-        let text = |i: usize| args.get(i).and_then(Value::as_str).unwrap_or_default().to_string();
-        let callback = args.get(3).and_then(Value::as_u64).ok_or("argument 4 must be a callback id")?;
+    pub(crate) fn plugin_show_input_panel(
+        &mut self,
+        args: &[Value],
+        run_command: &mut CommandRunner,
+    ) -> Result<Value, String> {
+        let text = |i: usize| {
+            args.get(i)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let callback = args
+            .get(3)
+            .and_then(Value::as_u64)
+            .ok_or("argument 4 must be a callback id")?;
         self.finish_plugin_input_panel(false, run_command);
         let id = self.next_document_id();
         let mut document = Document::new_untitled(id, LineEnding::Unix);
@@ -202,7 +258,10 @@ impl Editor {
             builtin: None,
             input: CommandInputPanel::from_json(args.get(5)),
         });
-        self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
+        self.state
+            .plugin_panels
+            .requests
+            .push(PluginPanelRequest::InputPanel);
         Ok(json!(id))
     }
 
@@ -231,13 +290,21 @@ impl Editor {
             builtin: Some(builtin),
             input: None,
         });
-        self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
+        self.state
+            .plugin_panels
+            .requests
+            .push(PluginPanelRequest::InputPanel);
     }
 
     /// `window.create_io_panel(name, on_input)`: the output panel `name` and, when the plugin
     /// passed a callback, the field that types into its process (Enter calls `on_input`, Esc
     /// closes it). Answers `(output, input)`.
-    pub(crate) fn plugin_create_io_panel(&mut self, name: &str, callback: Option<u64>, unlisted: bool) -> (DocumentId, Option<DocumentId>) {
+    pub(crate) fn plugin_create_io_panel(
+        &mut self,
+        name: &str,
+        callback: Option<u64>,
+        unlisted: bool,
+    ) -> (DocumentId, Option<DocumentId>) {
         let output = self.create_output_panel(name, unlisted);
         let Some(callback) = callback else {
             return (output, None);
@@ -260,7 +327,9 @@ impl Editor {
 
     /// The field typing into the output panel `name`, if it is open.
     pub fn io_input_panel(&self, name: &str) -> Option<DocumentId> {
-        self.plugin_input_panel().filter(|p| p.io.as_deref() == Some(name)).map(|p| p.document.id)
+        self.plugin_input_panel()
+            .filter(|p| p.io.as_deref() == Some(name))
+            .map(|p| p.document.id)
     }
 
     /// The next panel a plugin asked for, for the controller to show.
@@ -271,8 +340,16 @@ impl Editor {
 
     /// Shows the plugin's text field again (a view that is not a tab cannot be focused directly).
     pub(crate) fn request_plugin_input_panel(&mut self) {
-        if !self.state.plugin_panels.requests.contains(&PluginPanelRequest::InputPanel) {
-            self.state.plugin_panels.requests.push(PluginPanelRequest::InputPanel);
+        if !self
+            .state
+            .plugin_panels
+            .requests
+            .contains(&PluginPanelRequest::InputPanel)
+        {
+            self.state
+                .plugin_panels
+                .requests
+                .push(PluginPanelRequest::InputPanel);
         }
     }
 
@@ -285,15 +362,36 @@ impl Editor {
     }
 
     /// The user picked item `index` of the plugin's quick panel, or cancelled it (`None`: -1).
-    pub fn answer_plugin_quick_panel(&mut self, index: Option<usize>, run_command: &mut CommandRunner) {
+    pub fn answer_plugin_quick_panel(
+        &mut self,
+        index: Option<usize>,
+        run_command: &mut CommandRunner,
+    ) {
         if let Some(panel) = self.state.plugin_panels.quick_panel.take() {
             let index = index.map_or(-1, |i| i as i64);
             self.plugin_callback(panel.callback, "select", json!([index]), run_command);
         }
     }
 
+    /// Answers a quick panel, including the modifier keys held when the user selected an item.
+    pub fn answer_plugin_quick_panel_with_event(
+        &mut self,
+        index: Option<usize>,
+        event: Value,
+        run_command: &mut CommandRunner,
+    ) {
+        if let Some(panel) = self.state.plugin_panels.quick_panel.take() {
+            let index = index.map_or(-1, |i| i as i64);
+            self.plugin_callback(panel.callback, "select", json!([index, event]), run_command);
+        }
+    }
+
     /// The user moved to item `index` (the plugin hears it if it passed `on_highlight`).
-    pub fn highlight_plugin_quick_panel_item(&mut self, index: usize, run_command: &mut CommandRunner) {
+    pub fn highlight_plugin_quick_panel_item(
+        &mut self,
+        index: usize,
+        run_command: &mut CommandRunner,
+    ) {
         if let Some(panel) = self.state.plugin_panels.quick_panel.as_mut() {
             panel.selected = index;
             if panel.wants_highlight {
@@ -306,13 +404,34 @@ impl Editor {
     /// The user pressed Enter in the plugin's input panel (`done`), or closed it. An io panel
     /// (`create_io_panel`) calls `on_input` and stays open; Esc closes it without a call.
     pub fn finish_plugin_input_panel(&mut self, done: bool, run_command: &mut CommandRunner) {
+        self.finish_plugin_input_panel_inner(done, None, run_command);
+    }
+
+    /// Finishes an input panel, including the modifier keys held when Enter was pressed.
+    pub fn finish_plugin_input_panel_with_event(
+        &mut self,
+        done: bool,
+        event: Value,
+        run_command: &mut CommandRunner,
+    ) {
+        self.finish_plugin_input_panel_inner(done, Some(event), run_command);
+    }
+
+    fn finish_plugin_input_panel_inner(
+        &mut self,
+        done: bool,
+        event: Option<Value>,
+        run_command: &mut CommandRunner,
+    ) {
         if let Some(panel) = &self.state.plugin_panels.input_panel {
             if panel.io.is_some() {
                 if !done {
                     self.state.plugin_panels.input_panel = None;
                     return;
                 }
-                let Some(panel) = self.state.plugin_panels.input_panel.as_mut() else { return };
+                let Some(panel) = self.state.plugin_panels.input_panel.as_mut() else {
+                    return;
+                };
                 let callback = panel.callback;
                 let text = std::mem::take(&mut panel.document.text);
                 panel.document.note_text_changed();
@@ -329,7 +448,11 @@ impl Editor {
                 return;
             }
             if done {
-                self.plugin_callback(panel.callback, "done", json!([panel.document.text]), run_command);
+                let args = match event {
+                    Some(event) => json!([panel.document.text, event]),
+                    None => json!([panel.document.text]),
+                };
+                self.plugin_callback(panel.callback, "done", args, run_command);
             } else {
                 self.plugin_callback(panel.callback, "cancel", json!([]), run_command);
             }
@@ -341,13 +464,26 @@ impl Editor {
     pub(crate) fn set_plugin_input_preview(&mut self, text: &str, html: bool) {
         let panels = &mut self.state.plugin_panels;
         let quick = panels.quick_panel.as_mut().and_then(|p| p.input.as_mut());
-        let Some(input) = quick.or_else(|| panels.input_panel.as_mut().and_then(|p| p.input.as_mut())) else {
+        let Some(input) =
+            quick.or_else(|| panels.input_panel.as_mut().and_then(|p| p.input.as_mut()))
+        else {
             return;
         };
         input.preview = if html {
-            minihtml::parse(text).into_iter().filter(|line| !line.is_empty()).collect()
+            minihtml::parse(text)
+                .into_iter()
+                .filter(|line| !line.is_empty())
+                .collect()
         } else {
-            text.lines().filter(|line| !line.is_empty()).map(|line| vec![minihtml::Span { text: line.to_string(), ..Default::default() }]).collect()
+            text.lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| {
+                    vec![minihtml::Span {
+                        text: line.to_string(),
+                        ..Default::default()
+                    }]
+                })
+                .collect()
         };
     }
 

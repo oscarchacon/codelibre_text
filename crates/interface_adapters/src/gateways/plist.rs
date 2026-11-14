@@ -11,7 +11,13 @@ pub fn parse(source: &str) -> Result<Value, String> {
     while let Some(token) = tokens.get(at) {
         match token {
             Token::Open(name) if name == "plist" => at += 1,
-            Token::Open(_) | Token::Empty(_) => return Parser { tokens: &tokens, at }.value(),
+            Token::Open(_) | Token::Empty(_) => {
+                return Parser {
+                    tokens: &tokens,
+                    at,
+                }
+                .value()
+            }
             _ => at += 1,
         }
     }
@@ -62,7 +68,10 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
 }
 
 fn tag_name(tag: &str) -> String {
-    tag.split_whitespace().next().unwrap_or_default().to_string()
+    tag.split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn decode_entities(text: &str) -> String {
@@ -153,12 +162,17 @@ impl Parser<'_> {
                 "string" | "data" | "date" => self.text_until(&name).map(Value::String),
                 "integer" => {
                     let text = self.text_until(&name)?;
-                    text.trim().parse::<i64>().map(Value::from).map_err(|_| format!("bad integer {text:?}"))
+                    text.trim()
+                        .parse::<i64>()
+                        .map(Value::from)
+                        .map_err(|_| format!("bad integer {text:?}"))
                 }
                 "real" => {
                     let text = self.text_until(&name)?;
                     let number = text.trim().parse::<f64>().ok().and_then(Number::from_f64);
-                    number.map(Value::Number).ok_or_else(|| format!("bad real {text:?}"))
+                    number
+                        .map(Value::Number)
+                        .ok_or_else(|| format!("bad real {text:?}"))
                 }
                 "true" | "false" => {
                     self.text_until(&name)?;

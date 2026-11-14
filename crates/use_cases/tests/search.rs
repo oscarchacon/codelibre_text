@@ -17,9 +17,19 @@ fn captions(candidates: &[use_cases::search::Candidate]) -> Vec<String> {
 
 fn palette_world() -> World {
     World::new()
-        .with_palette(PaletteCommand { caption: "File: Save".into(), command: Command::new("save") })
-        .with_palette(PaletteCommand { caption: "View: Toggle Side Bar".into(), command: Command::new("toggle_side_bar") })
-        .with_binding(Binding { keys: vec![KeyCombo::parse("ctrl+s").unwrap()], command: Command::new("save"), context: vec![] })
+        .with_palette(PaletteCommand {
+            caption: "File: Save".into(),
+            command: Command::new("save"),
+        })
+        .with_palette(PaletteCommand {
+            caption: "View: Toggle Side Bar".into(),
+            command: Command::new("toggle_side_bar"),
+        })
+        .with_binding(Binding {
+            keys: vec![KeyCombo::parse("ctrl+s").unwrap()],
+            command: Command::new("save"),
+            context: vec![],
+        })
 }
 
 // ----- Command Palette -----------------------------------------------------------------------------
@@ -30,8 +40,14 @@ fn the_palette_lists_entries_with_their_key_binding() {
     let editor = world.editor();
     let results = editor.search(SearchKind::Commands, "save");
     assert_eq!(results[0].caption, "File: Save");
-    assert_eq!(results[0].hint, KeyCombo::parse("ctrl+s").unwrap().display());
-    assert_eq!(results[0].target, CandidateTarget::Command(Command::new("save")));
+    assert_eq!(
+        results[0].hint,
+        KeyCombo::parse("ctrl+s").unwrap().display()
+    );
+    assert_eq!(
+        results[0].target,
+        CandidateTarget::Command(Command::new("save"))
+    );
 }
 
 #[test]
@@ -46,7 +62,10 @@ fn the_palette_offers_set_syntax_for_every_syntax() {
     assert_eq!(python[0].caption, "Set Syntax: Python");
     assert_eq!(
         python[0].target,
-        CandidateTarget::Command(Command::with_args("set_file_type", json!({ "syntax": "Python" })))
+        CandidateTarget::Command(Command::with_args(
+            "set_file_type",
+            json!({ "syntax": "Python" })
+        ))
     );
 }
 
@@ -55,7 +74,10 @@ fn fuzzy_queries_filter_out_non_matches() {
     let world = palette_world();
     let editor = world.editor();
     let results = captions(&editor.search(SearchKind::Commands, "tsb"));
-    assert_eq!(results.first().map(String::as_str), Some("View: Toggle Side Bar"));
+    assert_eq!(
+        results.first().map(String::as_str),
+        Some("View: Toggle Side Bar")
+    );
     assert!(!results.contains(&"File: Save".to_string()));
 }
 
@@ -63,8 +85,14 @@ fn fuzzy_queries_filter_out_non_matches() {
 fn color_schemes_are_listed() {
     let world = World::new();
     let editor = world.editor();
-    assert_eq!(captions(&editor.search(SearchKind::ColorSchemes, "")), vec!["Daylight", "Monokai", "Solarized (dark)"]);
-    assert_eq!(captions(&editor.search(SearchKind::ColorSchemes, "mono")), vec!["Monokai"]);
+    assert_eq!(
+        captions(&editor.search(SearchKind::ColorSchemes, "")),
+        vec!["Daylight", "Monokai", "Solarized (dark)"]
+    );
+    assert_eq!(
+        captions(&editor.search(SearchKind::ColorSchemes, "mono")),
+        vec!["Monokai"]
+    );
 }
 
 // ----- Goto Anything -------------------------------------------------------------------------------
@@ -76,22 +104,38 @@ fn colon_goes_to_a_line() {
     let results = editor.search(SearchKind::Goto, ":12");
     assert_eq!(captions(&results), vec!["Go to line 12"]);
     assert_eq!(results[0].target, CandidateTarget::Line(11));
-    assert_eq!(captions(&editor.search(SearchKind::Goto, ":abc")), vec!["Type a line number"]);
+    assert_eq!(
+        captions(&editor.search(SearchKind::Goto, ":abc")),
+        vec!["Type a line number"]
+    );
 }
 
 #[test]
 fn at_lists_the_symbols_of_the_active_document() {
     let world = World::new();
     *world.syntaxes.symbols.borrow_mut() = vec![
-        Symbol { line: 0, name: "main".into() },
-        Symbol { line: 9, name: "helper".into() },
+        Symbol {
+            line: 0,
+            name: "main".into(),
+        },
+        Symbol {
+            line: 9,
+            name: "helper".into(),
+        },
     ];
     let editor = world.editor();
     let all = editor.search(SearchKind::Goto, "@");
-    assert_eq!(captions(&all), vec!["main", "helper"], "file order when there is no query");
+    assert_eq!(
+        captions(&all),
+        vec!["main", "helper"],
+        "file order when there is no query"
+    );
     assert_eq!(all[1].hint, "10");
     assert_eq!(all[1].target, CandidateTarget::Line(9));
-    assert_eq!(captions(&editor.search(SearchKind::Goto, "@help")), vec!["helper"]);
+    assert_eq!(
+        captions(&editor.search(SearchKind::Goto, "@help")),
+        vec!["helper"]
+    );
 }
 
 #[test]
@@ -107,9 +151,18 @@ fn files_come_from_open_documents_and_the_folder_index() {
     let main = results.iter().filter(|c| c.caption == "main.rs").count();
     assert_eq!(main, 1, "an open file is listed once");
     let lib = results.iter().find(|c| c.caption == "lib.rs").unwrap();
-    let relative = std::path::Path::new("/proj/src/lib.rs").strip_prefix("/proj").unwrap();
-    assert_eq!(lib.detail, relative.to_string_lossy(), "shown relative to the open folder");
-    assert_eq!(lib.target, CandidateTarget::OpenFile(PathBuf::from("/proj/src/lib.rs")));
+    let relative = std::path::Path::new("/proj/src/lib.rs")
+        .strip_prefix("/proj")
+        .unwrap();
+    assert_eq!(
+        lib.detail,
+        relative.to_string_lossy(),
+        "shown relative to the open folder"
+    );
+    assert_eq!(
+        lib.target,
+        CandidateTarget::OpenFile(PathBuf::from("/proj/src/lib.rs"))
+    );
     let open_doc = results.iter().find(|c| c.caption == "main.rs").unwrap();
     assert_eq!(open_doc.hint, "open");
 }
@@ -131,14 +184,20 @@ fn accepting_a_command_returns_it_to_the_caller() {
     let world = World::new();
     let mut editor = world.editor();
     let command = Command::new("save");
-    assert_eq!(editor.accept_candidate(CandidateTarget::Command(command.clone())), Some(command));
+    assert_eq!(
+        editor.accept_candidate(CandidateTarget::Command(command.clone())),
+        Some(command)
+    );
 }
 
 #[test]
 fn accepting_a_file_opens_it() {
     let world = World::new().with_file("/p/a.txt", "a");
     let mut editor = world.editor();
-    assert_eq!(editor.accept_candidate(CandidateTarget::OpenFile(PathBuf::from("/p/a.txt"))), None);
+    assert_eq!(
+        editor.accept_candidate(CandidateTarget::OpenFile(PathBuf::from("/p/a.txt"))),
+        None
+    );
     assert_eq!(editor.active_document().unwrap().name(), "a.txt");
 }
 
@@ -158,7 +217,10 @@ fn accepting_a_line_moves_the_caret() {
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     editor.accept_candidate(CandidateTarget::Line(2));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(4)
+    );
 }
 
 #[test]
@@ -170,7 +232,10 @@ fn accepting_a_color_scheme_saves_it_and_previewing_does_not() {
     assert!(world.resources.user_settings.borrow().is_empty());
 
     editor.accept_candidate(CandidateTarget::ColorScheme("Daylight".into()));
-    assert_eq!(world.resources.user_settings.borrow()["color_scheme"], json!("Daylight.sublime-color-scheme"));
+    assert_eq!(
+        world.resources.user_settings.borrow()["color_scheme"],
+        json!("Daylight.sublime-color-scheme")
+    );
 }
 
 #[test]
@@ -179,7 +244,10 @@ fn previewing_a_line_moves_the_caret_and_other_previews_do_nothing() {
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     editor.preview_candidate(&CandidateTarget::Line(1));
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(2));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(2)
+    );
     editor.preview_candidate(&CandidateTarget::Command(Command::new("exit")));
     assert_eq!(editor.state().documents.len(), 1);
 }

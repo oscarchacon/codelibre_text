@@ -19,7 +19,14 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
         .map(|(tab, index)| {
             let doc = &state.documents[index];
             let name = editor.document_name(doc);
-            OpenFileViewModel { index, group: doc.group, tab, name, dirty: doc.is_dirty(), active: index == state.active }
+            OpenFileViewModel {
+                index,
+                group: doc.group,
+                tab,
+                name,
+                dirty: doc.is_dirty(),
+                active: index == state.active,
+            }
         })
         .collect();
 
@@ -35,14 +42,21 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
             depth: 0,
             name,
             path: root.clone(),
-            kind: TreeRowKind::Folder { expanded, is_root: true },
+            kind: TreeRowKind::Folder {
+                expanded,
+                is_root: true,
+            },
             active: false,
         });
         if expanded {
             add_children(editor, view, root, 1, active_path.as_deref(), &mut folders);
         }
     }
-    SideBarViewModel { open_files, groups, folders }
+    SideBarViewModel {
+        open_files,
+        groups,
+        folders,
+    }
 }
 
 fn add_children(
@@ -55,14 +69,20 @@ fn add_children(
 ) {
     let entries = listing(editor, view, folder);
     for (path, is_dir) in entries {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if is_dir {
             let expanded = view.expanded_folders.contains(&path);
             rows.push(TreeRowViewModel {
                 depth,
                 name,
                 path: path.clone(),
-                kind: TreeRowKind::Folder { expanded, is_root: false },
+                kind: TreeRowKind::Folder {
+                    expanded,
+                    is_root: false,
+                },
                 active: false,
             });
             if expanded {

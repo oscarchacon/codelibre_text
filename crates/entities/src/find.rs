@@ -49,7 +49,13 @@ impl FindOptions {
             .multi_line(true)
             .build()
             .map(Some)
-            .map_err(|e| e.to_string().lines().last().unwrap_or("invalid regex").to_string())
+            .map_err(|e| {
+                e.to_string()
+                    .lines()
+                    .last()
+                    .unwrap_or("invalid regex")
+                    .to_string()
+            })
     }
 }
 
@@ -64,8 +70,15 @@ pub fn find_all(pattern: &Regex, text: &str) -> Vec<Range<usize>> {
 }
 
 /// The next (or previous) match after the selection, wrapping around if `wrap`.
-pub fn find_from(pattern: &Regex, text: &str, selection: Selection, forward: bool, wrap: bool) -> Option<Selection> {
-    let to_selection = |r: &Range<usize>| Selection::new(byte_to_char(text, r.start), byte_to_char(text, r.end));
+pub fn find_from(
+    pattern: &Regex,
+    text: &str,
+    selection: Selection,
+    forward: bool,
+    wrap: bool,
+) -> Option<Selection> {
+    let to_selection =
+        |r: &Range<usize>| Selection::new(byte_to_char(text, r.start), byte_to_char(text, r.end));
     let matches = find_all(pattern, text);
     let found = if forward {
         let from = char_to_byte(text, selection.end());
@@ -100,7 +113,12 @@ pub fn find_all_selections(pattern: &Regex, text: &str) -> Vec<Selection> {
 
 /// `find_under_expand`: the first match after `after` (wrapping around) that is not already one
 /// of the `selected` ranges.
-pub fn next_unselected(pattern: &Regex, text: &str, after: Selection, selected: &[Selection]) -> Option<Selection> {
+pub fn next_unselected(
+    pattern: &Regex,
+    text: &str,
+    after: Selection,
+    selected: &[Selection],
+) -> Option<Selection> {
     let from = char_to_byte(text, after.end());
     let matches = find_all(pattern, text);
     let split = matches.partition_point(|r| r.start < from);
@@ -108,7 +126,11 @@ pub fn next_unselected(pattern: &Regex, text: &str, after: Selection, selected: 
         .iter()
         .chain(&matches[..split])
         .map(|r| Selection::new(byte_to_char(text, r.start), byte_to_char(text, r.end)))
-        .find(|m| !selected.iter().any(|s| s.start() == m.start() && s.end() == m.end()))
+        .find(|m| {
+            !selected
+                .iter()
+                .any(|s| s.start() == m.start() && s.end() == m.end())
+        })
 }
 
 /// Sublime writes groups as `\1` or `$1`; the regex crate expects `${1}`.
@@ -167,13 +189,22 @@ pub fn replace_next(
 }
 
 /// Replaces every match and returns how many there were.
-pub fn replace_all(pattern: &Regex, text: &mut String, replacement: &str, options: &FindOptions) -> usize {
+pub fn replace_all(
+    pattern: &Regex,
+    text: &mut String,
+    replacement: &str,
+    options: &FindOptions,
+) -> usize {
     let count = find_all(pattern, text).len();
     if count > 0 {
         *text = if options.regex {
-            pattern.replace_all(text, replacement_template(replacement).as_str()).into_owned()
+            pattern
+                .replace_all(text, replacement_template(replacement).as_str())
+                .into_owned()
         } else {
-            pattern.replace_all(text, NoExpand(replacement)).into_owned()
+            pattern
+                .replace_all(text, NoExpand(replacement))
+                .into_owned()
         };
     }
     count

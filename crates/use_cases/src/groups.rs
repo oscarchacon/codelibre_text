@@ -29,7 +29,9 @@ impl Editor {
 
     /// Indexes (in `documents`) of the tabs of `group`, in order.
     pub fn group_indexes(&self, group: usize) -> Vec<usize> {
-        (0..self.state.documents.len()).filter(|&i| self.state.documents[i].group == group).collect()
+        (0..self.state.documents.len())
+            .filter(|&i| self.state.documents[i].group == group)
+            .collect()
     }
 
     /// The document `group` shows: the one of its documents used last.
@@ -83,14 +85,18 @@ impl Editor {
         if group >= self.group_count() {
             return;
         }
-        let Some(from) = self.index_of(id) else { return };
+        let Some(from) = self.index_of(id) else {
+            return;
+        };
         let active = self.active_document().map(|d| d.id);
         let mut doc = self.state.documents.remove(from);
         doc.group = group;
         let tabs = self.group_indexes(group);
         let to = match tabs.get(index) {
             Some(&at) => at,
-            None => tabs.last().map_or(self.state.documents.len(), |&last| last + 1),
+            None => tabs
+                .last()
+                .map_or(self.state.documents.len(), |&last| last + 1),
         };
         self.state.documents.insert(to, doc);
         if let Some(active) = active.and_then(|a| self.index_of(a)) {
@@ -103,7 +109,10 @@ impl Editor {
     pub fn view_index(&self, id: DocumentId) -> Option<(usize, usize)> {
         let index = self.index_of(id)?;
         let group = self.state.documents[index].group;
-        Some((group, self.group_indexes(group).iter().position(|&i| i == index)?))
+        Some((
+            group,
+            self.group_indexes(group).iter().position(|&i| i == index)?,
+        ))
     }
 
     /// `move_to_group`: the active document goes to the end of `group`'s tabs, and the focus
@@ -131,7 +140,12 @@ impl Editor {
     /// The `max_columns` window setting (`set_max_columns`): `new_pane` adds columns up to it,
     /// then rows. Sublime's default is 4.
     pub fn max_columns(&self) -> usize {
-        self.state.plugins.window_settings.get("max_columns").and_then(serde_json::Value::as_u64).map_or(4, |n| n.max(1) as usize)
+        self.state
+            .plugins
+            .window_settings
+            .get("max_columns")
+            .and_then(serde_json::Value::as_u64)
+            .map_or(4, |n| n.max(1) as usize)
     }
 
     /// `new_pane`: one more group, the layout flowing in rows of `max_columns`; with `move`, the
@@ -167,7 +181,13 @@ impl Editor {
             }
         }
         let focused = self.state.active_group;
-        self.state.active_group = if focused == group { into } else if focused > group { focused - 1 } else { focused };
+        self.state.active_group = if focused == group {
+            into
+        } else if focused > group {
+            focused - 1
+        } else {
+            focused
+        };
         self.set_layout(Layout::flow(count - 1, self.max_columns()));
         self.focus_group(self.state.active_group);
     }
@@ -175,7 +195,10 @@ impl Editor {
     /// `set_max_columns`: groups flow in rows of at most `columns` from now on (the current ones too).
     pub fn set_max_columns(&mut self, columns: usize) {
         let columns = columns.max(1);
-        self.state.plugins.window_settings.insert("max_columns".into(), serde_json::json!(columns));
+        self.state
+            .plugins
+            .window_settings
+            .insert("max_columns".into(), serde_json::json!(columns));
         let count = self.group_count();
         if count > 1 {
             self.set_layout(Layout::flow(count, columns));

@@ -28,7 +28,10 @@ impl Command {
     }
 
     pub fn bool_arg(&self, key: &str, default: bool) -> bool {
-        self.args.get(key).and_then(Value::as_bool).unwrap_or(default)
+        self.args
+            .get(key)
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
     }
 
     pub fn usize_arg(&self, key: &str, default: usize) -> usize {
@@ -42,6 +45,7 @@ impl Command {
     /// Same command and arguments; missing arguments and `{}` are equivalent.
     pub fn same_as(&self, other: &Command) -> bool {
         let empty = |v: &Value| v.is_null() || v.as_object().is_some_and(|m| m.is_empty());
-        self.name == other.name && (self.args == other.args || (empty(&self.args) && empty(&other.args)))
+        self.name == other.name
+            && (self.args == other.args || (empty(&self.args) && empty(&other.args)))
     }
 }

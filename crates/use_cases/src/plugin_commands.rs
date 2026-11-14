@@ -25,12 +25,16 @@ pub struct PluginCommandState {
 
 impl PluginCommandState {
     fn from_answer(answer: &Value) -> Self {
-        let flag = |key: &str, default: bool| answer.get(key).and_then(Value::as_bool).unwrap_or(default);
+        let flag =
+            |key: &str, default: bool| answer.get(key).and_then(Value::as_bool).unwrap_or(default);
         Self {
             visible: flag("visible", true),
             enabled: flag("enabled", true),
             checked: flag("checked", false),
-            description: answer.get("description").and_then(Value::as_str).map(String::from),
+            description: answer
+                .get("description")
+                .and_then(Value::as_str)
+                .map(String::from),
             want_event: flag("want_event", false),
         }
     }
@@ -73,7 +77,10 @@ impl Editor {
 
     /// The plugins' answers about the plugin commands among `commands`, in one query; `None` when
     /// nothing was asked or the host did not answer.
-    pub(crate) fn ask_plugin_command_states(&mut self, mut commands: Vec<Command>) -> Option<HashMap<String, PluginCommandState>> {
+    pub(crate) fn ask_plugin_command_states(
+        &mut self,
+        mut commands: Vec<Command>,
+    ) -> Option<HashMap<String, PluginCommandState>> {
         if !self.wants_plugin_event("command_states") {
             return None;
         }
@@ -85,10 +92,17 @@ impl Editor {
         }
         let view = self.active_document().map(|d| d.id);
         let asked: Vec<Value> = commands.iter().map(|c| json!([c.name, c.args])).collect();
-        let Some(Value::Array(answers)) = self.plugin_query("command_states", view, json!([asked])) else {
+        let Some(Value::Array(answers)) = self.plugin_query("command_states", view, json!([asked]))
+        else {
             return None;
         };
-        Some(commands.iter().zip(&answers).map(|(c, answer)| (state_key(c), PluginCommandState::from_answer(answer))).collect())
+        Some(
+            commands
+                .iter()
+                .zip(&answers)
+                .map(|(c, answer)| (state_key(c), PluginCommandState::from_answer(answer)))
+                .collect(),
+        )
     }
 
     /// The last answers about a command; `None` for commands the plugins were not asked about.
@@ -103,6 +117,7 @@ impl Editor {
             return false;
         }
         let view = self.active_document().map(|d| d.id);
-        self.plugin_query("command_input", view, json!([command.name, command.args])) == Some(Value::Bool(true))
+        self.plugin_query("command_input", view, json!([command.name, command.args]))
+            == Some(Value::Bool(true))
     }
 }

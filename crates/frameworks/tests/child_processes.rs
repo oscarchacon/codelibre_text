@@ -6,7 +6,12 @@ use codelibre_text::gateways::child_processes::ChildProcesses;
 use use_cases::gateways::{ProcessCommand, ProcessEvent, ProcessGateway, ProcessRequest};
 
 fn shell(line: &str) -> ProcessRequest {
-    ProcessRequest { command: ProcessCommand::Shell(line.to_string()), working_dir: None, env: Vec::new(), path: None }
+    ProcessRequest {
+        command: ProcessCommand::Shell(line.to_string()),
+        working_dir: None,
+        env: Vec::new(),
+        path: None,
+    }
 }
 
 /// Everything the process wrote, and its exit code, once it ends.
@@ -55,19 +60,30 @@ fn stderr_is_read_too() {
 fn the_working_folder_and_the_environment_are_used() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("marker.txt"), "found").unwrap();
-    let mut request = shell(if cfg!(windows) { "type marker.txt && echo %MY_VALUE%" } else { "cat marker.txt && echo $MY_VALUE" });
+    let mut request = shell(if cfg!(windows) {
+        "type marker.txt && echo %MY_VALUE%"
+    } else {
+        "cat marker.txt && echo $MY_VALUE"
+    });
     request.working_dir = Some(dir.path().to_path_buf());
     request.env = vec![("MY_VALUE".to_string(), "from-env".to_string())];
     let mut processes = ChildProcesses::default();
     processes.start(&request).unwrap();
     let (output, _) = wait(&mut processes);
-    assert!(output.contains("found") && output.contains("from-env"), "{output}");
+    assert!(
+        output.contains("found") && output.contains("from-env"),
+        "{output}"
+    );
 }
 
 #[test]
 fn environment_values_can_use_the_current_environment() {
     let expanded = if cfg!(windows) { "x;%PATH%" } else { "x:$PATH" };
-    let mut request = shell(if cfg!(windows) { "echo %MY_PATH%" } else { "echo $MY_PATH" });
+    let mut request = shell(if cfg!(windows) {
+        "echo %MY_PATH%"
+    } else {
+        "echo $MY_PATH"
+    });
     request.env = vec![("MY_PATH".to_string(), expanded.to_string())];
     let mut processes = ChildProcesses::default();
     processes.start(&request).unwrap();
@@ -79,19 +95,32 @@ fn environment_values_can_use_the_current_environment() {
 #[test]
 fn a_program_that_does_not_exist_is_an_error() {
     let mut processes = ChildProcesses::default();
-    let request = ProcessRequest { command: ProcessCommand::Program(vec!["no-such-program-here".into()]), ..shell("") };
+    let request = ProcessRequest {
+        command: ProcessCommand::Program(vec!["no-such-program-here".into()]),
+        ..shell("")
+    };
     assert!(processes.start(&request).is_err());
 }
 
 #[test]
 fn killing_ends_the_process_and_its_children() {
     let mut processes = ChildProcesses::default();
-    processes.start(&shell(if cfg!(windows) { "ping -n 30 127.0.0.1" } else { "sleep 30" })).unwrap();
+    processes
+        .start(&shell(if cfg!(windows) {
+            "ping -n 30 127.0.0.1"
+        } else {
+            "sleep 30"
+        }))
+        .unwrap();
     std::thread::sleep(Duration::from_millis(200));
     let started = Instant::now();
     processes.kill();
     wait(&mut processes);
-    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

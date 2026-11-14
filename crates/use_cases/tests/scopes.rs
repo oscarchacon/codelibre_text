@@ -26,11 +26,26 @@ fn scope_name_is_the_scope_of_the_char_at_the_point() {
     let world = World::new();
     let editor = python(&world);
     assert_eq!(editor.scope_name(id(&editor), 0).unwrap(), "source.python ");
-    assert_eq!(editor.scope_name(id(&editor), 4).unwrap(), "source.python string.quoted.double ", "the quote");
-    assert_eq!(editor.scope_name(id(&editor), 7).unwrap(), "source.python string.quoted.double ");
-    assert_eq!(editor.scope_name(id(&editor), 8).unwrap(), "source.python ", "the newline after it");
+    assert_eq!(
+        editor.scope_name(id(&editor), 4).unwrap(),
+        "source.python string.quoted.double ",
+        "the quote"
+    );
+    assert_eq!(
+        editor.scope_name(id(&editor), 7).unwrap(),
+        "source.python string.quoted.double "
+    );
+    assert_eq!(
+        editor.scope_name(id(&editor), 8).unwrap(),
+        "source.python ",
+        "the newline after it"
+    );
     let end = CODE.chars().count();
-    assert_eq!(editor.scope_name(id(&editor), end).unwrap(), "source.python string.quoted.double ", "the last char's");
+    assert_eq!(
+        editor.scope_name(id(&editor), end).unwrap(),
+        "source.python string.quoted.double ",
+        "the last char's"
+    );
     assert_eq!(editor.scope_name(999, 0), None);
 }
 
@@ -47,7 +62,11 @@ fn caret_contexts_know_the_scope_at_the_end_of_the_line() {
     let contexts = editor.caret_contexts();
     let eol: Vec<&str> = contexts.iter().map(|c| c.eol_scope.trim()).collect();
     assert_eq!(eol, ["source.python string.quoted.double", "source.python"]);
-    assert_eq!(contexts[0].scope.trim(), "source.python", "the caret itself is outside the string");
+    assert_eq!(
+        contexts[0].scope.trim(),
+        "source.python",
+        "the caret itself is outside the string"
+    );
 }
 
 #[test]
@@ -61,8 +80,14 @@ fn an_empty_document_has_its_syntax_base_scope() {
 fn find_by_selector_joins_neighbouring_pieces() {
     let world = World::new();
     let editor = python(&world);
-    assert_eq!(editor.find_by_selector(id(&editor), "string"), vec![(4, 8), (19, 22)]);
-    assert_eq!(editor.find_by_selector(id(&editor), "source - string"), vec![(0, 4), (8, 19)]);
+    assert_eq!(
+        editor.find_by_selector(id(&editor), "string"),
+        vec![(4, 8), (19, 22)]
+    );
+    assert_eq!(
+        editor.find_by_selector(id(&editor), "source - string"),
+        vec![(0, 4), (8, 19)]
+    );
 }
 
 #[test]
@@ -72,9 +97,54 @@ fn extract_scope_spans_the_token_around_the_point() {
     assert_eq!(editor.extract_scope(id(&editor), 5), Some((4, 8)));
 }
 
+/// What Sublime Text 4 (build 4215) answered for the same text: scopes are compared by name, so
+/// two strings side by side are one extent from inside; a quote is its own; the end of the text
+/// (or past it) is the whole text, even after a string.
+#[test]
+fn extract_scope_answers_as_sublime_does() {
+    let world = World::new();
+    world.disk.put("/p/c.py", "s = \"ab\"\"cd\" q \"ef");
+    let mut editor = world.editor();
+    editor.open_file(Path::new("/p/c.py"));
+    let doc = id(&editor);
+    let size = 18;
+    assert_eq!(editor.extract_scope(doc, 5), Some((4, 12)), "both strings");
+    assert_eq!(
+        editor.extract_scope(doc, 13),
+        Some((0, size)),
+        "outside them"
+    );
+    assert_eq!(
+        editor.extract_scope(doc, 17),
+        Some((15, size)),
+        "an open string"
+    );
+    assert_eq!(editor.extract_scope(doc, size), Some((0, size)), "the end");
+    assert_eq!(
+        editor.extract_scope(doc, size + 5),
+        Some((0, size)),
+        "past it"
+    );
+}
+
+#[test]
+fn extract_scope_of_an_empty_view_is_its_start() {
+    let world = World::new();
+    let editor = world.editor();
+    assert_eq!(editor.extract_scope(id(&editor), 0), Some((0, 0)));
+}
+
 /// A file of `lines` lines `n = 1`, with `x = "hi"` as line `quoted`.
 fn long_file(world: &World, lines: usize, quoted: usize) -> Editor {
-    let text: String = (0..lines).map(|line| if line == quoted { "x = \"hi\"\n".to_string() } else { "n = 1\n".to_string() }).collect();
+    let text: String = (0..lines)
+        .map(|line| {
+            if line == quoted {
+                "x = \"hi\"\n".to_string()
+            } else {
+                "n = 1\n".to_string()
+            }
+        })
+        .collect();
     world.disk.put("/p/long.py", text.as_str());
     let mut editor = world.editor();
     editor.open_file(Path::new("/p/long.py"));
@@ -87,9 +157,15 @@ fn extract_scope_reads_only_the_lines_around_the_point() {
     let editor = long_file(&world, 2000, 1000);
     let string_start = 1000 * 6 + 4;
     world.syntaxes.lines_copied.set(0);
-    assert_eq!(editor.extract_scope(id(&editor), string_start + 1), Some((string_start, string_start + 4)));
+    assert_eq!(
+        editor.extract_scope(id(&editor), string_start + 1),
+        Some((string_start, string_start + 4))
+    );
     let copied = world.syntaxes.lines_copied.get();
-    assert!(copied <= 2 * use_cases::scopes::EXTRACT_SCOPE_LINES + 1, "{copied} lines read for one string");
+    assert!(
+        copied <= 2 * use_cases::scopes::EXTRACT_SCOPE_LINES + 1,
+        "{copied} lines read for one string"
+    );
 }
 
 #[test]
@@ -109,8 +185,19 @@ fn scoped_ranges_read_only_the_lines_of_the_region() {
     world.syntaxes.lines_copied.set(0);
     let ranges = editor.scoped_ranges(id(&editor), 500 * 6, 500 * 6 + 9);
     assert_eq!(ranges.len(), 3, "{ranges:?}");
-    assert_eq!(ranges[1], ScopedRange { start: 3004, end: 3008, scope: "source.python string.quoted.double".to_string() });
-    assert_eq!(world.syntaxes.lines_copied.get(), 2, "the line and the next one, where the region ends");
+    assert_eq!(
+        ranges[1],
+        ScopedRange {
+            start: 3004,
+            end: 3008,
+            scope: "source.python string.quoted.double".to_string()
+        }
+    );
+    assert_eq!(
+        world.syntaxes.lines_copied.get(),
+        2,
+        "the line and the next one, where the region ends"
+    );
 }
 
 #[test]
@@ -121,8 +208,16 @@ fn scoped_ranges_are_clipped_to_the_region() {
     assert_eq!(
         editor.scoped_ranges(id(&editor), 2, 6),
         vec![
-            ScopedRange { start: 2, end: 4, scope: scope("source.python") },
-            ScopedRange { start: 4, end: 6, scope: scope("source.python string.quoted.double") },
+            ScopedRange {
+                start: 2,
+                end: 4,
+                scope: scope("source.python")
+            },
+            ScopedRange {
+                start: 4,
+                end: 6,
+                scope: scope("source.python string.quoted.double")
+            },
         ]
     );
 }
@@ -132,7 +227,10 @@ fn caret_scopes_has_one_scope_per_selection() {
     let world = World::new();
     let mut editor = python(&world);
     editor.sync_selection_from_view(id(&editor), Selection::caret(5));
-    assert_eq!(editor.caret_scopes(), vec!["source.python string.quoted.double "]);
+    assert_eq!(
+        editor.caret_scopes(),
+        vec!["source.python string.quoted.double "]
+    );
     // Alt+F3 on the first `=`: one caret per `=`.
     editor.sync_selection_from_view(id(&editor), Selection::new(2, 3));
     editor.select_all_occurrences();
@@ -141,13 +239,20 @@ fn caret_scopes_has_one_scope_per_selection() {
 
 #[test]
 fn symbol_locations_find_a_symbol_in_the_open_files() {
-    let world = World::new().with_meta_preference("text.plain", serde_json::json!({ "showInSymbolList": true }));
+    let world = World::new().with_meta_preference(
+        "text.plain",
+        serde_json::json!({ "showInSymbolList": true }),
+    );
     world.disk.put("/p/a.txt", "first line\nsecond line\n");
     let mut editor = world.editor();
     editor.add_folder(std::path::PathBuf::from("/p"));
     editor.open_file(Path::new("/p/a.txt"));
 
-    let found = editor.symbol_locations("second line", SymbolSource::OpenFiles, SymbolType::Definition);
+    let found = editor.symbol_locations(
+        "second line",
+        SymbolSource::OpenFiles,
+        SymbolType::Definition,
+    );
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].row, found[0].column), (1, 0));
     assert_eq!(found[0].display_name, "a.txt");
@@ -156,6 +261,11 @@ fn symbol_locations_find_a_symbol_in_the_open_files() {
     assert!(!found[0].reference);
 
     // The Index answers the same here: no file is indexed on disk.
-    assert_eq!(editor.symbol_locations("second line", SymbolSource::Index, SymbolType::Definition), found);
-    assert!(editor.symbol_locations("nowhere", SymbolSource::OpenFiles, SymbolType::Any).is_empty());
+    assert_eq!(
+        editor.symbol_locations("second line", SymbolSource::Index, SymbolType::Definition),
+        found
+    );
+    assert!(editor
+        .symbol_locations("nowhere", SymbolSource::OpenFiles, SymbolType::Any)
+        .is_empty());
 }

@@ -44,7 +44,11 @@ pub fn parse(source: &str, fallback_name: &str) -> Result<ColorSchemeDefinition,
     let variables: HashMap<String, String> = value
         .get("variables")
         .and_then(Value::as_object)
-        .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                .collect()
+        })
         .unwrap_or_default();
     let colors = ColorResolver { variables };
 
@@ -71,7 +75,8 @@ pub fn parse(source: &str, fallback_name: &str) -> Result<ColorSchemeDefinition,
                 _ => None,
             };
             let font_style = rule.get("font_style").and_then(Value::as_str);
-            let has = |style: &str| font_style.is_some_and(|f| f.split_whitespace().any(|s| s == style));
+            let has =
+                |style: &str| font_style.is_some_and(|f| f.split_whitespace().any(|s| s == style));
             Some(ColorRule {
                 scope: rule.get("scope")?.as_str()?.to_string(),
                 foreground: color("foreground"),
@@ -85,8 +90,15 @@ pub fn parse(source: &str, fallback_name: &str) -> Result<ColorSchemeDefinition,
         .collect();
 
     Ok(ColorSchemeDefinition {
-        name: value.get("name").and_then(Value::as_str).unwrap_or(fallback_name).to_string(),
-        author: value.get("author").and_then(Value::as_str).map(String::from),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback_name)
+            .to_string(),
+        author: value
+            .get("author")
+            .and_then(Value::as_str)
+            .map(String::from),
         globals,
         rules,
     })
@@ -109,7 +121,10 @@ impl ColorResolver {
         if let Some(name) = spec.strip_prefix("var(").and_then(|s| s.strip_suffix(')')) {
             return self.resolve_at_depth(self.variables.get(name.trim())?, depth + 1);
         }
-        if let Some(inner) = spec.strip_prefix("color(").and_then(|s| s.strip_suffix(')')) {
+        if let Some(inner) = spec
+            .strip_prefix("color(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
             return self.color_function(inner, depth);
         }
         parse_literal(spec)
@@ -117,17 +132,21 @@ impl ColorResolver {
 
     /// `color(<base> alpha(<a>))` and `color(<base> a(<a>))`; other adjusters are ignored.
     fn color_function(&self, inner: &str, depth: usize) -> Option<Rgba> {
-        let base_end = if inner.starts_with("var(") || inner.starts_with("rgb") || inner.starts_with("hsl") {
-            inner.find(')')? + 1
-        } else {
-            inner.find(char::is_whitespace).unwrap_or(inner.len())
-        };
+        let base_end =
+            if inner.starts_with("var(") || inner.starts_with("rgb") || inner.starts_with("hsl") {
+                inner.find(')')? + 1
+            } else {
+                inner.find(char::is_whitespace).unwrap_or(inner.len())
+            };
         let mut color = self.resolve_at_depth(&inner[..base_end], depth + 1)?;
         let rest = &inner[base_end..];
         for prefix in ["alpha(", "a("] {
             if let Some(pos) = rest.find(prefix) {
                 let start = pos + prefix.len();
-                if let Some(alpha) = rest[start..].find(')').and_then(|len| parse_alpha(&rest[start..start + len])) {
+                if let Some(alpha) = rest[start..]
+                    .find(')')
+                    .and_then(|len| parse_alpha(&rest[start..start + len]))
+                {
                     color.a = alpha;
                 }
                 break;
@@ -150,14 +169,22 @@ fn parse_alpha(s: &str) -> Option<u8> {
 fn parse_literal(spec: &str) -> Option<Rgba> {
     if let Some(hex) = spec.strip_prefix('#') {
         let bytes: Vec<u8> = match hex.len() {
-            3 | 4 => hex.chars().map(|c| u8::from_str_radix(&format!("{c}{c}"), 16).ok()).collect::<Option<_>>()?,
+            3 | 4 => hex
+                .chars()
+                .map(|c| u8::from_str_radix(&format!("{c}{c}"), 16).ok())
+                .collect::<Option<_>>()?,
             6 | 8 => (0..hex.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
                 .collect::<Option<_>>()?,
             _ => return None,
         };
-        return Some(Rgba { r: bytes[0], g: bytes[1], b: bytes[2], a: bytes.get(3).copied().unwrap_or(255) });
+        return Some(Rgba {
+            r: bytes[0],
+            g: bytes[1],
+            b: bytes[2],
+            a: bytes.get(3).copied().unwrap_or(255),
+        });
     }
     let args = |prefix: &str| -> Option<Vec<String>> {
         let inner = spec.strip_prefix(prefix)?.trim_start_matches('a').trim();
@@ -167,18 +194,49 @@ fn parse_literal(spec: &str) -> Option<Rgba> {
     let alpha = |a: &[String]| a.get(3).and_then(|s| parse_alpha(s)).unwrap_or(255);
     if let Some(a) = args("rgb") {
         let channel = |i: usize| a.get(i)?.parse::<f32>().ok().map(|v| v as u8);
-        return Some(Rgba { r: channel(0)?, g: channel(1)?, b: channel(2)?, a: alpha(&a) });
+        return Some(Rgba {
+            r: channel(0)?,
+            g: channel(1)?,
+            b: channel(2)?,
+            a: alpha(&a),
+        });
     }
     if let Some(a) = args("hsl") {
-        let percent = |i: usize| a.get(i)?.trim_end_matches('%').parse::<f32>().ok().map(|v| v / 100.0);
+        let percent = |i: usize| {
+            a.get(i)?
+                .trim_end_matches('%')
+                .parse::<f32>()
+                .ok()
+                .map(|v| v / 100.0)
+        };
         let hue = a.first()?.trim_end_matches("deg").parse::<f32>().ok()?;
         let (r, g, b) = hsl_to_rgb(hue, percent(1)?, percent(2)?);
-        return Some(Rgba { r, g, b, a: alpha(&a) });
+        return Some(Rgba {
+            r,
+            g,
+            b,
+            a: alpha(&a),
+        });
     }
     match spec {
-        "white" => Some(Rgba { r: 255, g: 255, b: 255, a: 255 }),
-        "black" => Some(Rgba { r: 0, g: 0, b: 0, a: 255 }),
-        "transparent" => Some(Rgba { r: 0, g: 0, b: 0, a: 0 }),
+        "white" => Some(Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        }),
+        "black" => Some(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        }),
+        "transparent" => Some(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }),
         _ => None,
     }
 }

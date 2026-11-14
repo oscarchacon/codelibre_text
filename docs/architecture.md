@@ -66,7 +66,8 @@ each module adds the use cases of one area as methods:
 | `documents.rs` | new, open, switch tabs, close (asking about unsaved changes), reopen, revert, reload changed files |
 | `saving.rs` | save, save as, save all |
 | `editing.rs` | `run_text_command(TextCommand)`, go to line, clipboard text |
-| `find_replace.rs` | find next/previous, find under caret, replace, cached matches |
+| `find_replace.rs` | find next/previous, find under caret, find all, replace, cached matches |
+| `find_in_files.rs` | Find in Files: the "Where" field, the background search, Find Results in the `find_results` panel, replace in files |
 | `preferences.rs` | settings, font size, color scheme, edit settings files |
 | `packages.rs` | load and reload Sublime resources |
 | `project.rs` | folders, folder listing, file index |
@@ -76,7 +77,7 @@ each module adds the use cases of one area as methods:
 
 **Gateways** (`gateways.rs`) are the traits through which use cases reach the outside world:
 `FileSystemGateway`, `DialogGateway`, `ClipboardGateway`, `ResourceGateway`, `SyntaxGateway`,
-`SessionGateway`, `FileIndexGateway`, `ShellGateway`. They are *declared* here and *implemented*
+`SessionGateway`, `FileIndexGateway`, `FileSearchGateway`, `ShellGateway`. They are *declared* here and *implemented*
 in the outer circles — that is how an inner circle uses something outer without depending on it.
 
 Use cases are tested with in-memory gateways from `crates/test_support` (`crates/use_cases/tests/`).

@@ -225,7 +225,12 @@ impl Document {
     }
 
     /// A document for a file's contents: detects the encoding and line endings.
-    pub fn from_bytes(id: DocumentId, path: &Path, bytes: Vec<u8>, modified_at: Option<SystemTime>) -> Result<Self, DocumentError> {
+    pub fn from_bytes(
+        id: DocumentId,
+        path: &Path,
+        bytes: Vec<u8>,
+        modified_at: Option<SystemTime>,
+    ) -> Result<Self, DocumentError> {
         if bytes.iter().take(8192).any(|&b| b == 0) {
             return Err(DocumentError::Binary);
         }
@@ -259,7 +264,9 @@ impl Document {
                 bytes.extend(text.into_bytes());
                 bytes
             }
-            Encoding::Latin1 if text.chars().all(|c| (c as u32) < 256) => text.chars().map(|c| c as u8).collect(),
+            Encoding::Latin1 if text.chars().all(|c| (c as u32) < 256) => {
+                text.chars().map(|c| c as u8).collect()
+            }
             Encoding::Latin1 => {
                 self.encoding = Encoding::Utf8;
                 text.into_bytes()
@@ -298,7 +305,10 @@ impl Document {
             let suffix = common_suffix(&before[prefix..], &self.text[prefix..]);
             let end_byte = before.len() - suffix;
             let inserted_text = self.text[prefix..self.text.len() - suffix].to_string();
-            let (start, end) = (before[..prefix].chars().count(), before[..end_byte].chars().count());
+            let (start, end) = (
+                before[..prefix].chars().count(),
+                before[..end_byte].chars().count(),
+            );
             let inserted = inserted_text.chars().count();
             let map = |p: usize| moved_position(p, start, end, inserted);
             let moved = |s: &Selection| Selection::new(map(s.anchor), map(s.head));
@@ -362,7 +372,8 @@ impl Document {
     pub fn is_dirty(&self) -> bool {
         !self.read_only
             && !self.scratch
-            && (self.text != self.saved_text || (self.path.is_some() && self.line_ending != self.saved_line_ending))
+            && (self.text != self.saved_text
+                || (self.path.is_some() && self.line_ending != self.saved_line_ending))
     }
 
     /// Tab title. Untitled buffers are named after their first line, as in Sublime.
@@ -421,7 +432,10 @@ impl Document {
             }
         }
         if prefix + suffix < before.len() || prefix + suffix < self.text.len() {
-            let (end, inserted) = (before.len() - suffix, self.text[prefix..self.text.len() - suffix].to_string());
+            let (end, inserted) = (
+                before.len() - suffix,
+                self.text[prefix..self.text.len() - suffix].to_string(),
+            );
             self.record_change(prefix, end, &inserted);
         }
     }
@@ -432,7 +446,10 @@ impl Document {
         let Some(before) = &mut self.tracked_text else {
             return;
         };
-        let (start_char, end_char) = (before[..start].chars().count(), before[..end].chars().count());
+        let (start_char, end_char) = (
+            before[..start].chars().count(),
+            before[..end].chars().count(),
+        );
         if let Some(log) = &mut self.change_log {
             log.push(TextChange {
                 start: start_char,
@@ -444,7 +461,10 @@ impl Document {
         }
         before.replace_range(start..end, inserted);
         let inserted = inserted.chars().count();
-        let regions = self.region_sets.iter_mut().flat_map(|s| s.regions.iter_mut());
+        let regions = self
+            .region_sets
+            .iter_mut()
+            .flat_map(|s| s.regions.iter_mut());
         for region in regions.chain(self.phantoms.iter_mut().map(|p| &mut p.region)) {
             *region = (
                 moved_position(region.0, start_char, end_char, inserted),
@@ -459,11 +479,22 @@ impl Document {
                 for (a, b) in field.iter_mut() {
                     let (low, high) = ((*a).min(*b), (*a).max(*b));
                     let (low, high) = if index == current && low <= end_char && high >= start_char {
-                        let low = if low <= start_char { low } else { start_char + inserted };
-                        let high = if high <= end_char { start_char + inserted } else { moved_position(high, start_char, end_char, inserted) };
+                        let low = if low <= start_char {
+                            low
+                        } else {
+                            start_char + inserted
+                        };
+                        let high = if high <= end_char {
+                            start_char + inserted
+                        } else {
+                            moved_position(high, start_char, end_char, inserted)
+                        };
                         (low, high)
                     } else {
-                        (moved_position(low, start_char, end_char, inserted), moved_position(high, start_char, end_char, inserted))
+                        (
+                            moved_position(low, start_char, end_char, inserted),
+                            moved_position(high, start_char, end_char, inserted),
+                        )
                     };
                     (*a, *b) = (low, high.max(low));
                 }
@@ -474,7 +505,9 @@ impl Document {
     /// Starts visiting a snippet's fields: the first one is selected (with its mirrors, as more
     /// selections). With one field (just where the caret ends), there is nothing to visit.
     pub fn start_snippet(&mut self, fields: Vec<Vec<(usize, usize)>>) {
-        let Some(first) = fields.first().cloned() else { return };
+        let Some(first) = fields.first().cloned() else {
+            return;
+        };
         self.select_field(&first);
         if fields.len() > 1 {
             self.tracked_text.get_or_insert_with(|| self.text.clone());
@@ -493,13 +526,23 @@ impl Document {
     pub fn snippet(&self) -> Option<&SnippetFields> {
         let snippet = self.snippet.as_ref()?;
         let (start, end) = (self.selection.start(), self.selection.end());
-        let inside = snippet.fields.get(snippet.current)?.iter().any(|&(a, b)| a.min(b) <= start && end <= a.max(b));
+        let inside = snippet
+            .fields
+            .get(snippet.current)?
+            .iter()
+            .any(|&(a, b)| a.min(b) <= start && end <= a.max(b));
         inside.then_some(snippet)
     }
 
     /// Whether Tab (`forward`) or Shift+Tab has a field to go to.
     pub fn has_snippet_field(&self, forward: bool) -> bool {
-        self.snippet().is_some_and(|s| if forward { s.current + 1 < s.fields.len() } else { s.current > 0 })
+        self.snippet().is_some_and(|s| {
+            if forward {
+                s.current + 1 < s.fields.len()
+            } else {
+                s.current > 0
+            }
+        })
     }
 
     /// `next_field` / `prev_field`: selects the next (or previous) field. Reaching the last one,
@@ -509,9 +552,18 @@ impl Document {
             self.clear_snippet();
             return false;
         }
-        let Some(snippet) = &mut self.snippet else { return false };
-        snippet.current = if forward { snippet.current + 1 } else { snippet.current - 1 };
-        let (field, last) = (snippet.fields[snippet.current].clone(), snippet.current + 1 == snippet.fields.len());
+        let Some(snippet) = &mut self.snippet else {
+            return false;
+        };
+        snippet.current = if forward {
+            snippet.current + 1
+        } else {
+            snippet.current - 1
+        };
+        let (field, last) = (
+            snippet.fields[snippet.current].clone(),
+            snippet.current + 1 == snippet.fields.len(),
+        );
         self.select_field(&field);
         if last {
             self.clear_snippet();
@@ -535,7 +587,10 @@ impl Document {
 
     /// The edits since the last call.
     pub fn take_text_changes(&mut self) -> Vec<TextChange> {
-        self.change_log.as_mut().map(std::mem::take).unwrap_or_default()
+        self.change_log
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// The selections besides the primary one, in the order they were added.
@@ -568,7 +623,11 @@ impl Document {
     }
 
     /// Replaces every selection on behalf of a command; `primary` is the one the view follows.
-    pub fn set_selections(&mut self, primary: Selection, others: impl IntoIterator<Item = Selection>) {
+    pub fn set_selections(
+        &mut self,
+        primary: Selection,
+        others: impl IntoIterator<Item = Selection>,
+    ) {
         self.set_selection(primary);
         let len = self.char_count();
         let mut extra: Vec<Selection> = others
@@ -598,7 +657,10 @@ impl Document {
 
     /// Runs a text command on this document. The command returns the new selection, or `None`
     /// when it did nothing.
-    pub fn edit(&mut self, command: impl FnOnce(&mut String, Selection) -> Option<Selection>) -> bool {
+    pub fn edit(
+        &mut self,
+        command: impl FnOnce(&mut String, Selection) -> Option<Selection>,
+    ) -> bool {
         if self.read_only {
             return false;
         }
@@ -624,7 +686,10 @@ impl Document {
         let len = self.char_count();
         let start = start.min(len);
         let end = end.clamp(start, len);
-        let (start_byte, end_byte) = (char_to_byte(&self.text, start), char_to_byte(&self.text, end));
+        let (start_byte, end_byte) = (
+            char_to_byte(&self.text, start),
+            char_to_byte(&self.text, end),
+        );
         self.text.replace_range(start_byte..end_byte, insert);
         self.change_count += 1;
         self.transient = false;
@@ -652,7 +717,13 @@ impl Document {
     pub fn regions(&self, key: &str) -> Vec<(usize, usize)> {
         let len = self.char_count();
         let set = self.region_sets.iter().find(|s| s.key == key);
-        set.map(|s| s.regions.iter().map(|&(a, b)| (a.min(len), b.min(len))).collect()).unwrap_or_default()
+        set.map(|s| {
+            s.regions
+                .iter()
+                .map(|&(a, b)| (a.min(len), b.min(len)))
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
     pub fn erase_regions(&mut self, key: &str) {
@@ -666,7 +737,11 @@ impl Document {
 
     /// The region sets a plugin asked to keep across runs (`sublime.PERSISTENT`).
     pub fn persistent_regions(&self) -> Vec<RegionSet> {
-        self.region_sets.iter().filter(|set| set.flags & PERSISTENT != 0).cloned().collect()
+        self.region_sets
+            .iter()
+            .filter(|set| set.flags & PERSISTENT != 0)
+            .cloned()
+            .collect()
     }
 
     /// Puts back the region sets of the session.
@@ -678,7 +753,11 @@ impl Document {
 
     /// Nothing needs the copy of the text any more.
     fn stop_tracking_if_unused(&mut self) {
-        if self.region_sets.is_empty() && self.phantoms.is_empty() && self.change_log.is_none() && self.snippet.is_none() {
+        if self.region_sets.is_empty()
+            && self.phantoms.is_empty()
+            && self.change_log.is_none()
+            && self.snippet.is_none()
+        {
             self.tracked_text = None;
         }
     }
@@ -705,7 +784,10 @@ impl Document {
         let len = self.char_count();
         self.phantoms
             .iter()
-            .map(|p| Phantom { region: (p.region.0.min(len), p.region.1.min(len)), ..p.clone() })
+            .map(|p| Phantom {
+                region: (p.region.0.min(len), p.region.1.min(len)),
+                ..p.clone()
+            })
             .collect()
     }
 
@@ -717,12 +799,16 @@ impl Document {
     /// The chars on screen; the whole text until the view has drawn the document.
     pub fn visible_range(&self) -> (usize, usize) {
         let len = self.char_count();
-        self.visible_range.map_or((0, len), |(start, end)| (start.min(len), end.min(len)))
+        self.visible_range
+            .map_or((0, len), |(start, end)| (start.min(len), end.min(len)))
     }
 
     /// Asks the view to scroll so that `point` is visible (centered when `center`).
     pub fn request_show(&mut self, point: usize, center: bool) {
-        self.show_request = Some(ShowRequest { point: point.min(self.char_count()), center });
+        self.show_request = Some(ShowRequest {
+            point: point.min(self.char_count()),
+            center,
+        });
         self.show_revision += 1;
     }
 
@@ -737,7 +823,10 @@ impl Document {
 
     /// Runs a text command on every selection at once. The command gets the selections sorted
     /// by position and returns the new ones in the same order.
-    pub fn edit_all(&mut self, command: impl FnOnce(&mut String, &[Selection]) -> Vec<Selection>) -> bool {
+    pub fn edit_all(
+        &mut self,
+        command: impl FnOnce(&mut String, &[Selection]) -> Vec<Selection>,
+    ) -> bool {
         if self.read_only {
             return false;
         }
@@ -784,7 +873,12 @@ fn common_prefix(a: &str, b: &str) -> usize {
 
 /// How many bytes two texts share at the end, on a char boundary.
 fn common_suffix(a: &str, b: &str) -> usize {
-    let mut same = a.bytes().rev().zip(b.bytes().rev()).take_while(|(x, y)| x == y).count();
+    let mut same = a
+        .bytes()
+        .rev()
+        .zip(b.bytes().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
     while !a.is_char_boundary(a.len() - same) || !b.is_char_boundary(b.len() - same) {
         same -= 1;
     }
@@ -795,15 +889,24 @@ fn common_suffix(a: &str, b: &str) -> usize {
 fn position_of(text: &str, byte: usize) -> (usize, usize) {
     let before = &text[..byte];
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    (before.matches('\n').count(), before[line_start..].chars().count())
+    (
+        before.matches('\n').count(),
+        before[line_start..].chars().count(),
+    )
 }
 
 fn decode(bytes: Vec<u8>) -> (String, Encoding) {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
-        return (String::from_utf8_lossy(rest).into_owned(), Encoding::Utf8WithBom);
+        return (
+            String::from_utf8_lossy(rest).into_owned(),
+            Encoding::Utf8WithBom,
+        );
     }
     match String::from_utf8(bytes) {
         Ok(text) => (text, Encoding::Utf8),
-        Err(e) => (e.into_bytes().into_iter().map(char::from).collect(), Encoding::Latin1),
+        Err(e) => (
+            e.into_bytes().into_iter().map(char::from).collect(),
+            Encoding::Latin1,
+        ),
     }
 }
