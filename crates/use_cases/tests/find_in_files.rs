@@ -27,6 +27,9 @@ fn editor_with_data(world: &World) -> Editor {
     editor
 }
 
+/// The home folder as Find Results writes it: `~`, but the whole path on Windows.
+const HOME: &str = if cfg!(windows) { "/home/user" } else { "~" };
+
 fn search(editor: &mut Editor, query: &str) {
     editor.set_find_options(FindOptions {
         query: query.to_string(),
@@ -54,10 +57,12 @@ fn results_are_written_as_sublime_writes_them() {
     // What Sublime 4215 wrote for these files.
     assert_eq!(
         results(&editor),
-        "Searching 3 files for \"foo\"\n\n\
-         ~/data/a.txt:\n    1  one\n    2: two foo\n    3  three\n    4  four\n    .\n    6  six\n    7  seven\n    8: eight foo bar foo\n    9  nine\n   10  \n\n\
-         ~/data/sub/b.txt:\n    1: foo\n    2  \n\n\
-         4 matches across 2 files\n"
+        format!(
+            "Searching 3 files for \"foo\"\n\n\
+             {HOME}/data/a.txt:\n    1  one\n    2: two foo\n    3  three\n    4  four\n    .\n    6  six\n    7  seven\n    8: eight foo bar foo\n    9  nine\n   10  \n\n\
+             {HOME}/data/sub/b.txt:\n    1: foo\n    2  \n\n\
+             4 matches across 2 files\n"
+        )
     );
     assert_eq!(status(&editor), "4 matches across 2 files");
     let panel = editor.shown_output_panel().unwrap().document.id;
@@ -190,7 +195,7 @@ fn open_files_are_searched_as_they_are_in_the_editor() {
     editor.find_in_files(false);
     editor.poll_find_in_files();
     assert!(
-        results(&editor).contains("~/data/c.txt:\n    1: foo nothing\n"),
+        results(&editor).contains(&format!("{HOME}/data/c.txt:\n    1: foo nothing\n")),
         "{}",
         results(&editor)
     );
