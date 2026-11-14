@@ -333,6 +333,7 @@ impl PluginHostGateway for PythonPluginHost {
                 "packages": request.packages_path.display().to_string(),
                 "installed_packages": data.join("Installed Packages").display().to_string(),
                 "cache": data.join("Cache").display().to_string(),
+                "lib": data.join("Lib").display().to_string(),
                 "executable": executable,
             },
         }))?;

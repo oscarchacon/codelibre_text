@@ -166,13 +166,21 @@ impl Editor {
         found
     }
 
-    /// The text around `point` in the scope of its char, across lines: the neighbours with that
-    /// scope or one inside it (a string with its quotes, a comment). Close to Sublime's extent of
-    /// the innermost scope.
+    /// `view.extract_scope(point)`, as Sublime Text 4 (build 4215) answers it: the run of pieces
+    /// around the char at `point` whose scope is that char's scope or one inside it, compared by
+    /// whole names (`kw.m` holds `kw.m other.z`, not `kw.m.n` nor `kw.mk`), across lines. Names,
+    /// not where the syntax pushed them: two strings side by side (`"a""b"`, from inside) are one
+    /// extent, and so are two `x` matched apart. On a quote, whose scope has its punctuation, it is
+    /// the quote. At the end of the text or past it, the whole text (`(0, 0)` when empty), even
+    /// when the last char is in a comment.
     ///
     /// Only the lines around `point` are read: a window of [`EXTRACT_SCOPE_LINES`] lines on each
     /// side, made four times wider while the scope goes on past one of its edges.
     pub fn extract_scope(&self, id: DocumentId, point: usize) -> Option<(usize, usize)> {
+        let size = self.any_document(id)?.text.chars().count();
+        if point >= size {
+            return Some((0, size));
+        }
         let scope = self.scope_name(id, point)?;
         let doc = self.any_document(id)?;
         let line = doc.text[..char_to_byte(&doc.text, point)]

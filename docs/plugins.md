@@ -12,7 +12,8 @@ auto-complete and plugins' completions, groups and layouts; 2026-11-06 local cha
 packages and `revert_package` tried, event commands on the view that asked, `move` by pages / stops / sub-words and
 `move_to brackets`, Tools > Build System, region annotations). 2026-11-06: the checkboxes and "missing" lists were
 checked against the code (clones, windows, completions, phantoms, groups and `reload_plugin` are done; scopes only lack
-`extract_scope`'s exact extent and whole-file scans; `score_selector` values are Sublime's since 2026-11-09); the rest of B and phase C below are the pending work, in order. Also on
+whole-file scans; `score_selector` and `extract_scope` answer as Sublime 4215 since 2026-11-14, see "Checking against
+Sublime itself"); the rest of B and phase C below are the pending work, in order. Also on
 2026-11-06: projects (`project_data`, `$project*`, project builds), `create_io_panel` with its `on_input` field,
 `window.symbol_locations` and the `lookup_*` functions, `PERSISTENT` regions in the session, `set_overwrite_status`,
 `new_html_sheet`, `view.export_to_html`, and output panels' `unlisted` / `word_wrap` / `font_size`; `compat.py` (the
@@ -132,6 +133,20 @@ edits the text before it is written. `on_modified` / `on_selection_modified` are
 - Saving a `.py` file in a package reloads the plugins (`reload_plugins`); Preferences > Reload Packages too. The host
   keeps running: only the packages added, removed or whose `.py` files changed (size or date, subfolders too) are loaded
   again (`load` in `plugin_host.py`); the others keep their modules, listeners and threads.
+
+### Checking against Sublime itself
+
+Where Sublime documents nothing, ask it. Sublime Text (4215 at `/opt/sublime_text` on Linux) runs with a throwaway
+profile: `HOME=<tmp> XDG_CONFIG_HOME=<tmp>/.config XDG_CACHE_HOME=<tmp>/.cache sublime_text --multiinstance -w`, with a
+plugin in `<tmp>/.config/sublime-text/Packages/User` that waits for `plugin_loaded`, opens scratch views (and probe
+`.sublime-syntax` files there), writes what the API answers to a JSON file and runs `sublime.run_command("exit")`.
+Its `Lib/python314/sublime.py` and `sublime_plugin.py` list the whole API.
+
+For how it is done inside, Ghidra 12.1.4 (`analyzeHeadless <project> <name> -import <binary>`, then
+`-process <binary> -noanalysis -postScript <script>`): `plugin_host-3.14` keeps its symbols, and each
+`api_<function>` only sends a message whose number it sets (`extract_scope` `0x5e`, `scope_name` `0x60`,
+`score_selector` `0x22`); in `sublime_text` (no symbols) the switch of `FUN_0064d999` (281 cases) runs them, a case
+passing its handler to a helper (`case 0x5e` → `FUN_006623f8` → `FUN_0057bb8c`). Addresses are 4215's.
 
 ### Adding an API function (the usual change)
 
@@ -718,11 +733,17 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       deprecated `lookup_symbol_in_index` / `_in_open_files`, `lookup_references_in_index` / `_in_open_files`) search
       the open files (`use_cases/src/scopes.rs::symbol_locations`); the index on disk is not kept, so `INDEX` answers
       the saved open files.
-- [x] **`score_selector` values** (2026-11-09, `entities/src/selector.rs`): Sublime's algorithm, as reverse-engineered in
-      sublimehq/sublime_text#2152 (leftmost match per selector element, 3 bits per scope position, at most 7 dotted parts
-      per element, 64 bits). `score_selector('a', 'a') == 8`, `('x a', 'a') == 64`, `('s a b a b a', 'b') == 512`, all
-      checked in `entities/tests/selector.rs`. It is a reconstruction, not Sublime's source; a group or `&` scores as its best
-      matching part. This changes which `.tmPreferences` entry wins among several (`meta_info`).
+- [x] **`score_selector` values** (2026-11-09, redone 2026-11-14, `entities/src/selector.rs`): the 2026-11-09 version
+      followed sublimehq/sublime_text#2152 and differed from Sublime 4215 in 54 of 279 cases. Now, as 4215 answers: each
+      selector element adds its matched dotted parts (at most 7) at bit `3 × position + 1`, the last element at the
+      rightmost scope that matches it and each one before at the rightmost before that (`('a', 'a') == 2`,
+      `('x a', 'a') == 16`, `('s a b a b a', 'a') == 65536`); only the innermost 21 scopes have slots of their own (the
+      outer ones share the first); a group or `&` scores as its best part. Odd selectors: reading stops at two terms
+      with no operator between them (`(a) b, c` is `(a)`) or a stray `)`; an empty alternative (`, a`, `a,,c`,
+      `(a,)`, `()`), a `-` with nothing after it or a parenthesis left open matches nothing, but a separator ending
+      the selector (`a,`, `a |`) is fine; `||` and `&&` are `|` and `&`. Test: `every_case_answers_as_sublime_4215_does`
+      reads the 472 cases Sublime answered (`entities/tests/data/score_selector_sublime_4215.json`). This changes which
+      `.tmPreferences` entry wins among several (`meta_info`).
 - [x] **Scopes read only the lines they need** (2026-11-12): nothing is parsed again (the highlighting cache keeps every
       line's scopes), and `SyntaxGateway::lines_scopes` copies only the lines asked for: `scoped_ranges` (and
       `extract_tokens_with_scopes`, `export_to_html` of a region) the lines of the region, `extract_scope` the
@@ -730,9 +751,41 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       edge. `find_by_selector` and the symbol lists still read the whole file, which is what they answer.
       Tests: `extract_scope_reads_only_the_lines_around_the_point`, `extract_scope_widens_its_window_while_the_scope_goes_on`,
       `scoped_ranges_read_only_the_lines_of_the_region` (`use_cases/tests/scopes.rs`).
-- [ ] Scopes, still missing: Sublime's exact `extract_scope`: no specification found (Sublime's own issue #2674 reports
-      it off by one in some cases), so it stays as a close approximation (the neighbours with the same scope or one
-      inside it).
+- [x] **`extract_scope` as Sublime answers it** (2026-11-14, `Editor::extract_scope`): checked against Sublime Text 4
+      build 4215 itself, since no specification exists. Sublime was run with a throwaway profile
+      (`HOME=<tmp> XDG_CONFIG_HOME=<tmp>/.config sublime_text --multiinstance -w`) and a plugin in its `Packages/User`
+      that opens scratch views (probe syntaxes with `meta_scope`, `meta_content_scope`, `set`, captures, nested and
+      multi-line contexts, plus its Python), writes `scope_name`, `extract_scope` and `extract_tokens_with_scopes` of
+      every point to a JSON file and runs `exit`. What it answers: the run of tokens around the char at the point
+      whose scope is that scope or one inside it, compared by whole names (`kw.m` holds `kw.m other.z`, not `kw.m.n`
+      nor `kw.mk`); by names, not pushes (`"ab""cd"` from inside is one extent, two `x` matched apart too); on a quote,
+      the quote; at the end of the text or past it, the whole text, `(0, 0)` when empty (we answered the last char's
+      scope there, and an error for an empty view). The off-by-one of sublimehq/sublime_text#2674 did not show up.
+      Tests: `extract_scope_answers_as_sublime_does`, `extract_scope_of_an_empty_view_is_its_start`
+      (`use_cases/tests/scopes.rs`). The binary agrees: the handler of message `0x5e` (`FUN_0057bb8c` in 4215's Linux
+      build) walks the tokens back and forth while their scope string starts with the point's (`strncmp`; the stored
+      scope ends in a space, so whole names), and answers `[0, size]` when no token holds the point.
+- [x] **The API Sublime 4215 has and ours lacked** (2026-11-14): its `Lib/python314/sublime.py` and
+      `sublime_plugin.py` compared with ours, class by class. Added, with what 4215 answers where it has no
+      documentation: `view.indentation_level` (the line's indentation in columns over `tab_size`, rounded up: `"  b"`
+      with 4 is 1), `view.indented_region` (the lines around indented as much or more; a blank line takes the next
+      line's level; level 0 is an empty region at the line's start; blank lines after the block are left out),
+      `view.utf8_code_units` / `utf16_code_units`, `view.retarget` (`view_retarget`: saves there from then on),
+      `selection.has_empty_region` / `has_non_empty_region` / `has_multiple_non_empty_regions`, `sheet.name` (the tab's:
+      `untitled` when nothing names it) / `set_name` / `is_selected`, `window.num_views_in_group` /
+      `num_sheets_in_group`, `make_sheet`, `lib_path` (`data/Lib`), `executable_hash`, `Phantom.to_tuple`,
+      `SymbolLocation.path_encoded_position`, `UIElement`, `FileTooLargeError`, `KIND_ID_COLOR_*`, `FORCE_CLONE` (a
+      clone of the open file), `WHOLEWORD` / `REVERSE` / `WRAP` / `HTML`, and in `sublime_plugin`
+      `Command.filter_args`, `CommandInputHandler.initial_selection` and `Summary`. `view.find` now honours its flags:
+      `REVERSE` takes the last match starting before the point, `WRAP` goes on from the other end, `find_all` ignores
+      both, `WHOLEWORD` is `\b…\b` (with `LITERAL` Sublime 4215 finds nothing at all, which is not copied).
+      Stand-ins, since the editor has no such thing yet: `file_history` / `project_history` / `folder_history` answer
+      `[]` (there is no Open Recent), `choose_font_dialog` calls back with `None` (cancelled),
+      `set_reference_document` / `reset_reference_document` do nothing (no incremental diff), `template_settings` is
+      the window's settings, `begin_edit` / `end_edit` only hand the token, `layout_to_window` is the identity (like
+      `window_to_layout`). Tests: `the_api_sublime_4215_added_answers_as_it_does` (`python_plugin_host.rs`, the values
+      4215 answered), `retarget_changes_the_file_a_view_saves_to`, `find_flags_reverse_wrap_and_whole_word`
+      (`plugin_api.rs`).
 - [x] **Completions** (`use_cases/src/completions.rs`, `entities/src/completion.rs`, drawn by `editor_view.rs`): the
       auto-complete list opens while typing a word where `auto_complete_selector` matches (or a character of
       `auto_complete_triggers` where its selector does; `auto_complete`, `auto_complete_size_limit`), or with the

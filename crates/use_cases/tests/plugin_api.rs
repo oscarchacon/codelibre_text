@@ -617,6 +617,61 @@ fn view_properties() {
     );
 }
 
+/// `view.retarget(path)`: the view saves to the new file from then on and keeps its text.
+#[test]
+fn retarget_changes_the_file_a_view_saves_to() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let v = editor.active_document().unwrap().id;
+    call(&world, &mut editor, "view_insert", json!([v, 0, "kept"])).unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_retarget",
+        json!([v, "/p/new.txt"]),
+    )
+    .unwrap();
+    assert_eq!(
+        call(&world, &mut editor, "view_file_name", json!([v])),
+        Ok(json!("/p/new.txt"))
+    );
+    assert!(editor.save_active(false));
+    assert_eq!(world.file_text("/p/new.txt"), "kept");
+}
+
+/// `view.find` flags as Sublime 4215 answers them: `REVERSE` takes the last match starting
+/// before the point, `WRAP` goes on from the other end, `WHOLEWORD` wants word boundaries.
+#[test]
+fn find_flags_reverse_wrap_and_whole_word() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    let v = editor.active_document().unwrap().id;
+    call(
+        &world,
+        &mut editor,
+        "view_insert",
+        json!([v, 0, "ab abc ab xab ab"]),
+    )
+    .unwrap();
+    let find = |editor: &mut Editor, start: u64, flags: u64| {
+        call(&world, editor, "view_find", json!([v, "ab", start, flags])).unwrap()
+    };
+    assert_eq!(find(&mut editor, 8, 1), json!([11, 13]), "forward");
+    assert_eq!(find(&mut editor, 8, 1 | 8), json!([7, 9]), "reverse");
+    assert_eq!(find(&mut editor, 0, 1 | 8), json!([-1, -1]));
+    assert_eq!(find(&mut editor, 0, 1 | 8 | 16), json!([14, 16]), "wrapped");
+    assert_eq!(find(&mut editor, 15, 1 | 16), json!([0, 2]), "wrapped");
+    assert_eq!(
+        call(
+            &world,
+            &mut editor,
+            "view_find_all",
+            json!([v, "ab", 1 | 4])
+        ),
+        Ok(json!([[0, 2], [7, 9], [14, 16]]))
+    );
+}
+
 #[test]
 fn closed_views_and_unknown_functions() {
     let world = plugin_world();

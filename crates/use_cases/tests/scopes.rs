@@ -97,6 +97,43 @@ fn extract_scope_spans_the_token_around_the_point() {
     assert_eq!(editor.extract_scope(id(&editor), 5), Some((4, 8)));
 }
 
+/// What Sublime Text 4 (build 4215) answered for the same text: scopes are compared by name, so
+/// two strings side by side are one extent from inside; a quote is its own; the end of the text
+/// (or past it) is the whole text, even after a string.
+#[test]
+fn extract_scope_answers_as_sublime_does() {
+    let world = World::new();
+    world.disk.put("/p/c.py", "s = \"ab\"\"cd\" q \"ef");
+    let mut editor = world.editor();
+    editor.open_file(Path::new("/p/c.py"));
+    let doc = id(&editor);
+    let size = 18;
+    assert_eq!(editor.extract_scope(doc, 5), Some((4, 12)), "both strings");
+    assert_eq!(
+        editor.extract_scope(doc, 13),
+        Some((0, size)),
+        "outside them"
+    );
+    assert_eq!(
+        editor.extract_scope(doc, 17),
+        Some((15, size)),
+        "an open string"
+    );
+    assert_eq!(editor.extract_scope(doc, size), Some((0, size)), "the end");
+    assert_eq!(
+        editor.extract_scope(doc, size + 5),
+        Some((0, size)),
+        "past it"
+    );
+}
+
+#[test]
+fn extract_scope_of_an_empty_view_is_its_start() {
+    let world = World::new();
+    let editor = world.editor();
+    assert_eq!(editor.extract_scope(id(&editor), 0), Some((0, 0)));
+}
+
 /// A file of `lines` lines `n = 1`, with `x = "hi"` as line `quoted`.
 fn long_file(world: &World, lines: usize, quoted: usize) -> Editor {
     let text: String = (0..lines)

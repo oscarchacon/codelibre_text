@@ -620,6 +620,98 @@ class ProbeWindowCommand(sublime_plugin.WindowCommand):
     assert!(view.show_minimap && !view.show_status_bar);
 }
 
+/// The API of Sublime Text 4215 our modules lacked, checked against what that Sublime answered for
+/// the same texts (run with a throwaway profile, see `docs/plugins.md`): indentation, code units,
+/// selections, find flags, sheets and the constants.
+#[test]
+fn the_api_sublime_4215_added_answers_as_it_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import json
+import sublime
+import sublime_plugin
+
+def view_of(window, text):
+    view = window.new_file()
+    view.set_scratch(True)
+    view.settings().set("tab_size", 4)
+    view.run_command("append", {"characters": text})
+    return view
+
+class ProbeApiCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        w = self.window
+        out = {}
+        v = view_of(w, "def f():\n    a = 1\n\n    if a:\n        b\n    c\nd\n")
+        out["levels"] = [v.indentation_level(p) for p in (0, 9, 19, 30, 46, 48)]
+        out["blocks"] = [v.indented_region(p).to_tuple() for p in (0, 9, 19, 30, 46, 48)]
+        v = view_of(w, "a\n    b\n\n        c\n\nd\n")
+        out["blank"] = [v.indented_region(p).to_tuple() for p in (2, 8, 9, 19)]
+        v = view_of(w, "x\n\ty\n\t  z\n  \tw\n")
+        out["tabs"] = [v.indentation_level(p) for p in (2, 5, 10)]
+        v = view_of(w, "a\u00e9\U0001F600b")
+        out["units"] = [[v.utf8_code_units(p), v.utf16_code_units(p)] for p in range(5)]
+        out["sel"] = [v.sel().has_empty_region(), v.sel().has_non_empty_region()]
+        v.sel().clear()
+        v.sel().add(sublime.Region(0, 1))
+        v.sel().add(sublime.Region(2, 3))
+        out["sel3"] = [v.sel().has_empty_region(), v.sel().has_multiple_non_empty_regions()]
+        out["sheet"] = [v.sheet().name(), v.sheet().is_selected()]
+        v.set_name("Named")
+        out["named"] = v.sheet().name()
+        v = view_of(w, "ab abc ab xab ab")
+        F = sublime.FindFlags
+        out["find"] = {
+            "reverse": [v.find("ab", s, F.LITERAL | F.REVERSE).to_tuple() for s in (0, 3, 8, 16)],
+            "wrap": [v.find("ab", s, F.LITERAL | F.WRAP).to_tuple() for s in (15,)],
+            "reverse_wrap": v.find("ab", 0, F.LITERAL | F.REVERSE | F.WRAP).to_tuple(),
+            "whole": [r.to_tuple() for r in v.find_all("a.", F.WHOLEWORD)],
+            "plain": v.find("ab", 8, F.LITERAL).to_tuple(),
+        }
+        out["constants"] = [sublime.WHOLEWORD, sublime.REVERSE, sublime.WRAP, sublime.FORCE_CLONE,
+                            sublime.KIND_ID_COLOR_LIGHT, int(sublime.UIElement.MENU),
+                            issubclass(sublime.FileTooLargeError, FileNotFoundError)]
+        out["windows"] = [w.num_views_in_group(0) == len(w.views_in_group(0)), w.file_history(),
+                          sublime.project_history(), len(sublime.executable_hash())]
+        sublime.status_message(json.dumps(out))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe_api"));
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    let console = editor.state().console.clone();
+    let out: serde_json::Value =
+        serde_json::from_str(&status).unwrap_or_else(|_| panic!("{status}\n{console}"));
+    let expected = serde_json::json!({
+        "levels": [0, 1, 0, 2, 0, 0],
+        "blocks": [[0, 0], [9, 46], [9, 46], [30, 40], [46, 46], [48, 48]],
+        "blank": [[2, 19], [8, 19], [8, 19], [19, 19]],
+        "tabs": [1, 2, 1],
+        "units": [[0, 0], [1, 1], [3, 2], [7, 4], [8, 5]],
+        "sel": [true, false],
+        "sel3": [false, true],
+        "sheet": ["untitled", true],
+        "named": "Named",
+        "find": {
+            "reverse": [[-1, -1], [0, 2], [7, 9], [14, 16]],
+            "wrap": [[0, 2]],
+            "reverse_wrap": [14, 16],
+            "whole": [[0, 2], [7, 9], [14, 16]],
+            "plain": [11, 13],
+        },
+        "constants": [4, 8, 16, 256, 18, 16, true],
+        "windows": [true, [], [], 3],
+    });
+    assert_eq!(out, expected, "console:\n{console}");
+}
+
 /// `sublime_plugin.reload_plugin` imports a changed plugin file again: the editor hears its new
 /// commands at once, the old ones go, `plugin_unloaded` / `plugin_loaded` run.
 #[test]
@@ -1377,7 +1469,7 @@ class FancyCommand(sublime_plugin.TextCommand):
     command_controller::run(&mut editor, &mut view, &Command::new("fancy"));
     assert_eq!(
         editor_status(&editor),
-        "True (0, 4) 0 8 'text.plain ' True",
+        "True (0, 4) 0 2 'text.plain ' True",
         "console:\n{}",
         editor.state().console
     );

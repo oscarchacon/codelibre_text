@@ -34,6 +34,9 @@ const APP_NAME: &str = "CodeLibre Text";
 /// `sublime.LITERAL` and `sublime.IGNORECASE`.
 const LITERAL: u64 = 1;
 const IGNORECASE: u64 = 2;
+const WHOLEWORD: u64 = 4;
+const REVERSE: u64 = 8;
+const WRAP: u64 = 16;
 
 /// The arguments of one call, with errors that name the bad argument.
 struct Args<'a>(&'a [Value]);
@@ -848,6 +851,13 @@ impl Editor {
                 doc.scratch_name = Some(a.str(1)?.to_string());
                 Value::Null
             }
+            // `view.retarget(path)`: the buffer saves there from now on; its text stays (and the
+            // file there, if any, is not read: no date to compare until it is saved).
+            "view_retarget" => {
+                doc.path = Some(std::path::PathBuf::from(a.str(1)?));
+                doc.modified_at = None;
+                Value::Null
+            }
             "view_is_dirty" => json!(doc.is_dirty()),
             "view_is_scratch" => json!(doc.scratch),
             "view_is_transient" => json!(doc.transient),
@@ -1027,6 +1037,10 @@ impl Editor {
             "view_text_point" => {
                 json!((line_to_char(&doc.text, a.usize(1)?) + a.usize(2)?).min(len))
             }
+            // As Sublime 4215 answers: forward, the first match starting at or after the point;
+            // `REVERSE`, the last one starting before it; `WRAP` goes on from the other end;
+            // `find_all` ignores both. `WHOLEWORD` is `\b…\b` (with `LITERAL` too, where Sublime
+            // 4215 finds nothing at all).
             "view_find" | "view_find_all" => {
                 let flags = a
                     .u64(if function == "view_find" { 3 } else { 2 })
@@ -1035,7 +1049,7 @@ impl Editor {
                     query: a.str(1)?.to_string(),
                     regex: flags & LITERAL == 0,
                     case_sensitive: flags & IGNORECASE == 0,
-                    whole_word: false,
+                    whole_word: flags & WHOLEWORD != 0,
                     wrap: false,
                 };
                 let matches = match options.pattern()? {
@@ -1044,7 +1058,13 @@ impl Editor {
                 };
                 if function == "view_find" {
                     let start = point(2)?;
-                    let found = matches.into_iter().find(|m| m.start() >= start);
+                    let found = if flags & REVERSE != 0 {
+                        let before = matches.iter().rev().find(|m| m.start() < start);
+                        before.or(matches.last().filter(|_| flags & WRAP != 0))
+                    } else {
+                        let after = matches.iter().find(|m| m.start() >= start);
+                        after.or(matches.first().filter(|_| flags & WRAP != 0))
+                    };
                     found.map_or(json!([-1, -1]), |m| region(m.start(), m.end()))
                 } else {
                     Value::Array(matches.iter().map(|m| region(m.start(), m.end())).collect())

@@ -62,6 +62,27 @@ class Command:
     def input_description(self):
         return None
 
+    def filter_args(self, args):
+        """The arguments without ``event`` when the command does not want it, as Sublime does."""
+        if args and "event" in args and not self.want_event():
+            args = dict(args)
+            del args["event"]
+        return args
+
+
+class Summary:
+    """Timings of a plugin's callbacks (Sublime's profiling: ``count``, ``sum``, ``max``)."""
+
+    def __init__(self):
+        self.max = 0.0
+        self.sum = 0.0
+        self.count = 0
+
+    def record(self, x):
+        self.count += 1
+        self.sum += x
+        self.max = max(self.max, x)
+
 
 class ApplicationCommand(Command):
     pass
@@ -127,6 +148,10 @@ class CommandInputHandler:
 
     def initial_text(self):
         return ""
+
+    def initial_selection(self):
+        """The parts of ``initial_text`` selected at first, as ``(begin, end)`` pairs."""
+        return []
 
     def preview(self, arg):
         return ""
