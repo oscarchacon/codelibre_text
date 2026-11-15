@@ -126,8 +126,8 @@ impl Lines {
     fn block_fold(&self, header: usize) -> Option<(usize, usize)> {
         let indent = self.indent(header);
         let mut last = None;
-        for line in header + 1..self.count() {
-            match self.indents[line] {
+        for (line, line_indent) in self.indents.iter().enumerate().skip(header + 1) {
+            match *line_indent {
                 None => {}
                 Some(i) if i > indent => last = Some(line),
                 Some(_) => break,
