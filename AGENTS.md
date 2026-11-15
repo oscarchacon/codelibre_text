@@ -27,6 +27,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Build / verify
 - `cargo build` / `cargo run -- <folder-or-file>...` (root `default-members` is the frameworks crate).
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
+  `cargo test -p codelibre_text --test app -- --ignored --nocapture` (`frameworks/tests/app.rs`, egui_kittest with wgpu,
+  needs a GPU or lavapipe) drives the whole window off screen (keys, clicks, a test plugin) and saves pictures to
+  `target/tmp/gui-checks` to look at: extend its script when a change is visual.
 - CI (`.github/workflows/ci.yml`) builds and runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
   and pull requests into them or a `release/**` branch (SonarQube is a TODO job there). macOS joins them when the commit has a tag `macos-test*` (pushed
   with it: `git push --atomic -f origin develop macos-test`; the tag starts no run of its own), a manual run with
@@ -97,6 +100,10 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
   them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
   IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
+- Find in Files (`use_cases/src/find_in_files.rs`, rules in `entities/src/find_in_files.rs`): `FileSearchGateway`
+  (`gateways/folder_search.rs`) lists and searches on threads; `Editor::poll_find_in_files` (every frame) writes
+  Find Results to the output panel `find_results` in Sublime 4215's exact format (checked by running it), so
+  `next_result` / double click work through `result_file_regex` / `result_line_regex`.
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
@@ -128,9 +135,10 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   since 2026-11-14 also plugins' edits in the widget's undo, text input handlers in the palette's field, modifier keys,
   the console as a panel, the window's `is_*_visible`, `extract_scope` and `score_selector` as Sublime 4215 answers
   them, and the API 4215 has that ours lacked (checked by running Sublime with a throwaway profile and with Ghidra:
-  "Checking against Sublime itself" there). Phase C has no unticked item left; phase A's stand-ins
-  (`show_popup_menu`, folding, the view's geometry, `TextSheet` / `ImageSheet`) are still to do. The items still
-  unticked there are what remains, with the files to touch.
+  "Checking against Sublime itself" there). Phase C has no unticked item left, and since 2026-11-15 neither has phase A
+  (`show_popup_menu`, folding, the view's geometry, `TextSheet` / `ImageSheet`); phase B then got the minimap's glyphs,
+  `toggle_tabs` / `toggle_menu` and output panels at once during events. The items still unticked there are what
+  remains, with the files to touch.
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
@@ -138,5 +146,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
 phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
-on the bundled 3.13), folding, find in files. The minimap (`views/minimap.rs`) draws words as bars, not glyphs.
+on the bundled 3.13), `fold_tag_attributes`, Find Results in a tab (`use_buffer`: they go to the `find_results` panel).
 Highlighting is skipped above 4 MB.
