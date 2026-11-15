@@ -3,12 +3,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use entities::document::LineEnding;
+use entities::document::{LineEnding, SheetKind};
 use entities::selection::Selection;
+use test_support::{active_text, open, status, World};
 use use_cases::editing::TextCommand;
 use use_cases::editor::{CloseChoice, PendingClose};
 use use_cases::gateways::PluginMessage;
-use test_support::{active_text, open, status, World};
 
 fn names(editor: &use_cases::Editor) -> Vec<String> {
     editor.state().documents.iter().map(|d| d.name()).collect()
@@ -27,9 +27,13 @@ fn new_file_adds_an_untitled_tab_and_activates_it() {
 
 #[test]
 fn new_files_use_the_default_line_ending_setting() {
-    let world = World::new().with_preferences(serde_json::json!({ "default_line_ending": "windows" }));
+    let world =
+        World::new().with_preferences(serde_json::json!({ "default_line_ending": "windows" }));
     let editor = world.editor();
-    assert_eq!(editor.active_document().unwrap().line_ending, LineEnding::Windows);
+    assert_eq!(
+        editor.active_document().unwrap().line_ending,
+        LineEnding::Windows
+    );
 }
 
 #[test]
@@ -53,7 +57,9 @@ fn opening_keeps_a_modified_untitled_tab() {
 
 #[test]
 fn opening_an_open_file_just_activates_it() {
-    let world = World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b");
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b");
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     open(&mut editor, "/p/b.txt");
@@ -83,6 +89,54 @@ fn binary_files_are_not_opened() {
 }
 
 #[test]
+fn images_open_as_image_sheets_that_are_never_written() {
+    let png = vec![0x89, b'P', b'N', b'G', 0, 0, 0, 0];
+    let world = World::new()
+        .with_file("/p/logo.PNG", png.clone())
+        .with_file("/p/a.txt", "a");
+    let mut editor = world.editor();
+    assert!(editor.open_file(Path::new("/p/logo.PNG")));
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.sheet, SheetKind::Image);
+    assert!(doc.read_only && doc.text.is_empty() && !doc.is_dirty());
+    assert_eq!(names(&editor), vec!["logo.PNG"]);
+    assert_eq!(editor.file_history(), [PathBuf::from("/p/logo.PNG")]);
+    // Saving does nothing to the file.
+    editor.save_active(false);
+    assert_eq!(world.disk.bytes("/p/logo.PNG"), Some(png));
+    // The session keeps it as a picture.
+    open(&mut editor, "/p/a.txt");
+    editor.save_session(Vec::new());
+    let restored = World::new()
+        .with_file("/p/logo.PNG", vec![0x89, 0])
+        .with_session(world.session.borrow().clone().unwrap());
+    let editor = restored.editor();
+    assert_eq!(
+        editor.state().documents[0].sheet,
+        SheetKind::Image,
+        "{:?}",
+        names(&editor)
+    );
+}
+
+#[test]
+fn an_html_sheet_keeps_its_minihtml_and_the_plain_text() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let id = editor.new_html_sheet("Notes", "<b>Hi</b> there", None);
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        (doc.id, &doc.sheet, doc.text.as_str()),
+        (id, &SheetKind::Html("<b>Hi</b> there".into()), "Hi there")
+    );
+    editor.set_html_sheet(id, "<i>Bye</i>");
+    assert_eq!(
+        editor.active_document().unwrap().sheet,
+        SheetKind::Html("<i>Bye</i>".into())
+    );
+}
+
+#[test]
 fn unreadable_files_report_the_error() {
     let world = World::new().with_dir("/p/folder");
     let mut editor = world.editor();
@@ -92,13 +146,18 @@ fn unreadable_files_report_the_error() {
 
 #[test]
 fn prompt_open_files_opens_every_picked_file_starting_in_the_current_folder() {
-    let world = World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b");
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b");
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     *world.dialogs.files_to_open.borrow_mut() = vec![PathBuf::from("/p/b.txt")];
     editor.prompt_open_files(None);
     assert_eq!(names(&editor), vec!["a.txt", "b.txt"]);
-    assert_eq!(*world.dialogs.last_open_dir.borrow(), Some(PathBuf::from("/p")));
+    assert_eq!(
+        *world.dialogs.last_open_dir.borrow(),
+        Some(PathBuf::from("/p"))
+    );
 }
 
 #[test]
@@ -138,7 +197,10 @@ fn cycling_documents_wraps_around() {
 
 #[test]
 fn cycling_recent_documents_goes_back_to_the_previous_one() {
-    let world = World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b").with_file("/p/c.txt", "c");
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b")
+        .with_file("/p/c.txt", "c");
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     open(&mut editor, "/p/b.txt");
@@ -170,7 +232,10 @@ fn closing_a_clean_document_removes_it() {
     let id = editor.active_document().unwrap().id;
     editor.close_active_document();
     assert!(editor.state().documents.is_empty());
-    assert!(world.syntaxes.forgotten.borrow().contains(&id), "highlighting cache released");
+    assert!(
+        world.syntaxes.forgotten.borrow().contains(&id),
+        "highlighting cache released"
+    );
 }
 
 #[test]
@@ -180,7 +245,10 @@ fn closing_a_dirty_document_asks_first() {
     editor.run_text_command(TextCommand::Insert("draft".into()));
     let id = editor.active_document().unwrap().id;
     editor.close_active_document();
-    assert_eq!(editor.state().pending_close, Some(PendingClose::Documents(vec![id])));
+    assert_eq!(
+        editor.state().pending_close,
+        Some(PendingClose::Documents(vec![id]))
+    );
     assert_eq!(editor.state().documents.len(), 1);
 }
 
@@ -229,16 +297,25 @@ fn close_all_asks_about_each_dirty_document_in_turn() {
     let ids: Vec<u64> = editor.state().documents.iter().map(|d| d.id).collect();
 
     editor.close_all_documents();
-    assert_eq!(editor.state().pending_close, Some(PendingClose::Documents(ids.clone())));
+    assert_eq!(
+        editor.state().pending_close,
+        Some(PendingClose::Documents(ids.clone()))
+    );
     editor.resolve_pending_close(CloseChoice::DontSave);
-    assert_eq!(editor.state().pending_close, Some(PendingClose::Documents(vec![ids[1]])));
+    assert_eq!(
+        editor.state().pending_close,
+        Some(PendingClose::Documents(vec![ids[1]]))
+    );
     editor.resolve_pending_close(CloseChoice::DontSave);
     assert!(editor.state().documents.is_empty());
 }
 
 #[test]
 fn closing_activates_the_most_recently_used_document() {
-    let world = World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b").with_file("/p/c.txt", "c");
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b")
+        .with_file("/p/c.txt", "c");
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     open(&mut editor, "/p/b.txt");
@@ -251,7 +328,9 @@ fn closing_activates_the_most_recently_used_document() {
 
 #[test]
 fn reopen_closed_file_brings_back_the_last_one() {
-    let world = World::new().with_file("/p/a.txt", "a").with_file("/p/b.txt", "b");
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/b.txt", "b");
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     open(&mut editor, "/p/b.txt");
@@ -298,7 +377,9 @@ fn revert_discards_changes() {
 
 #[test]
 fn files_changed_by_other_programs_are_reloaded_unless_modified_here() {
-    let world = World::new().with_file("/p/clean.txt", "old").with_file("/p/dirty.txt", "old");
+    let world = World::new()
+        .with_file("/p/clean.txt", "old")
+        .with_file("/p/dirty.txt", "old");
     let mut editor = world.editor();
     open(&mut editor, "/p/clean.txt");
     open(&mut editor, "/p/dirty.txt");
@@ -346,7 +427,9 @@ fn the_text_widget_can_edit_documents_but_not_read_only_ones() {
 
 #[test]
 fn listeners_hear_when_a_file_is_reverted_or_reloaded() {
-    let world = World::new().with_file("/p/a.txt", "old").with_plugins(&[], &["on_revert", "on_reload"]);
+    let world = World::new()
+        .with_file("/p/a.txt", "old")
+        .with_plugins(&[], &["on_revert", "on_reload"]);
     let mut editor = world.editor();
     open(&mut editor, "/p/a.txt");
     world.plugins.then([PluginMessage::Done { error: None }]);

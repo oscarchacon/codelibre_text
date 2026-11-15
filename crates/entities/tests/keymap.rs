@@ -26,7 +26,11 @@ fn key(spec: &str) -> KeyCombo {
 }
 
 fn binding(keys: &[&str], command: Command) -> Binding {
-    Binding { keys: keys.iter().map(|k| key(k)).collect(), command, context: Vec::new() }
+    Binding {
+        keys: keys.iter().map(|k| key(k)).collect(),
+        command,
+        context: Vec::new(),
+    }
 }
 
 fn press(keymap: &mut Keymap, spec: &str) -> KeyResult {
@@ -94,7 +98,14 @@ fn display_is_human_readable() {
     assert_eq!(key("f11").display_for(false), "F11");
     assert_eq!(key("alt+pageup").display_for(false), "Alt+Pageup");
     let chord = binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar"));
-    assert_eq!(chord.display(), if cfg!(target_os = "macos") { "⌃+K, ⌃+B" } else { "Ctrl+K, Ctrl+B" });
+    assert_eq!(
+        chord.display(),
+        if cfg!(target_os = "macos") {
+            "⌃+K, ⌃+B"
+        } else {
+            "Ctrl+K, Ctrl+B"
+        }
+    );
 }
 
 #[test]
@@ -132,18 +143,27 @@ fn later_bindings_win() {
 #[test]
 fn chords_wait_for_the_second_key() {
     let mut keymap = Keymap::default();
-    keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
+    keymap.add(binding(
+        &["ctrl+k", "ctrl+b"],
+        Command::new("toggle_side_bar"),
+    ));
     assert_eq!(command_name(press(&mut keymap, "ctrl+k")), "<chord>");
     assert!(keymap.is_waiting_for_chord());
     assert_eq!(keymap.pending_chord_display(), key("ctrl+k").display());
-    assert_eq!(command_name(press(&mut keymap, "ctrl+b")), "toggle_side_bar");
+    assert_eq!(
+        command_name(press(&mut keymap, "ctrl+b")),
+        "toggle_side_bar"
+    );
     assert!(!keymap.is_waiting_for_chord());
 }
 
 #[test]
 fn a_wrong_second_key_cancels_the_chord_and_is_swallowed() {
     let mut keymap = Keymap::default();
-    keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
+    keymap.add(binding(
+        &["ctrl+k", "ctrl+b"],
+        Command::new("toggle_side_bar"),
+    ));
     keymap.add(binding(&["x"], Command::new("insert")));
     press(&mut keymap, "ctrl+k");
     assert_eq!(command_name(press(&mut keymap, "ctrl+z")), "<chord>");
@@ -154,7 +174,10 @@ fn a_wrong_second_key_cancels_the_chord_and_is_swallowed() {
 #[test]
 fn bindings_keep_their_arguments() {
     let mut keymap = Keymap::default();
-    keymap.add(binding(&["ctrl+g"], Command::with_args("show_overlay", json!({ "overlay": "goto", "text": ":" }))));
+    keymap.add(binding(
+        &["ctrl+g"],
+        Command::with_args("show_overlay", json!({ "overlay": "goto", "text": ":" })),
+    ));
     match press(&mut keymap, "ctrl+g") {
         KeyResult::Command(c) => assert_eq!(c.str_arg("text"), ":"),
         _ => panic!("not bound"),
@@ -165,8 +188,30 @@ fn bindings_keep_their_arguments() {
 fn a_shifted_symbol_matches_a_binding_written_without_shift() {
     let mut keymap = Keymap::default();
     keymap.add(binding(&["ctrl+/"], Command::new("toggle_comment")));
-    let typed = KeyCombo { ctrl: true, alt: false, shift: true, super_key: false, key: "/".into() };
-    assert_eq!(command_name(keymap.press(&[typed], &Context::default())), "toggle_comment");
+    let typed = KeyCombo {
+        ctrl: true,
+        alt: false,
+        shift: true,
+        super_key: false,
+        key: "/".into(),
+    };
+    assert_eq!(
+        command_name(keymap.press(&[typed], &Context::default())),
+        "toggle_comment"
+    );
+}
+
+#[test]
+fn the_physical_key_keeps_its_shift() {
+    // Shift+[ on a US keyboard: the character `{`, the physical key `[`.
+    let mut keymap = Keymap::default();
+    keymap.add(binding(&["ctrl+["], Command::new("unindent")));
+    keymap.add(binding(&["ctrl+shift+["], Command::new("fold")));
+    let result = keymap.press(
+        &[key("ctrl+shift+{"), key("ctrl+shift+[")],
+        &Context::default(),
+    );
+    assert_eq!(command_name(result), "fold");
 }
 
 #[test]
@@ -193,8 +238,14 @@ fn context_conditions_must_hold() {
     keymap.add(escape_binding());
     let visible = Context(HashMap::from([("overlay_visible", json!(true))]));
     let hidden = Context(HashMap::from([("overlay_visible", json!(false))]));
-    assert_eq!(command_name(keymap.press(&[key("escape")], &visible)), "hide_overlay");
-    assert_eq!(command_name(keymap.press(&[key("escape")], &hidden)), "<unbound>");
+    assert_eq!(
+        command_name(keymap.press(&[key("escape")], &visible)),
+        "hide_overlay"
+    );
+    assert_eq!(
+        command_name(keymap.press(&[key("escape")], &hidden)),
+        "<unbound>"
+    );
 }
 
 #[test]
@@ -213,7 +264,10 @@ fn context_defaults_are_equal_to_true() {
         context: vec![json!({ "key": "has_next_field" })],
     });
     let context = Context(HashMap::from([("has_next_field", json!(true))]));
-    assert_eq!(command_name(keymap.press(&[key("tab")], &context)), "next_field");
+    assert_eq!(
+        command_name(keymap.press(&[key("tab")], &context)),
+        "next_field"
+    );
 }
 
 #[test]
@@ -225,7 +279,10 @@ fn not_equal_operator() {
         context: vec![json!({ "key": "setting.mode", "operator": "not_equal", "operand": "vi" })],
     });
     let context = Context(HashMap::from([("setting.mode", json!("normal"))]));
-    assert_eq!(command_name(keymap.press(&[key("enter")], &context)), "commit");
+    assert_eq!(
+        command_name(keymap.press(&[key("enter")], &context)),
+        "commit"
+    );
 }
 
 // ----- shortcuts for menus and the palette ---------------------------------------------------------
@@ -234,14 +291,36 @@ fn not_equal_operator() {
 fn binding_for_finds_the_shortcut_of_a_command() {
     let mut keymap = Keymap::default();
     keymap.add(binding(&["ctrl+s"], Command::new("save")));
-    keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
-    keymap.add(binding(&["ctrl+f"], Command::with_args("show_panel", json!({ "panel": "find" }))));
-    keymap.add(binding(&["ctrl+h"], Command::with_args("show_panel", json!({ "panel": "replace" }))));
+    keymap.add(binding(
+        &["ctrl+k", "ctrl+b"],
+        Command::new("toggle_side_bar"),
+    ));
+    keymap.add(binding(
+        &["ctrl+f"],
+        Command::with_args("show_panel", json!({ "panel": "find" })),
+    ));
+    keymap.add(binding(
+        &["ctrl+h"],
+        Command::with_args("show_panel", json!({ "panel": "replace" })),
+    ));
 
-    assert_eq!(keymap.binding_for(&Command::with_args("save", json!({}))), Some(key("ctrl+s").display()));
-    assert_eq!(keymap.binding_for(&Command::new("toggle_side_bar")), Some(format!("{}, {}", key("ctrl+k").display(), key("ctrl+b").display())));
     assert_eq!(
-        keymap.binding_for(&Command::with_args("show_panel", json!({ "panel": "replace" }))),
+        keymap.binding_for(&Command::with_args("save", json!({}))),
+        Some(key("ctrl+s").display())
+    );
+    assert_eq!(
+        keymap.binding_for(&Command::new("toggle_side_bar")),
+        Some(format!(
+            "{}, {}",
+            key("ctrl+k").display(),
+            key("ctrl+b").display()
+        ))
+    );
+    assert_eq!(
+        keymap.binding_for(&Command::with_args(
+            "show_panel",
+            json!({ "panel": "replace" })
+        )),
         Some(key("ctrl+h").display())
     );
     assert_eq!(keymap.binding_for(&Command::new("exit")), None);
@@ -251,9 +330,15 @@ fn binding_for_finds_the_shortcut_of_a_command() {
 fn key_for_is_the_key_of_that_shortcut_unless_it_is_a_chord() {
     let mut keymap = Keymap::default();
     keymap.add(binding(&["ctrl+s"], Command::new("save")));
-    keymap.add(binding(&["ctrl+k", "ctrl+b"], Command::new("toggle_side_bar")));
+    keymap.add(binding(
+        &["ctrl+k", "ctrl+b"],
+        Command::new("toggle_side_bar"),
+    ));
 
-    assert_eq!(keymap.key_for(&Command::new("save")), KeyCombo::parse("ctrl+s").as_ref());
+    assert_eq!(
+        keymap.key_for(&Command::new("save")),
+        KeyCombo::parse("ctrl+s").as_ref()
+    );
     assert_eq!(keymap.key_for(&Command::new("toggle_side_bar")), None);
     assert_eq!(keymap.key_for(&Command::new("exit")), None);
 }

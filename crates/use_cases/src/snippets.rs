@@ -14,7 +14,9 @@ impl Editor {
     /// With several selections, each one gets the snippet (its own `$SELECTION`) and a caret on
     /// its first field; Tab does not visit the other fields then.
     pub fn insert_snippet(&mut self, contents: &str) {
-        let Some(doc) = self.active_document_mut() else { return };
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
         if doc.extra_selections().is_empty() {
             let view = doc.id;
             self.insert_snippet_over(view, None, contents);
@@ -28,7 +30,8 @@ impl Editor {
             let mut shift: isize = 0;
             for i in order {
                 let moved = |p: usize| (p as isize + shift).max(0) as usize;
-                let selection = Selection::new(moved(selections[i].anchor), moved(selections[i].head));
+                let selection =
+                    Selection::new(moved(selections[i].anchor), moved(selections[i].head));
                 let before = text.chars().count() as isize;
                 new[i] = tc::insert_snippet(text, selection, contents);
                 shift += text.chars().count() as isize - before;
@@ -38,11 +41,19 @@ impl Editor {
     }
 
     /// Replaces `replaced` (else the selection) of `view` with a snippet and selects its first field.
-    pub(crate) fn insert_snippet_over(&mut self, view: DocumentId, replaced: Option<Selection>, contents: &str) {
-        let Some(doc) = self.any_document_mut(view) else { return };
+    pub(crate) fn insert_snippet_over(
+        &mut self,
+        view: DocumentId,
+        replaced: Option<Selection>,
+        contents: &str,
+    ) {
+        let Some(doc) = self.any_document_mut(view) else {
+            return;
+        };
         let mut fields = Vec::new();
         let edited = doc.edit(|text, selection| {
-            let (selected, found) = tc::insert_snippet_fields(text, replaced.unwrap_or(selection), contents);
+            let (selected, found) =
+                tc::insert_snippet_fields(text, replaced.unwrap_or(selection), contents);
             fields = found;
             Some(selected)
         });
@@ -53,7 +64,8 @@ impl Editor {
 
     /// The `has_next_field` (`forward`) / `has_prev_field` context.
     pub fn has_snippet_field(&self, forward: bool) -> bool {
-        self.active_document().is_some_and(|d| d.has_snippet_field(forward))
+        self.active_document()
+            .is_some_and(|d| d.has_snippet_field(forward))
     }
 
     /// `next_field` / `prev_field`.

@@ -8,8 +8,10 @@ use std::time::{Duration, Instant};
 
 use codelibre_text::gateways::python_plugin_host::{find_interpreter, PythonPluginHost};
 use codelibre_text::gateways::{
-    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell,
-    std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
+    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog,
+    folder_index::FolderIndex, folder_search::FolderSearch, native_dialogs::NativeDialogs,
+    os_shell::OsShell, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    system_clipboard::SystemClipboard,
 };
 use codelibre_text::syntax_engine::SyntaxEngine;
 use entities::command::Command;
@@ -22,7 +24,8 @@ use interface_adapters::gateways::session_file::SessionFileGateway;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use interface_adapters::view_state::ViewState;
 use use_cases::gateways::{
-    ArchiveFolder, DialogGateway, FileFilter, MessageAnswer, MessageDialog, PackagePaths, ResourceGateway,
+    ArchiveFolder, DialogGateway, FileFilter, MessageAnswer, MessageDialog, PackagePaths,
+    ResourceGateway,
 };
 use use_cases::{Editor, Gateways};
 
@@ -59,7 +62,12 @@ fn paths(dir: &Path, archives: PathBuf) -> PackagePaths {
     PackagePaths {
         packages: dir.join("Packages"),
         sublime_packages: None,
-        archive_folders: vec![ArchiveFolder { archives, unpacked: dir.join("Cache"), sublime: true, shipped: true }],
+        archive_folders: vec![ArchiveFolder {
+            archives,
+            unpacked: dir.join("Cache"),
+            sublime: true,
+            shipped: true,
+        }],
     }
 }
 
@@ -76,24 +84,47 @@ fn the_packages_sublime_ships_load() {
 
     let started = Instant::now();
     unpack_all(&paths, true, &mut errors);
-    println!("unpacked in {:?}, {} errors", started.elapsed(), errors.len());
+    println!(
+        "unpacked in {:?}, {} errors",
+        started.elapsed(),
+        errors.len()
+    );
 
     let started = Instant::now();
     let gateway = SublimeResourceGateway::new(paths.clone());
     let ui = gateway.load_ui_resources(true, &mut errors);
-    println!("{} bindings, {} palette entries in {:?}", ui.keymap.bindings.len(), ui.palette.len(), started.elapsed());
-    println!("{} build systems", gateway.find_resources("*.sublime-build", true).len());
+    println!(
+        "{} bindings, {} palette entries in {:?}",
+        ui.keymap.bindings.len(),
+        ui.palette.len(),
+        started.elapsed()
+    );
+    println!(
+        "{} build systems",
+        gateway.find_resources("*.sublime-build", true).len()
+    );
 
     let started = Instant::now();
     let mut engine = SyntaxEngine::new(paths);
     engine.reload(true, &mut errors);
-    println!("{} syntaxes, {} schemes in {:?}", engine.syntax_names().len(), engine.scheme_names().len(), started.elapsed());
+    println!(
+        "{} syntaxes, {} schemes in {:?}",
+        engine.syntax_names().len(),
+        engine.scheme_names().len(),
+        started.elapsed()
+    );
     println!("{} errors", errors.len());
     for error in errors.iter().take(40) {
         println!("  {}", error.chars().take(160).collect::<String>());
     }
     assert!(engine.syntax_names().iter().any(|s| s == "Python"));
-    assert!(!ui.keymap.bindings.iter().any(|b| b.command.name.starts_with("vi_")), "Vintage is ignored");
+    assert!(
+        !ui.keymap
+            .bindings
+            .iter()
+            .any(|b| b.command.name.starts_with("vi_")),
+        "Vintage is ignored"
+    );
     assert_eq!(errors, Vec::<String>::new());
 }
 
@@ -106,11 +137,19 @@ fn the_official_syntaxes_load() {
         eprintln!("skipped: no CODELIBRE_TEST_SYNTAX_PACKAGES");
         return;
     };
-    let paths = PackagePaths { packages: dir, sublime_packages: None, archive_folders: Vec::new() };
+    let paths = PackagePaths {
+        packages: dir,
+        sublime_packages: None,
+        archive_folders: Vec::new(),
+    };
     let mut engine = SyntaxEngine::new(paths);
     let mut errors = Vec::new();
     engine.reload(false, &mut errors);
-    println!("{} syntaxes, {} errors", engine.syntax_names().len(), errors.len());
+    println!(
+        "{} syntaxes, {} errors",
+        engine.syntax_names().len(),
+        errors.len()
+    );
     for error in errors.iter().take(60) {
         println!("  {}", error.chars().take(200).collect::<String>());
     }
@@ -137,8 +176,11 @@ fn the_plugins_sublime_ships_load() {
         clipboard: Box::new(SystemClipboard),
         resources: Box::new(SublimeResourceGateway::new(paths)),
         syntaxes: Box::new(SyntectSyntaxes(engine)),
-        sessions: Box::new(SessionFileGateway::new(dir.path().join("Session.sublime_session"))),
+        sessions: Box::new(SessionFileGateway::new(
+            dir.path().join("Session.sublime_session"),
+        )),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -185,8 +227,17 @@ fn scratch_editor(dir: &Path) -> Editor {
         sublime: false,
         shipped: false,
     };
-    let shipped = install_dir().map(|archives| ArchiveFolder { archives, unpacked: dir.join("Cache").join("shipped"), sublime: true, shipped: true });
-    let paths = PackagePaths { packages: dir.join("Packages"), sublime_packages: None, archive_folders: shipped.into_iter().chain([own]).collect() };
+    let shipped = install_dir().map(|archives| ArchiveFolder {
+        archives,
+        unpacked: dir.join("Cache").join("shipped"),
+        sublime: true,
+        shipped: true,
+    });
+    let paths = PackagePaths {
+        packages: dir.join("Packages"),
+        sublime_packages: None,
+        archive_folders: shipped.into_iter().chain([own]).collect(),
+    };
     let engine = Rc::new(RefCell::new(SyntaxEngine::new(paths.clone())));
     let mut editor = Editor::new(Gateways {
         file_system: Box::new(StdFileSystem),
@@ -196,6 +247,7 @@ fn scratch_editor(dir: &Path) -> Editor {
         syntaxes: Box::new(SyntectSyntaxes(engine)),
         sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -208,7 +260,10 @@ fn scratch_editor(dir: &Path) -> Editor {
 
 /// Presses `key` like the window does and runs what it queued; true when a binding took it.
 fn press(editor: &mut Editor, view: &mut ViewState, key: &str) -> bool {
-    let taken = matches!(key_pressed(editor, view, &[KeyCombo::parse(key).unwrap()]), KeyHandling::Consumed);
+    let taken = matches!(
+        key_pressed(editor, view, &[KeyCombo::parse(key).unwrap()]),
+        KeyHandling::Consumed
+    );
     for command in view.take_commands() {
         command_controller::run(editor, view, &command);
     }
@@ -227,7 +282,11 @@ fn language_key_bindings_apply_by_scope() {
     let dir = tempfile::tempdir().unwrap();
     let user = dir.path().join("Packages").join("User");
     std::fs::create_dir_all(&user).unwrap();
-    std::fs::write(user.join("Preferences.sublime-settings"), r#"{ "auto_match_enabled": true }"#).unwrap();
+    std::fs::write(
+        user.join("Preferences.sublime-settings"),
+        r#"{ "auto_match_enabled": true }"#,
+    )
+    .unwrap();
     let (notes, code) = (dir.path().join("notes.md"), dir.path().join("a.py"));
     std::fs::write(&notes, "a word b\n").unwrap();
     std::fs::write(&code, "a word b\n").unwrap();
@@ -236,19 +295,37 @@ fn language_key_bindings_apply_by_scope() {
     let mut view = ViewState::default();
 
     let id = editor.active_document().unwrap().id;
-    println!("syntax {:?}, scope at 2: {:?}", editor.active_document().unwrap().syntax, editor.scope_name(id, 2));
+    println!(
+        "syntax {:?}, scope at 2: {:?}",
+        editor.active_document().unwrap().syntax,
+        editor.scope_name(id, 2)
+    );
     editor.sync_selection_from_view(id, Selection::new(2, 6));
-    assert!(press(&mut editor, &mut view, "*"), "Markdown's binding takes `*`");
+    assert!(
+        press(&mut editor, &mut view, "*"),
+        "Markdown's binding takes `*`"
+    );
     let doc = editor.active_document().unwrap();
     println!("markdown: {:?} {:?}", doc.text, doc.selection());
     assert_eq!(doc.text, "a *word* b\n");
-    assert_eq!(doc.selection(), Selection::new(3, 7), "the word stays selected");
+    assert_eq!(
+        doc.selection(),
+        Selection::new(3, 7),
+        "the word stays selected"
+    );
 
     editor.open_file(&code);
     let id = editor.active_document().unwrap().id;
-    println!("syntax {:?}, scope at 2: {:?}", editor.active_document().unwrap().syntax, editor.scope_name(id, 2));
+    println!(
+        "syntax {:?}, scope at 2: {:?}",
+        editor.active_document().unwrap().syntax,
+        editor.scope_name(id, 2)
+    );
     editor.sync_selection_from_view(id, Selection::new(2, 6));
-    assert!(!press(&mut editor, &mut view, "*"), "no binding for `*` in Python: the widget types it");
+    assert!(
+        !press(&mut editor, &mut view, "*"),
+        "no binding for `*` in Python: the widget types it"
+    );
     assert_eq!(editor.active_document().unwrap().text, "a word b\n");
 }
 
@@ -283,10 +360,18 @@ class ProbeCommand(sublime_plugin.TextCommand):
     editor.start(vec![code]);
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("probe"));
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
     println!("{status}\nconsole:\n{}", editor.state().console);
     assert!(status.contains("string.quoted.double.python"), "{status}");
-    assert!(status.contains("True, False, Region(4, 8)"), "the string with its quotes: {status}");
+    assert!(
+        status.contains("True, False, Region(4, 8)"),
+        "the string with its quotes: {status}"
+    );
 }
 
 /// `install_package_control` with the network: downloads it into a temporary profile, the
@@ -303,36 +388,75 @@ fn install_package_control_downloads_and_loads_it() {
     editor.start(Vec::new());
     let mut view = ViewState::default();
     assert!(!editor.is_plugin_command("install_package"));
-    command_controller::run(&mut editor, &mut view, &Command::new("install_package_control"));
-    let status = |editor: &Editor| editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::new("install_package_control"),
+    );
+    let status = |editor: &Editor| {
+        editor
+            .state()
+            .status
+            .as_ref()
+            .map(|s| s.text.clone())
+            .unwrap_or_default()
+    };
     println!("after the command: {}", status(&editor));
 
-    let installed = dir.path().join("Installed Packages").join("Package Control.sublime-package");
+    let installed = dir
+        .path()
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline && !editor.is_plugin_command("install_package") {
         editor.poll_downloads();
         command_controller::poll_plugins(&mut editor, &mut view);
         std::thread::sleep(Duration::from_millis(50));
     }
-    println!("file: {} ({:?} bytes)", installed.is_file(), std::fs::metadata(&installed).map(|m| m.len()).ok());
+    println!(
+        "file: {} ({:?} bytes)",
+        installed.is_file(),
+        std::fs::metadata(&installed).map(|m| m.len()).ok()
+    );
     println!("status: {}", status(&editor));
     assert!(installed.is_file());
-    assert!(!dir.path().join("Installed Packages").join("Package Control.sublime-package.download").exists());
-    assert!(editor.is_plugin_command("install_package"), "console:\n{}", editor.state().console);
+    assert!(!dir
+        .path()
+        .join("Installed Packages")
+        .join("Package Control.sublime-package.download")
+        .exists());
+    assert!(
+        editor.is_plugin_command("install_package"),
+        "console:\n{}",
+        editor.state().console
+    );
 
     // A second time it only says so.
-    command_controller::run(&mut editor, &mut view, &Command::new("install_package_control"));
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::new("install_package_control"),
+    );
     assert_eq!(status(&editor), "Package Control is already installed");
     // Removing it unloads it once the folder holds still.
     std::fs::remove_file(&installed).unwrap();
     editor.check_installed_packages();
     editor.check_installed_packages();
     assert!(!editor.is_plugin_command("install_package"));
-    assert!(!editor.state().console.contains("Traceback"), "{}", editor.state().console);
+    assert!(
+        !editor.state().console.contains("Traceback"),
+        "{}",
+        editor.state().console
+    );
 }
 
 /// Lets the plugins and the external-change checks run until `done` or `seconds` pass; true if done.
-fn run_until(editor: &mut Editor, view: &mut ViewState, seconds: u64, mut done: impl FnMut(&Editor) -> bool) -> bool {
+fn run_until(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    seconds: u64,
+    mut done: impl FnMut(&Editor) -> bool,
+) -> bool {
     let deadline = Instant::now() + Duration::from_secs(seconds);
     while Instant::now() < deadline {
         command_controller::poll_plugins(editor, view);
@@ -349,16 +473,24 @@ fn run_until(editor: &mut Editor, view: &mut ViewState, seconds: u64, mut done: 
 fn pick_package(editor: &mut Editor, view: &mut ViewState, command: &str, package: &str) {
     command_controller::run(editor, view, &Command::new(command));
     run_until(editor, view, 45, |e| e.plugin_quick_panel().is_some());
-    let panel = editor.plugin_quick_panel().unwrap_or_else(|| panic!("{command}: no list\n{}", editor.state().console));
+    let panel = editor
+        .plugin_quick_panel()
+        .unwrap_or_else(|| panic!("{command}: no list\n{}", editor.state().console));
     let index = panel.items.iter().position(|i| i.caption == package);
-    let index = index.unwrap_or_else(|| panic!("{command}: {package} not in {:?}", panel.items.iter().map(|i| &i.caption).collect::<Vec<_>>()));
+    let index = index.unwrap_or_else(|| {
+        panic!(
+            "{command}: {package} not in {:?}",
+            panel.items.iter().map(|i| &i.caption).collect::<Vec<_>>()
+        )
+    });
     command_controller::answer_plugin_quick_panel(editor, view, Some(index));
 }
 
 /// The `version` in the `package-metadata.json` of an installed `.sublime-package`.
 fn archive_version(archive: &Path) -> Option<String> {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(archive).ok()?).ok()?;
-    let metadata: serde_json::Value = serde_json::from_reader(zip.by_name("package-metadata.json").ok()?).ok()?;
+    let metadata: serde_json::Value =
+        serde_json::from_reader(zip.by_name("package-metadata.json").ok()?).ok()?;
     metadata["version"].as_str().map(str::to_string)
 }
 
@@ -381,9 +513,13 @@ fn set_archive_version(archive: &Path, version: &str) {
     let mut writer = zip::ZipWriter::new(std::fs::File::create(archive).unwrap());
     for (name, is_dir, bytes) in files {
         if is_dir {
-            writer.add_directory(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer
+                .add_directory(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
         } else {
-            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
             std::io::Write::write_all(&mut writer, &bytes).unwrap();
         }
     }
@@ -400,14 +536,19 @@ fn package_control_installs_upgrades_and_removes_a_package_with_plugins() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
     }
-    let package = std::env::var("CODELIBRE_TEST_PACKAGE").unwrap_or_else(|_| "MarkdownPreview".into());
-    let command = std::env::var("CODELIBRE_TEST_COMMAND").unwrap_or_else(|_| "markdown_preview".into());
-    let args = std::env::var("CODELIBRE_TEST_ARGS").unwrap_or_else(|_| r#"{"target": "sublime"}"#.into());
+    let package =
+        std::env::var("CODELIBRE_TEST_PACKAGE").unwrap_or_else(|_| "MarkdownPreview".into());
+    let command =
+        std::env::var("CODELIBRE_TEST_COMMAND").unwrap_or_else(|_| "markdown_preview".into());
+    let args =
+        std::env::var("CODELIBRE_TEST_ARGS").unwrap_or_else(|_| r#"{"target": "sublime"}"#.into());
     let dir = tempfile::tempdir().unwrap();
     let archives = dir.path().join("Installed Packages");
     std::fs::create_dir_all(&archives).unwrap();
@@ -421,34 +562,86 @@ fn package_control_installs_upgrades_and_removes_a_package_with_plugins() {
     let console = |editor: &Editor| editor.state().console.clone();
     let report = |editor: &Editor| {
         let lib = dir.path().join("Lib");
-        let listing = |name: &str| std::fs::read_dir(lib.join(name)).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
-        println!("python33: {:?}\npython38: {:?}", listing("python33"), listing("python38"));
+        let listing = |name: &str| {
+            std::fs::read_dir(lib.join(name))
+                .map(|d| {
+                    d.flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        println!(
+            "python33: {:?}\npython38: {:?}",
+            listing("python33"),
+            listing("python38")
+        );
         println!("load errors: {:?}", editor.state().load_errors);
-        println!("status: {:?}", editor.state().status.as_ref().map(|s| s.text.clone()));
+        println!(
+            "status: {:?}",
+            editor.state().status.as_ref().map(|s| s.text.clone())
+        );
     };
 
     // Install.
     pick_package(&mut editor, &mut view, "install_package", &package);
     let archive = archives.join(format!("{package}.sublime-package"));
     let unpacked = dir.path().join("Packages").join(&package);
-    let loaded = run_until(&mut editor, &mut view, 120, |e| e.is_plugin_command(&command));
+    let loaded = run_until(&mut editor, &mut view, 120, |e| {
+        e.is_plugin_command(&command)
+    });
     report(&editor);
-    println!("archive {}, folder {}, version {:?}", archive.is_file(), unpacked.is_dir(), archive_version(&archive));
-    assert!(loaded, "{command} did not load\nconsole:\n{}", console(&editor));
+    println!(
+        "archive {}, folder {}, version {:?}",
+        archive.is_file(),
+        unpacked.is_dir(),
+        archive_version(&archive)
+    );
+    assert!(
+        loaded,
+        "{command} did not load\nconsole:\n{}",
+        console(&editor)
+    );
     run_until(&mut editor, &mut view, 5, |_| false);
 
     // Its command runs on the Markdown file (Package Control's message view is the active one).
     editor.open_file(&notes);
     let before = editor.state().documents.len();
-    command_controller::run(&mut editor, &mut view, &Command::with_args(&command, serde_json::from_str(&args).unwrap()));
-    let opened = run_until(&mut editor, &mut view, 20, |e| e.state().documents.len() > before);
-    let output = editor.active_document().map(|d| d.text.clone()).unwrap_or_default();
-    println!("documents {before} → {}, active {:?}:\n{}", editor.state().documents.len(), editor.active_document().map(|d| d.name()), output.chars().take(300).collect::<String>());
-    assert!(!console(&editor).contains("Traceback"), "console:\n{}", console(&editor));
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args(&command, serde_json::from_str(&args).unwrap()),
+    );
+    let opened = run_until(&mut editor, &mut view, 20, |e| {
+        e.state().documents.len() > before
+    });
+    let output = editor
+        .active_document()
+        .map(|d| d.text.clone())
+        .unwrap_or_default();
+    println!(
+        "documents {before} → {}, active {:?}:\n{}",
+        editor.state().documents.len(),
+        editor.active_document().map(|d| d.name()),
+        output.chars().take(300).collect::<String>()
+    );
+    assert!(
+        !console(&editor).contains("Traceback"),
+        "console:\n{}",
+        console(&editor)
+    );
     if package == "MarkdownPreview" {
-        let heading = output.find("<h1").map(|at| &output[at..]).and_then(|h| h.find("</h1>").map(|end| &h[..end])).unwrap_or_default();
+        let heading = output
+            .find("<h1")
+            .map(|at| &output[at..])
+            .and_then(|h| h.find("</h1>").map(|end| &h[..end]))
+            .unwrap_or_default();
         println!("heading: {heading}");
-        assert!(opened && heading.contains("Title"), "console:\n{}", console(&editor));
+        assert!(
+            opened && heading.contains("Title"),
+            "console:\n{}",
+            console(&editor)
+        );
     }
 
     // Upgrade: the installed one says it is older.
@@ -457,29 +650,61 @@ fn package_control_installs_upgrades_and_removes_a_package_with_plugins() {
         set_archive_version(&archive, "0.0.1");
         run_until(&mut editor, &mut view, 5, |_| false);
         pick_package(&mut editor, &mut view, "upgrade_package", &package);
-        let upgraded = run_until(&mut editor, &mut view, 120, |_| archive_version(&archive).is_some_and(|v| v != "0.0.1"));
+        let upgraded = run_until(&mut editor, &mut view, 120, |_| {
+            archive_version(&archive).is_some_and(|v| v != "0.0.1")
+        });
         run_until(&mut editor, &mut view, 5, |_| false);
         report(&editor);
-        println!("upgraded to {:?} (was {version})", archive_version(&archive));
+        println!(
+            "upgraded to {:?} (was {version})",
+            archive_version(&archive)
+        );
         assert!(upgraded, "console:\n{}", console(&editor));
-        assert!(editor.is_plugin_command(&command), "{command} after the upgrade\nconsole:\n{}", console(&editor));
+        assert!(
+            editor.is_plugin_command(&command),
+            "{command} after the upgrade\nconsole:\n{}",
+            console(&editor)
+        );
     }
 
     // Remove.
     pick_package(&mut editor, &mut view, "remove_package", &package);
-    let removed = run_until(&mut editor, &mut view, 60, |e| !archive.exists() && !unpacked.exists() && !e.is_plugin_command(&command));
+    let removed = run_until(&mut editor, &mut view, 60, |e| {
+        !archive.exists() && !unpacked.exists() && !e.is_plugin_command(&command)
+    });
     run_until(&mut editor, &mut view, 5, |_| false);
     report(&editor);
     println!("console:\n{}", console(&editor));
-    assert!(removed, "archive {}, folder {}, command {}", archive.exists(), unpacked.exists(), editor.is_plugin_command(&command));
+    assert!(
+        removed,
+        "archive {}, folder {}, command {}",
+        archive.exists(),
+        unpacked.exists(),
+        editor.is_plugin_command(&command)
+    );
     assert!(!console(&editor).contains("Traceback"));
 }
 
 /// Popular packages with plugins, for [`package_control_installs_the_listed_packages_at_start`].
 const POPULAR_PACKAGES: &[&str] = &[
-    "A File Icon", "AdvancedNewFile", "BracketHighlighter", "ColorHelper", "DocBlockr", "Emmet", "FileDiffs", "GitGutter",
-    "LSP", "MarkdownEditing", "Origami", "PackageResourceViewer", "Pretty JSON", "SideBarEnhancements", "SublimeLinter",
-    "Terminus", "Text Pastry", "TrailingSpaces",
+    "A File Icon",
+    "AdvancedNewFile",
+    "BracketHighlighter",
+    "ColorHelper",
+    "DocBlockr",
+    "Emmet",
+    "FileDiffs",
+    "GitGutter",
+    "LSP",
+    "MarkdownEditing",
+    "Origami",
+    "PackageResourceViewer",
+    "Pretty JSON",
+    "SideBarEnhancements",
+    "SublimeLinter",
+    "Terminus",
+    "Text Pastry",
+    "TrailingSpaces",
 ];
 
 /// Package Control installs at start the packages `installed_packages` lists and it does not
@@ -492,13 +717,19 @@ fn package_control_installs_the_listed_packages_at_start() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
     }
     let packages: Vec<String> = match std::env::var("CODELIBRE_TEST_PACKAGES") {
-        Ok(list) => list.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect(),
+        Ok(list) => list
+            .split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect(),
         Err(_) => POPULAR_PACKAGES.iter().map(|p| p.to_string()).collect(),
     };
     let dir = tempfile::tempdir().unwrap();
@@ -509,21 +740,44 @@ fn package_control_installs_the_listed_packages_at_start() {
     std::fs::create_dir_all(&user).unwrap();
     let mut listed = packages.clone();
     listed.push("Package Control".into());
-    std::fs::write(user.join("Package Control.sublime-settings"), serde_json::json!({ "installed_packages": listed }).to_string()).unwrap();
+    std::fs::write(
+        user.join("Package Control.sublime-settings"),
+        serde_json::json!({ "installed_packages": listed }).to_string(),
+    )
+    .unwrap();
     let notes = dir.path().join("notes.md");
     std::fs::write(&notes, "# Title\n\nSome *text*.\n").unwrap();
 
     let mut editor = scratch_editor(dir.path());
     editor.start(vec![notes]);
     let mut view = ViewState::default();
-    let installed = |package: &str| archives.join(format!("{package}.sublime-package")).is_file() || dir.path().join("Packages").join(package).join("package-metadata.json").is_file();
+    let installed = |package: &str| {
+        archives
+            .join(format!("{package}.sublime-package"))
+            .is_file()
+            || dir
+                .path()
+                .join("Packages")
+                .join(package)
+                .join("package-metadata.json")
+                .is_file()
+    };
     let started = Instant::now();
-    let all = run_until(&mut editor, &mut view, 600, |_| packages.iter().all(|p| installed(p)));
+    let all = run_until(&mut editor, &mut view, 600, |_| {
+        packages.iter().all(|p| installed(p))
+    });
     // The last ones reload once their folder holds still; Package Control re-enables them.
     run_until(&mut editor, &mut view, 15, |_| false);
     println!("installed in {:?}: {all}", started.elapsed());
     for package in &packages {
-        println!("  {package}: {}", if installed(package) { "installed" } else { "MISSING" });
+        println!(
+            "  {package}: {}",
+            if installed(package) {
+                "installed"
+            } else {
+                "MISSING"
+            }
+        );
     }
     let console = editor.state().console.clone();
     println!("console:\n{console}");
@@ -532,12 +786,24 @@ fn package_control_installs_the_listed_packages_at_start() {
     for error in &errors {
         // The package, then the exception's last line.
         let first = error.lines().next().unwrap_or_default();
-        let last = error.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default();
+        let last = error
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_default();
         println!("  {first}\n      {last}");
     }
-    println!("ignored: {:?}", editor.global_settings().get("ignored_packages"));
+    println!(
+        "ignored: {:?}",
+        editor.global_settings().get("ignored_packages")
+    );
     assert!(all, "not every package was installed");
-    assert_eq!(errors.len(), 0, "{} load errors, syntaxes included", errors.len());
+    assert_eq!(
+        errors.len(),
+        0,
+        "{} load errors, syntaxes included",
+        errors.len()
+    );
 }
 
 /// `upgrade_all_packages` when Package Control and another package are out of date: it upgrades
@@ -549,7 +815,9 @@ fn package_control_upgrades_itself_then_the_other_packages() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
@@ -563,26 +831,50 @@ fn package_control_upgrades_itself_then_the_other_packages() {
     let user = dir.path().join("Packages").join("User");
     std::fs::create_dir_all(&user).unwrap();
     let settings = serde_json::json!({ "installed_packages": [other, "Package Control"], "auto_upgrade": false });
-    std::fs::write(user.join("Package Control.sublime-settings"), settings.to_string()).unwrap();
+    std::fs::write(
+        user.join("Package Control.sublime-settings"),
+        settings.to_string(),
+    )
+    .unwrap();
     let mut editor = scratch_editor(dir.path());
     editor.start(Vec::new());
     let mut view = ViewState::default();
     let other_archive = archives.join(format!("{other}.sublime-package"));
-    assert!(run_until(&mut editor, &mut view, 120, |_| other_archive.is_file()), "{}", editor.state().console);
+    assert!(
+        run_until(&mut editor, &mut view, 120, |_| other_archive.is_file()),
+        "{}",
+        editor.state().console
+    );
     run_until(&mut editor, &mut view, 10, |_| false);
 
     set_archive_version(&package_control, "0.0.1");
     set_archive_version(&other_archive, "0.0.1");
     run_until(&mut editor, &mut view, 5, |_| false);
-    let upgrade_all = Command::with_args("upgrade_all_packages", serde_json::json!({ "unattended": true }));
+    let upgrade_all = Command::with_args(
+        "upgrade_all_packages",
+        serde_json::json!({ "unattended": true }),
+    );
     let old = |archive: &Path| archive_version(archive).as_deref() == Some("0.0.1");
 
     command_controller::run(&mut editor, &mut view, &upgrade_all);
-    let itself = run_until(&mut editor, &mut view, 120, |e| !old(&package_control) && e.is_plugin_command("install_package"));
+    let itself = run_until(&mut editor, &mut view, 120, |e| {
+        !old(&package_control) && e.is_plugin_command("install_package")
+    });
     run_until(&mut editor, &mut view, 10, |_| false);
-    println!("first: Package Control {:?}, {other} {:?}", archive_version(&package_control), archive_version(&other_archive));
-    println!("ignored: {:?}", editor.global_settings().get("ignored_packages"));
-    assert!(itself, "Package Control did not upgrade itself and load again\n{}", editor.state().console);
+    println!(
+        "first: Package Control {:?}, {other} {:?}",
+        archive_version(&package_control),
+        archive_version(&other_archive)
+    );
+    println!(
+        "ignored: {:?}",
+        editor.global_settings().get("ignored_packages")
+    );
+    assert!(
+        itself,
+        "Package Control did not upgrade itself and load again\n{}",
+        editor.state().console
+    );
     assert!(old(&other_archive), "Package Control upgrades itself alone");
 
     command_controller::run(&mut editor, &mut view, &upgrade_all);
@@ -592,9 +884,21 @@ fn package_control_upgrades_itself_then_the_other_packages() {
     println!("console:\n{}", editor.state().console);
     assert!(others, "{other} was not upgraded");
     assert!(editor.is_plugin_command("install_package"));
-    assert!(editor.is_plugin_command("text_pastry_insert_text") || editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
-    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+    assert!(
+        editor.is_plugin_command("text_pastry_insert_text")
+            || editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
+    assert_eq!(
+        editor.global_settings().get("ignored_packages"),
+        Some(&serde_json::json!(["Vintage"]))
+    );
     assert!(!editor.state().console.contains("Traceback"));
 }
 
@@ -606,13 +910,23 @@ fn write_package_control_3_profile(dir: &Path, source: &Path) {
     let archives = dir.join("Installed Packages");
     std::fs::create_dir_all(&archives).unwrap();
     std::fs::copy(source, archives.join("Package Control.sublime-package")).unwrap();
-    let mut loader = zip::ZipWriter::new(std::fs::File::create(archives.join("0_package_control_loader.sublime-package")).unwrap());
+    let mut loader = zip::ZipWriter::new(
+        std::fs::File::create(archives.join("0_package_control_loader.sublime-package")).unwrap(),
+    );
     for (name, contents) in [
-        ("dependency-metadata.json", r#"{"version": "1.0.0", "description": "Package Control loader"}"#),
+        (
+            "dependency-metadata.json",
+            r#"{"version": "1.0.0", "description": "Package Control loader"}"#,
+        ),
         ("00-package_control.py", ""),
-        ("50-oldlib.py", "from package_control import sys_path\nsys_path.add_dependency('oldlib')\n"),
+        (
+            "50-oldlib.py",
+            "from package_control import sys_path\nsys_path.add_dependency('oldlib')\n",
+        ),
     ] {
-        loader.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        loader
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
         loader.write_all(contents.as_bytes()).unwrap();
     }
     loader.finish().unwrap();
@@ -631,7 +945,10 @@ fn write_package_control_3_profile(dir: &Path, source: &Path) {
         "Uses/plugin.py",
         "import sublime_plugin\n\nclass WhereIsOldlibCommand(sublime_plugin.ApplicationCommand):\n    def run(self):\n        import oldlib\n        print('oldlib from', oldlib.__file__)\n",
     );
-    write("User/Package Control.sublime-settings", r#"{"installed_packages": ["Package Control"], "auto_upgrade": false}"#);
+    write(
+        "User/Package Control.sublime-settings",
+        r#"{"installed_packages": ["Package Control"], "auto_upgrade": false}"#,
+    );
 }
 
 /// The files named `name` under `dir`, at any depth.
@@ -656,14 +973,19 @@ fn package_control_migrates_package_control_3_dependencies() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     write_package_control_3_profile(dir.path(), &source);
-    let loader = dir.path().join("Installed Packages").join("0_package_control_loader.sublime-package");
+    let loader = dir
+        .path()
+        .join("Installed Packages")
+        .join("0_package_control_loader.sublime-package");
     let old = dir.path().join("Packages").join("oldlib");
 
     let mut editor = scratch_editor(dir.path());
@@ -672,20 +994,47 @@ fn package_control_migrates_package_control_3_dependencies() {
     // Before the migration the plugin imports it from the dependency's folder.
     command_controller::run(&mut editor, &mut view, &Command::new("where_is_oldlib"));
     let before = editor.state().console.clone();
-    assert!(before.contains(&format!("oldlib from {}", old.join("all").join("oldlib.py").display())), "{before}");
+    assert!(
+        before.contains(&format!(
+            "oldlib from {}",
+            old.join("all").join("oldlib.py").display()
+        )),
+        "{before}"
+    );
 
-    let migrated = run_until(&mut editor, &mut view, 60, |_| !loader.exists() && !old.exists());
+    let migrated = run_until(&mut editor, &mut view, 60, |_| {
+        !loader.exists() && !old.exists()
+    });
     run_until(&mut editor, &mut view, 5, |_| false);
     let console = editor.state().console.clone();
     println!("console:\n{console}");
-    assert!(migrated, "loader {}, oldlib {}", loader.exists(), old.exists());
+    assert!(
+        migrated,
+        "loader {}, oldlib {}",
+        loader.exists(),
+        old.exists()
+    );
     let libraries = find_files(&dir.path().join("Lib"), "oldlib.py");
     assert_eq!(libraries.len(), 1, "{libraries:?}");
-    assert!(libraries[0].parent().unwrap().join("oldlib-1.2.0.dist-info").is_dir(), "{libraries:?}");
+    assert!(
+        libraries[0]
+            .parent()
+            .unwrap()
+            .join("oldlib-1.2.0.dist-info")
+            .is_dir(),
+        "{libraries:?}"
+    );
     assert!(!console.contains("Error trying to migrate"), "{console}");
     assert!(!console.contains("Traceback"), "{console}");
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
-    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
+    assert_eq!(
+        editor.global_settings().get("ignored_packages"),
+        Some(&serde_json::json!(["Vintage"]))
+    );
 
     // A new plugin host imports the library (the old one keeps the module it imported).
     drop(editor);
@@ -693,7 +1042,10 @@ fn package_control_migrates_package_control_3_dependencies() {
     editor.start(Vec::new());
     command_controller::run(&mut editor, &mut view, &Command::new("where_is_oldlib"));
     let after = editor.state().console.clone();
-    assert!(after.contains(&format!("oldlib from {}", libraries[0].display())), "{after}");
+    assert!(
+        after.contains(&format!("oldlib from {}", libraries[0].display())),
+        "{after}"
+    );
 }
 
 /// Removing a package with a file nobody can delete or move (another program has it open, as
@@ -707,7 +1059,9 @@ fn package_control_removes_a_locked_package_at_the_next_start() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
@@ -724,25 +1078,47 @@ fn package_control_removes_a_locked_package_at_the_next_start() {
     std::fs::write(fake.join("fake.py"), "import sublime_plugin\n\nclass FakeHelloCommand(sublime_plugin.WindowCommand):\n    def run(self):\n        print('hello')\n").unwrap();
     std::fs::write(fake.join("data.bin"), b"in use").unwrap();
     let settings = serde_json::json!({ "installed_packages": ["Fake", "Package Control"], "auto_upgrade": false });
-    std::fs::write(packages.join("User").join("Package Control.sublime-settings"), settings.to_string()).unwrap();
+    std::fs::write(
+        packages
+            .join("User")
+            .join("Package Control.sublime-settings"),
+        settings.to_string(),
+    )
+    .unwrap();
 
     let mut editor = scratch_editor(dir.path());
     editor.start(Vec::new());
     let mut view = ViewState::default();
-    assert!(run_until(&mut editor, &mut view, 30, |e| e.is_plugin_command("remove_package") && e.is_plugin_command("fake_hello")));
+    assert!(run_until(&mut editor, &mut view, 30, |e| e
+        .is_plugin_command("remove_package")
+        && e.is_plugin_command("fake_hello")));
     run_until(&mut editor, &mut view, 5, |_| false);
 
     // While this handle is open others may read it (Package Control backs it up) but not delete
     // or move it (FILE_SHARE_READ only).
-    let lock = std::fs::OpenOptions::new().read(true).share_mode(1).open(fake.join("data.bin")).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(fake.join("data.bin"))
+        .unwrap();
     pick_package(&mut editor, &mut view, "remove_package", "Fake");
     let cleanup = fake.join("package-control.cleanup");
-    let deferred = run_until(&mut editor, &mut view, 60, |e| cleanup.is_file() && !e.is_plugin_command("fake_hello"));
+    let deferred = run_until(&mut editor, &mut view, 60, |e| {
+        cleanup.is_file() && !e.is_plugin_command("fake_hello")
+    });
     run_until(&mut editor, &mut view, 5, |_| false);
     let console = editor.state().console.clone();
     println!("first start:\n{console}");
-    assert!(deferred, "cleanup file {}, fake_hello {}", cleanup.is_file(), editor.is_plugin_command("fake_hello"));
-    assert!(console.contains("scheduled clean up on next restart"), "{console}");
+    assert!(
+        deferred,
+        "cleanup file {}, fake_hello {}",
+        cleanup.is_file(),
+        editor.is_plugin_command("fake_hello")
+    );
+    assert!(
+        console.contains("scheduled clean up on next restart"),
+        "{console}"
+    );
     assert!(!console.contains("Traceback"), "{console}");
     drop(editor);
     drop(lock);
@@ -755,10 +1131,28 @@ fn package_control_removes_a_locked_package_at_the_next_start() {
     println!("second start:\n{console}");
     assert!(removed, "{console}");
     assert!(!console.contains("Traceback"), "{console}");
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
-    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
-    let pc_settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(packages.join("User").join("Package Control.sublime-settings")).unwrap()).unwrap();
-    assert_eq!(pc_settings["installed_packages"], serde_json::json!(["Package Control"]));
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
+    assert_eq!(
+        editor.global_settings().get("ignored_packages"),
+        Some(&serde_json::json!(["Vintage"]))
+    );
+    let pc_settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            packages
+                .join("User")
+                .join("Package Control.sublime-settings"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        pc_settings["installed_packages"],
+        serde_json::json!(["Package Control"])
+    );
 }
 
 /// `path` as a `file:///` URL, as Package Control accepts for channels, repositories and releases.
@@ -772,7 +1166,11 @@ fn write_package_zip(archive: &Path, top: &str, files: &[(&str, &str)]) {
     use std::io::Write;
     let mut zip = zip::ZipWriter::new(std::fs::File::create(archive).unwrap());
     for (name, contents) in files {
-        zip.start_file(format!("{top}/{name}"), zip::write::SimpleFileOptions::default()).unwrap();
+        zip.start_file(
+            format!("{top}/{name}"),
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
         zip.write_all(contents.as_bytes()).unwrap();
     }
     zip.finish().unwrap();
@@ -806,7 +1204,9 @@ fn package_control_installs_from_local_repositories_and_channels() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
@@ -819,77 +1219,174 @@ fn package_control_installs_from_local_repositories_and_channels() {
     let user = packages.join("User");
     std::fs::create_dir_all(&user).unwrap();
     let settings = serde_json::json!({ "installed_packages": ["Package Control"], "auto_upgrade": false, "channels": [], "repositories": [] });
-    std::fs::write(user.join("Package Control.sublime-settings"), settings.to_string()).unwrap();
+    std::fs::write(
+        user.join("Package Control.sublime-settings"),
+        settings.to_string(),
+    )
+    .unwrap();
 
     let sources = dir.path().join("sources");
     std::fs::create_dir_all(&sources).unwrap();
-    let plugin = |version: &str| format!("import sublime_plugin\n\nclass UnpackedHelloCommand(sublime_plugin.ApplicationCommand):\n    def run(self):\n        print('unpacked says {version}')\n");
+    let plugin = |version: &str| {
+        format!("import sublime_plugin\n\nclass UnpackedHelloCommand(sublime_plugin.ApplicationCommand):\n    def run(self):\n        print('unpacked says {version}')\n")
+    };
     let repository = sources.join("repository.json");
     let v1 = plugin("1.0.0");
-    write_repository(&repository, "Unpacked", "1.0.0", &[(".no-sublime-package", ""), ("unpacked.py", &v1)]);
+    write_repository(
+        &repository,
+        "Unpacked",
+        "1.0.0",
+        &[(".no-sublime-package", ""), ("unpacked.py", &v1)],
+    );
     // A channel listing a second repository, with a package that has the name of one Sublime ships.
-    let shipped = install_dir().filter(|d| d.join("Diff.sublime-package").is_file()).map(|_| "Diff");
+    let shipped = install_dir()
+        .filter(|d| d.join("Diff.sublime-package").is_file())
+        .map(|_| "Diff");
     let second = sources.join("second").join("repository.json");
     std::fs::create_dir_all(second.parent().unwrap()).unwrap();
-    write_repository(&second, shipped.unwrap_or("Other"), "9.0.0", &[("readme.txt", "an override\n"), ("Override.sublime-settings", "{}\n")]);
+    write_repository(
+        &second,
+        shipped.unwrap_or("Other"),
+        "9.0.0",
+        &[
+            ("readme.txt", "an override\n"),
+            ("Override.sublime-settings", "{}\n"),
+        ],
+    );
     let channel = sources.join("channel.json");
-    std::fs::write(&channel, serde_json::json!({ "schema_version": "4.0.0", "repositories": [file_url(&second)] }).to_string()).unwrap();
+    std::fs::write(
+        &channel,
+        serde_json::json!({ "schema_version": "4.0.0", "repositories": [file_url(&second)] })
+            .to_string(),
+    )
+    .unwrap();
 
     let mut editor = scratch_editor(dir.path());
     editor.start(Vec::new());
     let mut view = ViewState::default();
-    assert!(run_until(&mut editor, &mut view, 30, |e| e.is_plugin_command("add_repository")), "{}", editor.state().console);
+    assert!(
+        run_until(&mut editor, &mut view, 30, |e| e
+            .is_plugin_command("add_repository")),
+        "{}",
+        editor.state().console
+    );
     let console = |editor: &Editor| editor.state().console.clone();
-    let pc_settings = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(user.join("Package Control.sublime-settings")).unwrap()).unwrap() };
+    let pc_settings = || -> serde_json::Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(user.join("Package Control.sublime-settings")).unwrap(),
+        )
+        .unwrap()
+    };
 
     // add_repository / add_channel save the URL in Package Control's settings.
-    command_controller::run(&mut editor, &mut view, &Command::with_args("add_repository", serde_json::json!({ "url": file_url(&repository) })));
-    command_controller::run(&mut editor, &mut view, &Command::with_args("add_channel", serde_json::json!({ "url": file_url(&channel) })));
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args(
+            "add_repository",
+            serde_json::json!({ "url": file_url(&repository) }),
+        ),
+    );
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args(
+            "add_channel",
+            serde_json::json!({ "url": file_url(&channel) }),
+        ),
+    );
     run_until(&mut editor, &mut view, 3, |_| false);
     println!("settings: {}", pc_settings());
-    assert_eq!(pc_settings()["repositories"], serde_json::json!([file_url(&repository)]));
-    assert_eq!(pc_settings()["channels"], serde_json::json!([file_url(&channel)]));
+    assert_eq!(
+        pc_settings()["repositories"],
+        serde_json::json!([file_url(&repository)])
+    );
+    assert_eq!(
+        pc_settings()["channels"],
+        serde_json::json!([file_url(&channel)])
+    );
 
     // A `.no-sublime-package` package goes to `Packages/Unpacked`, with no archive.
     pick_package(&mut editor, &mut view, "install_package", "Unpacked");
     let unpacked = packages.join("Unpacked");
-    let loaded = run_until(&mut editor, &mut view, 60, |e| e.is_plugin_command("unpacked_hello"));
+    let loaded = run_until(&mut editor, &mut view, 60, |e| {
+        e.is_plugin_command("unpacked_hello")
+    });
     println!("console:\n{}", console(&editor));
     assert!(loaded, "unpacked_hello did not load");
-    assert!(unpacked.join("unpacked.py").is_file() && unpacked.join("package-metadata.json").is_file());
+    assert!(
+        unpacked.join("unpacked.py").is_file() && unpacked.join("package-metadata.json").is_file()
+    );
     assert!(!archives.join("Unpacked.sublime-package").exists());
     command_controller::run(&mut editor, &mut view, &Command::new("unpacked_hello"));
-    assert!(console(&editor).contains("unpacked says 1.0.0"), "{}", console(&editor));
+    assert!(
+        console(&editor).contains("unpacked says 1.0.0"),
+        "{}",
+        console(&editor)
+    );
 
     // Upgraded in place: the new plugin runs.
     let v2 = plugin("1.1.0");
-    write_repository(&repository, "Unpacked", "1.1.0", &[(".no-sublime-package", ""), ("unpacked.py", &v2)]);
+    write_repository(
+        &repository,
+        "Unpacked",
+        "1.1.0",
+        &[(".no-sublime-package", ""), ("unpacked.py", &v2)],
+    );
     pick_package(&mut editor, &mut view, "upgrade_package", "Unpacked");
-    let upgraded = run_until(&mut editor, &mut view, 60, |_| std::fs::read_to_string(unpacked.join("unpacked.py")).is_ok_and(|s| s.contains("1.1.0")));
+    let upgraded = run_until(&mut editor, &mut view, 60, |_| {
+        std::fs::read_to_string(unpacked.join("unpacked.py")).is_ok_and(|s| s.contains("1.1.0"))
+    });
     run_until(&mut editor, &mut view, 5, |_| false);
     assert!(upgraded, "{}", console(&editor));
     command_controller::run(&mut editor, &mut view, &Command::new("unpacked_hello"));
-    assert!(console(&editor).contains("unpacked says 1.1.0"), "{}", console(&editor));
+    assert!(
+        console(&editor).contains("unpacked says 1.1.0"),
+        "{}",
+        console(&editor)
+    );
 
     // The channel's package, an override of a shipped one, then Revert Package.
     if let Some(name) = shipped {
         pick_package(&mut editor, &mut view, "install_package", name);
         let archive = archives.join(format!("{name}.sublime-package"));
-        assert!(run_until(&mut editor, &mut view, 60, |_| archive.is_file()), "{}", console(&editor));
+        assert!(
+            run_until(&mut editor, &mut view, 60, |_| archive.is_file()),
+            "{}",
+            console(&editor)
+        );
         run_until(&mut editor, &mut view, 5, |_| false);
         pick_package(&mut editor, &mut view, "revert_package", name);
-        assert!(run_until(&mut editor, &mut view, 60, |_| !archive.exists()), "{}", console(&editor));
+        assert!(
+            run_until(&mut editor, &mut view, 60, |_| !archive.exists()),
+            "{}",
+            console(&editor)
+        );
         run_until(&mut editor, &mut view, 5, |_| false);
     }
 
     pick_package(&mut editor, &mut view, "remove_package", "Unpacked");
-    let removed = run_until(&mut editor, &mut view, 60, |e| !unpacked.exists() && !e.is_plugin_command("unpacked_hello"));
+    let removed = run_until(&mut editor, &mut view, 60, |e| {
+        !unpacked.exists() && !e.is_plugin_command("unpacked_hello")
+    });
     run_until(&mut editor, &mut view, 5, |_| false);
     println!("console:\n{}", console(&editor));
-    assert!(removed, "folder {}, command {}", unpacked.exists(), editor.is_plugin_command("unpacked_hello"));
+    assert!(
+        removed,
+        "folder {}, command {}",
+        unpacked.exists(),
+        editor.is_plugin_command("unpacked_hello")
+    );
     assert!(!console(&editor).contains("Traceback"));
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
-    assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
+    assert_eq!(
+        editor.global_settings().get("ignored_packages"),
+        Some(&serde_json::json!(["Vintage"]))
+    );
 }
 
 /// Package Control copied to a temporary profile, with nothing else: nothing of the user's is
@@ -900,7 +1397,9 @@ fn package_control_loads_in_a_scratch_profile() {
     let Some(data) = sublime_data_dir() else {
         return;
     };
-    let source = data.join("Installed Packages").join("Package Control.sublime-package");
+    let source = data
+        .join("Installed Packages")
+        .join("Package Control.sublime-package");
     if !source.is_file() || find_interpreter(None).is_err() {
         eprintln!("skipped: no Package Control or no Python here");
         return;
@@ -909,7 +1408,12 @@ fn package_control_loads_in_a_scratch_profile() {
     let archives = dir.path().join("Installed Packages");
     std::fs::create_dir_all(&archives).unwrap();
     std::fs::copy(&source, archives.join("Package Control.sublime-package")).unwrap();
-    let own = ArchiveFolder { archives, unpacked: dir.path().join("Cache").join("own"), sublime: false, shipped: false };
+    let own = ArchiveFolder {
+        archives,
+        unpacked: dir.path().join("Cache").join("own"),
+        sublime: false,
+        shipped: false,
+    };
     let shipped = install_dir().map(|archives| ArchiveFolder {
         archives,
         unpacked: dir.path().join("Cache").join("shipped"),
@@ -928,8 +1432,11 @@ fn package_control_loads_in_a_scratch_profile() {
         clipboard: Box::new(SystemClipboard),
         resources: Box::new(SublimeResourceGateway::new(paths)),
         syntaxes: Box::new(SyntectSyntaxes(engine)),
-        sessions: Box::new(SessionFileGateway::new(dir.path().join("Session.sublime_session"))),
+        sessions: Box::new(SessionFileGateway::new(
+            dir.path().join("Session.sublime_session"),
+        )),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -944,12 +1451,25 @@ fn package_control_loads_in_a_scratch_profile() {
         command_controller::poll_plugins(&mut editor, &mut view);
         std::thread::sleep(Duration::from_millis(20));
     }
-    println!("plugin commands: {:?}", editor.is_plugin_command("install_package"));
-    let user_preferences = dir.path().join("Packages/User/Preferences.sublime-settings");
-    println!("preferences at start: {:?}", std::fs::read_to_string(&user_preferences).ok());
+    println!(
+        "plugin commands: {:?}",
+        editor.is_plugin_command("install_package")
+    );
+    let user_preferences = dir
+        .path()
+        .join("Packages/User/Preferences.sublime-settings");
+    println!(
+        "preferences at start: {:?}",
+        std::fs::read_to_string(&user_preferences).ok()
+    );
     let ignored = editor.global_settings().get("ignored_packages").cloned();
     println!("global ignored: {ignored:?}");
-    assert_eq!(ignored, Some(serde_json::json!(["Vintage"])), "{}", editor.state().console);
+    assert_eq!(
+        ignored,
+        Some(serde_json::json!(["Vintage"])),
+        "{}",
+        editor.state().console
+    );
     // The list of packages: read from the network. Nothing is chosen, so nothing is installed.
     command_controller::run(&mut editor, &mut view, &Command::new("install_package"));
     let deadline = Instant::now() + Duration::from_secs(45);
@@ -958,14 +1478,26 @@ fn package_control_loads_in_a_scratch_profile() {
         std::thread::sleep(Duration::from_millis(20));
     }
     match editor.plugin_quick_panel() {
-        Some(panel) => println!("packages offered: {}, first: {:?}", panel.items.len(), panel.items.first().map(|i| &i.caption)),
+        Some(panel) => println!(
+            "packages offered: {}, first: {:?}",
+            panel.items.len(),
+            panel.items.first().map(|i| &i.caption)
+        ),
         None => println!("no list of packages"),
     }
     // A color scheme has no code: installing it runs nothing of a third party.
-    let chosen = editor.plugin_quick_panel().and_then(|panel| panel.items.iter().position(|i| i.caption == "Dracula Color Scheme"));
+    let chosen = editor.plugin_quick_panel().and_then(|panel| {
+        panel
+            .items
+            .iter()
+            .position(|i| i.caption == "Dracula Color Scheme")
+    });
     if let Some(index) = chosen {
         command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(index));
-        let installed = dir.path().join("Installed Packages").join("Dracula Color Scheme.sublime-package");
+        let installed = dir
+            .path()
+            .join("Installed Packages")
+            .join("Dracula Color Scheme.sublime-package");
         let deadline = Instant::now() + Duration::from_secs(40);
         while Instant::now() < deadline && !installed.is_file() {
             command_controller::poll_plugins(&mut editor, &mut view);
@@ -976,16 +1508,39 @@ fn package_control_loads_in_a_scratch_profile() {
             std::thread::sleep(Duration::from_millis(20));
         }
         println!("installed: {}", installed.is_file());
-        println!("settings: {:?}", std::fs::read_to_string(dir.path().join("Packages/User/Package Control.sublime-settings")).ok());
-        println!("preferences: {:?}", std::fs::read_to_string(dir.path().join("Packages/User/Preferences.sublime-settings")).ok());
+        println!(
+            "settings: {:?}",
+            std::fs::read_to_string(
+                dir.path()
+                    .join("Packages/User/Package Control.sublime-settings")
+            )
+            .ok()
+        );
+        println!(
+            "preferences: {:?}",
+            std::fs::read_to_string(
+                dir.path()
+                    .join("Packages/User/Preferences.sublime-settings")
+            )
+            .ok()
+        );
         editor.reload_packages();
-        println!("after reload: {:?}", editor.state().status.as_ref().map(|s| s.text.clone()));
+        println!(
+            "after reload: {:?}",
+            editor.state().status.as_ref().map(|s| s.text.clone())
+        );
         command_controller::poll_plugins(&mut editor, &mut view);
         let found = editor.search(use_cases::search::SearchKind::ColorSchemes, "Dracula");
-        println!("schemes: {:?}", found.iter().map(|c| &c.caption).collect::<Vec<_>>());
+        println!(
+            "schemes: {:?}",
+            found.iter().map(|c| &c.caption).collect::<Vec<_>>()
+        );
         assert!(installed.is_file());
         assert!(found.iter().any(|c| c.caption == "Dracula"));
-        assert_eq!(editor.global_settings().get("ignored_packages"), Some(&serde_json::json!(["Vintage"])));
+        assert_eq!(
+            editor.global_settings().get("ignored_packages"),
+            Some(&serde_json::json!(["Vintage"]))
+        );
 
         // Disable Package / Enable Package only change `ignored_packages`: the packages follow at once.
         for (command, ignored) in [("disable_package", true), ("enable_package", false)] {
@@ -995,25 +1550,43 @@ fn package_control_loads_in_a_scratch_profile() {
                 command_controller::poll_plugins(&mut editor, &mut view);
                 std::thread::sleep(Duration::from_millis(20));
             }
-            let panel = editor.plugin_quick_panel().unwrap_or_else(|| panic!("{command}: no list"));
-            let index = panel.items.iter().position(|i| i.caption == "Dracula Color Scheme").expect("Dracula listed");
+            let panel = editor
+                .plugin_quick_panel()
+                .unwrap_or_else(|| panic!("{command}: no list"));
+            let index = panel
+                .items
+                .iter()
+                .position(|i| i.caption == "Dracula Color Scheme")
+                .expect("Dracula listed");
             command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(index));
             let deadline = Instant::now() + Duration::from_secs(20);
             while Instant::now() < deadline {
                 command_controller::poll_plugins(&mut editor, &mut view);
                 editor.check_external_changes();
-                let shown = editor.search(use_cases::search::SearchKind::ColorSchemes, "Dracula").iter().any(|c| c.caption == "Dracula");
+                let shown = editor
+                    .search(use_cases::search::SearchKind::ColorSchemes, "Dracula")
+                    .iter()
+                    .any(|c| c.caption == "Dracula");
                 if shown != ignored {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
-            let shown = editor.search(use_cases::search::SearchKind::ColorSchemes, "Dracula").iter().any(|c| c.caption == "Dracula");
-            println!("{command}: ignored {:?}, Dracula shown: {shown}", editor.global_settings().get("ignored_packages"));
+            let shown = editor
+                .search(use_cases::search::SearchKind::ColorSchemes, "Dracula")
+                .iter()
+                .any(|c| c.caption == "Dracula");
+            println!(
+                "{command}: ignored {:?}, Dracula shown: {shown}",
+                editor.global_settings().get("ignored_packages")
+            );
             assert_eq!(shown, !ignored, "{command}");
         }
     }
-    println!("status: {:?}", editor.state().status.as_ref().map(|s| s.text.clone()));
+    println!(
+        "status: {:?}",
+        editor.state().status.as_ref().map(|s| s.text.clone())
+    );
     println!("load errors: {}", editor.state().load_errors.len());
     for error in &editor.state().load_errors {
         println!("error: {error}");
@@ -1024,12 +1597,35 @@ fn package_control_loads_in_a_scratch_profile() {
     // Preferences > Package Settings > Package Control: its defaults, read from inside the
     // archive, open next to the user's file.
     let menu = interface_adapters::presenters::menu::present(&editor);
-    let package_settings = menu.iter().flat_map(|m| &m.children).find(|e| e.caption == "Package Settings").expect("Package Settings");
-    let ours = package_settings.children.iter().find(|e| e.caption == "Package Control").expect("Package Control's settings");
-    let edit = ours.children.iter().filter_map(|e| e.command.clone()).find(|c| c.name == "edit_settings").expect("edit_settings");
+    let package_settings = menu
+        .iter()
+        .flat_map(|m| &m.children)
+        .find(|e| e.caption == "Package Settings")
+        .expect("Package Settings");
+    let ours = package_settings
+        .children
+        .iter()
+        .find(|e| e.caption == "Package Control")
+        .expect("Package Control's settings");
+    let edit = ours
+        .children
+        .iter()
+        .filter_map(|e| e.command.clone())
+        .find(|c| c.name == "edit_settings")
+        .expect("edit_settings");
     println!("settings command: {edit:?}");
     command_controller::run(&mut editor, &mut view, &edit);
-    let defaults = editor.state().documents.iter().find(|d| d.read_only && d.name().starts_with("Package Control.sublime-settings"));
-    assert!(defaults.expect("the defaults").text.contains("\"channels\""));
-    assert_eq!(editor.active_document().unwrap().name(), "Package Control.sublime-settings");
+    let defaults = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.read_only && d.name().starts_with("Package Control.sublime-settings"));
+    assert!(defaults
+        .expect("the defaults")
+        .text
+        .contains("\"channels\""));
+    assert_eq!(
+        editor.active_document().unwrap().name(),
+        "Package Control.sublime-settings"
+    );
 }

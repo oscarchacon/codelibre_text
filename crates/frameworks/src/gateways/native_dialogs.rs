@@ -1,12 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use use_cases::gateways::{DialogGateway, FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel};
+use use_cases::gateways::{
+    DialogGateway, FileFilter, MessageAnswer, MessageButtons, MessageDialog, MessageLevel,
+};
 
 /// [`DialogGateway`] with the operating system's file pickers and message boxes (`rfd`).
 pub struct NativeDialogs;
 
 fn with_filters(dialog: rfd::FileDialog, filters: &[FileFilter]) -> rfd::FileDialog {
-    filters.iter().fold(dialog, |dialog, filter| dialog.add_filter(&filter.name, &filter.extensions))
+    filters.iter().fold(dialog, |dialog, filter| {
+        dialog.add_filter(&filter.name, &filter.extensions)
+    })
 }
 
 impl DialogGateway for NativeDialogs {
@@ -34,7 +38,12 @@ impl DialogGateway for NativeDialogs {
         dialog.pick_folders().unwrap_or_default()
     }
 
-    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf> {
+    fn pick_save_path(
+        &self,
+        start_dir: Option<&Path>,
+        file_name: &str,
+        filters: &[FileFilter],
+    ) -> Option<PathBuf> {
         let mut dialog = with_filters(rfd::FileDialog::new(), filters).set_file_name(file_name);
         if let Some(dir) = start_dir {
             dialog = dialog.set_directory(dir);
@@ -50,7 +59,9 @@ impl DialogGateway for NativeDialogs {
         };
         let buttons = match &dialog.buttons {
             MessageButtons::Ok => rfd::MessageButtons::Ok,
-            MessageButtons::OkCancel { ok, cancel } => rfd::MessageButtons::OkCancelCustom(ok.clone(), cancel.clone()),
+            MessageButtons::OkCancel { ok, cancel } => {
+                rfd::MessageButtons::OkCancelCustom(ok.clone(), cancel.clone())
+            }
             MessageButtons::YesNoCancel { yes, no, cancel } => {
                 rfd::MessageButtons::YesNoCancelCustom(yes.clone(), no.clone(), cancel.clone())
             }

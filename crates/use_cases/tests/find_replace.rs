@@ -19,7 +19,10 @@ fn selection(editor: &Editor) -> Selection {
 }
 
 fn query(text: &str) -> FindOptions {
-    FindOptions { query: text.into(), ..Default::default() }
+    FindOptions {
+        query: text.into(),
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn multi_line_selections_do_not_replace_the_query() {
 fn find_under_caret_selects_the_word_and_searches_it_as_a_whole_word() {
     let world = World::new();
     let mut editor = editor_with(&world, "foo bar", Selection::caret(5));
-    editor.set_find_options(FindOptions { regex: true, ..query("x") });
+    editor.set_find_options(FindOptions {
+        regex: true,
+        ..query("x")
+    });
     editor.use_selection_as_query(true);
     let find = &editor.state().find;
     assert_eq!(find.query, "bar");
@@ -93,7 +99,10 @@ fn not_found_is_reported_in_the_status_bar() {
 fn an_invalid_regex_is_shown_as_a_find_error() {
     let world = World::new();
     let mut editor = editor_with(&world, "abc", Selection::caret(0));
-    editor.set_find_options(FindOptions { regex: true, ..query("(") });
+    editor.set_find_options(FindOptions {
+        regex: true,
+        ..query("(")
+    });
     assert!(editor.find_next(true));
     assert!(editor.state().find_error.is_some());
 }
@@ -108,9 +117,20 @@ fn ctrl_d_selects_the_word_then_adds_the_next_occurrences() {
     assert_eq!(selection(&editor), Selection::new(4, 5));
     editor.select_word_or_next_occurrence();
     let doc = editor.active_document().unwrap();
-    assert_eq!(doc.selections(), vec![Selection::new(0, 1), Selection::new(4, 5), Selection::new(8, 9)]);
+    assert_eq!(
+        doc.selections(),
+        vec![
+            Selection::new(0, 1),
+            Selection::new(4, 5),
+            Selection::new(8, 9)
+        ]
+    );
     editor.select_word_or_next_occurrence();
-    assert_eq!(editor.active_document().unwrap().selections().len(), 3, "every occurrence is already selected");
+    assert_eq!(
+        editor.active_document().unwrap().selections().len(),
+        3,
+        "every occurrence is already selected"
+    );
 }
 
 #[test]
@@ -127,10 +147,18 @@ fn ctrl_d_from_part_of_a_word_matches_inside_words() {
     let world = World::new();
     let mut editor = editor_with(&world, "foo foobar", Selection::new(0, 3));
     editor.select_word_or_next_occurrence();
-    assert_eq!(selection(&editor), Selection::new(0, 3), "a whole-word selection skips foobar");
+    assert_eq!(
+        selection(&editor),
+        Selection::new(0, 3),
+        "a whole-word selection skips foobar"
+    );
     let mut editor = editor_with(&world, "fo foobar", Selection::new(0, 1));
     editor.select_word_or_next_occurrence();
-    assert_eq!(selection(&editor), Selection::new(3, 4), "part of a word also matches inside words");
+    assert_eq!(
+        selection(&editor),
+        Selection::new(3, 4),
+        "part of a word also matches inside words"
+    );
 }
 
 #[test]
@@ -145,8 +173,16 @@ fn typing_deleting_and_moving_with_several_selections() {
     assert_eq!(active_text(&editor), "xy xy");
     editor.move_carets(entities::text_commands::CaretMotion::LineStart);
     editor.delete_at_selections(true);
-    assert_eq!(active_text(&editor), "y xy", "both carets went to the line start and merged");
-    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+    assert_eq!(
+        active_text(&editor),
+        "y xy",
+        "both carets went to the line start and merged"
+    );
+    assert!(editor
+        .active_document()
+        .unwrap()
+        .extra_selections()
+        .is_empty());
 }
 
 #[test]
@@ -206,7 +242,10 @@ fn find_matches_lists_every_match_and_follows_edits() {
 fn find_matches_records_regex_errors() {
     let world = World::new();
     let mut editor = editor_with(&world, "abc", Selection::caret(0));
-    editor.set_find_options(FindOptions { regex: true, ..query("[") });
+    editor.set_find_options(FindOptions {
+        regex: true,
+        ..query("[")
+    });
     assert!(editor.find_matches().is_empty());
     assert!(editor.state().find_error.is_some());
     editor.set_find_options(query("b"));
@@ -227,8 +266,16 @@ fn find_all_under_selects_every_whole_word_occurrence_of_the_word_at_the_caret()
     let mut editor = editor_with(&world, "ab abc ab Ab", Selection::caret(8));
     editor.select_all_occurrences();
     let doc = editor.active_document().unwrap();
-    assert_eq!(doc.selection(), Selection::new(7, 9), "the primary selection stays where the caret was");
-    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(7, 9)], "case sensitive, whole words");
+    assert_eq!(
+        doc.selection(),
+        Selection::new(7, 9),
+        "the primary selection stays where the caret was"
+    );
+    assert_eq!(
+        doc.selections(),
+        vec![Selection::new(0, 2), Selection::new(7, 9)],
+        "case sensitive, whole words"
+    );
 }
 
 #[test]
@@ -236,7 +283,10 @@ fn find_all_under_with_a_partial_selection_matches_inside_words() {
     let world = World::new();
     let mut editor = editor_with(&world, "ab abc", Selection::new(0, 1));
     editor.select_all_occurrences();
-    assert_eq!(editor.active_document().unwrap().selections(), vec![Selection::new(0, 1), Selection::new(3, 4)]);
+    assert_eq!(
+        editor.active_document().unwrap().selections(),
+        vec![Selection::new(0, 1), Selection::new(3, 4)]
+    );
 }
 
 #[test]
@@ -244,5 +294,9 @@ fn find_all_under_without_a_word_does_nothing() {
     let world = World::new();
     let mut editor = editor_with(&world, "a  b", Selection::caret(2));
     editor.select_all_occurrences();
-    assert!(editor.active_document().unwrap().extra_selections().is_empty());
+    assert!(editor
+        .active_document()
+        .unwrap()
+        .extra_selections()
+        .is_empty());
 }

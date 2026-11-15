@@ -56,19 +56,30 @@ pub fn parse(text: &str) -> Result<PoFile, String> {
         if line.starts_with('"') {
             let value = unquote(line).ok_or_else(|| error("unterminated string"))?;
             match field {
-                Some(Field::Context) => entry.context.get_or_insert_with(String::new).push_str(&value),
+                Some(Field::Context) => entry
+                    .context
+                    .get_or_insert_with(String::new)
+                    .push_str(&value),
                 Some(Field::Id) => entry.msgid.get_or_insert_with(String::new).push_str(&value),
-                Some(Field::IdPlural) => entry.msgid_plural.get_or_insert_with(String::new).push_str(&value),
+                Some(Field::IdPlural) => entry
+                    .msgid_plural
+                    .get_or_insert_with(String::new)
+                    .push_str(&value),
                 Some(Field::Str(index)) => entry.msgstr[index].push_str(&value),
                 None => return Err(error("string without a keyword")),
             }
             continue;
         }
 
-        let (keyword, rest) = line.split_once(char::is_whitespace).ok_or_else(|| error("expected a keyword and a string"))?;
+        let (keyword, rest) = line
+            .split_once(char::is_whitespace)
+            .ok_or_else(|| error("expected a keyword and a string"))?;
         let value = unquote(rest.trim()).ok_or_else(|| error("expected a quoted string"))?;
         // A new msgctxt/msgid after a complete entry starts the next one.
-        if matches!(keyword, "msgctxt" | "msgid") && entry.msgid.is_some() && !entry.msgstr.is_empty() {
+        if matches!(keyword, "msgctxt" | "msgid")
+            && entry.msgid.is_some()
+            && !entry.msgstr.is_empty()
+        {
             entries.push(std::mem::take(&mut entry));
         }
         field = Some(match keyword {
@@ -116,7 +127,8 @@ pub fn parse(text: &str) -> Result<PoFile, String> {
     let header_value = |name: &str| {
         header.lines().find_map(|line| {
             let (key, value) = line.split_once(':')?;
-            (key.trim().eq_ignore_ascii_case(name) && !value.trim().is_empty()).then(|| value.trim().to_string())
+            (key.trim().eq_ignore_ascii_case(name) && !value.trim().is_empty())
+                .then(|| value.trim().to_string())
         })
     };
 

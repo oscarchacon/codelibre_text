@@ -25,7 +25,7 @@ const CONSOLE_LIMIT: usize = 200_000;
 const MAX_DEPTH: usize = 16;
 /// At most this many messages are answered per frame, so a busy plugin thread cannot freeze the window.
 const MAX_IDLE_MESSAGES: usize = 1000;
-const CONSOLE_NAME: &str = "Console";
+const CONSOLE_NAME: &str = "console";
 /// Package Control 3's package that put its dependencies on `sys.path` (see `plugin_packages`).
 const DEPENDENCY_LOADER: &str = "0_package_control_loader";
 
@@ -78,6 +78,9 @@ pub struct PluginState {
     depth: usize,
     /// The popup a plugin shows (`view.show_popup`), see `plugin_popups`.
     pub(crate) popup: Option<crate::plugin_popups::PluginPopup>,
+    /// The menu a plugin shows (`view.show_popup_menu`), one at a time.
+    pub(crate) popup_menu: Option<crate::plugin_popups::PluginPopupMenu>,
+    pub(crate) next_popup_menu: u64,
     /// The `on_navigate` callback of each phantom that has one, by phantom id.
     pub(crate) phantom_callbacks: HashMap<u64, u64>,
     /// The callbacks (`on_navigate`, `on_close`) of region sets with annotations, by view and key.
@@ -120,9 +123,26 @@ impl Editor {
             packages,
             dependencies,
             packages_path: self.gateways.resources.paths().packages.clone(),
-            archives: self.gateways.resources.paths().archive_folders.iter().map(|f| (f.unpacked.clone(), f.archives.clone())).collect(),
-            shipped_packages: self.gateways.resources.paths().archive_folders.iter().find(|f| f.shipped).map(|f| f.archives.clone()),
-            interpreter: settings.str("python_interpreter").filter(|s| !s.is_empty()).map(String::from),
+            archives: self
+                .gateways
+                .resources
+                .paths()
+                .archive_folders
+                .iter()
+                .map(|f| (f.unpacked.clone(), f.archives.clone()))
+                .collect(),
+            shipped_packages: self
+                .gateways
+                .resources
+                .paths()
+                .archive_folders
+                .iter()
+                .find(|f| f.shipped)
+                .map(|f| f.archives.clone()),
+            interpreter: settings
+                .str("python_interpreter")
+                .filter(|s| !s.is_empty())
+                .map(String::from),
         };
         match self.gateways.plugins.load(&request) {
             Ok(true) => self.forget_plugin_settings(),
@@ -134,9 +154,16 @@ impl Editor {
             }
         }
         match self.converse(&mut |editor: &mut Editor, command: &Command| {
-            editor.log(&format!("{}: built-in commands cannot run while plugins load\n", command.name));
+            editor.log(&format!(
+                "{}: built-in commands cannot run while plugins load\n",
+                command.name
+            ));
         }) {
-            Ok(PluginMessage::Loaded { commands, events, errors }) => {
+            Ok(PluginMessage::Loaded {
+                commands,
+                events,
+                errors,
+            }) => {
                 self.state.plugins.commands = commands.into_iter().collect();
                 self.state.plugins.events = events.into_iter().collect();
                 errors.into_iter().for_each(|e| self.plugin_load_error(e));
@@ -152,7 +179,11 @@ impl Editor {
 
     /// `sublime_plugin.reload_plugin` (or `unload_module` / `load_module`) changed the plugins'
     /// commands and events while the host ran: these are the ones there are now.
-    pub(crate) fn set_plugin_commands(&mut self, commands: Vec<(String, PluginCommandKind)>, events: Vec<String>) {
+    pub(crate) fn set_plugin_commands(
+        &mut self,
+        commands: Vec<(String, PluginCommandKind)>,
+        events: Vec<String>,
+    ) {
         self.state.plugins.commands = commands.into_iter().collect();
         self.state.plugins.events = events.into_iter().collect();
         self.state.plugins.command_states.clear();
@@ -177,13 +208,21 @@ impl Editor {
 
     /// Runs a queued command with `view` active; the view active before comes back afterwards,
     /// unless the command changed it (it opened or closed a view…).
-    fn run_queued_command(&mut self, command: &Command, view: Option<DocumentId>, run_command: &mut CommandRunner) {
+    fn run_queued_command(
+        &mut self,
+        command: &Command,
+        view: Option<DocumentId>,
+        run_command: &mut CommandRunner,
+    ) {
         let target = view.and_then(|id| self.index_of(id));
         let Some(index) = target.filter(|&i| i != self.state.active) else {
             run_command(self, command);
             return;
         };
-        let (previous, target) = (self.active_document().map(|d| d.id), self.state.documents[index].id);
+        let (previous, target) = (
+            self.active_document().map(|d| d.id),
+            self.state.documents[index].id,
+        );
         self.state.active = index;
         run_command(self, command);
         if self.active_document().is_some_and(|d| d.id == target) {
@@ -195,14 +234,23 @@ impl Editor {
 
     /// Runs a plugin command on the active view (text commands) or the window.
     /// Returns false when no plugin defines it.
-    pub fn run_plugin_command(&mut self, command: &Command, run_command: &mut CommandRunner) -> bool {
+    pub fn run_plugin_command(
+        &mut self,
+        command: &Command,
+        run_command: &mut CommandRunner,
+    ) -> bool {
         let view = self.active_document().map(|d| d.id);
         self.run_plugin_command_in(command, view, run_command)
     }
 
     /// Like [`run_plugin_command`](Self::run_plugin_command), with a text command's view given
     /// (e.g. an output panel, which is never the active document).
-    pub(crate) fn run_plugin_command_in(&mut self, command: &Command, view: Option<DocumentId>, run_command: &mut CommandRunner) -> bool {
+    pub(crate) fn run_plugin_command_in(
+        &mut self,
+        command: &Command,
+        view: Option<DocumentId>,
+        run_command: &mut CommandRunner,
+    ) -> bool {
         let Some(&kind) = self.state.plugins.commands.get(&command.name) else {
             return false;
         };
@@ -218,7 +266,9 @@ impl Editor {
             .and_then(|()| self.converse(run_command));
         self.state.plugins.depth -= 1;
         match result {
-            Ok(PluginMessage::Done { error: Some(traceback) }) => self.report_plugin_error(&command.name, &traceback),
+            Ok(PluginMessage::Done {
+                error: Some(traceback),
+            }) => self.report_plugin_error(&command.name, &traceback),
             Ok(_) => {}
             Err(e) => self.report_plugin_error(&command.name, &e),
         }
@@ -228,7 +278,12 @@ impl Editor {
     /// What plugins show in the status bar for a view, in key order (Sublime sorts them by key).
     pub fn plugin_statuses(&self, id: DocumentId) -> Vec<&str> {
         let statuses = self.state.plugins.view_statuses.get(&id);
-        statuses.into_iter().flat_map(|s| s.values()).map(String::as_str).filter(|s| !s.is_empty()).collect()
+        statuses
+            .into_iter()
+            .flat_map(|s| s.values())
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .collect()
     }
 
     pub fn plugin_command_kind(&self, name: &str) -> Option<PluginCommandKind> {
@@ -286,19 +341,33 @@ impl Editor {
         if !self.enter_plugin(name) {
             return;
         }
-        let result = self.gateways.plugins.event(name, view).and_then(|()| self.converse_during_event());
+        let result = self
+            .gateways
+            .plugins
+            .event(name, view)
+            .and_then(|()| self.converse_during_event());
         self.leave_plugin();
         match result {
-            Ok(PluginMessage::Done { error: Some(traceback) }) => self.log(&format!("{name}: {traceback}\n")),
+            Ok(PluginMessage::Done {
+                error: Some(traceback),
+            }) => self.log(&format!("{name}: {traceback}\n")),
             Ok(_) => {}
             Err(e) => self.plugin_host_failed(&e),
         }
     }
 
     /// Runs a panel's callback in the plugin (see `plugin_panels`).
-    pub(crate) fn plugin_callback(&mut self, callback: u64, name: &str, args: Value, run_command: &mut CommandRunner) {
+    pub(crate) fn plugin_callback(
+        &mut self,
+        callback: u64,
+        name: &str,
+        args: Value,
+        run_command: &mut CommandRunner,
+    ) {
         if self.state.plugins.depth >= MAX_DEPTH {
-            self.log(&format!("{name}: plugin callbacks run each other too deeply\n"));
+            self.log(&format!(
+                "{name}: plugin callbacks run each other too deeply\n"
+            ));
             return;
         }
         self.state.plugins.depth += 1;
@@ -309,7 +378,9 @@ impl Editor {
             .and_then(|()| self.converse(run_command));
         self.state.plugins.depth -= 1;
         match result {
-            Ok(PluginMessage::Done { error: Some(traceback) }) => self.report_plugin_error(name, &traceback),
+            Ok(PluginMessage::Done {
+                error: Some(traceback),
+            }) => self.report_plugin_error(name, &traceback),
             Ok(_) => {}
             Err(e) => self.report_plugin_error(name, &e),
         }
@@ -323,10 +394,16 @@ impl Editor {
             .state
             .documents
             .iter()
-            .filter(|d| d.path.as_deref().is_some_and(|p| self.gateways.file_system.exists(p)))
+            .filter(|d| {
+                d.path
+                    .as_deref()
+                    .is_some_and(|p| self.gateways.file_system.exists(p))
+            })
             .map(|d| d.id)
             .collect();
-        loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
+        loaded
+            .into_iter()
+            .for_each(|id| self.plugin_event("on_load", id));
         self.state.plugins.active_view = None;
         self.plugin_activation_events();
     }
@@ -393,15 +470,21 @@ impl Editor {
                 changed.push(doc.id);
             }
         }
-        plugins.change_counts.retain(|id, _| documents.iter().any(|d| d.id == *id));
-        let active = documents.get(self.state.active).map(|d| (d.id, d.selections()));
+        plugins
+            .change_counts
+            .retain(|id, _| documents.iter().any(|d| d.id == *id));
+        let active = documents
+            .get(self.state.active)
+            .map(|d| (d.id, d.selections()));
         let moved = match (&plugins.selections, &active) {
             (Some((before_id, before)), Some((id, now))) => before_id == id && before != now,
             _ => false,
         };
         plugins.selections = active.clone();
         if modified {
-            changed.into_iter().for_each(|id| self.plugin_event("on_modified", id));
+            changed
+                .into_iter()
+                .for_each(|id| self.plugin_event("on_modified", id));
         }
         if let (true, Some((id, _))) = (moved && selection_modified, active) {
             self.plugin_event("on_selection_modified", id);
@@ -412,45 +495,58 @@ impl Editor {
     pub fn log(&mut self, text: &str) {
         let console = &mut self.state.console;
         console.push_str(text);
-        if console.len() > CONSOLE_LIMIT {
+        let truncated = console.len() > CONSOLE_LIMIT;
+        if truncated {
             let mut cut = console.len() - CONSOLE_LIMIT;
             while !console.is_char_boundary(cut) {
                 cut += 1;
             }
             console.drain(..cut);
         }
+        if let Some(id) = self.find_output_panel(CONSOLE_NAME) {
+            let appended = (!truncated).then(|| text.to_string());
+            let replacement = truncated.then(|| self.state.console.clone());
+            if let Some(document) = self.any_document_mut(id) {
+                document.read_only = false;
+                if let Some(text) = replacement {
+                    document.replace_range(0, document.char_count(), &text);
+                } else if let Some(text) = appended {
+                    let end = document.char_count();
+                    document.replace_range(end, end, &text);
+                }
+                document.read_only = true;
+                let end = document.char_count();
+                document.set_selection(Selection::caret(end));
+            }
+        }
     }
 
-    /// `show_panel {"panel": "console"}`: the console in a read-only tab, scrolled to the end.
+    /// `show_panel {"panel": "console"}`: the console output panel, scrolled to the end.
     pub fn show_console(&mut self) {
+        let id = self
+            .find_output_panel(CONSOLE_NAME)
+            .unwrap_or_else(|| self.create_output_panel(CONSOLE_NAME, true));
         let text = self.state.console.clone();
-        let existing = self
-            .state
-            .documents
-            .iter()
-            .position(|d| d.scratch_name.as_deref() == Some(CONSOLE_NAME) && d.read_only);
-        match existing {
-            Some(index) => {
-                self.state.documents[index].text = text;
-                self.activate(index);
-            }
-            None => self.open_scratch(CONSOLE_NAME, &text, "Plain Text", true),
+        if let Some(document) = self.any_document_mut(id) {
+            document.read_only = false;
+            document.replace_range(0, document.char_count(), &text);
+            document.read_only = true;
+            let end = document.char_count();
+            document.set_selection(Selection::caret(end));
         }
-        if let Some(doc) = self.active_document_mut() {
-            let end = doc.char_count();
-            doc.set_selection(Selection::caret(end));
-        }
+        self.focus_output_panel(id);
     }
 
-    /// `show_panel {"panel": "console", "toggle": true}` (Ctrl+`): closes the console when it is the
-    /// active tab, shows it otherwise.
+    /// `show_panel {"panel": "console", "toggle": true}` (Ctrl+`): hides the panel when it is
+    /// shown, or shows it otherwise.
     pub fn toggle_console(&mut self) {
-        match self.active_document() {
-            Some(doc) if doc.scratch_name.as_deref() == Some(CONSOLE_NAME) && doc.read_only => {
-                let id = doc.id;
-                self.close_documents(vec![id]);
-            }
-            _ => self.show_console(),
+        if self
+            .shown_output_panel()
+            .is_some_and(|panel| panel.name == CONSOLE_NAME)
+        {
+            self.hide_output_panel();
+        } else {
+            self.show_console();
         }
     }
 
@@ -471,7 +567,9 @@ impl Editor {
     /// Counts one more plugin request in progress; false (and a console line) when they nest too deeply.
     pub(crate) fn enter_plugin(&mut self, name: &str) -> bool {
         if self.state.plugins.depth >= MAX_DEPTH {
-            self.log(&format!("{name}: plugin events run each other too deeply\n"));
+            self.log(&format!(
+                "{name}: plugin events run each other too deeply\n"
+            ));
             return false;
         }
         self.state.plugins.depth += 1;
@@ -516,7 +614,11 @@ impl Editor {
     /// `sys.path`, is not loaded: the host does that.
     fn plugin_packages(&self) -> (Vec<PluginPackage>, Vec<PathBuf>) {
         let settings = self.global_settings();
-        let ignored = settings.get("ignored_packages").and_then(Value::as_array).cloned().unwrap_or_default();
+        let ignored = settings
+            .get("ignored_packages")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let paths = self.gateways.resources.paths();
         let own = paths.packages.clone();
         let fs = &self.gateways.file_system;
@@ -524,7 +626,11 @@ impl Editor {
         let mut dependencies: Vec<(String, PathBuf)> = Vec::new();
         for root in paths.roots(settings.bool("import_sublime_packages", true)) {
             for entry in fs.list_dir(&root).into_iter().filter(|e| e.is_dir) {
-                let name = entry.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = entry
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if (root != own && name == "Default")
                     || name == DEPENDENCY_LOADER
                     || ignored.iter().any(|i| i.as_str() == Some(&name))
@@ -532,19 +638,28 @@ impl Editor {
                     continue;
                 }
                 let files = fs.list_dir(&entry.path);
-                let has_file = |file_name: &str| files.iter().any(|f| !f.is_dir && f.path.file_name().is_some_and(|n| n == file_name));
+                let has_file = |file_name: &str| {
+                    files
+                        .iter()
+                        .any(|f| !f.is_dir && f.path.file_name().is_some_and(|n| n == file_name))
+                };
                 if has_file("dependency-metadata.json") || has_file(".sublime-dependency") {
                     dependencies.retain(|(n, _)| *n != name);
                     dependencies.push((name, entry.path));
                     continue;
                 }
-                let has_plugins = files.iter().any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
+                let has_plugins = files
+                    .iter()
+                    .any(|f| !f.is_dir && f.path.extension().is_some_and(|e| e == "py"));
                 if !has_plugins {
                     continue;
                 }
                 match packages.iter_mut().find(|p| p.name == name) {
                     Some(package) => package.dirs.push(entry.path),
-                    None => packages.push(PluginPackage { name, dirs: vec![entry.path] }),
+                    None => packages.push(PluginPackage {
+                        name,
+                        dirs: vec![entry.path],
+                    }),
                 }
             }
         }
@@ -557,7 +672,10 @@ impl Editor {
             (rank, p.name.to_lowercase())
         });
         dependencies.sort_by_key(|(name, _)| name.to_lowercase());
-        (packages, dependencies.into_iter().map(|(_, path)| path).collect())
+        (
+            packages,
+            dependencies.into_iter().map(|(_, path)| path).collect(),
+        )
     }
 
     /// The host died or stopped answering: say so, and stop sending it events.
@@ -578,6 +696,9 @@ impl Editor {
         self.log(&format!("{name}: {error}\n"));
         self.record_errors(&[format!("{name}: {error}")]);
         let summary = error.trim_end().lines().last().unwrap_or(error).to_string();
-        self.notify(self.tr_args("{name} failed: {error} (View > Show Console)", &[("name", &name), ("error", &summary)]));
+        self.notify(self.tr_args(
+            "{name} failed: {error} (View > Show Console)",
+            &[("name", &name), ("error", &summary)],
+        ));
     }
 }

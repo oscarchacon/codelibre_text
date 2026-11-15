@@ -26,6 +26,11 @@ import sublime_api
 
 LITERAL = 1
 IGNORECASE = 2
+WHOLEWORD = 4
+REVERSE = 8
+WRAP = 16
+# Deprecated popup flag, kept for old plugins.
+HTML = 1
 
 CLASS_WORD_START = 1
 CLASS_WORD_END = 2
@@ -57,6 +62,7 @@ SEMI_TRANSIENT = 16
 ADD_TO_SELECTION = 32
 REPLACE_MRU = 64
 CLEAR_TO_RIGHT = 128
+FORCE_CLONE = 256
 
 MONOSPACE_FONT = 1
 KEEP_OPEN_ON_FOCUS_LOST = 2
@@ -72,6 +78,15 @@ KIND_ID_MARKUP = 6
 KIND_ID_VARIABLE = 7
 KIND_ID_SNIPPET = 8
 KIND_ID_COLOR_REDISH = 9
+KIND_ID_COLOR_ORANGISH = 10
+KIND_ID_COLOR_YELLOWISH = 11
+KIND_ID_COLOR_GREENISH = 12
+KIND_ID_COLOR_CYANISH = 13
+KIND_ID_COLOR_BLUISH = 14
+KIND_ID_COLOR_PURPLISH = 15
+KIND_ID_COLOR_PINKISH = 16
+KIND_ID_COLOR_DARK = 17
+KIND_ID_COLOR_LIGHT = 18
 KIND_AMBIGUOUS = (KIND_ID_AMBIGUOUS, "", "")
 KIND_KEYWORD = (KIND_ID_KEYWORD, "k", "Keyword")
 KIND_TYPE = (KIND_ID_TYPE, "t", "Type")
@@ -143,16 +158,16 @@ class NewFileFlags(enum.IntFlag):
     ADD_TO_SELECTION = ADD_TO_SELECTION
     REPLACE_MRU = REPLACE_MRU
     CLEAR_TO_RIGHT = CLEAR_TO_RIGHT
-    FORCE_CLONE = 256
+    FORCE_CLONE = FORCE_CLONE
 
 
 class FindFlags(enum.IntFlag):
     NONE = 0
     LITERAL = LITERAL
     IGNORECASE = IGNORECASE
-    WHOLEWORD = 4
-    REVERSE = 8
-    WRAP = 16
+    WHOLEWORD = WHOLEWORD
+    REVERSE = REVERSE
+    WRAP = WRAP
 
 
 class QuickPanelFlags(enum.IntFlag):
@@ -244,15 +259,30 @@ class KindId(enum.IntEnum):
     VARIABLE = KIND_ID_VARIABLE
     SNIPPET = KIND_ID_SNIPPET
     COLOR_REDISH = KIND_ID_COLOR_REDISH
-    COLOR_ORANGISH = 10
-    COLOR_YELLOWISH = 11
-    COLOR_GREENISH = 12
-    COLOR_CYANISH = 13
-    COLOR_BLUISH = 14
-    COLOR_PURPLISH = 15
-    COLOR_PINKISH = 16
-    COLOR_DARK = 17
-    COLOR_LIGHT = 18
+    COLOR_ORANGISH = KIND_ID_COLOR_ORANGISH
+    COLOR_YELLOWISH = KIND_ID_COLOR_YELLOWISH
+    COLOR_GREENISH = KIND_ID_COLOR_GREENISH
+    COLOR_CYANISH = KIND_ID_COLOR_CYANISH
+    COLOR_BLUISH = KIND_ID_COLOR_BLUISH
+    COLOR_PURPLISH = KIND_ID_COLOR_PURPLISH
+    COLOR_PINKISH = KIND_ID_COLOR_PINKISH
+    COLOR_DARK = KIND_ID_COLOR_DARK
+    COLOR_LIGHT = KIND_ID_COLOR_LIGHT
+
+
+class UIElement(enum.IntEnum):
+    """The parts of a window that can be hidden (Sublime's ``window_*_ui_element_visible``)."""
+
+    SIDE_BAR = 1
+    MINIMAP = 2
+    TABS = 4
+    STATUS_BAR = 8
+    MENU = 16
+    OPEN_FILES = 32
+
+
+class FileTooLargeError(FileNotFoundError):
+    """Raised when a resource exceeds file size limits (Sublime 4 raises it from ``load_resource``)."""
 
 
 class SymbolSource(enum.IntEnum):
@@ -275,7 +305,7 @@ class CompletionFormat(enum.IntEnum):
 # ----- application -----------------------------------------------------------------------------
 
 # Filled by the plugin host from the editor's ``load`` request.
-_paths = {"packages": "", "installed_packages": "", "cache": "", "executable": ""}
+_paths = {"packages": "", "installed_packages": "", "cache": "", "lib": "", "executable": ""}
 # Views whose selection a plugin cleared and has not refilled yet (the editor always keeps one).
 _cleared_selections = set()
 
@@ -327,6 +357,45 @@ def installed_packages_path():
 
 def cache_path():
     return _paths["cache"]
+
+
+def lib_path():
+    """The ``Lib`` folder (``data/Lib``): the host's modules, and the libraries Package Control
+    installs for each Python."""
+    return _paths["lib"]
+
+
+def executable_hash():
+    """What identifies this installation: version, platform and architecture, and a hash of the
+    executable (of the version, when the executable cannot be read)."""
+    import hashlib
+
+    try:
+        with open(executable_path(), "rb") as f:
+            digest = hashlib.md5(f.read()).hexdigest()
+    except OSError:
+        digest = hashlib.md5(version().encode()).hexdigest()
+    return (version(), "%s_%s" % (platform(), arch()), digest)
+
+
+def project_history():
+    """Recently opened projects: none, the editor keeps no history of them yet."""
+    return []
+
+
+def folder_history():
+    """The folders added recently, newest first (File > Open Recent)."""
+    return sublime_api.folder_history()
+
+
+def choose_font_dialog(callback, default=None):
+    """There is no font dialog yet: the callback hears ``None``, as when the dialog is cancelled."""
+    set_timeout(lambda: callback(None), 0)
+
+
+def make_sheet(sheet_id):
+    """The sheet with that id (every sheet here holds a view, so it is the view's)."""
+    return View(sheet_id).sheet()
 
 
 def status_message(msg):
@@ -905,6 +974,15 @@ class Selection:
     def contains(self, region):
         return any(r.contains(region) for r in self._get())
 
+    def has_empty_region(self):
+        return any(r.empty() for r in self._get())
+
+    def has_non_empty_region(self):
+        return any(not r.empty() for r in self._get())
+
+    def has_multiple_non_empty_regions(self):
+        return sum(1 for r in self._get() if not r.empty()) > 1
+
 
 # ----- settings ----------------------------------------------------------------------------------
 
@@ -1070,6 +1148,10 @@ class SymbolLocation:
     def __repr__(self):
         return "SymbolLocation(%r, %r, %r, %r)" % (self.path, self.row, self.col, self.syntax)
 
+    def path_encoded_position(self):
+        """``path:row:col``, as ``open_file`` with ``ENCODED_POSITION`` reads it."""
+        return "%s:%s:%s" % (self.path, self.row, self.col)
+
 
 class View:
     """A tab showing a document. ``view_id`` is the editor's document id."""
@@ -1129,6 +1211,90 @@ class View:
 
     def set_name(self, name):
         sublime_api.view_set_name(self.view_id, name)
+
+    def retarget(self, new_fname):
+        """The file the buffer saves to from now on (its text is kept)."""
+        sublime_api.view_retarget(self.view_id, str(new_fname))
+
+    def set_reference_document(self, reference):
+        """The text the incremental diff compares with: there is no diff in the gutter yet."""
+
+    def reset_reference_document(self):
+        """See ``set_reference_document``."""
+
+    def begin_edit(self, edit_token, cmd, args=None):
+        """Sublime's own plugin host opens an edit with it; here edits need no opening."""
+        return Edit(edit_token)
+
+    def end_edit(self, edit):
+        edit.edit_token = 0
+
+    def indentation_level(self, pt):
+        """The indentation of ``pt``'s line in units of ``tab_size``, a part counting as a whole:
+        ``"  b"`` with 4 is 1, ``"\\t  z"`` is 2 (as Sublime 4215 answers)."""
+        line = self.substr(self.line(pt))
+        return self._indent_units(line)
+
+    def _indent_units(self, line):
+        tab_size = int(self.settings().get("tab_size", 4) or 4)
+        columns = 0
+        for c in line:
+            if c == " ":
+                columns += 1
+            elif c == "\t":
+                columns += tab_size - columns % tab_size
+            else:
+                break
+        return -(-columns // tab_size)
+
+    def indented_region(self, pt):
+        """The block of lines around ``pt``'s indented as much or more, as Sublime 4215 answers:
+        a blank line (or one of only spaces) takes the level of the next line that is not; level
+        0 is an empty region at the line's start; blank lines inside the block and before it
+        count, those after it do not. It ends after the last line's newline."""
+        text = self.substr(Region(0, self.size()))
+        pt = max(0, min(int(pt), len(text)))
+        # Each line's start and its end after the newline (the last line may have none).
+        starts, at = [], 0
+        for line in text.split("\n"):
+            starts.append(at)
+            at += len(line) + 1
+        ends = [min(start + len(line) + 1, len(text)) for start, line in zip(starts, text.split("\n"))]
+        lines = text.split("\n")
+        row = text.count("\n", 0, pt)
+        blank = [not line.strip() for line in lines]
+        units = [self._indent_units(line) for line in lines]
+
+        def level(i):
+            for j in range(i, len(lines)):
+                if not blank[j]:
+                    return units[j]
+            return 0
+
+        wanted = level(row)
+        if wanted == 0:
+            return Region(starts[row], starts[row])
+        first = row
+        while first > 0 and (blank[first - 1] or units[first - 1] >= wanted):
+            first -= 1
+        last = row
+        for j in range(row + 1, len(lines)):
+            if blank[j]:
+                continue
+            if units[j] < wanted:
+                break
+            last = j
+        return Region(starts[first], ends[last])
+
+    def utf8_code_units(self, tp=None):
+        """The UTF-8 bytes before ``tp`` (or in the whole text)."""
+        end = self.size() if tp is None else tp
+        return len(self.substr(Region(0, end)).encode("utf-8"))
+
+    def utf16_code_units(self, tp=None):
+        """The UTF-16 units before ``tp`` (or in the whole text): 2 for a char above U+FFFF."""
+        end = self.size() if tp is None else tp
+        return len(self.substr(Region(0, end)).encode("utf-16-le")) // 2
 
     def is_loading(self):
         return False
@@ -1384,8 +1550,9 @@ class View:
         sublime_api.view_hide_popup(self.view_id)
 
     def show_popup_menu(self, items, on_select, flags=0):
-        """A menu at the caret: shown as a quick panel."""
-        self.window().show_quick_panel(items, on_select, flags)
+        """A menu of ``items`` (strings) at the mouse; ``on_select(index)``, -1 when dismissed."""
+        callback = _register_callbacks(("select",), select=on_select) if on_select is not None else None
+        sublime_api.view_show_popup_menu(self.view_id, [str(item) for item in items], callback)
 
     def add_phantom(self, key, region, content, layout, on_navigate=None):
         """Shows minihtml ``content`` at ``region`` (drawn after the end of its line); its id."""
@@ -1424,17 +1591,25 @@ class View:
         """The words of the view that start with ``prefix``, nearest to ``tp`` (the caret) first."""
         return sublime_api.view_extract_completions(self.view_id, prefix, int(tp))
 
+    @staticmethod
+    def _region_list(x):
+        regions = [x] if isinstance(x, Region) else list(x)
+        return [[r.a, r.b] for r in regions]
+
     def fold(self, x):
-        return False
+        """Folds a region or a list of them; False when all of it was folded already."""
+        return sublime_api.view_fold(self.view_id, self._region_list(x))
 
     def unfold(self, x):
-        return []
+        """Unfolds the folds that touch a region or a list of them; the regions unfolded."""
+        return [Region(a, b) for a, b in sublime_api.view_unfold(self.view_id, self._region_list(x))]
 
     def folded_regions(self):
-        return []
+        return [Region(a, b) for a, b in sublime_api.view_folded_regions(self.view_id)]
 
     def is_folded(self, region):
-        return False
+        """Whether all of ``region`` is inside a fold."""
+        return any(f.contains(region) for f in self.folded_regions())
 
     def overwrite_status(self):
         return sublime_api.view_overwrite_status(self.view_id)
@@ -1458,7 +1633,7 @@ class View:
         return None
 
     def sheet(self):
-        return Sheet(self.view_id)
+        return _make_sheet(self.view_id)
 
     def sheet_id(self):
         return self.view_id
@@ -1507,40 +1682,43 @@ class View:
         return start + len(line.decode("utf-16-le", errors="ignore"))
 
     # The view's geometry is the widget's: these answer a fixed font and an unscrolled view.
+    # The view's geometry, as it last drew the text (layout: the whole text, (0, 0) at its first
+    # char; window: the view on screen, gutter included).
     def line_height(self):
-        return 16.0
+        return sublime_api.view_line_height(self.view_id)
 
     def em_width(self):
-        return 8.0
+        return sublime_api.view_em_width(self.view_id)
 
     def viewport_position(self):
-        return (0.0, 0.0)
+        return tuple(sublime_api.view_viewport_position(self.view_id))
 
     def set_viewport_position(self, xy, animate=True):
-        pass
+        sublime_api.view_set_viewport_position(self.view_id, list(xy))
 
     def viewport_extent(self):
-        return (800.0, 600.0)
+        return tuple(sublime_api.view_viewport_extent(self.view_id))
 
     def layout_extent(self):
-        rows = self.rowcol(self.size())[0] + 1
-        return (800.0, rows * self.line_height())
+        return tuple(sublime_api.view_layout_extent(self.view_id))
 
     def text_to_layout(self, tp):
-        row, col = self.rowcol(tp)
-        return (col * self.em_width(), row * self.line_height())
+        return tuple(sublime_api.view_text_to_layout(self.view_id, int(tp)))
 
     def text_to_window(self, tp):
-        return self.text_to_layout(tp)
+        return self.layout_to_window(self.text_to_layout(tp))
 
     def layout_to_text(self, vector):
-        return self.text_point(int(vector[1] // self.line_height()), int(vector[0] // self.em_width()))
+        return sublime_api.view_layout_to_text(self.view_id, list(vector))
 
     def window_to_layout(self, vector):
-        return vector
+        return tuple(sublime_api.view_window_to_layout(self.view_id, list(vector)))
+
+    def layout_to_window(self, vector):
+        return tuple(sublime_api.view_layout_to_window(self.view_id, list(vector)))
 
     def window_to_text(self, vector):
-        return self.layout_to_text(vector)
+        return self.layout_to_text(self.window_to_layout(vector))
 
     def add_regions(self, key, regions, scope="", icon="", flags=0, annotations=None, annotation_color="",
                     on_navigate=None, on_close=None, **kwargs):
@@ -1588,7 +1766,8 @@ def _point_of(x):
 
 
 class Sheet:
-    """What a tab holds; here always a view (``sheet_id`` is the view's id)."""
+    """What a tab holds: a view (``TextSheet``), a plugin's minihtml (``HtmlSheet``) or a picture
+    (``ImageSheet``). Its id is the id of the editor's document behind the tab."""
 
     def __init__(self, sheet_id):
         self.sheet_id = sheet_id
@@ -1600,22 +1779,28 @@ class Sheet:
         return self.sheet_id
 
     def __repr__(self):
-        return "Sheet(%d)" % self.sheet_id
+        return "%s(%d)" % (type(self).__name__, self.sheet_id)
+
+    def _tab(self):
+        # The document behind the tab, through the view API (which answers for every sheet).
+        return View(self.sheet_id)
 
     def id(self):
         return self.sheet_id
 
     def window(self):
-        return self.view().window()
+        return self._tab().window()
 
     def view(self):
-        return View(self.sheet_id)
+        """Its view: only a ``TextSheet`` has one."""
+        return None
 
     def file_name(self):
-        return self.view().file_name()
+        return self._tab().file_name()
 
     def group(self):
-        return self.view().window().get_view_index(self.view())[0]
+        window = self.window()
+        return window.get_view_index(self._tab())[0] if window else None
 
     def is_semi_transient(self):
         return False
@@ -1625,17 +1810,34 @@ class Sheet:
         return sublime_api.view_is_transient(self.sheet_id)
 
     def close(self, on_close=None):
-        return self.view().close(on_close)
+        return self._tab().close(on_close)
+
+    def name(self):
+        """What its tab is called: the name given to it, its file's name, or ``untitled``."""
+        tab = self._tab()
+        file_name = tab.file_name()
+        return tab.name() or (os.path.basename(file_name) if file_name else "untitled")
+
+    def set_name(self, name):
+        self._tab().set_name(name)
+
+    def is_selected(self):
+        window = self.window()
+        return window is not None and self in window.selected_sheets()
 
 
 class TextSheet(Sheet):
-    pass
+    def view(self):
+        return View(self.sheet_id)
+
+
+def _make_sheet(sheet_id):
+    """The sheet of that id, of its kind (the editor says which)."""
+    kind = sublime_api.view_sheet_kind(sheet_id)
+    return {"html": HtmlSheet, "image": ImageSheet}.get(kind, TextSheet)(sheet_id)
 
 
 class HtmlSheet(Sheet):
-    def set_name(self, name):
-        self.view().set_name(name)
-
     def set_contents(self, contents):
         sublime_api.view_set_html_contents(self.sheet_id, contents)
 
@@ -1668,6 +1870,10 @@ class Phantom:
 
     def __repr__(self):
         return "Phantom(%r, %r, %r)" % (self.region, self.content, self.layout)
+
+    def to_tuple(self):
+        """What identifies it in a set (a phantom is mutable, so not itself)."""
+        return (self.region.to_tuple(), self.content, self.layout, self.on_navigate)
 
 
 class PhantomSet:
@@ -1859,6 +2065,20 @@ class Window:
     def views_in_group(self, group):
         return [View(view_id) for view_id in sublime_api.window_views_in_group(group, self._window_arg())]
 
+    def num_views_in_group(self, group):
+        return len(self.views_in_group(group))
+
+    def num_sheets_in_group(self, group):
+        return len(self.sheets_in_group(group))
+
+    def file_history(self):
+        """The files opened recently, newest first (File > Open Recent); every window shares it."""
+        return sublime_api.window_file_history(self._window_arg())
+
+    def template_settings(self):
+        """The settings a new window copies: here the window's own settings."""
+        return self.settings()
+
     def get_view_index(self, view):
         if view is None:
             return (-1, -1)
@@ -1881,7 +2101,14 @@ class Window:
             row = col = None
         if 0 <= group < self.num_groups():
             self.focus_group(group)
-        view_id = sublime_api.window_open_file(fname, int(flags), self._window_arg())
+        open_view = self.find_open_file(fname) if flags & FORCE_CLONE else None
+        if open_view is not None:
+            # ``FORCE_CLONE``: a new view of the open file (``clone_file``), not the open one.
+            self.focus_view(open_view)
+            self.run_command("clone_file")
+            view_id = self.active_view().id()
+        else:
+            view_id = sublime_api.window_open_file(fname, int(flags), self._window_arg())
         if not view_id:
             return None
         view = View(view_id)
@@ -1935,11 +2162,11 @@ class Window:
     def show_quick_panel(self, items, on_select, flags=0, selected_index=-1, on_highlight=None, placeholder=None, _input=None):
         """Shows a list to pick from; ``on_select`` gets the item's index, or -1 when cancelled.
         ``_input`` (input handlers only, ``sublime_plugin``): the palette's breadcrumb and ``on_back``."""
-        def select(index):
+        def select(index, event=None):
             if on_select is None:
                 return
             if flags & WANT_EVENT:
-                on_select(index, {"modifier_keys": {}})
+                on_select(index, event or {"modifier_keys": {}})
             else:
                 on_select(index)
         on_back = (_input or {}).get("on_back")
@@ -1952,8 +2179,16 @@ class Window:
     def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel, _input=None):
         """A one-line text field at the bottom. Returns its view. ``_input``: see ``show_quick_panel``."""
         on_back = (_input or {}).get("on_back")
+        def done(text, event=None):
+            if on_done is None:
+                return
+            if _input is not None:
+                on_done(text, event or {"modifier_keys": {}})
+            else:
+                on_done(text)
+
         callback = _register_callbacks(
-            ("done", "cancel", "back"), done=on_done, change=on_change, cancel=on_cancel, back=on_back
+            ("done", "cancel", "back"), done=done, change=on_change, cancel=on_cancel, back=on_back
         )
         return View(sublime_api.window_show_input_panel(
             self.window_id, str(caption), str(initial_text), callback, on_change is not None,
@@ -1979,7 +2214,7 @@ class Window:
         return sublime_api.window_project_data(self._window_arg())
 
     def set_project_data(self, data):
-        sublime_api.window_set_project_data(self._window_arg(), data)
+        sublime_api.window_set_project_data(data, self._window_arg())
 
     def layout(self):
         return sublime_api.window_get_layout(self._window_arg())
@@ -2000,10 +2235,11 @@ class Window:
         return view.sheet() if view else None
 
     def sheets(self):
-        return [view.sheet() for view in self.views()]
+        return [_make_sheet(sheet_id) for sheet_id in sublime_api.window_sheets(self._window_arg())]
 
     def sheets_in_group(self, group):
-        return [view.sheet() for view in self.views_in_group(group)]
+        return [_make_sheet(sheet_id)
+                for sheet_id in sublime_api.window_sheets_in_group(group, self._window_arg())]
 
     def selected_sheets(self):
         sheet = self.active_sheet()
@@ -2022,33 +2258,33 @@ class Window:
         return View(view_id) if view_id else None
 
     def focus_sheet(self, sheet):
-        if sheet and sheet.view():
-            self.focus_view(sheet.view())
+        if sheet:
+            self.focus_view(sheet._tab())
 
     def select_sheets(self, sheets):
         if sheets:
             self.focus_sheet(sheets[0])
 
     def get_sheet_index(self, sheet):
-        return self.get_view_index(sheet.view()) if sheet and sheet.view() else (-1, -1)
+        return self.get_view_index(sheet._tab()) if sheet else (-1, -1)
 
     def set_view_index(self, view, group, index):
         if view is not None and 0 <= group < self.num_groups():
             sublime_api.window_set_view_index(view.id(), group, index if index >= 0 else 1 << 31, self._window_arg())
 
     def set_sheet_index(self, sheet, group, index):
-        if sheet and sheet.view():
-            self.set_view_index(sheet.view(), group, index)
+        if sheet:
+            self.set_view_index(sheet._tab(), group, index)
 
     def move_sheets_to_group(self, sheets, group, insertion_idx=-1, select=True):
-        views = [sheet.view() for sheet in sheets if sheet and sheet.view()]
+        views = [sheet._tab() for sheet in sheets if sheet]
         for offset, view in enumerate(views):
             self.set_view_index(view, group, insertion_idx + offset if insertion_idx >= 0 else -1)
         if select and views:
             self.focus_view(views[0])
 
     def new_html_sheet(self, name, contents, flags=0, group=-1):
-        """A read-only tab with the text of the minihtml ``contents`` (links are not clickable)."""
+        """A read-only tab that shows the minihtml ``contents``."""
         view_id = sublime_api.window_new_html_sheet(self.window_id, str(name), str(contents), int(group), self._window_arg())
         return HtmlSheet(view_id)
 
@@ -2073,7 +2309,7 @@ class Window:
             location["path"], location["display_name"], location["row"], location["col"],
             location["syntax"], location["type"],
             (location["kind_id"], location["kind_letter"], location["kind_description"]))
-            for location in sublime_api.window_symbol_locations(self._window_arg(), str(sym), int(source), int(type))]
+            for location in sublime_api.window_symbol_locations(str(sym), int(source), int(type), self._window_arg())]
         if kind_id != KIND_ID_AMBIGUOUS:
             found = [location for location in found if location.kind[0] == kind_id]
         if kind_letter:
@@ -2081,35 +2317,34 @@ class Window:
         return found
 
     def is_sidebar_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("side_bar", self._window_arg())
 
     def set_sidebar_visible(self, flag, animate=True):
-        pass
+        sublime_api.window_set_ui_visible("side_bar", bool(flag), self._window_arg())
 
     def is_minimap_visible(self):
-        # Shown unless `toggle_minimap` hid it; plugins do not see that window state yet.
-        return True
+        return sublime_api.window_is_ui_visible("minimap", self._window_arg())
 
     def set_minimap_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("minimap", bool(flag), self._window_arg())
 
     def is_status_bar_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("status_bar", self._window_arg())
 
     def set_status_bar_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("status_bar", bool(flag), self._window_arg())
 
     def get_tabs_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("tabs", self._window_arg())
 
     def set_tabs_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("tabs", bool(flag), self._window_arg())
 
     def is_menu_visible(self):
-        return True
+        return sublime_api.window_is_ui_visible("menu", self._window_arg())
 
     def set_menu_visible(self, flag):
-        pass
+        sublime_api.window_set_ui_visible("menu", bool(flag), self._window_arg())
 
     def bring_to_front(self):
         pass

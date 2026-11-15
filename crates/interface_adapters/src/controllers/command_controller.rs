@@ -18,7 +18,9 @@ use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::side_bar;
 use use_cases::Editor;
 
-use crate::view_state::{InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetEditInProgress};
+use crate::view_state::{
+    InputPanelState, QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetEditInProgress,
+};
 
 /// Every frame: answers what plugins ask outside a command (timers, threads) and tells their
 /// listeners about edits; the commands they run come back here.
@@ -26,8 +28,33 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
     for (command, target) in view.take_finished_widget_edits() {
         editor.plugin_command_ran(&command, target);
     }
+    editor.sync_window_chrome(view.layout());
+    editor.sync_find_panel(view.find_panel_name());
     editor.poll_plugins(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    // `window.set_minimap_visible(…)` and the like, from any plugin call since the last frame.
+    view.apply_layout(&editor.take_window_chrome_requests());
+    editor.sync_window_chrome(view.layout());
+    editor.sync_find_panel(view.find_panel_name());
+    let focused_panel = editor
+        .shown_output_panel()
+        .filter(|panel| editor.is_output_panel_focused(panel.document.id))
+        .map(|panel| panel.document.id);
+    if focused_panel != view.focused_output_panel {
+        view.focused_output_panel = focused_panel;
+        view.output_panel_focus_requested = focused_panel;
+        if focused_panel.is_some() {
+            view.focus_editor = false;
+        }
+    }
     show_plugin_panels(editor, view);
+    let current_window = editor.current_window();
+    for boundary in editor.take_plugin_edit_undo_boundaries(current_window) {
+        view.request(ViewRequest::WidgetUndoBoundary {
+            document: boundary.document,
+            text: boundary.text,
+            selection: boundary.selection,
+        });
+    }
 }
 
 /// Shows the quick / input panels plugins asked for. A plugin's quick panel replaces whatever
@@ -41,8 +68,18 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                 let Some(selected) = editor.plugin_quick_panel().map(|p| p.selected) else {
                     continue;
                 };
-                if view.quick_panel.as_ref().is_some_and(|p| p.kind != SearchKind::PluginItems) {
+                if view
+                    .quick_panel
+                    .as_ref()
+                    .is_some_and(|p| p.kind != SearchKind::PluginItems)
+                {
                     cancel_quick_panel(editor, view);
+                } else if palette_asks_text_input(editor, view) {
+                    // The text handler's field goes; its handler hears `cancel` (the list stays).
+                    editor.finish_plugin_input_panel(
+                        false,
+                        &mut |editor: &mut Editor, command: &Command| run(editor, view, command),
+                    );
                 }
                 let mut panel = QuickPanel::new(SearchKind::PluginItems, String::new());
                 panel.selected = selected;
@@ -51,18 +88,40 @@ fn show_plugin_panels(editor: &mut Editor, view: &mut ViewState) {
                 highlight_plugin_item(editor, view, selected);
             }
             PluginPanelRequest::InputPanel => {
-                if editor.plugin_input_panel().is_none() {
+                let Some(input) = editor.plugin_input_panel() else {
                     continue;
-                }
-                view.input_panel = Some(InputPanelState { focus_requested: true });
+                };
                 view.find_panel.visible = false;
+                if input.input.is_some() {
+                    // Text command-input handlers reuse the palette's existing query widget.
+                    view.input_panel = None;
+                    view.quick_panel = Some(QuickPanel::new(
+                        SearchKind::PluginItems,
+                        input.document.text.clone(),
+                    ));
+                } else {
+                    view.input_panel = Some(InputPanelState {
+                        focus_requested: true,
+                    });
+                }
                 // An io panel types next to the output it belongs to; a one-shot one replaces it.
-                if editor.plugin_input_panel().is_some_and(|p| p.io.is_none()) {
+                if input.io.is_none() {
                     editor.hide_output_panel();
                 }
             }
         }
     }
+}
+
+/// A text input handler asks in the palette's own field: the quick panel is open for a plugin and
+/// the plugin's input panel belongs to an input handler (`show_plugin_panels`).
+pub fn palette_asks_text_input(editor: &Editor, view: &ViewState) -> bool {
+    view.quick_panel
+        .as_ref()
+        .is_some_and(|p| p.kind == SearchKind::PluginItems)
+        && editor
+            .plugin_input_panel()
+            .is_some_and(|p| p.input.is_some())
 }
 
 /// `show_panel {"panel": "output.<name>"}`: the panel takes the place of the find and input panels.
@@ -89,47 +148,128 @@ fn show_build_picker(editor: &mut Editor, view: &mut ViewState) {
 
 /// The answers to a plugin's panels go back to it; the commands its callbacks run come back here.
 pub fn answer_plugin_quick_panel(editor: &mut Editor, view: &mut ViewState, item: Option<usize>) {
-    editor.answer_plugin_quick_panel(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    editor.answer_plugin_quick_panel(item, &mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
+    view.focus_editor = true;
+    show_plugin_panels(editor, view);
+}
+
+pub fn answer_plugin_quick_panel_with_event(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    item: Option<usize>,
+    event: serde_json::Value,
+) {
+    editor.answer_plugin_quick_panel_with_event(
+        item,
+        event,
+        &mut |editor: &mut Editor, command: &Command| run(editor, view, command),
+    );
     view.focus_editor = true;
     show_plugin_panels(editor, view);
 }
 
 /// A link clicked in a plugin's popup: its `on_navigate`.
 pub fn navigate_plugin_popup(editor: &mut Editor, view: &mut ViewState, href: &str) {
-    editor.navigate_plugin_popup(href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    editor.navigate_plugin_popup(href, &mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
+    show_plugin_panels(editor, view);
+}
+
+/// An item of a plugin's popup menu chosen, or the menu dismissed: its `on_select`.
+pub fn choose_plugin_popup_menu(editor: &mut Editor, view: &mut ViewState, index: Option<usize>) {
+    editor.choose_plugin_popup_menu(index, &mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
     show_plugin_panels(editor, view);
 }
 
 /// A link clicked in a plugin's phantom: its `on_navigate`.
-pub fn navigate_plugin_phantom(editor: &mut Editor, view: &mut ViewState, phantom: u64, href: &str) {
-    editor.navigate_plugin_phantom(phantom, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+pub fn navigate_plugin_phantom(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    phantom: u64,
+    href: &str,
+) {
+    editor.navigate_plugin_phantom(
+        phantom,
+        href,
+        &mut |editor: &mut Editor, command: &Command| run(editor, view, command),
+    );
     show_plugin_panels(editor, view);
 }
 
 /// A link clicked in an annotation of a plugin's regions: its `on_navigate`.
-pub fn navigate_plugin_annotation(editor: &mut Editor, view: &mut ViewState, document: DocumentId, key: &str, href: &str) {
-    editor.navigate_plugin_annotation(document, key, href, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+pub fn navigate_plugin_annotation(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    document: DocumentId,
+    key: &str,
+    href: &str,
+) {
+    editor.navigate_plugin_annotation(
+        document,
+        key,
+        href,
+        &mut |editor: &mut Editor, command: &Command| run(editor, view, command),
+    );
     show_plugin_panels(editor, view);
 }
 
 pub fn highlight_plugin_item(editor: &mut Editor, view: &mut ViewState, item: usize) {
-    editor.highlight_plugin_quick_panel_item(item, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    editor
+        .highlight_plugin_quick_panel_item(item, &mut |editor: &mut Editor, command: &Command| {
+            run(editor, view, command)
+        });
 }
 
 pub fn change_plugin_input(editor: &mut Editor, view: &mut ViewState, text: &str) {
-    editor.change_plugin_input_panel(text, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    editor.change_plugin_input_panel(text, &mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
 }
 
 /// Enter (`done`) or Esc in a plugin's input panel.
 pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool) {
+    finish_plugin_input_inner(editor, view, done, None);
+}
+
+pub fn finish_plugin_input_with_event(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    done: bool,
+    event: serde_json::Value,
+) {
+    finish_plugin_input_inner(editor, view, done, Some(event));
+}
+
+fn finish_plugin_input_inner(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    done: bool,
+    event: Option<serde_json::Value>,
+) {
     // An io panel (`create_io_panel`) stays open after Enter, with the focus.
     let stays = done && editor.plugin_input_panel().is_some_and(|p| p.io.is_some());
-    if view.input_panel.take().is_none() {
+    let palette_input = palette_asks_text_input(editor, view);
+    if view.input_panel.take().is_none() && !palette_input {
         return;
     }
-    editor.finish_plugin_input_panel(done, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    if palette_input {
+        view.quick_panel = None;
+    }
+    let run_command = &mut |editor: &mut Editor, command: &Command| run(editor, view, command);
+    if let Some(event) = event {
+        editor.finish_plugin_input_panel_with_event(done, event, run_command);
+    } else {
+        editor.finish_plugin_input_panel(done, run_command);
+    }
     if stays {
-        view.input_panel = Some(InputPanelState { focus_requested: true });
+        view.input_panel = Some(InputPanelState {
+            focus_requested: true,
+        });
     } else {
         view.focus_editor = true;
     }
@@ -139,18 +279,28 @@ pub fn finish_plugin_input(editor: &mut Editor, view: &mut ViewState, done: bool
 /// Backspace in the empty field of a panel an input handler asks in: the panel closes (without
 /// its cancel) and the plugin asks for the previous argument again, or opens the palette.
 pub fn go_back_in_plugin_panel(editor: &mut Editor, view: &mut ViewState) {
-    let can = |input: Option<&use_cases::plugin_panels::CommandInputPanel>| input.is_some_and(|i| i.can_go_back);
+    let can = |input: Option<&use_cases::plugin_panels::CommandInputPanel>| {
+        input.is_some_and(|i| i.can_go_back)
+    };
     let in_quick_panel = can(editor.plugin_quick_panel().and_then(|p| p.input.as_ref()))
-        && view.quick_panel.as_ref().is_some_and(|p| p.kind == SearchKind::PluginItems);
-    let in_input_panel = can(editor.plugin_input_panel().and_then(|p| p.input.as_ref())) && view.input_panel.is_some();
-    if in_quick_panel {
+        && view
+            .quick_panel
+            .as_ref()
+            .is_some_and(|p| p.kind == SearchKind::PluginItems);
+    let in_input_panel = can(editor.plugin_input_panel().and_then(|p| p.input.as_ref()))
+        && view.input_panel.is_some();
+    let in_palette_input = can(editor.plugin_input_panel().and_then(|p| p.input.as_ref()))
+        && palette_asks_text_input(editor, view);
+    if in_quick_panel || in_palette_input {
         view.quick_panel = None;
     } else if in_input_panel {
         view.input_panel = None;
     } else {
         return;
     }
-    editor.go_back_in_plugin_panel(&mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+    editor.go_back_in_plugin_panel(&mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
     show_plugin_panels(editor, view);
     if view.quick_panel.is_none() && view.input_panel.is_none() {
         view.focus_editor = true;
@@ -170,27 +320,121 @@ pub fn run_from_palette(editor: &mut Editor, view: &mut ViewState, command: Comm
 /// Built-in commands that are window commands in Sublime (the others run on the active view), so
 /// plugins hear about them in `on_window_command` instead of `on_text_command`.
 const WINDOW_COMMANDS: &[&str] = &[
-    "new_file", "prompt_open_file", "prompt_open_folder", "prompt_add_folder", "open_file", "open_dir", "save_all",
-    "close", "close_file", "close_all", "close_window", "exit", "reopen_last_file", "close_folder_list",
-    "prompt_open_project", "prompt_open_project_or_workspace", "open_project", "open_project_or_workspace",
+    "new_file",
+    "prompt_open_file",
+    "prompt_open_folder",
+    "prompt_add_folder",
+    "open_file",
+    "open_dir",
+    "save_all",
+    "close",
+    "close_file",
+    "close_all",
+    "close_window",
+    "exit",
+    "reopen_last_file",
+    "open_recent_file",
+    "open_recent_folder",
+    "clear_recent_files",
+    "close_folder_list",
+    "prompt_open_project",
+    "prompt_open_project_or_workspace",
+    "open_project",
+    "open_project_or_workspace",
     "close_project",
-    "refresh_folder_list", "show_overlay", "hide_overlay", "select_color_scheme", "select_language", "show_panel",
-    "hide_panel", "toggle_side_bar", "toggle_status_bar", "toggle_minimap", "toggle_full_screen", "toggle_distraction_free",
-    "increase_font_size", "decrease_font_size", "reset_font_size", "next_view", "prev_view", "next_view_in_stack",
-    "prev_view_in_stack", "select_by_index", "edit_settings", "reload_packages", "install_package_control", "show_load_errors",
-    "show_about_window", "open_url", "report_issue", "open_error_log", "build", "exec", "cancel_build", "set_build_system", "next_result",
-    "prev_result", "set_layout", "focus_group", "move_to_group", "focus_neighboring_group", "move_to_neighboring_group",
-    "new_pane", "close_pane", "set_max_columns", "new_window", "clone_file",
-    "close_by_index", "close_others_by_index", "close_to_right_by_index", "remove_folder", "open_containing_folder",
-    "new_file_at", "new_folder", "rename_path", "delete_file", "delete_folder",
+    "refresh_folder_list",
+    "show_overlay",
+    "hide_overlay",
+    "select_color_scheme",
+    "select_language",
+    "show_panel",
+    "hide_panel",
+    "cancel_find",
+    "add_directory",
+    "clear_location",
+    "add_where_snippet",
+    "find_in_folder",
+    "toggle_side_bar",
+    "toggle_status_bar",
+    "toggle_minimap",
+    "toggle_tabs",
+    "toggle_menu",
+    "toggle_full_screen",
+    "toggle_distraction_free",
+    "increase_font_size",
+    "decrease_font_size",
+    "reset_font_size",
+    "next_view",
+    "prev_view",
+    "next_view_in_stack",
+    "prev_view_in_stack",
+    "select_by_index",
+    "edit_settings",
+    "reload_packages",
+    "install_package_control",
+    "show_load_errors",
+    "show_about_window",
+    "open_url",
+    "report_issue",
+    "open_error_log",
+    "build",
+    "exec",
+    "cancel_build",
+    "set_build_system",
+    "next_result",
+    "prev_result",
+    "set_layout",
+    "focus_group",
+    "move_to_group",
+    "focus_neighboring_group",
+    "move_to_neighboring_group",
+    "new_pane",
+    "close_pane",
+    "set_max_columns",
+    "new_window",
+    "clone_file",
+    "close_by_index",
+    "close_others_by_index",
+    "close_to_right_by_index",
+    "remove_folder",
+    "open_containing_folder",
+    "new_file_at",
+    "new_folder",
+    "rename_path",
+    "delete_file",
+    "delete_folder",
 ];
 
 /// Built-in commands handled by [`run_editing_command`].
 const EDITING_COMMANDS: &[&str] = &[
-    "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
-    "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
-    "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert", "insert_snippet", "goto_line",
-    "move", "move_to", "left_delete", "right_delete", "delete_word",
+    "toggle_comment",
+    "duplicate_line",
+    "swap_line_up",
+    "swap_line_down",
+    "expand_selection",
+    "indent",
+    "unindent",
+    "reindent",
+    "join_lines",
+    "upper_case",
+    "lower_case",
+    "title_case",
+    "swap_case",
+    "transpose",
+    "expand_tabs",
+    "unexpand_tabs",
+    "trim_trailing_white_space",
+    "sort_lines",
+    "permute_lines",
+    "run_macro_file",
+    "insert",
+    "insert_snippet",
+    "goto_line",
+    "move",
+    "move_to",
+    "left_delete",
+    "right_delete",
+    "delete_word",
 ];
 
 /// Runs a command. Plugins listening to `on_text_command` / `on_window_command` may replace it
@@ -208,16 +452,38 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 /// widget is about to do on its own. It is not asked about again.
 fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
+    let undo_before = plugin_edit_undo_snapshot(editor, &command);
     run_command(editor, view, &command);
+    editor.record_plugin_edit_undo(undo_before);
     view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;
     };
     if view.widget_edits_requested() > widget_edits {
         // Listeners must see the result: the widget does the edit in the next frame.
-        view.widget_edits_in_progress.push(WidgetEditInProgress { command, target, applied_next_frame: true });
+        view.widget_edits_in_progress.push(WidgetEditInProgress {
+            command,
+            target,
+            applied_next_frame: true,
+        });
     } else {
         editor.plugin_command_ran(&command, target);
+    }
+}
+
+/// Built-in editing commands bypass the text widget, so preserve their old text in its history.
+/// Direct `sublime_api` edits are tracked inside the use case API boundary.
+fn plugin_edit_undo_snapshot(
+    editor: &mut Editor,
+    command: &Command,
+) -> Vec<use_cases::editor::PluginEditUndoBoundary> {
+    if EDITING_COMMANDS.contains(&command.name.as_str()) {
+        let document = editor.active_document().map(|document| document.id);
+        document.map_or_else(Vec::new, |document| {
+            editor.plugin_edit_undo_snapshot(document)
+        })
+    } else {
+        Vec::new()
     }
 }
 
@@ -228,12 +494,19 @@ fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
 ///
 /// With several selections the widget only knows the primary one, so the use case does the whole
 /// edit instead of replaying it.
-pub fn hooked_widget_input(editor: &mut Editor, view: &mut ViewState, command: Command, replay: WidgetEdit) -> bool {
+pub fn hooked_widget_input(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    command: Command,
+    replay: WidgetEdit,
+) -> bool {
     if !editor.plugins_hear_text_commands() {
         return false;
     }
     let rewritten = editor.plugin_rewrite_command(&command, CommandTarget::View);
-    let several = editor.active_document().is_some_and(|doc| !doc.extra_selections().is_empty());
+    let several = editor
+        .active_document()
+        .is_some_and(|doc| !doc.extra_selections().is_empty());
     if several {
         run_rewritten(editor, view, rewritten);
     } else if rewritten.name == "insert" && command.name == "insert" {
@@ -254,7 +527,11 @@ pub fn hooked_widget_input(editor: &mut Editor, view: &mut ViewState, command: C
     } else if rewritten.same_as(&command) {
         // What the widget was going to do: give it back the same input, one frame later.
         view.request(ViewRequest::WidgetEdit(replay));
-        view.widget_edits_in_progress.push(WidgetEditInProgress { command, target: CommandTarget::View, applied_next_frame: true });
+        view.widget_edits_in_progress.push(WidgetEditInProgress {
+            command,
+            target: CommandTarget::View,
+            applied_next_frame: true,
+        });
     } else {
         run_rewritten(editor, view, rewritten);
     }
@@ -279,25 +556,50 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "new_file" => editor.new_file(),
         "prompt_open_file" => editor.prompt_open_files(Some(command.str_arg("initial_directory"))),
         "prompt_open_folder" | "prompt_add_folder" => {
-            if let Some(folder) = editor.prompt_add_folder(Some(command.str_arg("initial_directory"))) {
+            if let Some(folder) =
+                editor.prompt_add_folder(Some(command.str_arg("initial_directory")))
+            {
                 view.expanded_folders.insert(folder);
                 view.show_side_bar = true;
             }
         }
-        "open_file" => editor.open_package_file(command.str_arg("file"), command.bool_arg("encoded_position", false)),
+        "open_file" => editor.open_package_file(
+            command.str_arg("file"),
+            command.bool_arg("encoded_position", false),
+        ),
         "open_dir" => editor.open_package_folder(command.str_arg("dir"), command.str_arg("file")),
-        "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => editor.close_by_index(command),
+        "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => {
+            editor.close_by_index(command)
+        }
         "remove_folder" => editor.remove_folders(command),
         "open_containing_folder" => editor.open_containing_folder(command),
         // Sublime's side bar commands, unless a plugin (SideBarEnhancements, FileManager) defines them.
-        name if side_bar::SIDE_BAR_COMMANDS.contains(&name) && editor.plugin_command_kind(name).is_some() => {
-            editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+        name if side_bar::SIDE_BAR_COMMANDS.contains(&name)
+            && editor.plugin_command_kind(name).is_some() =>
+        {
+            editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| {
+                run(editor, view, command)
+            });
         }
         "new_file_at" => editor.new_file_at(command),
-        "new_folder" => editor.new_folder(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)),
-        "rename_path" => editor.rename_path(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)),
+        "new_folder" => editor
+            .new_folder(command, &mut |editor: &mut Editor, command: &Command| {
+                run(editor, view, command)
+            }),
+        "rename_path" => editor
+            .rename_path(command, &mut |editor: &mut Editor, command: &Command| {
+                run(editor, view, command)
+            }),
         "delete_file" => editor.delete_file(command),
         "delete_folder" => editor.delete_folder(command),
+        "find_in_folder" => {
+            editor.find_in_folder(command);
+            let show = Command::with_args(
+                "show_panel",
+                serde_json::json!({ "panel": "find_in_files" }),
+            );
+            run(editor, view, &show);
+        }
         "save" => {
             editor.save_active(false);
         }
@@ -317,6 +619,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.clone_active_document();
         }
         "reopen_last_file" => editor.reopen_closed_file(),
+        "open_recent_file" => editor.open_recent_file(command.usize_arg("index", 0)),
+        "open_recent_folder" => editor.open_recent_folder(command.usize_arg("index", 0)),
+        "clear_recent_files" => editor.clear_recent_files(),
         "close_folder_list" => editor.close_all_folders(),
         "prompt_open_project" | "prompt_open_project_or_workspace" => editor.prompt_open_project(),
         "open_project" | "open_project_or_workspace" => {
@@ -334,7 +639,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 "command_palette" => SearchKind::Commands,
                 "goto" => SearchKind::Goto,
                 other => {
-                    editor.notify(editor.tr_args("Overlay not supported: {name}", &[("name", &other)]));
+                    editor.notify(
+                        editor.tr_args("Overlay not supported: {name}", &[("name", &other)]),
+                    );
                     return;
                 }
             };
@@ -344,7 +651,11 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 // `{"overlay": "command_palette", "command": "foo", "args": {…}}` goes straight to `foo`.
                 let chosen = command.str_arg("command");
                 if !chosen.is_empty() {
-                    let args = command.args.get("args").cloned().unwrap_or(serde_json::Value::Null);
+                    let args = command
+                        .args
+                        .get("args")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
                     run_from_palette(editor, view, Command::with_args(chosen, args));
                     return;
                 }
@@ -375,7 +686,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             panel.selected = panel
                 .results
                 .iter()
-                .position(|c| matches!(&c.target, CandidateTarget::Language(code) if *code == current))
+                .position(
+                    |c| matches!(&c.target, CandidateTarget::Language(code) if *code == current),
+                )
                 .unwrap_or(0);
             view.quick_panel = Some(panel);
         }
@@ -388,7 +701,10 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             let panel = command.str_arg("panel");
             match panel {
                 "find" | "incremental_find" | "find_in_files" | "replace"
-                    if toggle && view.find_panel.visible && view.find_panel.replace_mode == (panel == "replace") =>
+                    if toggle
+                        && view.find_panel.visible
+                        && view.find_panel.replace_mode == (panel == "replace")
+                        && view.find_panel.in_files == (panel == "find_in_files") =>
                 {
                     view.find_panel.visible = false;
                 }
@@ -397,19 +713,24 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     editor.hide_output_panel();
                     view.find_panel.visible = true;
                     view.find_panel.replace_mode = panel == "replace";
+                    view.find_panel.in_files = panel == "find_in_files";
                     view.find_panel.focus_requested = true;
                     editor.use_selection_as_query_if_single_line();
+                    apply_find_panel_args(editor, command);
                 }
                 "console" if toggle => editor.toggle_console(),
                 "console" => editor.show_console(),
-                other => editor.notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
+                other => editor
+                    .notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
             }
+            editor.sync_find_panel(view.find_panel_name());
         }
         "hide_panel" => {
             view.find_panel.visible = false;
             finish_plugin_input(editor, view, false);
             editor.hide_output_panel();
             view.focus_editor = true;
+            editor.sync_find_panel(None);
         }
 
         // ----- builds --------------------------------------------------------------------------
@@ -429,7 +750,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             let cancel = editor.cancel_build_command();
             run(editor, view, &cancel);
         }
-        "set_build_system" => editor.set_build_system(command.str_arg("file"), command.str_arg("variant")),
+        "set_build_system" => {
+            editor.set_build_system(command.str_arg("file"), command.str_arg("variant"))
+        }
         "next_result" | "prev_result" => {
             if editor.next_result(command.name == "next_result") {
                 view.find_panel.visible = false;
@@ -444,7 +767,24 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             find_next(editor, view, command.name == "find_under");
         }
         "replace_next" => editor.replace_next(),
+        "replace_all" if find_in_files_panel(view) => find_in_files(editor, view, true),
         "replace_all" => editor.replace_all(),
+        "find_all" if find_in_files_panel(view) => find_in_files(editor, view, false),
+        "find_all" => {
+            editor.select_find_matches();
+            let close = command.bool_arg("close_panel", false)
+                || editor
+                    .global_settings()
+                    .bool("close_find_after_find_all", true);
+            if close && view.find_panel.visible {
+                view.find_panel.visible = false;
+                view.focus_editor = true;
+            }
+        }
+        "cancel_find" => editor.cancel_find_in_files(),
+        "add_directory" => editor.prompt_add_where_folder(),
+        "clear_location" => editor.clear_where(),
+        "add_where_snippet" => editor.add_where_snippet(command.str_arg("snippet")),
 
         // ----- auto-complete -------------------------------------------------------------------
         "auto_complete" => editor.show_auto_complete(AutoCompleteOptions {
@@ -468,6 +808,8 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "toggle_side_bar" => view.show_side_bar = !view.show_side_bar,
         "toggle_status_bar" => view.show_status_bar = !view.show_status_bar,
         "toggle_minimap" => view.show_minimap = !view.show_minimap,
+        "toggle_tabs" => view.show_tabs = !view.show_tabs,
+        "toggle_menu" => view.show_menu = !view.show_menu,
         "toggle_full_screen" | "toggle_distraction_free" => {
             view.fullscreen = !view.fullscreen;
             view.request(ViewRequest::SetFullscreen(view.fullscreen));
@@ -485,7 +827,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                 view.focus_editor = true;
             }
             None => {
-                let message = editor.tr("set_layout needs cols, rows and cells").to_string();
+                let message = editor
+                    .tr("set_layout needs cols, rows and cells")
+                    .to_string();
                 editor.notify(message);
             }
         },
@@ -510,17 +854,26 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             view.focus_editor = true;
         }
         "close_pane" => {
-            let group = command.args.get("group").and_then(serde_json::Value::as_i64).filter(|g| *g >= 0).map(|g| g as usize);
+            let group = command
+                .args
+                .get("group")
+                .and_then(serde_json::Value::as_i64)
+                .filter(|g| *g >= 0)
+                .map(|g| g as usize);
             editor.close_pane(group);
             view.focus_editor = true;
         }
         "set_max_columns" => editor.set_max_columns(command.usize_arg("columns", 4)),
         // ----- done by the text widget itself --------------------------------------------------
         "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
-        "redo" | "redo_or_repeat" | "soft_redo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo)),
+        "redo" | "redo_or_repeat" | "soft_redo" => {
+            view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo))
+        }
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
         // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
-        "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
+        "copy" | "cut" if editor.copies_whole_line() => {
+            editor.copy_whole_line(command.name == "cut")
+        }
         "copy" => {
             editor.remember_copied_selections();
             view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy));
@@ -530,7 +883,11 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             view.request(ViewRequest::WidgetEdit(WidgetEdit::Cut));
         }
         // With an index (the entry chosen in its panel): pastes that entry; without, lists them.
-        "paste_from_history" => match command.args.get("index").and_then(serde_json::Value::as_u64) {
+        "paste_from_history" => match command
+            .args
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+        {
             Some(index) => {
                 if let Some(text) = editor.take_clipboard_history_entry(index as usize) {
                     view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));
@@ -539,7 +896,8 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             None if editor.clipboard_history().is_empty() => {}
             None => {
                 cancel_quick_panel(editor, view);
-                view.quick_panel = Some(QuickPanel::new(SearchKind::ClipboardHistory, String::new()));
+                view.quick_panel =
+                    Some(QuickPanel::new(SearchKind::ClipboardHistory, String::new()));
             }
         },
         "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
@@ -550,7 +908,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
 
         // ----- preferences and help ------------------------------------------------------------
-        "edit_settings" => editor.edit_settings(command.str_arg("base_file"), command.str_arg("default")),
+        "edit_settings" => {
+            editor.edit_settings(command.str_arg("base_file"), command.str_arg("default"))
+        }
         "reload_packages" => editor.reload_packages(),
         "install_package_control" => editor.install_package_control(),
         "show_load_errors" => view.show_load_errors = true,
@@ -563,7 +923,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         name if EDITING_COMMANDS.contains(&name) => run_editing_command(editor, command),
         name if EDITOR_COMMANDS.contains(&name) => run_editor_command(editor, command),
         other => {
-            if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| run(editor, view, command)) {
+            if !editor.run_plugin_command(command, &mut |editor: &mut Editor, command: &Command| {
+                run(editor, view, command)
+            }) {
                 editor.notify(editor.tr_args("Command not available: {name}", &[("name", &other)]));
             }
         }
@@ -571,7 +933,14 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 
     show_plugin_panels(editor, view);
     // Whatever the command did, typing continues in the text unless a panel took the focus.
-    if view.quick_panel.is_none() && !view.find_panel.focus_requested && view.input_panel.is_none() {
+    let output_has_focus = editor
+        .shown_output_panel()
+        .is_some_and(|panel| editor.is_output_panel_focused(panel.document.id));
+    if view.quick_panel.is_none()
+        && !view.find_panel.focus_requested
+        && view.input_panel.is_none()
+        && !output_has_focus
+    {
         view.focus_editor = true;
     }
 }
@@ -579,35 +948,57 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 /// Commands that only need the text, so they can also run in the middle of a use case.
 fn run_editing_command(editor: &mut Editor, command: &Command) {
     match command.name.as_str() {
-        "toggle_comment" => editor.run_text_command(TextCommand::ToggleComment { block: command.bool_arg("block", false) }),
+        "toggle_comment" => editor.run_text_command(TextCommand::ToggleComment {
+            block: command.bool_arg("block", false),
+        }),
         "duplicate_line" => editor.run_text_command(TextCommand::DuplicateLine),
         "swap_line_up" => editor.run_text_command(TextCommand::SwapLine { up: true }),
         "swap_line_down" => editor.run_text_command(TextCommand::SwapLine { up: false }),
         "expand_selection" => match command.str_arg("to") {
             "line" => editor.run_text_command(TextCommand::ExpandSelectionToLine),
             "word" => editor.run_text_command(TextCommand::SelectWord),
-            "line_prev" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineUpward)),
-            "line_without_eol" | "line_strict" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineContent)),
-            "brackets" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets)),
-            "indentation" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation)),
+            "line_prev" => {
+                editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineUpward))
+            }
+            "line_without_eol" | "line_strict" => {
+                editor.run_text_command(TextCommand::ExpandSelection(Expansion::LineContent))
+            }
+            "brackets" => {
+                editor.run_text_command(TextCommand::ExpandSelection(Expansion::Brackets))
+            }
+            "indentation" => {
+                editor.run_text_command(TextCommand::ExpandSelection(Expansion::Indentation))
+            }
             "smart" => editor.run_text_command(TextCommand::ExpandSelection(Expansion::Smart)),
-            other => editor.notify(editor.tr_args("expand_selection to {target} is not supported", &[("target", &other)])),
+            other => editor.notify(editor.tr_args(
+                "expand_selection to {target} is not supported",
+                &[("target", &other)],
+            )),
         },
         "indent" => editor.run_text_command(TextCommand::Indent),
         "unindent" => editor.run_text_command(TextCommand::Unindent),
-        "reindent" => editor.reindent(command.bool_arg("single_line", true), command.bool_arg("force_indent", true)),
+        "reindent" => editor.reindent(
+            command.bool_arg("single_line", true),
+            command.bool_arg("force_indent", true),
+        ),
         "join_lines" => editor.run_text_command(TextCommand::JoinLines),
         "upper_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Upper)),
         "lower_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Lower)),
         "title_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Title)),
         "swap_case" => editor.run_text_command(TextCommand::ChangeCase(Case::Swap)),
         "transpose" => editor.run_text_command(TextCommand::Transpose),
-        "expand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true }),
-        "unexpand_tabs" => editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false }),
-        "trim_trailing_white_space" => editor.run_text_command(TextCommand::TrimTrailingWhitespace {
-            only_modified: command.bool_arg("only_modified", false),
-            trim_on_caret: command.bool_arg("trim_on_caret", true),
-        }),
+        "expand_tabs" => {
+            editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: true })
+        }
+        "unexpand_tabs" => {
+            editor.run_text_command(TextCommand::ConvertIndentation { to_spaces: false })
+        }
+        "trim_trailing_white_space" => {
+            editor.run_text_command(TextCommand::TrimTrailingWhitespace {
+                only_modified: command.bool_arg("only_modified", false),
+                trim_on_caret: command.bool_arg("trim_on_caret", true),
+            })
+        }
         "sort_lines" => editor.run_text_command(TextCommand::ReorderLines(LineOrder::Sort {
             case_sensitive: command.bool_arg("case_sensitive", false),
         })),
@@ -617,10 +1008,16 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
             _ => editor.notify("permute_lines: only reverse and unique are supported"),
         },
         "run_macro_file" => run_macro(editor, command.str_arg("file")),
-        "insert" => editor.run_text_command(TextCommand::Insert(command.str_arg("characters").to_string())),
-        "insert_snippet" => editor.run_text_command(TextCommand::InsertSnippet(command.str_arg("contents").to_string())),
+        "insert" => editor.run_text_command(TextCommand::Insert(
+            command.str_arg("characters").to_string(),
+        )),
+        "insert_snippet" => editor.run_text_command(TextCommand::InsertSnippet(
+            command.str_arg("contents").to_string(),
+        )),
         "goto_line" => editor.go_to_line(command.usize_arg("line", 1).saturating_sub(1)),
-        "move" | "move_to" | "left_delete" | "right_delete" | "delete_word" => editor.run_view_command_on_active(command),
+        "move" | "move_to" | "left_delete" | "right_delete" | "delete_word" => {
+            editor.run_view_command_on_active(command)
+        }
         other => unreachable!("{other} is not in EDITING_COMMANDS"),
     }
 }
@@ -628,9 +1025,28 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
 /// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
 /// settings and need no view state, so they too run at once inside an event.
 const EDITOR_COMMANDS: &[&str] = &[
-    "slurp_find_string", "find_under_expand", "find_all_under", "select_lines", "split_selection_into_lines",
-    "single_selection", "increase_font_size", "decrease_font_size", "reset_font_size", "toggle_setting", "set_setting",
-    "set_file_type", "set_line_ending", "next_field", "prev_field", "clear_fields", "replace_completion_with_next_completion",
+    "slurp_find_string",
+    "find_under_expand",
+    "find_all_under",
+    "select_lines",
+    "split_selection_into_lines",
+    "single_selection",
+    "fold",
+    "unfold",
+    "unfold_all",
+    "fold_by_level",
+    "fold_all",
+    "increase_font_size",
+    "decrease_font_size",
+    "reset_font_size",
+    "toggle_setting",
+    "set_setting",
+    "set_file_type",
+    "set_line_ending",
+    "next_field",
+    "prev_field",
+    "clear_fields",
+    "replace_completion_with_next_completion",
 ];
 
 fn run_editor_command(editor: &mut Editor, command: &Command) {
@@ -641,6 +1057,11 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
         "split_selection_into_lines" => editor.split_selection_into_lines(),
         "single_selection" => editor.single_selection(),
+        "fold" => editor.fold_selections(),
+        "unfold" => editor.unfold_selections(),
+        "unfold_all" => editor.unfold_all(),
+        "fold_by_level" => editor.fold_by_level(command.usize_arg("level", 1)),
+        "fold_all" => editor.fold_by_level(1),
         "increase_font_size" => editor.change_font_size(1.0),
         "decrease_font_size" => editor.change_font_size(-1.0),
         "reset_font_size" => editor.reset_font_size(),
@@ -655,8 +1076,15 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "clear_fields" => editor.clear_snippet_fields(),
         "replace_completion_with_next_completion" => editor.replace_completion_with_next(),
         "set_line_ending" => {
-            let system = if cfg!(windows) { LineEnding::Windows } else { LineEnding::Unix };
-            editor.set_line_ending(LineEnding::from_setting(Some(command.str_arg("type")), system));
+            let system = if cfg!(windows) {
+                LineEnding::Windows
+            } else {
+                LineEnding::Unix
+            };
+            editor.set_line_ending(LineEnding::from_setting(
+                Some(command.str_arg("type")),
+                system,
+            ));
         }
         other => unreachable!("{other} is not in EDITOR_COMMANDS"),
     }
@@ -669,7 +1097,16 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
 /// the views up again afterwards, so closing one meanwhile is safe. Undo / redo stay the
 /// widget's (its history) and wait for the next frame, as do panels and builds (view state).
 const DOCUMENT_COMMANDS: &[&str] = &[
-    "save", "prompt_save_as", "save_all", "revert", "close", "close_file", "select_all", "copy", "cut", "paste",
+    "save",
+    "prompt_save_as",
+    "save_all",
+    "revert",
+    "close",
+    "close_file",
+    "select_all",
+    "copy",
+    "cut",
+    "paste",
     "paste_and_indent",
 ];
 
@@ -686,7 +1123,9 @@ fn run_document_command(editor: &mut Editor, command: &Command) {
         "revert" => editor.revert_active_document(),
         "close" | "close_file" => editor.close_active_document(),
         "select_all" => editor.run_view_command_on_active(command),
-        "copy" | "cut" if editor.copies_whole_line() => editor.copy_whole_line(command.name == "cut"),
+        "copy" | "cut" if editor.copies_whole_line() => {
+            editor.copy_whole_line(command.name == "cut")
+        }
         "copy" | "cut" => editor.copy_selections(command.name == "cut"),
         "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
         "paste" | "paste_and_indent" => editor.paste_at_selections(),
@@ -696,23 +1135,34 @@ fn run_document_command(editor: &mut Editor, command: &Command) {
 
 /// Whether a built-in command can run in the middle of a use case (it needs no view state).
 fn runs_during_event(name: &str) -> bool {
-    EDITING_COMMANDS.contains(&name) || EDITOR_COMMANDS.contains(&name) || DOCUMENT_COMMANDS.contains(&name)
+    EDITING_COMMANDS.contains(&name)
+        || EDITOR_COMMANDS.contains(&name)
+        || DOCUMENT_COMMANDS.contains(&name)
 }
 
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
-/// state: a formatter's command in `on_pre_save` must reach the file being saved. The others
-/// (panels, builds, the widget's undo and redo) answer false and wait for the next frame, which
-/// runs them on the view that asked.
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. Output panels,
+/// the console and `exec` do their editor's part at once ([`panel_part_during_event`]). The
+/// others (the find and input panels, `build`, the widget's undo and redo) answer false and wait
+/// for the next frame, which runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
-    if !runs_during_event(&command.name) {
+    let at_once = |name: &str| runs_during_event(name) || PANEL_COMMANDS.contains(&name);
+    if !at_once(&command.name) {
         return false;
     }
     let target = hook_target(editor, &command.name).unwrap_or(CommandTarget::View);
     let rewritten = editor.plugin_rewrite_command(command, target);
-    if !runs_during_event(&rewritten.name) {
+    if !at_once(&rewritten.name) {
         editor.queue_plugin_command(rewritten);
         return true;
     }
+    if PANEL_COMMANDS.contains(&rewritten.name.as_str()) {
+        if !panel_part_during_event(editor, &rewritten) {
+            editor.queue_plugin_command(rewritten);
+        }
+        return true;
+    }
+    let undo_before = plugin_edit_undo_snapshot(editor, &rewritten);
     if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
         run_editing_command(editor, &rewritten);
     } else if DOCUMENT_COMMANDS.contains(&rewritten.name.as_str()) {
@@ -720,13 +1170,75 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     } else {
         run_editor_command(editor, &rewritten);
     }
-    editor.plugin_command_ran(&rewritten, hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View));
+    editor.record_plugin_edit_undo(undo_before);
+    editor.plugin_command_ran(
+        &rewritten,
+        hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View),
+    );
     true
+}
+
+/// The panel and build commands whose part in the editor runs during an event.
+const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec"];
+
+/// The editor's part of a panel command run during an event, at once: a plugin that shows
+/// `output.exec` in `on_post_save` and writes to it, or asks `window.active_panel()`, finds it
+/// shown. The view's part (the find or input panel closed, the focus) follows next frame as the
+/// same command, which shows again what is already shown. False when it must all wait (the find
+/// panel, an unknown panel, a plugin's own `exec`).
+fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
+    match command.name.as_str() {
+        "show_panel" => {
+            let panel = command.str_arg("panel");
+            let toggle = command.bool_arg("toggle", false);
+            if panel == "console" {
+                if toggle {
+                    editor.toggle_console();
+                } else {
+                    editor.show_console();
+                }
+                return true;
+            }
+            let Some(name) = panel.strip_prefix("output.") else {
+                return false;
+            };
+            if toggle && editor.shown_output_panel().is_some_and(|p| p.name == name) {
+                editor.hide_output_panel();
+                return true;
+            }
+            if !editor.show_output_panel(name) {
+                return false;
+            }
+            // It takes the find panel's place (closed next frame).
+            editor.sync_find_panel(None);
+            let show = serde_json::json!({ "panel": panel });
+            editor.queue_plugin_command(Command::with_args("show_panel", show));
+            true
+        }
+        "hide_panel" => {
+            editor.hide_output_panel();
+            editor.sync_find_panel(None);
+            editor.queue_plugin_command(Command::new("hide_panel"));
+            true
+        }
+        "exec" if editor.plugin_command_kind("exec").is_none() => {
+            if editor.exec(&command.args) && editor.show_output_panel("exec") {
+                editor.sync_find_panel(None);
+                let show = serde_json::json!({ "panel": "output.exec" });
+                editor.queue_plugin_command(Command::with_args("show_panel", show));
+            }
+            true
+        }
+        _ => false,
+    }
 }
 
 /// What Tab does in the text: a tab (or spaces, or indentation) at every selection.
 pub fn insert_tab(editor: &mut Editor) {
-    if editor.active_document().is_some_and(|d| !d.extra_selections().is_empty()) {
+    if editor
+        .active_document()
+        .is_some_and(|d| !d.extra_selections().is_empty())
+    {
         editor.insert_at_selections("\t");
     } else {
         editor.run_text_command(TextCommand::InsertTab);
@@ -740,15 +1252,57 @@ pub fn close_quick_panel(editor: &mut Editor, view: &mut ViewState) {
 }
 
 /// Takes the quick panel away: a cancelled color scheme preview is reverted, a plugin's list hears -1.
+/// A text input handler hears `cancel` too: it asks in the palette's own field.
 fn cancel_quick_panel(editor: &mut Editor, view: &mut ViewState) {
+    let text_input = palette_asks_text_input(editor, view);
     if let Some(panel) = view.quick_panel.take() {
         if let Some(scheme) = panel.color_scheme_before {
             editor.preview_color_scheme(&scheme);
         }
-        if panel.kind == SearchKind::PluginItems {
-            editor.answer_plugin_quick_panel(None, &mut |editor: &mut Editor, command: &Command| run(editor, view, command));
+        if text_input {
+            editor
+                .finish_plugin_input_panel(false, &mut |editor: &mut Editor, command: &Command| {
+                    run(editor, view, command)
+                });
+            show_plugin_panels(editor, view);
+        } else if panel.kind == SearchKind::PluginItems {
+            editor
+                .answer_plugin_quick_panel(None, &mut |editor: &mut Editor, command: &Command| {
+                    run(editor, view, command)
+                });
             show_plugin_panels(editor, view);
         }
+    }
+}
+
+/// The find panel shown is Find in Files'.
+fn find_in_files_panel(view: &ViewState) -> bool {
+    view.find_panel.visible && view.find_panel.in_files
+}
+
+/// Find in Files' Find / Replace: the results panel takes the find panel's place.
+fn find_in_files(editor: &mut Editor, view: &mut ViewState, replace: bool) {
+    if editor.find_in_files(replace) {
+        view.find_panel.visible = false;
+        finish_plugin_input(editor, view, false);
+        editor.sync_find_panel(None);
+    }
+}
+
+/// `show_panel`'s `where` (Find in Files) and the options `regex`, `case_sensitive` and
+/// `whole_word`, when given.
+fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
+    if let Some(place) = command.args.get("where").and_then(|v| v.as_str()) {
+        editor.set_find_where(place.to_string());
+    }
+    let mut options = editor.state().find.clone();
+    let flag = |key: &str| command.args.get(key).and_then(|v| v.as_bool());
+    options.regex = flag("regex").unwrap_or(options.regex);
+    options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
+    options.whole_word = flag("whole_word").unwrap_or(options.whole_word);
+    options.wrap = flag("wrap").unwrap_or(options.wrap);
+    if options != editor.state().find {
+        editor.set_find_options(options);
     }
 }
 
@@ -762,7 +1316,11 @@ fn find_next(editor: &mut Editor, view: &mut ViewState, forward: bool) {
 
 /// Sublime's built-in line macros (`res://Packages/Default/<Name>.sublime-macro`).
 fn run_macro(editor: &mut Editor, file: &str) {
-    let name = file.rsplit('/').next().unwrap_or("").trim_end_matches(".sublime-macro");
+    let name = file
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(".sublime-macro");
     // Backspace between an auto-paired `(` and `)` (or quotes): both go, at every caret.
     if name == "Delete Left Right" {
         editor.run_view_command_on_active(&Command::new("left_delete"));
@@ -783,4 +1341,3 @@ fn run_macro(editor: &mut Editor, file: &str) {
     };
     editor.run_text_command(command);
 }
-

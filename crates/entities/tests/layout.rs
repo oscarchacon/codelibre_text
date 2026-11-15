@@ -28,11 +28,26 @@ fn layouts_are_read_and_written_as_sublime_writes_them() {
 fn what_is_not_a_layout() {
     let not = |value| Layout::from_json(&value).is_none();
     assert!(not(json!({})));
-    assert!(not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [] })), "no cells");
-    assert!(not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 2, 1]] })), "a cell past the columns");
-    assert!(not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 0, 1]] })), "an empty cell");
-    assert!(not(json!({ "cols": [0.0, 0.7, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]] })), "columns out of order");
-    assert!(not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1]] })), "a cell of three numbers");
+    assert!(
+        not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [] })),
+        "no cells"
+    );
+    assert!(
+        not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 2, 1]] })),
+        "a cell past the columns"
+    );
+    assert!(
+        not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 0, 1]] })),
+        "an empty cell"
+    );
+    assert!(
+        not(json!({ "cols": [0.0, 0.7, 0.5, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1, 1]] })),
+        "columns out of order"
+    );
+    assert!(
+        not(json!({ "cols": [0.0, 1.0], "rows": [0.0, 1.0], "cells": [[0, 0, 1]] })),
+        "a cell of three numbers"
+    );
 }
 
 #[test]
@@ -48,7 +63,11 @@ fn a_flow_layout_fills_rows_of_max_columns() {
     let three = Layout::flow(3, 2);
     assert_eq!(three.cols, vec![0.0, 0.5, 1.0]);
     assert_eq!(three.rows, vec![0.0, 0.5, 1.0]);
-    assert_eq!(three.cells, vec![[0, 0, 1, 1], [1, 0, 2, 1], [0, 1, 2, 2]], "the last row's one cell spans it");
+    assert_eq!(
+        three.cells,
+        vec![[0, 0, 1, 1], [1, 0, 2, 1], [0, 1, 2, 2]],
+        "the last row's one cell spans it"
+    );
     assert_eq!(Layout::flow(2, 4), Layout::columns(2));
     assert_eq!(Layout::flow(1, 4), Layout::default());
 }

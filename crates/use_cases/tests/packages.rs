@@ -12,15 +12,28 @@ use use_cases::gateways::{expand_variable, MessageAnswer, PluginMessage};
 use use_cases::packages::PACKAGE_CONTROL_URL;
 
 fn save_binding() -> Binding {
-    Binding { keys: vec![KeyCombo::parse("ctrl+s").unwrap()], command: Command::new("save"), context: vec![] }
+    Binding {
+        keys: vec![KeyCombo::parse("ctrl+s").unwrap()],
+        command: Command::new("save"),
+        context: vec![],
+    }
 }
 
 #[test]
 fn startup_loads_key_bindings_menus_and_palette_entries() {
     let world = World::new()
         .with_binding(save_binding())
-        .with_menu(MenuItem { caption: "File".into(), id: Some("file".into()), command: None, checkbox: false, children: vec![] })
-        .with_palette(PaletteCommand { caption: "File: Save".into(), command: Command::new("save") });
+        .with_menu(MenuItem {
+            caption: "File".into(),
+            id: Some("file".into()),
+            command: None,
+            checkbox: false,
+            children: vec![],
+        })
+        .with_palette(PaletteCommand {
+            caption: "File: Save".into(),
+            command: Command::new("save"),
+        });
     let editor = world.editor();
     let state = editor.state();
     assert_eq!(state.keymap.bindings.len(), 1);
@@ -47,9 +60,16 @@ fn import_sublime_packages_false_leaves_them_out() {
 #[test]
 fn load_errors_are_kept_and_announced() {
     let world = World::new();
-    world.resources.errors.borrow_mut().push("bad.sublime-keymap: expected `]`".into());
+    world
+        .resources
+        .errors
+        .borrow_mut()
+        .push("bad.sublime-keymap: expected `]`".into());
     let editor = world.editor();
-    assert_eq!(editor.state().load_errors, vec!["bad.sublime-keymap: expected `]`"]);
+    assert_eq!(
+        editor.state().load_errors,
+        vec!["bad.sublime-keymap: expected `]`"]
+    );
     assert!(status(&editor).contains("1 package resource failed to load"));
 }
 
@@ -61,7 +81,10 @@ fn reload_packages_reads_everything_again_and_reports_counts() {
     editor.reload_packages();
     assert_eq!(editor.state().keymap.bindings.len(), 2);
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
-    assert_eq!(status(&editor), "Packages reloaded: 6 syntaxes, 3 color schemes, 2 key bindings, 0 plugin commands");
+    assert_eq!(
+        status(&editor),
+        "Packages reloaded: 6 syntaxes, 3 color schemes, 2 key bindings, 0 plugin commands"
+    );
 }
 
 /// The first start unpacks everything Sublime Text ships: the window does not wait for it.
@@ -70,22 +93,45 @@ fn startup_unpacks_in_the_background_and_loads_the_packages_again_when_it_change
     let world = World::new();
     world.resources.background_unpacking.set(true);
     let mut editor = world.editor();
-    assert!(world.resources.unpacks.borrow().is_empty(), "nothing is unpacked while starting");
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "the packages load from what was unpacked before");
+    assert!(
+        world.resources.unpacks.borrow().is_empty(),
+        "nothing is unpacked while starting"
+    );
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "the packages load from what was unpacked before"
+    );
     assert_eq!(status(&editor), "Unpacking the installed packages…");
 
     editor.poll_unpacking();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "still unpacking");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "still unpacking"
+    );
 
     world.resources.unpacked.set(Some(true));
     editor.poll_unpacking();
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
-    assert!(status(&editor).starts_with("Packages reloaded"), "{}", status(&editor));
-    assert_eq!(world.resources.unpacks.borrow().len(), 1, "loading unpacks again once the background is done");
+    assert!(
+        status(&editor).starts_with("Packages reloaded"),
+        "{}",
+        status(&editor)
+    );
+    assert_eq!(
+        world.resources.unpacks.borrow().len(),
+        1,
+        "loading unpacks again once the background is done"
+    );
 
     world.resources.unpacked.set(Some(true));
     editor.poll_unpacking();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 2, "nothing is being unpacked any more");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        2,
+        "nothing is being unpacked any more"
+    );
 }
 
 /// Every start but the first, and the one after Sublime Text or a package changed.
@@ -96,9 +142,17 @@ fn an_unpacking_that_changed_nothing_does_not_load_the_packages_again() {
     world.resources.unpacked.set(Some(false));
     let mut editor = world.editor();
     assert_eq!(world.resources.ui_loads.borrow().len(), 1);
-    assert_ne!(status(&editor), "Unpacking the installed packages…", "it ended while starting");
+    assert_ne!(
+        status(&editor),
+        "Unpacking the installed packages…",
+        "it ended while starting"
+    );
     editor.reload_packages();
-    assert_eq!(world.resources.unpacks.borrow().len(), 1, "loading unpacks again");
+    assert_eq!(
+        world.resources.unpacks.borrow().len(),
+        1,
+        "loading unpacks again"
+    );
 }
 
 /// Two unpackings must not write the same folders: a load during the background one leaves the
@@ -122,7 +176,11 @@ fn packages_loaded_while_unpacking_are_loaded_again_when_it_ends() {
 fn reload_settings_only_reads_the_settings() {
     let world = World::new();
     let mut editor = world.editor();
-    world.resources.preferences.borrow_mut().push(json!({ "tab_size": 3 }));
+    world
+        .resources
+        .preferences
+        .borrow_mut()
+        .push(json!({ "tab_size": 3 }));
     editor.reload_settings();
     assert_eq!(editor.global_settings().usize("tab_size", 0), 3);
     assert_eq!(world.resources.ui_loads.borrow().len(), 1);
@@ -149,7 +207,11 @@ fn the_packages_variable_also_expands_without_braces() {
     let mut editor = world.editor();
     editor.open_package_file("$packages/User/Package Control.user-ca-bundle", false);
     assert_eq!(editor.active_document().unwrap().text, "certs");
-    assert_eq!(expand_variable("$packages_x/$packages", "packages", "/p"), "$packages_x//p", "only the whole name");
+    assert_eq!(
+        expand_variable("$packages_x/$packages", "packages", "/p"),
+        "$packages_x//p",
+        "only the whole name"
+    );
 }
 
 #[test]
@@ -157,7 +219,10 @@ fn open_package_folder_opens_the_file_manager() {
     let world = World::new();
     let mut editor = world.editor();
     editor.open_package_folder("${packages}", "");
-    assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/packages")]);
+    assert_eq!(
+        *world.opened_folders.borrow(),
+        vec![PathBuf::from("/packages")]
+    );
 }
 
 #[test]
@@ -165,12 +230,18 @@ fn open_package_folder_selects_the_file_it_is_given() {
     let world = World::new().with_file("/installed/Emmet.sublime-package", "");
     let mut editor = world.editor();
     editor.open_package_folder("/installed", "Emmet.sublime-package");
-    assert_eq!(*world.selected_files.borrow(), vec![PathBuf::from("/installed/Emmet.sublime-package")]);
+    assert_eq!(
+        *world.selected_files.borrow(),
+        vec![PathBuf::from("/installed/Emmet.sublime-package")]
+    );
     assert!(world.opened_folders.borrow().is_empty());
 
     // A file that is not there: the folder alone.
     editor.open_package_folder("/installed", "Gone.sublime-package");
-    assert_eq!(*world.opened_folders.borrow(), vec![PathBuf::from("/installed")]);
+    assert_eq!(
+        *world.opened_folders.borrow(),
+        vec![PathBuf::from("/installed")]
+    );
 }
 
 fn package_control_file() -> PathBuf {
@@ -180,13 +251,20 @@ fn package_control_file() -> PathBuf {
 #[test]
 fn install_package_control_asks_then_downloads_it_into_installed_packages() {
     let world = World::new().with_installed_packages();
-    world.dialogs.message_answers.borrow_mut().push_back(MessageAnswer::Ok);
+    world
+        .dialogs
+        .message_answers
+        .borrow_mut()
+        .push_back(MessageAnswer::Ok);
     let mut editor = world.editor();
     editor.install_package_control();
     let asked = world.dialogs.messages.borrow();
     assert_eq!(asked.len(), 1);
     assert!(asked[0].text.contains(PACKAGE_CONTROL_URL));
-    assert_eq!(*world.downloads.started.borrow(), vec![(PACKAGE_CONTROL_URL.to_string(), package_control_file())]);
+    assert_eq!(
+        *world.downloads.started.borrow(),
+        vec![(PACKAGE_CONTROL_URL.to_string(), package_control_file())]
+    );
     assert_eq!(status(&editor), "Downloading Package Control…");
 }
 
@@ -211,7 +289,9 @@ fn install_package_control_when_it_is_there_only_says_so() {
 
 #[test]
 fn a_finished_download_reloads_the_packages_and_package_control_loads() {
-    let world = World::new().with_installed_packages().with_plugin_commands(&[("other", Window)]);
+    let world = World::new()
+        .with_installed_packages()
+        .with_plugin_commands(&[("other", Window)]);
     let mut editor = world.editor();
     world.plugins.then([PluginMessage::Loaded {
         commands: vec![("install_package".into(), Window)],
@@ -221,7 +301,11 @@ fn a_finished_download_reloads_the_packages_and_package_control_loads() {
     *world.downloads.finished.borrow_mut() = Some(Ok(()));
     editor.poll_downloads();
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
-    assert!(status(&editor).starts_with("Package Control installed"), "{}", status(&editor));
+    assert!(
+        status(&editor).starts_with("Package Control installed"),
+        "{}",
+        status(&editor)
+    );
 }
 
 #[test]
@@ -239,10 +323,12 @@ fn a_download_that_does_not_load_is_not_called_installed() {
 fn a_failed_download_is_reported_and_kept_in_the_console() {
     let world = World::new().with_installed_packages();
     let mut editor = world.editor();
-    *world.downloads.finished.borrow_mut() = Some(Err("curl: (6) Could not resolve host: github.com".into()));
+    *world.downloads.finished.borrow_mut() =
+        Some(Err("curl: (6) Could not resolve host: github.com".into()));
     editor.poll_downloads();
     assert_eq!(world.resources.ui_loads.borrow().len(), 1);
-    let message = "Could not download Package Control: curl: (6) Could not resolve host: github.com";
+    let message =
+        "Could not download Package Control: curl: (6) Could not resolve host: github.com";
     assert_eq!(status(&editor), message);
     assert!(editor.state().console.contains(message));
     assert_eq!(*world.logged_errors.borrow(), vec![message.to_string()]);
@@ -253,7 +339,10 @@ fn install_package_control_without_installed_packages_says_why() {
     let world = World::new();
     let mut editor = world.editor();
     editor.install_package_control();
-    assert_eq!(status(&editor), "Package Control cannot be installed: there is no Installed Packages folder");
+    assert_eq!(
+        status(&editor),
+        "Package Control cannot be installed: there is no Installed Packages folder"
+    );
     assert!(world.downloads.started.borrow().is_empty());
 }
 
@@ -261,9 +350,16 @@ fn install_package_control_without_installed_packages_says_why() {
 fn a_reload_with_problems_says_so() {
     let world = World::new();
     let mut editor = world.editor();
-    world.resources.errors.borrow_mut().push("Broken.sublime-package: invalid Zip archive".into());
+    world
+        .resources
+        .errors
+        .borrow_mut()
+        .push("Broken.sublime-package: invalid Zip archive".into());
     editor.reload_packages();
-    assert_eq!(status(&editor), "1 package resource failed to load (Help > Package Load Errors)");
+    assert_eq!(
+        status(&editor),
+        "1 package resource failed to load (Help > Package Load Errors)"
+    );
 }
 
 #[test]
@@ -271,14 +367,31 @@ fn a_new_installed_package_reloads_the_packages_once_the_folder_holds_still() {
     let world = World::new().with_installed_packages();
     let mut editor = world.editor();
     editor.check_installed_packages();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "nothing changed");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "nothing changed"
+    );
 
-    world.disk.put(format!("{INSTALLED_PACKAGES}/Theme.sublime-package"), "zip");
+    world
+        .disk
+        .put(format!("{INSTALLED_PACKAGES}/Theme.sublime-package"), "zip");
     editor.check_installed_packages();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "it may still be changing");
-    world.disk.put(format!("{INSTALLED_PACKAGES}/Linter.sublime-package"), "zip");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "it may still be changing"
+    );
+    world.disk.put(
+        format!("{INSTALLED_PACKAGES}/Linter.sublime-package"),
+        "zip",
+    );
     editor.check_installed_packages();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "it changed again");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "it changed again"
+    );
     editor.check_installed_packages();
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
     editor.check_installed_packages();
@@ -290,7 +403,10 @@ fn a_new_installed_package_reloads_the_packages_once_the_folder_holds_still() {
 #[test]
 fn a_package_folder_installed_upgraded_or_removed_reloads_the_packages() {
     let world = World::new();
-    world.disk.put(format!("{PACKAGES}/User/Preferences.sublime-settings"), "{}");
+    world.disk.put(
+        format!("{PACKAGES}/User/Preferences.sublime-settings"),
+        "{}",
+    );
     let mut editor = world.editor();
     let loads = || world.resources.ui_loads.borrow().len();
     let check_twice = |editor: &mut use_cases::Editor| {
@@ -299,12 +415,20 @@ fn a_package_folder_installed_upgraded_or_removed_reloads_the_packages() {
     };
 
     world.disk.put(format!("{PACKAGES}/Terminal/plugin.py"), "");
-    world.disk.put(format!("{PACKAGES}/Terminal/package-metadata.json"), "{\"version\": \"1.0\"}");
+    world.disk.put(
+        format!("{PACKAGES}/Terminal/package-metadata.json"),
+        "{\"version\": \"1.0\"}",
+    );
     check_twice(&mut editor);
     assert_eq!(loads(), 2, "installed");
 
-    world.disk.put(format!("{PACKAGES}/Terminal/plugin.py"), "# 2.0");
-    world.disk.put(format!("{PACKAGES}/Terminal/package-metadata.json"), "{\"version\": \"2.0\"}");
+    world
+        .disk
+        .put(format!("{PACKAGES}/Terminal/plugin.py"), "# 2.0");
+    world.disk.put(
+        format!("{PACKAGES}/Terminal/package-metadata.json"),
+        "{\"version\": \"2.0\"}",
+    );
     check_twice(&mut editor);
     assert_eq!(loads(), 3, "upgraded");
 
@@ -312,17 +436,27 @@ fn a_package_folder_installed_upgraded_or_removed_reloads_the_packages() {
     check_twice(&mut editor);
     assert_eq!(loads(), 4, "removed");
 
-    world.disk.put(format!("{PACKAGES}/User/Preferences.sublime-settings"), "{\"font_size\": 12}");
+    world.disk.put(
+        format!("{PACKAGES}/User/Preferences.sublime-settings"),
+        "{\"font_size\": 12}",
+    );
     world.disk.put(format!("{PACKAGES}/User/notes.py"), "");
     check_twice(&mut editor);
-    assert_eq!(loads(), 4, "files of a package are not watched, only its metadata");
+    assert_eq!(
+        loads(),
+        4,
+        "files of a package are not watched, only its metadata"
+    );
 }
 
 #[test]
 fn other_files_in_installed_packages_are_not_watched() {
     let world = World::new().with_installed_packages();
     let mut editor = world.editor();
-    world.disk.put(format!("{INSTALLED_PACKAGES}/Theme.sublime-package.download"), "partial");
+    world.disk.put(
+        format!("{INSTALLED_PACKAGES}/Theme.sublime-package.download"),
+        "partial",
+    );
     editor.check_installed_packages();
     editor.check_installed_packages();
     assert_eq!(world.resources.ui_loads.borrow().len(), 1);
@@ -333,20 +467,35 @@ fn a_change_of_ignored_packages_reloads_the_packages() {
     let world = World::new();
     let mut editor = world.editor();
     editor.check_ignored_packages();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 1, "nothing changed");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        1,
+        "nothing changed"
+    );
 
     // Package Control disables a package: it sets and saves the user's preferences.
-    world.resources.preferences.borrow_mut().push(json!({ "ignored_packages": ["Vintage", "Linter"] }));
+    world
+        .resources
+        .preferences
+        .borrow_mut()
+        .push(json!({ "ignored_packages": ["Vintage", "Linter"] }));
     editor.reload_settings();
     editor.check_ignored_packages();
     assert_eq!(world.resources.ui_loads.borrow().len(), 2);
     editor.check_ignored_packages();
-    assert_eq!(world.resources.ui_loads.borrow().len(), 2, "loaded with it already");
+    assert_eq!(
+        world.resources.ui_loads.borrow().len(),
+        2,
+        "loaded with it already"
+    );
 }
 
 #[test]
 fn packages_location_reports_both_folders() {
     let world = World::new();
     let editor = world.editor();
-    assert_eq!(editor.packages_location(), (PathBuf::from("/packages"), None));
+    assert_eq!(
+        editor.packages_location(),
+        (PathBuf::from("/packages"), None)
+    );
 }

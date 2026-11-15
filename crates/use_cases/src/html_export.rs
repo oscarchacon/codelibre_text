@@ -38,13 +38,20 @@ impl Editor {
         let doc = self.any_document(id)?;
         let scheme = self.color_scheme_name();
         let base = self.gateways.syntaxes.scheme_style(&scheme);
-        let foreground = base.get("foreground").and_then(Value::as_str).unwrap_or("#000000");
-        let background = base.get("background").and_then(Value::as_str).unwrap_or("#ffffff");
+        let foreground = base
+            .get("foreground")
+            .and_then(Value::as_str)
+            .unwrap_or("#000000");
+        let background = base
+            .get("background")
+            .and_then(Value::as_str)
+            .unwrap_or("#ffffff");
 
         let ranges: Vec<(usize, usize)> = match regions {
-            Some(regions) if !regions.is_empty() => {
-                regions.iter().map(|s| (s.anchor.min(s.head), s.anchor.max(s.head))).collect()
-            }
+            Some(regions) if !regions.is_empty() => regions
+                .iter()
+                .map(|s| (s.anchor.min(s.head), s.anchor.max(s.head)))
+                .collect(),
             _ => vec![(0, doc.char_count())],
         };
         let mut runs: Vec<(String, String)> = Vec::new();
@@ -54,10 +61,13 @@ impl Editor {
                 runs.push((String::new(), "\n".to_string()));
             }
             for token in self.scoped_ranges(id, start, end) {
-                let text = &doc.text[char_to_byte(&doc.text, token.start)..char_to_byte(&doc.text, token.end)];
+                let text = &doc.text
+                    [char_to_byte(&doc.text, token.start)..char_to_byte(&doc.text, token.end)];
                 let css = self.span_css(&scheme, &token.scope, foreground);
                 match runs.last_mut() {
-                    Some((last_css, last_text)) if *last_css == css => last_text.push_str(&escape_html(text)),
+                    Some((last_css, last_text)) if *last_css == css => {
+                        last_text.push_str(&escape_html(text))
+                    }
                     _ => runs.push((css, escape_html(text))),
                 }
             }
@@ -74,13 +84,20 @@ impl Editor {
         if !options.enclosing_tags {
             return Some(body);
         }
-        let mut div = vec![format!("color: {foreground};"), format!("background-color: {background};")];
+        let mut div = vec![
+            format!("color: {foreground};"),
+            format!("background-color: {background};"),
+        ];
         if options.font_family {
             div.push("font-family: monospace;".to_string());
         }
         if options.font_size {
             let size = self.settings_of(id).f32("font_size", 11.0);
-            let size = if size.fract() == 0.0 { format!("{size:.0}") } else { size.to_string() };
+            let size = if size.fract() == 0.0 {
+                format!("{size:.0}")
+            } else {
+                size.to_string()
+            };
             div.push(format!("font-size: {size}pt;"));
         }
         Some(format!("<div style=\"{}\">{body}</div>", div.join(" ")))
@@ -89,7 +106,10 @@ impl Editor {
     /// The `style` of the span of one scope: its color, background and decorations in the scheme.
     fn span_css(&self, scheme: &str, scope: &str, default_foreground: &str) -> String {
         let style = self.gateways.syntaxes.scope_style(scheme, scope);
-        let foreground = style.get("foreground").and_then(Value::as_str).unwrap_or(default_foreground);
+        let foreground = style
+            .get("foreground")
+            .and_then(Value::as_str)
+            .unwrap_or(default_foreground);
         let mut css = vec![format!("color: {foreground};")];
         if let Some(background) = style.get("background").and_then(Value::as_str) {
             css.push(format!("background-color: {background};"));
@@ -97,10 +117,18 @@ impl Editor {
         if style.get("bold").and_then(Value::as_bool).unwrap_or(false) {
             css.push("font-weight: bold;".to_string());
         }
-        if style.get("italic").and_then(Value::as_bool).unwrap_or(false) {
+        if style
+            .get("italic")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             css.push("font-style: italic;".to_string());
         }
-        if style.get("underline").and_then(Value::as_bool).unwrap_or(false) {
+        if style
+            .get("underline")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             css.push("text-decoration: underline;".to_string());
         }
         css.join(" ")

@@ -26,7 +26,9 @@ fn starting_without_paths_shows_one_empty_tab() {
 
 #[test]
 fn starting_with_files_and_folders_opens_them() {
-    let world = World::new().with_dir("/proj").with_file("/proj/a.rs", "fn main() {}");
+    let world = World::new()
+        .with_dir("/proj")
+        .with_file("/proj/a.rs", "fn main() {}");
     let editor = world.editor_opening(&["/proj", "/proj/a.rs"]);
     assert_eq!(editor.state().folders, vec![PathBuf::from("/proj")]);
     assert_eq!(editor.state().documents.len(), 1);
@@ -55,7 +57,10 @@ fn key_presses_are_resolved_through_the_loaded_keymap() {
         KeyResult::Command(command) => assert_eq!(command.name, "save"),
         _ => panic!("ctrl+s should be bound"),
     }
-    assert!(matches!(editor.press_key(&[KeyCombo::parse("ctrl+q").unwrap()], &NoContext), KeyResult::Unbound));
+    assert!(matches!(
+        editor.press_key(&[KeyCombo::parse("ctrl+q").unwrap()], &NoContext),
+        KeyResult::Unbound
+    ));
 }
 
 #[test]

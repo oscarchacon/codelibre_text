@@ -70,9 +70,19 @@ impl Editor {
     fn build_systems(&mut self) -> Vec<BuildSystem> {
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
         let mut systems = Vec::new();
-        for resource in self.gateways.resources.find_resources("*.sublime-build", include_sublime) {
-            match self.gateways.resources.load_json_resource(&resource, include_sublime) {
-                Ok(json) => systems.extend(BuildSystem::from_json(&resource, &json, platform_name())),
+        for resource in self
+            .gateways
+            .resources
+            .find_resources("*.sublime-build", include_sublime)
+        {
+            match self
+                .gateways
+                .resources
+                .load_json_resource(&resource, include_sublime)
+            {
+                Ok(json) => {
+                    systems.extend(BuildSystem::from_json(&resource, &json, platform_name()))
+                }
                 Err(e) => self.state.console.push_str(&format!("{resource}: {e}\n")),
             }
         }
@@ -89,19 +99,39 @@ impl Editor {
         let Some(doc) = self.active_document() else {
             return false;
         };
-        if selector_matches(&build.selector, &self.gateways.syntaxes.base_scope(&doc.syntax)) {
+        if selector_matches(
+            &build.selector,
+            &self.gateways.syntaxes.base_scope(&doc.syntax),
+        ) {
             return true;
         }
-        if build.selector.trim().is_empty() && build.file_patterns.is_empty() && build.keyfiles.is_empty() {
+        if build.selector.trim().is_empty()
+            && build.file_patterns.is_empty()
+            && build.keyfiles.is_empty()
+        {
             return true;
         }
-        let name = doc.path.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned());
-        if name.is_some_and(|name| build.file_patterns.iter().any(|p| matches_pattern(p, &name))) {
+        let name = doc
+            .path
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned());
+        if name.is_some_and(|name| {
+            build
+                .file_patterns
+                .iter()
+                .any(|p| matches_pattern(p, &name))
+        }) {
             return true;
         }
         let ancestors = doc.path.iter().flat_map(|p| p.ancestors().skip(1));
         let mut folders = ancestors.chain(self.state.folders.iter().map(PathBuf::as_path));
-        folders.any(|folder| build.keyfiles.iter().any(|key| self.gateways.file_system.exists(&folder.join(key))))
+        folders.any(|folder| {
+            build
+                .keyfiles
+                .iter()
+                .any(|key| self.gateways.file_system.exists(&folder.join(key)))
+        })
     }
 
     /// `set_build_system {"file": …}`: an empty file goes back to choosing by the active file.
@@ -117,10 +147,15 @@ impl Editor {
     pub fn plan_build(&mut self, file: &str, variant: &str) -> BuildPlan {
         if !file.is_empty() {
             let variant = (!variant.is_empty()).then(|| variant.to_string());
-            self.state.builds.choice = Some(BuildChoice { resource: file.to_string(), variant, always: false });
+            self.state.builds.choice = Some(BuildChoice {
+                resource: file.to_string(),
+                variant,
+                always: false,
+            });
         }
         let systems = self.build_systems();
-        let applying: Vec<&BuildSystem> = systems.iter().filter(|b| self.build_applies(b)).collect();
+        let applying: Vec<&BuildSystem> =
+            systems.iter().filter(|b| self.build_applies(b)).collect();
         let chosen = self.state.builds.choice.clone().and_then(|choice| {
             let build = systems.iter().find(|b| b.resource == choice.resource)?;
             (choice.always || applying.contains(&build)).then_some((build, choice.variant))
@@ -134,9 +169,16 @@ impl Editor {
             }
             (None, _) => return BuildPlan::Choose,
         };
-        let variant = if variant.is_empty() { chosen_variant.as_deref() } else { Some(variant) };
+        let variant = if variant.is_empty() {
+            chosen_variant.as_deref()
+        } else {
+            Some(variant)
+        };
         let arguments = build.arguments_for(variant);
-        let command = Command::with_args(&build.target, expand_arguments(&Value::Object(arguments), &self.build_variables()));
+        let command = Command::with_args(
+            &build.target,
+            expand_arguments(&Value::Object(arguments), &self.build_variables()),
+        );
         self.state.builds.cancel = Some(match &build.cancel {
             Some(Value::String(name)) => Command::new(name),
             Some(arguments) => Command::with_args(&build.target, arguments.clone()),
@@ -152,11 +194,20 @@ impl Editor {
     /// for the active file, or all if none applies.
     pub fn refresh_build_options(&mut self) {
         let systems = self.build_systems();
-        let applying: Vec<&BuildSystem> = systems.iter().filter(|b| self.build_applies(b)).collect();
-        let shown = if applying.is_empty() { systems.iter().collect() } else { applying };
+        let applying: Vec<&BuildSystem> =
+            systems.iter().filter(|b| self.build_applies(b)).collect();
+        let shown = if applying.is_empty() {
+            systems.iter().collect()
+        } else {
+            applying
+        };
         let mut options = Vec::new();
         for build in shown {
-            options.push(BuildOption { caption: build.name.clone(), resource: build.resource.clone(), variant: None });
+            options.push(BuildOption {
+                caption: build.name.clone(),
+                resource: build.resource.clone(),
+                variant: None,
+            });
             for variant in &build.variants {
                 options.push(BuildOption {
                     caption: format!("{} - {}", build.name, variant.name),
@@ -175,7 +226,11 @@ impl Editor {
         systems.sort_by_key(|build| build.name.to_lowercase());
         let mut options = Vec::new();
         for build in systems {
-            options.push(BuildOption { caption: build.name.clone(), resource: build.resource.clone(), variant: None });
+            options.push(BuildOption {
+                caption: build.name.clone(),
+                resource: build.resource.clone(),
+                variant: None,
+            });
             options.extend(build.variants.iter().map(|variant| BuildOption {
                 caption: format!("{} - {}", build.name, variant.name),
                 resource: build.resource.clone(),
@@ -192,28 +247,47 @@ impl Editor {
 
     /// The build system set with `set_build_system` (`None`: chosen by the file, "Automatic").
     pub fn build_system_set(&self) -> Option<&str> {
-        self.state.builds.choice.as_ref().filter(|c| c.always).map(|c| c.resource.as_str())
+        self.state
+            .builds
+            .choice
+            .as_ref()
+            .filter(|c| c.always)
+            .map(|c| c.resource.as_str())
     }
 
     /// Whether `set_build_system` set this build system and variant (an empty `file`: "Automatic",
     /// none set; an empty `variant`: the build itself), as Tools > Build System checks them.
     pub fn is_build_system_set(&self, file: &str, variant: &str) -> bool {
         match self.state.builds.choice.as_ref().filter(|c| c.always) {
-            Some(choice) => choice.resource == file && choice.variant.as_deref().unwrap_or_default() == variant,
+            Some(choice) => {
+                choice.resource == file && choice.variant.as_deref().unwrap_or_default() == variant
+            }
             None => file.is_empty(),
         }
     }
 
     /// The command that stops the last build (`exec` with `kill` unless the build says otherwise).
     pub fn cancel_build_command(&self) -> Command {
-        self.state.builds.cancel.clone().unwrap_or_else(|| Command::with_args("exec", json!({ "kill": true })))
+        self.state
+            .builds
+            .cancel
+            .clone()
+            .unwrap_or_else(|| Command::with_args("exec", json!({ "kill": true })))
     }
 
     /// `$file`, `$folder`, `$project*` and the other variables of a build.
     pub fn build_variables(&self) -> HashMap<String, String> {
         let text = |value: &str| value.to_string();
         let mut variables = HashMap::from([
-            (text("packages"), self.gateways.resources.paths().packages.display().to_string()),
+            (
+                text("packages"),
+                self.gateways
+                    .resources
+                    .paths()
+                    .packages
+                    .display()
+                    .to_string(),
+            ),
             (text("platform"), text(platform_name())),
         ]);
         variables.extend(self.project_variables());
@@ -221,9 +295,18 @@ impl Editor {
             variables.insert(text("folder"), folder.display().to_string());
         }
         if let Some(path) = self.active_document().and_then(|d| d.path.as_deref()) {
-            let part = |value: Option<&std::ffi::OsStr>| value.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default();
+            let part = |value: Option<&std::ffi::OsStr>| {
+                value
+                    .map(|v| v.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
             variables.insert(text("file"), path.display().to_string());
-            variables.insert(text("file_path"), path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+            variables.insert(
+                text("file_path"),
+                path.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            );
             variables.insert(text("file_name"), part(path.file_name()));
             variables.insert(text("file_base_name"), part(path.file_stem()));
             variables.insert(text("file_extension"), part(path.extension()));
@@ -240,19 +323,32 @@ impl Editor {
         }
         let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default();
         let Some(command) = process_command(args) else {
-            self.notify(self.tr("Nothing to run: the build has no shell_cmd or cmd").to_string());
+            self.notify(
+                self.tr("Nothing to run: the build has no shell_cmd or cmd")
+                    .to_string(),
+            );
             return false;
         };
         if self.state.builds.running.is_some() {
             self.gateways.processes.kill();
             self.state.builds.running = None;
         }
-        let working_dir = Some(text("working_dir")).filter(|d| !d.is_empty()).map(PathBuf::from).or_else(|| self.default_build_dir());
-        let result_base = working_dir.as_ref().map_or(String::new(), |d| d.display().to_string());
+        let working_dir = Some(text("working_dir"))
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| self.default_build_dir());
+        let result_base = working_dir
+            .as_ref()
+            .map_or(String::new(), |d| d.display().to_string());
         self.open_exec_panel(text("file_regex"), text("line_regex"), &result_base);
 
         let path = args.get("path").and_then(Value::as_str).map(String::from);
-        let request = ProcessRequest { command: command.clone(), working_dir, env: environment(args.get("env")), path: path.clone() };
+        let request = ProcessRequest {
+            command: command.clone(),
+            working_dir,
+            env: environment(args.get("env")),
+            path: path.clone(),
+        };
         match self.gateways.processes.start(&request) {
             Ok(()) => {
                 self.state.builds.running = Some(RunningBuild {
@@ -291,7 +387,11 @@ impl Editor {
 
     /// Without a `working_dir`, a build runs next to its file, else in the first open folder.
     fn default_build_dir(&self) -> Option<PathBuf> {
-        let file_dir = self.active_document().and_then(|d| d.path.as_deref()).and_then(Path::parent).map(Path::to_path_buf);
+        let file_dir = self
+            .active_document()
+            .and_then(|d| d.path.as_deref())
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
         file_dir.or_else(|| self.state.folders.first().cloned())
     }
 
@@ -342,11 +442,17 @@ impl Editor {
             self.tr_args("[Finished in {time}s]", &time)
         } else {
             let code = code.map_or_else(|| "?".to_string(), |c| c.to_string());
-            let details = [("time", &seconds as &dyn std::fmt::Display), ("code", &code)];
+            let details = [
+                ("time", &seconds as &dyn std::fmt::Display),
+                ("code", &code),
+            ];
             self.tr_args("[Finished in {time}s with exit code {code}]", &details)
         };
         if code != Some(0) && !build.cancelled {
-            report.push_str(&format!("\n[cmd: {}]\n[dir: {}]", build.command_line, build.working_dir));
+            report.push_str(&format!(
+                "\n[cmd: {}]\n[dir: {}]",
+                build.command_line, build.working_dir
+            ));
             if !build.path.is_empty() {
                 report.push_str(&format!("\n[path: {}]", build.path));
             }
@@ -354,10 +460,17 @@ impl Editor {
         if !build.quiet || code != Some(0) {
             self.append_to_exec_panel(&format!("\n{report}\n"));
         }
-        let errors = self.find_output_panel(EXEC_PANEL).map_or(0, |id| self.output_results(id).len());
+        let errors = self
+            .find_output_panel(EXEC_PANEL)
+            .map_or(0, |id| self.output_results(id).len());
         self.notify(match errors {
             0 => self.tr("Build finished").to_string(),
-            n => self.tr_n("Build finished with {count} error", "Build finished with {count} errors", n, &[]),
+            n => self.tr_n(
+                "Build finished with {count} error",
+                "Build finished with {count} errors",
+                n,
+                &[],
+            ),
         });
     }
 }
@@ -365,13 +478,21 @@ impl Editor {
 /// `shell_cmd`, or `cmd` as a program and its arguments (a line for the shell with `"shell": true`
 /// or when it is a string).
 fn process_command(args: &Value) -> Option<ProcessCommand> {
-    if let Some(line) = args.get("shell_cmd").and_then(Value::as_str).filter(|l| !l.is_empty()) {
+    if let Some(line) = args
+        .get("shell_cmd")
+        .and_then(Value::as_str)
+        .filter(|l| !l.is_empty())
+    {
         return Some(ProcessCommand::Shell(line.to_string()));
     }
     match args.get("cmd")? {
         Value::String(line) if !line.is_empty() => Some(ProcessCommand::Shell(line.clone())),
         Value::Array(parts) => {
-            let parts: Vec<String> = parts.iter().filter_map(Value::as_str).map(String::from).collect();
+            let parts: Vec<String> = parts
+                .iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect();
             match args.get("shell").and_then(Value::as_bool) {
                 _ if parts.is_empty() => None,
                 Some(true) => Some(ProcessCommand::Shell(parts.join(" "))),
@@ -391,5 +512,7 @@ fn command_line(command: &ProcessCommand) -> String {
 
 fn environment(env: Option<&Value>) -> Vec<(String, String)> {
     let values = env.and_then(Value::as_object).into_iter().flatten();
-    values.filter_map(|(name, value)| Some((name.clone(), value.as_str()?.to_string()))).collect()
+    values
+        .filter_map(|(name, value)| Some((name.clone(), value.as_str()?.to_string())))
+        .collect()
 }

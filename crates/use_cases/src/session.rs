@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use entities::document::{Document, RegionSet};
+use entities::document::{is_image_path, Document, RegionSet};
 use entities::layout::Layout;
 use entities::selection::Selection;
 
@@ -21,9 +21,12 @@ pub struct Session {
     /// The groups of the window (`None`: one group).
     pub groups: Option<Layout>,
     pub active_group: usize,
-    /// The other windows, each as a session of its own (their `layout` flags and `windows`
-    /// unused).
+    /// The other windows, each as a session of its own (their `layout` flags, `windows` and
+    /// histories unused).
     pub windows: Vec<Session>,
+    /// File > Open Recent: the files and the folders, newest first (the first window's only).
+    pub file_history: Vec<PathBuf>,
+    pub folder_history: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +39,8 @@ pub struct SessionDocument {
     pub group: usize,
     /// The `PERSISTENT` regions of the view.
     pub regions: Vec<RegionSet>,
+    /// Its folded regions (chars).
+    pub folds: Vec<(usize, usize)>,
 }
 
 impl Editor {
@@ -44,7 +49,10 @@ impl Editor {
     /// With `hot_exit`, unsaved changes are kept in the session instead of asking.
     pub fn request_exit(&mut self, layout: Vec<(String, bool)>) -> bool {
         let hot_exit = self.global_settings().bool("hot_exit", true);
-        let has_unsaved = self.state.documents.iter().any(Document::is_dirty) || self.other_windows().any(|(_, docs, ..)| docs.iter().any(Document::is_dirty));
+        let has_unsaved = self.state.documents.iter().any(Document::is_dirty)
+            || self
+                .other_windows()
+                .any(|(_, docs, ..)| docs.iter().any(Document::is_dirty));
         if hot_exit || !has_unsaved {
             self.save_session(layout);
             true
@@ -59,9 +67,23 @@ impl Editor {
         let current = self.current_window();
         let first = self.window_ids()[0];
         self.switch_to_window(first);
-        let mut session = window_session(&self.state.documents, self.state.active, &self.state.layout, self.state.active_group, &self.state.folders, self.state.project.as_ref().and_then(|p| p.file.as_deref()));
+        let mut session = window_session(
+            &self.state.documents,
+            self.state.active,
+            &self.state.layout,
+            self.state.active_group,
+            &self.state.folders,
+            self.state.project.as_ref().and_then(|p| p.file.as_deref()),
+        );
         session.layout = layout;
-        session.windows = self.other_windows().map(|(_, docs, active, layout, group, folders, project)| window_session(docs, active, layout, group, folders, project)).collect();
+        session.file_history = self.state.recent_files.paths().to_vec();
+        session.folder_history = self.state.recent_folders.paths().to_vec();
+        session.windows = self
+            .other_windows()
+            .map(|(_, docs, active, layout, group, folders, project)| {
+                window_session(docs, active, layout, group, folders, project)
+            })
+            .collect();
         self.switch_to_window(current);
         if let Err(e) = self.gateways.sessions.save(&session) {
             self.notify(self.tr_args("Could not save the session: {error}", &[("error", &e)]));
@@ -70,7 +92,11 @@ impl Editor {
 
     /// Layout flags saved with the session, e.g. whether the side bar was visible.
     pub fn session_layout(&self) -> Vec<(String, bool)> {
-        self.gateways.sessions.load().map(|s| s.layout).unwrap_or_default()
+        self.gateways
+            .sessions
+            .load()
+            .map(|s| s.layout)
+            .unwrap_or_default()
     }
 
     pub(crate) fn restore_session(&mut self) {
@@ -78,6 +104,8 @@ impl Editor {
             return;
         };
         let others = std::mem::take(&mut session.windows);
+        let files = std::mem::take(&mut session.file_history);
+        let folders = std::mem::take(&mut session.folder_history);
         self.restore_window(session);
         // Each other window opens as it was; the first stays the current one.
         let first = self.current_window();
@@ -86,6 +114,8 @@ impl Editor {
             self.restore_window(window);
         }
         self.switch_to_window(first);
+        // Restoring added the session's folders to the history: the saved one replaces it.
+        self.restore_recent(files, folders);
     }
 
     fn restore_window(&mut self, session: Session) {
@@ -94,7 +124,10 @@ impl Editor {
                 self.add_folder(folder);
             }
         }
-        if let Some(project) = session.project.filter(|path| self.gateways.file_system.exists(path)) {
+        if let Some(project) = session
+            .project
+            .filter(|path| self.gateways.file_system.exists(path))
+        {
             self.open_project(&project);
         }
         if let Some(layout) = session.groups {
@@ -104,10 +137,18 @@ impl Editor {
         for saved in session.documents {
             let id = self.next_document_id();
             let mut doc = match &saved.path {
-                Some(path) if self.gateways.file_system.exists(path) => {
-                    let Ok(bytes) = self.gateways.file_system.read(path) else { continue };
+                Some(path) if is_image_path(path) && self.gateways.file_system.exists(path) => {
                     let modified = self.gateways.file_system.modified(path);
-                    let Ok(doc) = Document::from_bytes(id, path, bytes, modified) else { continue };
+                    Document::image(id, path, modified)
+                }
+                Some(path) if self.gateways.file_system.exists(path) => {
+                    let Ok(bytes) = self.gateways.file_system.read(path) else {
+                        continue;
+                    };
+                    let modified = self.gateways.file_system.modified(path);
+                    let Ok(doc) = Document::from_bytes(id, path, bytes, modified) else {
+                        continue;
+                    };
                     loaded.push(id);
                     doc
                 }
@@ -123,6 +164,11 @@ impl Editor {
             doc.syntax = self.gateways.syntaxes.resolve(&saved.syntax);
             doc.set_selection(saved.selection);
             doc.restore_regions(saved.regions);
+            // A file changed meanwhile may be shorter: its folds past the end are dropped.
+            let len = doc.char_count();
+            let folds: Vec<(usize, usize)> =
+                saved.folds.into_iter().filter(|&(_, b)| b <= len).collect();
+            doc.fold(&folds);
             doc.group = saved.group.min(self.group_count() - 1);
             self.state.documents.push(doc);
         }
@@ -131,12 +177,21 @@ impl Editor {
         } else {
             self.focus_group(session.active_group);
         }
-        loaded.into_iter().for_each(|id| self.plugin_event("on_load", id));
+        loaded
+            .into_iter()
+            .for_each(|id| self.plugin_event("on_load", id));
     }
 }
 
 /// One window as the session keeps it: its files (not the scratch views), folders and groups.
-fn window_session(documents: &[Document], active: usize, layout: &Layout, active_group: usize, folders: &[PathBuf], project: Option<&Path>) -> Session {
+fn window_session(
+    documents: &[Document],
+    active: usize,
+    layout: &Layout,
+    active_group: usize,
+    folders: &[PathBuf],
+    project: Option<&Path>,
+) -> Session {
     Session {
         folders: folders.to_vec(),
         project: project.map(Path::to_path_buf),
@@ -150,6 +205,7 @@ fn window_session(documents: &[Document], active: usize, layout: &Layout, active
                 selection: d.selection(),
                 group: d.group,
                 regions: d.persistent_regions(),
+                folds: d.folds().to_vec(),
             })
             .collect(),
         active,
@@ -157,5 +213,7 @@ fn window_session(documents: &[Document], active: usize, layout: &Layout, active
         groups: (layout.group_count() > 1).then(|| layout.clone()),
         active_group,
         windows: Vec::new(),
+        file_history: Vec::new(),
+        folder_history: Vec::new(),
     }
 }

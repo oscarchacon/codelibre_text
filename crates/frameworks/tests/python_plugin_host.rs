@@ -9,19 +9,26 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use codelibre_text::gateways::{
-    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog, folder_index::FolderIndex, native_dialogs::NativeDialogs, os_shell::OsShell, std_file_system::StdFileSystem,
-    syntect_syntaxes::SyntectSyntaxes, system_clipboard::SystemClipboard,
+use codelibre_text::gateways::python_plugin_host::{
+    bundled_interpreter, find_interpreter, PythonPluginHost,
 };
-use codelibre_text::gateways::python_plugin_host::{bundled_interpreter, find_interpreter, PythonPluginHost};
+use codelibre_text::gateways::{
+    child_processes::ChildProcesses, curl_downloads::CurlDownloads, file_error_log::FileErrorLog,
+    folder_index::FolderIndex, folder_search::FolderSearch, native_dialogs::NativeDialogs,
+    os_shell::OsShell, std_file_system::StdFileSystem, syntect_syntaxes::SyntectSyntaxes,
+    system_clipboard::SystemClipboard,
+};
 use codelibre_text::syntax_engine::SyntaxEngine;
 use entities::command::Command;
 use interface_adapters::controllers::command_controller;
 use interface_adapters::gateways::session_file::SessionFileGateway;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
+use interface_adapters::presenters::quick_panel as quick_panel_presenter;
 use interface_adapters::view_state::ViewState;
 use serde_json::{json, Value};
-use use_cases::gateways::{PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, PluginPackage};
+use use_cases::gateways::{
+    PackagePaths, PluginCommandKind, PluginHostGateway, PluginLoad, PluginMessage, PluginPackage,
+};
 use use_cases::plugin_popups::HoverZone;
 use use_cases::{Editor, Gateways};
 
@@ -39,7 +46,10 @@ fn host_with(dir: &Path, files: &[(&str, &str)]) -> Option<(PythonPluginHost, Pl
     }
     let mut host = PythonPluginHost::new(dir.join("Lib").join("python"));
     host.load(&PluginLoad {
-        packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        packages: vec![PluginPackage {
+            name: "MyPkg".into(),
+            dirs: vec![package],
+        }],
         dependencies: Vec::new(),
         packages_path: dir.join("Packages"),
         archives: Vec::new(),
@@ -84,7 +94,11 @@ fn next_idle(host: &mut PythonPluginHost, log: &mut String) -> PluginMessage {
 /// An editor with the real plugin host and `plugin` in the package `MyPkg`; `None` without Python.
 fn editor_with(dir: &Path, plugin: &str) -> Option<Editor> {
     let editor = editor_with_load_errors(dir, plugin)?;
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
     Some(editor)
 }
 
@@ -97,7 +111,11 @@ fn editor_with_load_errors(dir: &Path, plugin: &str) -> Option<Editor> {
     let packages = dir.join("Packages");
     fs::create_dir_all(packages.join("MyPkg")).unwrap();
     fs::write(packages.join("MyPkg").join("plugin.py"), plugin).unwrap();
-    let paths = PackagePaths { packages, sublime_packages: None, archive_folders: Vec::new() };
+    let paths = PackagePaths {
+        packages,
+        sublime_packages: None,
+        archive_folders: Vec::new(),
+    };
     let engine = Rc::new(RefCell::new(SyntaxEngine::new(paths.clone())));
     let mut editor = Editor::new(Gateways {
         file_system: Box::new(StdFileSystem),
@@ -107,6 +125,7 @@ fn editor_with_load_errors(dir: &Path, plugin: &str) -> Option<Editor> {
         syntaxes: Box::new(SyntectSyntaxes(engine)),
         sessions: Box::new(SessionFileGateway::new(dir.join("Session.sublime_session"))),
         file_index: Box::new(FolderIndex::default()),
+        file_search: Box::new(FolderSearch::default()),
         shell: Box::new(OsShell),
         processes: Box::new(ChildProcesses::default()),
         downloads: Box::new(CurlDownloads::default()),
@@ -161,7 +180,10 @@ fn loads_plugins_and_runs_their_commands() {
     let Some((mut host, loaded)) = host_with(dir.path(), &files) else {
         return;
     };
-    let PluginMessage::Loaded { commands, errors, .. } = loaded else {
+    let PluginMessage::Loaded {
+        commands, errors, ..
+    } = loaded
+    else {
         panic!("expected Loaded, got {loaded:?}");
     };
     assert_eq!(
@@ -175,32 +197,61 @@ fn loads_plugins_and_runs_their_commands() {
         "named like Sublime names them"
     );
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].contains("bad.py") && errors[0].contains("SyntaxError"), "{}", errors[0]);
+    assert!(
+        errors[0].contains("bad.py") && errors[0].contains("SyntaxError"),
+        "{}",
+        errors[0]
+    );
 
     // A text command: it reads the selection and inserts at the caret.
     let mut log = String::new();
-    host.run(PluginCommandKind::Text, "hello", &json!({"name": "bob"}), Some(7)).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "view_selection_get"), vec![json!(7)]);
+    host.run(
+        PluginCommandKind::Text,
+        "hello",
+        &json!({"name": "bob"}),
+        Some(7),
+    )
+    .unwrap();
+    assert_eq!(
+        expect_call(&mut host, &mut log, "view_selection_get"),
+        vec![json!(7)]
+    );
     host.reply(Ok(json!([[3, 3]]))).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "view_insert"), vec![json!(7), json!(3), json!("hello bob")]);
+    assert_eq!(
+        expect_call(&mut host, &mut log, "view_insert"),
+        vec![json!(7), json!(3), json!("hello bob")]
+    );
     host.reply(Ok(json!(9))).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
-    assert_eq!(log, "saying hello\n", "print() goes to the console, not the protocol");
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
+    assert_eq!(
+        log, "saying hello\n",
+        "print() goes to the console, not the protocol"
+    );
 
     // An exception becomes the command's error, and the host keeps working.
-    host.run(PluginCommandKind::Window, "broken", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "broken", &Value::Null, None)
+        .unwrap();
     match next(&mut host, &mut log) {
-        PluginMessage::Done { error: Some(traceback) } => assert!(traceback.contains("ValueError: boom"), "{traceback}"),
+        PluginMessage::Done {
+            error: Some(traceback),
+        } => assert!(traceback.contains("ValueError: boom"), "{traceback}"),
         other => panic!("expected an error, got {other:?}"),
     }
 
     // Selections: cleared, then added; overlapping ones and repeated carets merge.
-    host.run(PluginCommandKind::Text, "add_carets", &Value::Null, Some(7)).unwrap();
+    host.run(PluginCommandKind::Text, "add_carets", &Value::Null, Some(7))
+        .unwrap();
     let mut sets: Vec<Value> = Vec::new();
     loop {
         match next(&mut host, &mut log) {
             PluginMessage::Call { function, .. } if function == "view_selection_get" => {
-                assert!(!sets.is_empty(), "a cleared selection is not read back from the editor");
+                assert!(
+                    !sets.is_empty(),
+                    "a cleared selection is not read back from the editor"
+                );
                 host.reply(Ok(sets.last().unwrap().clone())).unwrap();
             }
             PluginMessage::Call { function, args } => {
@@ -214,16 +265,42 @@ fn loads_plugins_and_runs_their_commands() {
             }
         }
     }
-    assert_eq!(sets, vec![json!([[4, 4]]), json!([[1, 2], [4, 4]]), json!([[1, 2], [4, 4]])]);
+    assert_eq!(
+        sets,
+        vec![
+            json!([[4, 4]]),
+            json!([[1, 2], [4, 4]]),
+            json!([[1, 2], [4, 4]])
+        ]
+    );
 
     // Settings files.
-    host.run(PluginCommandKind::Application, "h_tMLPrint", &Value::Null, None).unwrap();
+    host.run(
+        PluginCommandKind::Application,
+        "h_tMLPrint",
+        &Value::Null,
+        None,
+    )
+    .unwrap();
     let args = expect_call(&mut host, &mut log, "settings_set");
-    assert_eq!(args, vec![json!(["file", "MyPkg.sublime-settings"]), json!("count"), json!(2)]);
+    assert_eq!(
+        args,
+        vec![
+            json!(["file", "MyPkg.sublime-settings"]),
+            json!("count"),
+            json!(2)
+        ]
+    );
     host.reply(Ok(Value::Null)).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "save_settings"), vec![json!("MyPkg.sublime-settings")]);
+    assert_eq!(
+        expect_call(&mut host, &mut log, "save_settings"),
+        vec![json!("MyPkg.sublime-settings")]
+    );
     host.reply(Ok(Value::Null)).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
 
     host.stop();
     assert!(host.receive().is_err(), "a stopped host answers nothing");
@@ -239,7 +316,11 @@ fn plugins_of_an_archive_see_the_paths_inside_it() {
     let package = unpacked.join("Zipped");
     fs::create_dir_all(package.join("lib").join("deep")).unwrap();
     fs::write(package.join("lib").join("__init__.py"), "").unwrap();
-    fs::write(package.join("lib").join("deep").join("__init__.py"), "VALUE = 'inner'\n").unwrap();
+    fs::write(
+        package.join("lib").join("deep").join("__init__.py"),
+        "VALUE = 'inner'\n",
+    )
+    .unwrap();
     let plugin = r#"
 import sublime_plugin
 from .lib import deep
@@ -252,7 +333,10 @@ print(deep.VALUE)
     let archives = dir.path().join("Installed Packages");
     let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
     host.load(&PluginLoad {
-        packages: vec![PluginPackage { name: "Zipped".into(), dirs: vec![package] }],
+        packages: vec![PluginPackage {
+            name: "Zipped".into(),
+            dirs: vec![package],
+        }],
         dependencies: Vec::new(),
         packages_path: dir.path().join("Packages"),
         archives: vec![(unpacked, archives.clone())],
@@ -269,9 +353,19 @@ print(deep.VALUE)
     let lines: Vec<&str> = log.lines().collect();
     assert_eq!(lines[0], root.join("plugin.py").display().to_string());
     assert_eq!(lines[1], root.join("plugin.py").display().to_string());
-    assert_eq!(lines[2], root.join("lib").join("deep").join("__init__.py").display().to_string());
+    assert_eq!(
+        lines[2],
+        root.join("lib")
+            .join("deep")
+            .join("__init__.py")
+            .display()
+            .to_string()
+    );
     assert_eq!(lines[3], "inner");
-    assert!(dir.path().join("Lib").join("Packages").is_dir(), "next to the executable plugins are told about");
+    assert!(
+        dir.path().join("Lib").join("Packages").is_dir(),
+        "next to the executable plugins are told about"
+    );
     host.stop();
 }
 
@@ -286,9 +380,18 @@ fn plugins_get_paths_with_the_platforms_separators() {
     fs::create_dir_all(&package).unwrap();
     fs::write(package.join("plugin.py"), "import sublime\nprint(sublime.packages_path())\nprint(sublime.installed_packages_path())\n").unwrap();
     let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
-    let slashed = std::path::PathBuf::from(dir.path().join("Packages").display().to_string().replace('\\', "/"));
+    let slashed = std::path::PathBuf::from(
+        dir.path()
+            .join("Packages")
+            .display()
+            .to_string()
+            .replace('\\', "/"),
+    );
     host.load(&PluginLoad {
-        packages: vec![PluginPackage { name: "MyPkg".into(), dirs: vec![package] }],
+        packages: vec![PluginPackage {
+            name: "MyPkg".into(),
+            dirs: vec![package],
+        }],
         dependencies: Vec::new(),
         packages_path: slashed,
         archives: Vec::new(),
@@ -297,10 +400,16 @@ fn plugins_get_paths_with_the_platforms_separators() {
     })
     .unwrap();
     let mut log = String::new();
-    assert!(matches!(next(&mut host, &mut log), PluginMessage::Loaded { .. }));
+    assert!(matches!(
+        next(&mut host, &mut log),
+        PluginMessage::Loaded { .. }
+    ));
     let lines: Vec<&str> = log.lines().collect();
     assert_eq!(lines[0], dir.path().join("Packages").display().to_string());
-    assert_eq!(lines[1], dir.path().join("Installed Packages").display().to_string());
+    assert_eq!(
+        lines[1],
+        dir.path().join("Installed Packages").display().to_string()
+    );
     host.stop();
 }
 
@@ -319,14 +428,23 @@ fn plugins_import_package_control_3_dependencies_from_the_variant_for_this_pytho
     write("oldlib/dependency-metadata.json", "{}");
     write("oldlib/all/oldlib.py", "WHERE = 'all'\n");
     write("oldlib/st3/oldlib.py", "WHERE = 'st3'\n");
-    write("oldlib/st3_windows_x64/oldlib.py", "WHERE = 'compiled for 3.3'\n");
+    write(
+        "oldlib/st3_windows_x64/oldlib.py",
+        "WHERE = 'compiled for 3.3'\n",
+    );
     write("pure/.sublime-dependency", "");
     write("pure/all/pure/__init__.py", "WHERE = 'all'\n");
-    write("Uses/plugin.py", "import oldlib, pure\nprint(oldlib.WHERE, pure.WHERE)\n");
+    write(
+        "Uses/plugin.py",
+        "import oldlib, pure\nprint(oldlib.WHERE, pure.WHERE)\n",
+    );
     let mut host = PythonPluginHost::new(dir.path().join("Lib").join("python"));
     let mut load = |dependencies: Vec<std::path::PathBuf>| {
         host.load(&PluginLoad {
-            packages: vec![PluginPackage { name: "Uses".into(), dirs: vec![packages.join("Uses")] }],
+            packages: vec![PluginPackage {
+                name: "Uses".into(),
+                dirs: vec![packages.join("Uses")],
+            }],
             dependencies,
             packages_path: packages.clone(),
             archives: Vec::new(),
@@ -369,10 +487,14 @@ class SizeCommand(sublime_plugin.TextCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Text, "size", &Value::Null, Some(1)).unwrap();
+    host.run(PluginCommandKind::Text, "size", &Value::Null, Some(1))
+        .unwrap();
     expect_call(&mut host, &mut log, "view_size");
     host.reply(Err("the view is closed".into())).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     assert_eq!(log, "caught: the view is closed\n");
 }
 
@@ -395,14 +517,25 @@ class InnerCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "outer", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "outer", &Value::Null, None)
+        .unwrap();
     let args = expect_call(&mut host, &mut log, "run_command");
-    assert_eq!(args, vec![json!("window"), json!(1), json!("inner"), Value::Null]);
+    assert_eq!(
+        args,
+        vec![json!("window"), json!(1), json!("inner"), Value::Null]
+    );
     // The editor finds that "inner" is a plugin command and asks the host to run it meanwhile.
-    host.run(PluginCommandKind::Window, "inner", &Value::Null, None).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    host.run(PluginCommandKind::Window, "inner", &Value::Null, None)
+        .unwrap();
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     host.reply(Ok(Value::Null)).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     assert_eq!(log, "inner ran\nouter done\n");
 }
 
@@ -430,9 +563,154 @@ class ShoutCommand(sublime_plugin.TextCommand):
 
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("shout"));
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
-    assert_eq!(status, "shouted HELLO world", "console:\n{}", editor.state().console);
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        status,
+        "shouted HELLO world",
+        "console:\n{}",
+        editor.state().console
+    );
     assert_eq!(editor.active_document().unwrap().text, "HELLO world");
+}
+
+/// Window functions name their window in a last argument: project data and symbol lookups reach
+/// the editor with their own arguments, and the window's chrome is the view's.
+#[test]
+fn window_functions_pass_their_arguments_and_see_the_window_s_chrome() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import sublime
+import sublime_plugin
+
+class ProbeWindowCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        self.window.set_project_data({"folders": [], "settings": {"tab_size": 3}})
+        data = self.window.project_data()
+        symbols = self.window.lookup_symbol_in_open_files("nothing_here")
+        minimap = self.window.is_minimap_visible()
+        self.window.set_minimap_visible(True)
+        self.window.set_status_bar_visible(False)
+        sublime.status_message("%s %s %s %s" % (
+            data.get("settings"), symbols, minimap, self.window.is_minimap_visible()))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("toggle_minimap"));
+    command_controller::poll_plugins(&mut editor, &mut view);
+    command_controller::run(&mut editor, &mut view, &Command::new("probe_window"));
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        status,
+        "{'tab_size': 3} [] False True",
+        "console:\n{}",
+        editor.state().console
+    );
+    command_controller::poll_plugins(&mut editor, &mut view);
+    assert!(view.show_minimap && !view.show_status_bar);
+}
+
+/// The API of Sublime Text 4215 our modules lacked, checked against what that Sublime answered for
+/// the same texts (run with a throwaway profile, see `docs/plugins.md`): indentation, code units,
+/// selections, find flags, sheets and the constants.
+#[test]
+fn the_api_sublime_4215_added_answers_as_it_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = r#"
+import json
+import sublime
+import sublime_plugin
+
+def view_of(window, text):
+    view = window.new_file()
+    view.set_scratch(True)
+    view.settings().set("tab_size", 4)
+    view.run_command("append", {"characters": text})
+    return view
+
+class ProbeApiCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        w = self.window
+        out = {}
+        v = view_of(w, "def f():\n    a = 1\n\n    if a:\n        b\n    c\nd\n")
+        out["levels"] = [v.indentation_level(p) for p in (0, 9, 19, 30, 46, 48)]
+        out["blocks"] = [v.indented_region(p).to_tuple() for p in (0, 9, 19, 30, 46, 48)]
+        v = view_of(w, "a\n    b\n\n        c\n\nd\n")
+        out["blank"] = [v.indented_region(p).to_tuple() for p in (2, 8, 9, 19)]
+        v = view_of(w, "x\n\ty\n\t  z\n  \tw\n")
+        out["tabs"] = [v.indentation_level(p) for p in (2, 5, 10)]
+        v = view_of(w, "a\u00e9\U0001F600b")
+        out["units"] = [[v.utf8_code_units(p), v.utf16_code_units(p)] for p in range(5)]
+        out["sel"] = [v.sel().has_empty_region(), v.sel().has_non_empty_region()]
+        v.sel().clear()
+        v.sel().add(sublime.Region(0, 1))
+        v.sel().add(sublime.Region(2, 3))
+        out["sel3"] = [v.sel().has_empty_region(), v.sel().has_multiple_non_empty_regions()]
+        out["sheet"] = [v.sheet().name(), v.sheet().is_selected()]
+        v.set_name("Named")
+        out["named"] = v.sheet().name()
+        v = view_of(w, "ab abc ab xab ab")
+        F = sublime.FindFlags
+        out["find"] = {
+            "reverse": [v.find("ab", s, F.LITERAL | F.REVERSE).to_tuple() for s in (0, 3, 8, 16)],
+            "wrap": [v.find("ab", s, F.LITERAL | F.WRAP).to_tuple() for s in (15,)],
+            "reverse_wrap": v.find("ab", 0, F.LITERAL | F.REVERSE | F.WRAP).to_tuple(),
+            "whole": [r.to_tuple() for r in v.find_all("a.", F.WHOLEWORD)],
+            "plain": v.find("ab", 8, F.LITERAL).to_tuple(),
+        }
+        out["constants"] = [sublime.WHOLEWORD, sublime.REVERSE, sublime.WRAP, sublime.FORCE_CLONE,
+                            sublime.KIND_ID_COLOR_LIGHT, int(sublime.UIElement.MENU),
+                            issubclass(sublime.FileTooLargeError, FileNotFoundError)]
+        out["windows"] = [w.num_views_in_group(0) == len(w.views_in_group(0)), w.file_history(),
+                          sublime.project_history(), len(sublime.executable_hash())]
+        sublime.status_message(json.dumps(out))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(&mut editor, &mut view, &Command::new("probe_api"));
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    let console = editor.state().console.clone();
+    let out: serde_json::Value =
+        serde_json::from_str(&status).unwrap_or_else(|_| panic!("{status}\n{console}"));
+    let expected = serde_json::json!({
+        "levels": [0, 1, 0, 2, 0, 0],
+        "blocks": [[0, 0], [9, 46], [9, 46], [30, 40], [46, 46], [48, 48]],
+        "blank": [[2, 19], [8, 19], [8, 19], [19, 19]],
+        "tabs": [1, 2, 1],
+        "units": [[0, 0], [1, 1], [3, 2], [7, 4], [8, 5]],
+        "sel": [true, false],
+        "sel3": [false, true],
+        "sheet": ["untitled", true],
+        "named": "Named",
+        "find": {
+            "reverse": [[-1, -1], [0, 2], [7, 9], [14, 16]],
+            "wrap": [[0, 2]],
+            "reverse_wrap": [14, 16],
+            "whole": [[0, 2], [7, 9], [14, 16]],
+            "plain": [11, 13],
+        },
+        "constants": [4, 8, 16, 256, 18, 16, true],
+        "windows": [true, [], [], 3],
+    });
+    assert_eq!(out, expected, "console:\n{console}");
 }
 
 /// `sublime_plugin.reload_plugin` imports a changed plugin file again: the editor hears its new
@@ -473,10 +751,19 @@ class ReloadIt(sublime_plugin.WindowCommand):
     command_controller::run(&mut editor, &mut view, &Command::new("reload_it"));
     let console = editor.state().console.clone();
     assert!(editor.is_plugin_command("second"), "console:\n{console}");
-    assert!(!editor.is_plugin_command("first"), "the old command is gone");
-    assert!(console.contains("unloaded first") && console.contains("loaded second"), "console:\n{console}");
+    assert!(
+        !editor.is_plugin_command("first"),
+        "the old command is gone"
+    );
+    assert!(
+        console.contains("unloaded first") && console.contains("loaded second"),
+        "console:\n{console}"
+    );
     command_controller::run(&mut editor, &mut view, &Command::new("second"));
-    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("second"));
+    assert_eq!(
+        editor.state().status.as_ref().map(|s| s.text.as_str()),
+        Some("second")
+    );
 }
 
 /// `Default.paste_from_history` is the editor's history, and the modules newer Pythons removed
@@ -496,15 +783,27 @@ class ProbeCommand(sublime_plugin.WindowCommand):
         from distutils.spawn import find_executable
         from distutils.dir_util import mkpath
         g_clipboard_history.push_text("copied in Terminus")
-        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on"), asynchat.async_chat.__name__))
+        # Our shim answers 1, as Python's distutils did; setuptools' copy (which shadows it where
+        # setuptools is installed) answers True.
+        sublime.status_message("%s %s %s" % (g_clipboard_history.get()[0][0], strtobool("on") == 1, asynchat.async_chat.__name__))
 "#;
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("probe"));
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
-    assert_eq!(status, "copied in Terminus 1 async_chat", "console:\n{}", editor.state().console);
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        status,
+        "copied in Terminus True async_chat",
+        "console:\n{}",
+        editor.state().console
+    );
     assert_eq!(editor.clipboard_history(), ["copied in Terminus"]);
 }
 
@@ -551,8 +850,18 @@ class ProbeCommand(sublime_plugin.TextCommand):
     let mut view = ViewState::default();
     let probe = Command::with_args("probe", serde_json::json!({ "old": old.to_string_lossy() }));
     command_controller::run(&mut editor, &mut view, &probe);
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
-    assert_eq!(status, "(0, 6) True 1", "console:\n{}", editor.state().console);
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        status,
+        "(0, 6) True 1",
+        "console:\n{}",
+        editor.state().console
+    );
     assert!(dir.path().join("new.txt").is_file() && !old.exists());
     assert!(editor.is_plugin_command("hidden_rename_path"));
 }
@@ -582,7 +891,12 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("probe"));
-    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("True True"), "console:\n{}", editor.state().console);
+    assert_eq!(
+        editor.state().status.as_ref().map(|s| s.text.as_str()),
+        Some("True True"),
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 /// A package that imports one not installed yet (LSP-json before LSP: Package Control installs
@@ -604,16 +918,31 @@ class HelperCommand(sublime_plugin.WindowCommand):
         return;
     };
     assert!(!editor.is_plugin_command("helper"));
-    assert!(editor.state().load_errors.iter().any(|e| e.contains("No module named 'Base'")), "{:?}", editor.state().load_errors);
+    assert!(
+        editor
+            .state()
+            .load_errors
+            .iter()
+            .any(|e| e.contains("No module named 'Base'")),
+        "{:?}",
+        editor.state().load_errors
+    );
 
     let base = dir.path().join("Packages").join("Base");
     fs::create_dir_all(&base).unwrap();
     fs::write(base.join("core.py"), "GREETING = 'from Base'\n").unwrap();
     editor.load_plugins();
-    assert!(editor.state().load_errors.is_empty(), "{:?}", editor.state().load_errors);
+    assert!(
+        editor.state().load_errors.is_empty(),
+        "{:?}",
+        editor.state().load_errors
+    );
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("helper"));
-    assert_eq!(editor.state().status.as_ref().map(|s| s.text.as_str()), Some("from Base"));
+    assert_eq!(
+        editor.state().status.as_ref().map(|s| s.text.as_str()),
+        Some("from Base")
+    );
 }
 
 /// The modules newer Pythons removed entirely (`cgi`, `imghdr`, `pipes`, `uu`) and the names
@@ -727,7 +1056,12 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("probe"));
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
     assert_eq!(status, "shims ok", "console:\n{}", editor.state().console);
 }
 
@@ -783,8 +1117,18 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("probe"));
-    let status = editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
-    assert_eq!(status, "3.3 names ok", "console:\n{}", editor.state().console);
+    let status = editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        status,
+        "3.3 names ok",
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -812,7 +1156,12 @@ class FakeBuildCommand(sublime_plugin.WindowCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("fake_build"));
-    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+    assert_eq!(
+        editor.shown_output_panel().map(|p| p.name.as_str()),
+        Some("exec"),
+        "console:\n{}",
+        editor.state().console
+    );
 
     // The thread's calls are answered between frames.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -820,8 +1169,16 @@ class FakeBuildCommand(sublime_plugin.WindowCommand):
         command_controller::poll_plugins(&mut editor, &mut view);
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(editor_status(&editor), "built output.exec 24", "console:\n{}", editor.state().console);
-    assert_eq!(editor.shown_output_panel().unwrap().document.text, "compiling\na.rs:3: error\n");
+    assert_eq!(
+        editor_status(&editor),
+        "built output.exec 24",
+        "console:\n{}",
+        editor.state().console
+    );
+    assert_eq!(
+        editor.shown_output_panel().unwrap().document.text,
+        "compiling\na.rs:3: error\n"
+    );
     assert_eq!(editor.state().documents.len(), 1, "the panel is not a tab");
 }
 
@@ -841,15 +1198,27 @@ class MyBuildCommand(ExecCommand):
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
-    assert!(editor.plugin_command_kind("exec").is_none(), "Default's ExecCommand is not a command");
+    assert!(
+        editor.plugin_command_kind("exec").is_none(),
+        "Default's ExecCommand is not a command"
+    );
     let mut view = ViewState::default();
     let args = json!({
         "shell_cmd": "echo a.py:3: oops",
         "file_regex": "^(.+):(\\d+): ",
         "working_dir": dir.path().display().to_string(),
     });
-    command_controller::run(&mut editor, &mut view, &Command::with_args("my_build", args));
-    assert_eq!(editor.shown_output_panel().map(|p| p.name.as_str()), Some("exec"), "console:\n{}", editor.state().console);
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args("my_build", args),
+    );
+    assert_eq!(
+        editor.shown_output_panel().map(|p| p.name.as_str()),
+        Some("exec"),
+        "console:\n{}",
+        editor.state().console
+    );
 
     let deadline = Instant::now() + Duration::from_secs(10);
     while !editor.state().console.contains("exit ") && Instant::now() < deadline {
@@ -898,23 +1267,46 @@ class PhantomsAgainCommand(sublime_plugin.TextCommand):
     assert!(editor.plugins_hear_hover());
 
     editor.plugin_hover(v, 2, HoverZone::Text);
-    let popup = editor.plugin_popup().unwrap_or_else(|| panic!("no popup; console:\n{}", editor.state().console));
-    assert_eq!((popup.location, popup.content.as_str()), (2, r#"<a href="go">go 2 1</a>"#));
+    let popup = editor
+        .plugin_popup()
+        .unwrap_or_else(|| panic!("no popup; console:\n{}", editor.state().console));
+    assert_eq!(
+        (popup.location, popup.content.as_str()),
+        (2, r#"<a href="go">go 2 1</a>"#)
+    );
     command_controller::navigate_plugin_popup(&mut editor, &mut view, "go");
     editor.hide_plugin_popup();
     command_controller::poll_plugins(&mut editor, &mut view);
     let console = editor.state().console.clone();
-    assert!(console.contains("navigate go") && console.contains("hidden"), "{console}");
+    assert!(
+        console.contains("navigate go") && console.contains("hidden"),
+        "{console}"
+    );
 
     command_controller::run(&mut editor, &mut view, &Command::new("phantoms"));
-    let ids: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    let ids: Vec<u64> = editor
+        .active_document()
+        .unwrap()
+        .phantoms()
+        .iter()
+        .map(|p| p.id)
+        .collect();
     assert_eq!(ids.len(), 2, "console:\n{}", editor.state().console);
     command_controller::navigate_plugin_phantom(&mut editor, &mut view, ids[0], "fix");
     command_controller::run(&mut editor, &mut view, &Command::new("phantoms_again"));
     let console = editor.state().console.clone();
     assert!(console.contains("phantom fix"), "{console}");
-    assert!(console.contains(&format!("ids again [{}] [Region(0, 1)]", ids[0])), "the equal phantom keeps its id\n{console}");
-    let left: Vec<u64> = editor.active_document().unwrap().phantoms().iter().map(|p| p.id).collect();
+    assert!(
+        console.contains(&format!("ids again [{}] [Region(0, 1)]", ids[0])),
+        "the equal phantom keeps its id\n{console}"
+    );
+    let left: Vec<u64> = editor
+        .active_document()
+        .unwrap()
+        .phantoms()
+        .iter()
+        .map(|p| p.id)
+        .collect();
     assert_eq!(left, vec![ids[0]]);
 }
 
@@ -944,20 +1336,57 @@ class Later(sublime_plugin.ViewEventListener):
     let mut view = ViewState::default();
     editor.insert_at_selections("zeta_word ze");
     command_controller::run(&mut editor, &mut view, &Command::new("auto_complete"));
-    let triggers = |editor: &Editor| editor.auto_complete().map(|l| l.shown.iter().map(|s| s.completion.trigger.clone()).collect::<Vec<_>>());
-    let now = triggers(&editor).unwrap_or_else(|| panic!("no list; console:\n{}", editor.state().console));
+    let triggers = |editor: &Editor| {
+        editor.auto_complete().map(|l| {
+            l.shown
+                .iter()
+                .map(|s| s.completion.trigger.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    let now = triggers(&editor)
+        .unwrap_or_else(|| panic!("no list; console:\n{}", editor.state().console));
     assert_eq!(now.len(), 3, "no words (INHIBIT_WORD_COMPLETIONS): {now:?}");
-    assert!(editor.state().console.contains("asked ze [12] False"), "{}", editor.state().console);
-    let item = &editor.auto_complete().unwrap().shown.iter().find(|s| s.completion.trigger == "zeta_fn").unwrap().completion;
-    assert_eq!((item.annotation.as_str(), item.kind.letter.as_str(), item.details.as_str()), ("fn", "f", "<b>details</b>"));
+    assert!(
+        editor.state().console.contains("asked ze [12] False"),
+        "{}",
+        editor.state().console
+    );
+    let item = &editor
+        .auto_complete()
+        .unwrap()
+        .shown
+        .iter()
+        .find(|s| s.completion.trigger == "zeta_fn")
+        .unwrap()
+        .completion;
+    assert_eq!(
+        (
+            item.annotation.as_str(),
+            item.kind.letter.as_str(),
+            item.details.as_str()
+        ),
+        ("fn", "f", "<b>details</b>")
+    );
 
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !triggers(&editor).unwrap_or_default().contains(&"zeta_later".to_string()) {
-        assert!(Instant::now() < deadline, "set_completions never arrived; console:\n{}", editor.state().console);
+    while !triggers(&editor)
+        .unwrap_or_default()
+        .contains(&"zeta_later".to_string())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "set_completions never arrived; console:\n{}",
+            editor.state().console
+        );
         command_controller::poll_plugins(&mut editor, &mut view);
         std::thread::sleep(Duration::from_millis(20));
     }
-    let pair = triggers(&editor).unwrap().iter().position(|t| t == "zeta_pair").unwrap();
+    let pair = triggers(&editor)
+        .unwrap()
+        .iter()
+        .position(|t| t == "zeta_pair")
+        .unwrap();
     editor.commit_completion(Some(pair));
     assert_eq!(editor.active_document().unwrap().text, "zeta_word PAIR");
 }
@@ -997,11 +1426,21 @@ class MarkCommand(sublime_plugin.TextCommand):
     assert_eq!(doc.region_sets()[0].flags, 32 | 256 | 2048);
     assert_eq!(doc.region_sets()[0].annotations, ["<a href='why'>why</a>"]);
     assert_eq!(doc.region_sets()[0].annotation_color, "#ff0000");
-    assert_eq!(doc.show_request(), Some(entities::document::ShowRequest { point: 11, center: true }));
+    assert_eq!(
+        doc.show_request(),
+        Some(entities::document::ShowRequest {
+            point: 11,
+            center: true
+        })
+    );
     assert_eq!(editor.plugin_statuses(doc.id), ["2 marks"]);
     let id = doc.id;
     command_controller::navigate_plugin_annotation(&mut editor, &mut view, id, "words", "why");
-    assert!(editor.state().console.contains("annotation link why"), "console:\n{}", editor.state().console);
+    assert!(
+        editor.state().console.contains("annotation link why"),
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -1031,7 +1470,12 @@ class FancyCommand(sublime_plugin.TextCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("fancy"));
-    assert_eq!(editor_status(&editor), "True (0, 4) 0 8 'text.plain ' True", "console:\n{}", editor.state().console);
+    assert_eq!(
+        editor_status(&editor),
+        "True (0, 4) 0 2 'text.plain ' True",
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 /// Package Control installs libraries in `Lib/python38`, and in `Lib/python33` for packages of
@@ -1040,7 +1484,10 @@ class FancyCommand(sublime_plugin.TextCommand):
 fn plugins_import_the_libraries_package_control_installs() {
     let dir = tempfile::tempdir().unwrap();
     let lib = dir.path().join("Lib");
-    for (folder, files) in [("python38", ["shared.py", "lib38.py"]), ("python33", ["shared.py", "lib33.py"])] {
+    for (folder, files) in [
+        ("python38", ["shared.py", "lib38.py"]),
+        ("python33", ["shared.py", "lib33.py"]),
+    ] {
         fs::create_dir_all(lib.join(folder)).unwrap();
         for file in files {
             fs::write(lib.join(folder).join(file), format!("WHERE = '{folder}'\n")).unwrap();
@@ -1062,10 +1509,22 @@ fn plugins_import_the_libraries_package_control_installs() {
 #[test]
 fn libraries_read_entry_points_by_group_as_in_python_3_8() {
     let dir = tempfile::tempdir().unwrap();
-    let dist_info = dir.path().join("Lib").join("python38").join("ext-1.0.dist-info");
+    let dist_info = dir
+        .path()
+        .join("Lib")
+        .join("python38")
+        .join("ext-1.0.dist-info");
     fs::create_dir_all(&dist_info).unwrap();
-    fs::write(dist_info.join("METADATA"), "Metadata-Version: 2.1\nName: ext\nVersion: 1.0\n").unwrap();
-    fs::write(dist_info.join("entry_points.txt"), "[markdown.extensions]\nabbr = ext:Abbr\n").unwrap();
+    fs::write(
+        dist_info.join("METADATA"),
+        "Metadata-Version: 2.1\nName: ext\nVersion: 1.0\n",
+    )
+    .unwrap();
+    fs::write(
+        dist_info.join("entry_points.txt"),
+        "[markdown.extensions]\nabbr = ext:Abbr\n",
+    )
+    .unwrap();
     let plugin = "from importlib import metadata\n\
                   found = metadata.entry_points()\n\
                   assert [e.name for e in found.get('markdown.extensions', ())] == ['abbr'], found\n\
@@ -1131,11 +1590,21 @@ class TlsCommand(sublime_plugin.TextCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("tls"));
-    assert_eq!(editor_status(&editor), "ready SSLContext", "console:\n{}", editor.state().console);
+    assert_eq!(
+        editor_status(&editor),
+        "ready SSLContext",
+        "console:\n{}",
+        editor.state().console
+    );
 }
 
 fn editor_status(editor: &Editor) -> String {
-    editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default()
+    editor
+        .state()
+        .status
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -1156,12 +1625,19 @@ class LaterCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "later", &Value::Null, None).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None }, "timers wait: {log}");
+    host.run(PluginCommandKind::Window, "later", &Value::Null, None)
+        .unwrap();
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None },
+        "timers wait: {log}"
+    );
     let mut messages = Vec::new();
     for _ in 0..2 {
         match next_idle(&mut host, &mut log) {
-            PluginMessage::Call { function, args } if function == "status_message" => messages.push(args[0].clone()),
+            PluginMessage::Call { function, args } if function == "status_message" => {
+                messages.push(args[0].clone())
+            }
             other => panic!("expected status_message, got {other:?}"),
         }
         host.reply(Ok(Value::Null)).unwrap();
@@ -1205,18 +1681,34 @@ fn event_listeners_hear_the_events_they_define() {
     // The first event of a view asks each ViewEventListener class whether it applies.
     let mut log = String::new();
     host.event("on_modified", 3).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "settings_get"), vec![json!(["view", 3]), json!("lint")]);
+    assert_eq!(
+        expect_call(&mut host, &mut log, "settings_get"),
+        vec![json!(["view", 3]), json!("lint")]
+    );
     host.reply(Ok(json!([true, true]))).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     assert_eq!(log, "modified 3\nlint 3\n");
     host.event("on_modified", 3).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None }, "the listener object is kept");
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None },
+        "the listener object is kept"
+    );
 
     // An _async listener runs after the event is done, on the async thread.
     host.event("on_post_save", 3).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     match next_idle(&mut host, &mut log) {
-        PluginMessage::Call { function, args } => assert_eq!((function.as_str(), args), ("view_set_name", vec![json!(3), json!("saved")])),
+        PluginMessage::Call { function, args } => assert_eq!(
+            (function.as_str(), args),
+            ("view_set_name", vec![json!(3), json!("saved")])
+        ),
         other => panic!("expected view_set_name, got {other:?}"),
     }
     host.reply(Ok(Value::Null)).unwrap();
@@ -1241,10 +1733,17 @@ class Listener(sublime_plugin.EventListener):
     let PluginMessage::Loaded { events, .. } = loaded else {
         panic!("expected Loaded, got {loaded:?}");
     };
-    assert!(events.iter().any(|e| e == "on_post_text_command"), "events: {events:?}");
+    assert!(
+        events.iter().any(|e| e == "on_post_text_command"),
+        "events: {events:?}"
+    );
     let mut log = String::new();
-    host.query("on_post_text_command", Some(1), &json!(["shout", {}])).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Answer(Value::Null));
+    host.query("on_post_text_command", Some(1), &json!(["shout", {}]))
+        .unwrap();
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Answer(Value::Null)
+    );
     match next_idle(&mut host, &mut log) {
         PluginMessage::Call { function, args } => {
             assert_eq!(function, "status_message");
@@ -1278,8 +1777,13 @@ class ShoutAllCommand(sublime_plugin.TextCommand):
     fs::write(&file, "abc").unwrap();
     assert!(editor.open_file(&file));
     assert!(editor.save_active(false));
-    assert_eq!(fs::read_to_string(&file).unwrap(), "ABC", "console:
-{}", editor.state().console);
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "ABC",
+        "console:
+{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -1304,7 +1808,12 @@ class Shout(sublime_plugin.EventListener):
     let id = editor.active_document().unwrap().id;
     editor.text_for_editing(id).unwrap().push('!');
     assert!(editor.save_active(false), "{}", editor.state().console);
-    assert_eq!(fs::read_to_string(&file).unwrap(), "QUIET!", "{}", editor.state().console);
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "QUIET!",
+        "{}",
+        editor.state().console
+    );
     assert!(!editor.active_document().unwrap().is_dirty());
 }
 
@@ -1322,7 +1831,7 @@ class PickCommand(sublime_plugin.WindowCommand):
         self.window.show_quick_panel(ITEMS, self.picked, sublime.WANT_EVENT, 2, placeholder="Which?")
 
     def picked(self, index, event):
-        print("picked", index, sorted(event))
+        print("picked", index, event["modifier_keys"])
 
 class AskCommand(sublime_plugin.WindowCommand):
     def run(self):
@@ -1332,7 +1841,8 @@ class AskCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "pick", &Value::Null, None)
+        .unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
     assert_eq!(
         args,
@@ -1355,21 +1865,52 @@ class AskCommand(sublime_plugin.WindowCommand):
         ]
     );
     host.reply(Ok(Value::Null)).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
 
-    host.callback(1, "select", &json!([2])).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    host.callback(1, "select", &json!([2, {"modifier_keys": {"shift": true}}]))
+        .unwrap();
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     host.callback(1, "select", &json!([0])).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
-    assert_eq!(log, "picked 2 ['modifier_keys']\n", "a closed panel's callback runs once");
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
+    assert_eq!(
+        log, "picked 2 {'shift': True}\n",
+        "a closed panel's callback runs once"
+    );
 
-    host.run(PluginCommandKind::Window, "ask", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "ask", &Value::Null, None)
+        .unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_input_panel");
-    assert_eq!(args, vec![json!(1), json!("Name:"), json!("bob"), json!(2), json!(false), Value::Null, json!({ "__window__": 1 })]);
+    assert_eq!(
+        args,
+        vec![
+            json!(1),
+            json!("Name:"),
+            json!("bob"),
+            json!(2),
+            json!(false),
+            Value::Null,
+            json!({ "__window__": 1 })
+        ]
+    );
     host.reply(Ok(Value::Null)).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     host.callback(2, "done", &json!(["alice"])).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     assert!(log.ends_with("done alice\n"), "{log}");
 }
 
@@ -1400,22 +1941,37 @@ class ProbeCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "probe", &Value::Null, None).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "ok_cancel_dialog"), vec![json!("Go?"), json!(""), json!("")]);
+    host.run(PluginCommandKind::Window, "probe", &Value::Null, None)
+        .unwrap();
+    assert_eq!(
+        expect_call(&mut host, &mut log, "ok_cancel_dialog"),
+        vec![json!("Go?"), json!(""), json!("")]
+    );
     host.reply(Ok(json!(true))).unwrap();
     expect_call(&mut host, &mut log, "load_binary_resource");
     host.reply(Ok(json!("00ff"))).unwrap();
     expect_call(&mut host, &mut log, "load_resource");
-    host.reply(Err("resource not found: Packages/T/nope".into())).unwrap();
-    assert_eq!(expect_call(&mut host, &mut log, "settings_watch"), vec![json!(["file", "T.sublime-settings"])]);
+    host.reply(Err("resource not found: Packages/T/nope".into()))
+        .unwrap();
+    assert_eq!(
+        expect_call(&mut host, &mut log, "settings_watch"),
+        vec![json!(["file", "T.sublime-settings"])]
+    );
     host.reply(Ok(Value::Null)).unwrap();
     for _ in 0..2 {
         expect_call(&mut host, &mut log, "settings_set");
         host.reply(Ok(Value::Null)).unwrap();
     }
-    assert_eq!(expect_call(&mut host, &mut log, "open_dialog"), vec![Value::Null, json!([])]);
+    assert_eq!(
+        expect_call(&mut host, &mut log, "open_dialog"),
+        vec![Value::Null, json!([])]
+    );
     host.reply(Ok(json!(["/a.txt", "/b.txt"]))).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None }, "{log}");
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None },
+        "{log}"
+    );
     assert_eq!(
         log,
         "ok True\nbin b'\\x00\\xff'\nmissing resource not found: Packages/T/nope\nchanged\n{'a': [1, 2], 'b': 'x//y,]'}\n",
@@ -1423,7 +1979,11 @@ class ProbeCommand(sublime_plugin.WindowCommand):
     );
     match next_idle(&mut host, &mut log) {
         PluginMessage::Call { function, args } if function == "status_message" => {
-            assert_eq!(args, vec![json!("picked /a.txt")], "one file without multi_select, after the command")
+            assert_eq!(
+                args,
+                vec![json!("picked /a.txt")],
+                "one file without multi_select, after the command"
+            )
         }
         other => panic!("expected status_message, got {other:?}"),
     }
@@ -1459,7 +2019,11 @@ class Broken(sublime_plugin.ViewEventListener):
     let PluginMessage::Loaded { events, .. } = loaded else {
         panic!("expected loaded, got {loaded:?}");
     };
-    for event in ["on_query_context", "on_text_command", "on_post_window_command"] {
+    for event in [
+        "on_query_context",
+        "on_text_command",
+        "on_post_window_command",
+    ] {
         assert!(events.contains(&event.to_string()), "{events:?}");
     }
     let mut log = String::new();
@@ -1467,17 +2031,65 @@ class Broken(sublime_plugin.ViewEventListener):
         host.query(name, view, &args).unwrap();
         next(host, &mut log)
     };
-    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["my.ctx", "equal", 7, false])), PluginMessage::Answer(json!(true)));
-    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["my.ctx", "not_equal", 7, false])), PluginMessage::Answer(json!(false)));
-    assert_eq!(ask(&mut host, "on_query_context", Some(7), json!(["other", "equal", 7, false])), PluginMessage::Answer(Value::Null));
     assert_eq!(
-        ask(&mut host, "on_text_command", Some(7), json!(["title_case", null])),
+        ask(
+            &mut host,
+            "on_query_context",
+            Some(7),
+            json!(["my.ctx", "equal", 7, false])
+        ),
+        PluginMessage::Answer(json!(true))
+    );
+    assert_eq!(
+        ask(
+            &mut host,
+            "on_query_context",
+            Some(7),
+            json!(["my.ctx", "not_equal", 7, false])
+        ),
+        PluginMessage::Answer(json!(false))
+    );
+    assert_eq!(
+        ask(
+            &mut host,
+            "on_query_context",
+            Some(7),
+            json!(["other", "equal", 7, false])
+        ),
+        PluginMessage::Answer(Value::Null)
+    );
+    assert_eq!(
+        ask(
+            &mut host,
+            "on_text_command",
+            Some(7),
+            json!(["title_case", null])
+        ),
         PluginMessage::Answer(json!(["upper_case", {"from": "title_case"}]))
     );
-    assert_eq!(ask(&mut host, "on_text_command", Some(7), json!(["lower_case", null])), PluginMessage::Answer(Value::Null));
-    assert_eq!(ask(&mut host, "on_post_window_command", None, json!(["new_file", null])), PluginMessage::Answer(Value::Null));
+    assert_eq!(
+        ask(
+            &mut host,
+            "on_text_command",
+            Some(7),
+            json!(["lower_case", null])
+        ),
+        PluginMessage::Answer(Value::Null)
+    );
+    assert_eq!(
+        ask(
+            &mut host,
+            "on_post_window_command",
+            None,
+            json!(["new_file", null])
+        ),
+        PluginMessage::Answer(Value::Null)
+    );
     assert!(log.contains("ran new_file None 1"), "{log}");
-    assert!(log.contains("ValueError: ignored"), "a failing listener's traceback goes to the console: {log}");
+    assert!(
+        log.contains("ValueError: ignored"),
+        "a failing listener's traceback goes to the console: {log}"
+    );
 }
 
 #[test]
@@ -1523,10 +2135,14 @@ class BrokenCommand(sublime_plugin.WindowCommand):
         panic!("expected loaded, got {loaded:?}");
     };
     assert!(events.contains(&"command_states".to_string()), "{events:?}");
-    assert!(!events.contains(&"command_input".to_string()), "no command has input(): {events:?}");
+    assert!(
+        !events.contains(&"command_input".to_string()),
+        "no command has input(): {events:?}"
+    );
 
     let mut log = String::new();
-    let asked = json!([[["plain", null], ["fancy", {"on": true}], ["fancy", null], ["broken", null]]]);
+    let asked =
+        json!([[["plain", null], ["fancy", {"on": true}], ["fancy", null], ["broken", null]]]);
     host.query("command_states", None, &asked).unwrap();
     let default = json!({"visible": true, "enabled": true, "checked": false, "description": null, "want_event": false});
     assert_eq!(
@@ -1563,6 +2179,12 @@ class WhoInputHandler(sublime_plugin.ListInputHandler):
         return WordsInputHandler()
 
 class WordsInputHandler(sublime_plugin.TextInputHandler):
+    def initial_text(self):
+        return "words"
+
+    def initial_selection(self):
+        return [sublime.Region(1, 3)]
+
     def placeholder(self):
         return "Words"
 
@@ -1573,27 +2195,64 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
         return;
     };
     let mut view = ViewState::default();
-    command_controller::run_from_palette(&mut editor, &mut view, Command::with_args("greet", json!({ "who": "me" })));
-    assert_eq!(view.take_commands().len(), 1, "with the argument given it just runs");
+    command_controller::run_from_palette(
+        &mut editor,
+        &mut view,
+        Command::with_args("greet", json!({ "who": "me" })),
+    );
+    assert_eq!(
+        view.take_commands().len(),
+        1,
+        "with the argument given it just runs"
+    );
 
     command_controller::run_from_palette(&mut editor, &mut view, Command::new("greet"));
-    assert!(view.take_commands().is_empty(), "{}", editor.state().console);
+    assert!(
+        view.take_commands().is_empty(),
+        "{}",
+        editor.state().console
+    );
     let items = &editor.plugin_quick_panel().expect("the list").items;
     assert_eq!(items[1].caption, "Bob the builder");
     assert_eq!(items[2].caption, "Zoe");
 
     command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(1));
-    assert!(view.input_panel.is_some());
-    assert_eq!(editor.plugin_input_panel().expect("the text field").caption, "Words");
+    assert!(view.input_panel.is_none());
+    assert!(view.quick_panel.is_some());
+    assert_eq!(
+        editor.plugin_input_panel().expect("the text field").caption,
+        "Words"
+    );
+    let input = editor.plugin_input_panel().unwrap();
+    assert_eq!(input.document.text, "words");
+    assert_eq!(
+        input.document.selection(),
+        entities::selection::Selection::new(1, 3)
+    );
+    let field = quick_panel_presenter::present(&editor, &mut view).unwrap();
+    assert!(field.text_input);
+    assert_eq!(field.query, "words");
+    assert_eq!(
+        field.input_selection,
+        Some((input.document.id, input.document.selection_revision(), 1, 3))
+    );
 
     command_controller::change_plugin_input(&mut editor, &mut view, "bad");
     command_controller::finish_plugin_input(&mut editor, &mut view, true);
-    assert!(view.input_panel.is_some(), "asked again after a failed validation");
+    assert!(
+        view.quick_panel.is_some(),
+        "asked again after a failed validation"
+    );
     assert_eq!(editor.plugin_input_panel().unwrap().document.text, "bad");
     command_controller::change_plugin_input(&mut editor, &mut view, "good day");
     command_controller::finish_plugin_input(&mut editor, &mut view, true);
     assert!(view.input_panel.is_none());
-    assert!(editor.state().console.contains("hello bob good day"), "{}", editor.state().console);
+    assert!(view.quick_panel.is_none());
+    assert!(
+        editor.state().console.contains("hello bob good day"),
+        "{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -1611,7 +2270,11 @@ def plugin_loaded():
     };
     editor.set_setting("font_size", json!(99));
     editor.poll_plugins(&mut |_, _| {});
-    assert!(editor.state().console.contains("font 99"), "{}", editor.state().console);
+    assert!(
+        editor.state().console.contains("font 99"),
+        "{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -1639,10 +2302,17 @@ fn an_interpreter_older_than_python_3_8_is_reported() {
 /// beside it (Windows, portable archives), in the macOS app's `Resources`, in `lib` on Linux.
 #[test]
 fn the_bundled_python_is_found_next_to_the_executable() {
-    let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
+    let program = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "bin/python3"
+    };
     for (executable, python) in [
         ("codelibre_text", "python"),
-        ("CodeLibre Text.app/Contents/MacOS/codelibre_text", "CodeLibre Text.app/Contents/Resources/python"),
+        (
+            "CodeLibre Text.app/Contents/MacOS/codelibre_text",
+            "CodeLibre Text.app/Contents/Resources/python",
+        ),
         ("usr/bin/codelibre_text", "usr/lib/codelibre-text/python"),
         (
             "target/debug/build/codelibre_text/hash/out/python_plugin_host",
@@ -1657,7 +2327,10 @@ fn the_bundled_python_is_found_next_to_the_executable() {
         fs::create_dir_all(python.parent().unwrap()).unwrap();
         fs::write(&python, "").unwrap();
         let found = bundled_interpreter(&executable).expect("bundled python");
-        assert_eq!(fs::canonicalize(found).unwrap(), fs::canonicalize(&python).unwrap());
+        assert_eq!(
+            fs::canonicalize(found).unwrap(),
+            fs::canonicalize(&python).unwrap()
+        );
     }
 }
 
@@ -1681,13 +2354,22 @@ class Watch(sublime_plugin.TextChangeListener):
     let PluginMessage::Loaded { events, .. } = loaded else {
         panic!("expected loaded, got {loaded:?}");
     };
-    assert!(events.contains(&"on_text_changed".to_string()), "{events:?}");
+    assert!(
+        events.contains(&"on_text_changed".to_string()),
+        "{events:?}"
+    );
     let mut log = String::new();
     let changes = json!([[{ "a": [5, 1, 2], "b": [6, 1, 3], "text": "é" }]]);
     host.query("on_text_changed", Some(7), &changes).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Answer(Value::Null));
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Answer(Value::Null)
+    );
     host.event("on_revert", 7).unwrap();
-    assert_eq!(next(&mut host, &mut log), PluginMessage::Done { error: None });
+    assert_eq!(
+        next(&mut host, &mut log),
+        PluginMessage::Done { error: None }
+    );
     assert_eq!(log, "changed 5 1 6 é 2 7\nreverted\n");
 }
 
@@ -1707,7 +2389,8 @@ class PickCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "pick", &Value::Null, None)
+        .unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
     assert_eq!(args[1], json!([["one", [], "note", "f", true]]));
     assert_eq!(args[2], json!(2));
@@ -1734,7 +2417,8 @@ class PickCommand(sublime_plugin.WindowCommand):
         return;
     };
     let mut log = String::new();
-    host.run(PluginCommandKind::Window, "pick", &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Window, "pick", &Value::Null, None)
+        .unwrap();
     let args = expect_call(&mut host, &mut log, "window_show_quick_panel");
     assert_eq!(
         args[1],
@@ -1765,7 +2449,14 @@ fn a_build_from_a_package_runs_for_real_and_its_error_opens_the_file() {
         "shell_cmd": "echo compiling && echo $file_name:2: boom && exit 1",
         "file_regex": "^(\\S+):(\\d+):(\\d*) (.*?)\\s*$",
     }"#;
-    fs::write(dir.path().join("Packages").join("MyPkg").join("Echo.sublime-build"), build).unwrap();
+    fs::write(
+        dir.path()
+            .join("Packages")
+            .join("MyPkg")
+            .join("Echo.sublime-build"),
+        build,
+    )
+    .unwrap();
     let file = dir.path().join("script.py");
     fs::write(&file, "one\ntwo\n").unwrap();
     assert!(editor.open_file(&file));
@@ -1779,8 +2470,16 @@ fn a_build_from_a_package_runs_for_real_and_its_error_opens_the_file() {
         editor.poll_builds();
         std::thread::sleep(Duration::from_millis(10));
     }
-    let output = editor.shown_output_panel().expect("the results").document.text.clone();
-    assert!(output.starts_with("compiling") && output.contains("\nscript.py:2: boom"), "{output}");
+    let output = editor
+        .shown_output_panel()
+        .expect("the results")
+        .document
+        .text
+        .clone();
+    assert!(
+        output.starts_with("compiling") && output.contains("\nscript.py:2: boom"),
+        "{output}"
+    );
     assert!(output.contains("with exit code 1]"), "{output}");
     assert_eq!(editor_status(&editor), "Build finished with 1 error");
 
@@ -1809,9 +2508,16 @@ class RenameCommand(sublime_plugin.WindowCommand):
     };
     let mut view = ViewState::default();
     command_controller::run(&mut editor, &mut view, &Command::new("rename"));
-    assert!(editor.state().console.contains("panel report.txt 1 input"), "{}", editor.state().console);
+    assert!(
+        editor.state().console.contains("panel report.txt 1 input"),
+        "{}",
+        editor.state().console
+    );
     let document = &editor.plugin_input_panel().expect("the panel").document;
-    assert_eq!(document.selection(), entities::selection::Selection::new(0, 6));
+    assert_eq!(
+        document.selection(),
+        entities::selection::Selection::new(0, 6)
+    );
 }
 
 #[test]
@@ -1828,8 +2534,19 @@ class ExpandCommand(sublime_plugin.WindowCommand):
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
-    command_controller::run(&mut editor, &mut ViewState::default(), &Command::new("expand"));
-    assert!(editor.state().console.contains("{'cmd': ['x', 1], 'b': 'x!'}"), "{}", editor.state().console);
+    command_controller::run(
+        &mut editor,
+        &mut ViewState::default(),
+        &Command::new("expand"),
+    );
+    assert!(
+        editor
+            .state()
+            .console
+            .contains("{'cmd': ['x', 1], 'b': 'x!'}"),
+        "{}",
+        editor.state().console
+    );
 }
 
 #[test]
@@ -1861,8 +2578,12 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
     let mut view = ViewState::default();
     command_controller::run_from_palette(&mut editor, &mut view, Command::new("ask"));
     command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
-    assert!(view.input_panel.is_some());
-    assert!(!view.focus_editor, "the text would take the keys typed for the panel");
+    assert!(view.input_panel.is_none());
+    assert!(view.quick_panel.is_some());
+    assert!(
+        !view.focus_editor,
+        "the text would take the keys typed for the panel"
+    );
 }
 
 #[test]
@@ -1883,6 +2604,13 @@ class GreetCommand(sublime_plugin.WindowCommand):
         return "Greet"
 
 class WhoInputHandler(sublime_plugin.ListInputHandler):
+    def want_event(self):
+        return True
+
+    def validate(self, value, event):
+        print("list event", event)
+        return True
+
     def list_items(self):
         return [("Ana", "ana"), ("Bob", "bob")]
 
@@ -1911,28 +2639,95 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
     };
     let mut view = ViewState::default();
     command_controller::run_from_palette(&mut editor, &mut view, Command::new("greet"));
-    let list = editor.plugin_quick_panel().expect("the list").input.clone().expect("asked by an input handler");
+    let list = editor
+        .plugin_quick_panel()
+        .expect("the list")
+        .input
+        .clone()
+        .expect("asked by an input handler");
     assert_eq!(list.breadcrumb, ["Greet"], "{}", editor.state().console);
     assert!(list.can_go_back);
-    let preview: String = list.preview.iter().flatten().map(|span| span.text.as_str()).collect();
-    assert_eq!(preview, "ana will be greeted", "the first item is highlighted: {}", editor.state().console);
+    let preview: String = list
+        .preview
+        .iter()
+        .flatten()
+        .map(|span| span.text.as_str())
+        .collect();
+    assert_eq!(
+        preview,
+        "ana will be greeted",
+        "the first item is highlighted: {}",
+        editor.state().console
+    );
 
-    command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(1));
-    let field = editor.plugin_input_panel().expect("the text field").input.clone().unwrap();
-    assert_eq!(field.breadcrumb, ["Greet", "BOB"], "the list's description of the answer");
-    assert_eq!(field.preview[0][0].text, "0 words", "the initial text's preview");
+    command_controller::answer_plugin_quick_panel_with_event(
+        &mut editor,
+        &mut view,
+        Some(1),
+        json!({"modifier_keys": {"ctrl": true}}),
+    );
+    assert!(
+        editor
+            .state()
+            .console
+            .contains("list event {'modifier_keys': {'ctrl': True}}"),
+        "{}",
+        editor.state().console
+    );
+    let field = editor
+        .plugin_input_panel()
+        .expect("the text field")
+        .input
+        .clone()
+        .unwrap();
+    assert_eq!(
+        field.breadcrumb,
+        ["Greet", "BOB"],
+        "the list's description of the answer"
+    );
+    assert_eq!(
+        field.preview[0][0].text, "0 words",
+        "the initial text's preview"
+    );
 
     // Backspace in the empty field: the list again, without the answer in the breadcrumb.
     command_controller::go_back_in_plugin_panel(&mut editor, &mut view);
     assert!(view.input_panel.is_none());
-    assert_eq!(editor.plugin_quick_panel().expect("the list again").input.as_ref().unwrap().breadcrumb, ["Greet"]);
+    assert_eq!(
+        editor
+            .plugin_quick_panel()
+            .expect("the list again")
+            .input
+            .as_ref()
+            .unwrap()
+            .breadcrumb,
+        ["Greet"]
+    );
 
     command_controller::answer_plugin_quick_panel(&mut editor, &mut view, Some(0));
     command_controller::change_plugin_input(&mut editor, &mut view, "good day");
-    assert_eq!(editor.plugin_input_panel().unwrap().input.as_ref().unwrap().preview[0][0].text, "2 words");
-    command_controller::finish_plugin_input(&mut editor, &mut view, true);
+    assert_eq!(
+        editor
+            .plugin_input_panel()
+            .unwrap()
+            .input
+            .as_ref()
+            .unwrap()
+            .preview[0][0]
+            .text,
+        "2 words"
+    );
+    command_controller::finish_plugin_input_with_event(
+        &mut editor,
+        &mut view,
+        true,
+        json!({"modifier_keys": {"shift": true}}),
+    );
     let console = &editor.state().console;
-    assert!(console.contains("validate good day {'modifier_keys': {}}"), "want_event: {console}");
+    assert!(
+        console.contains("validate good day {'modifier_keys': {'shift': True}}"),
+        "want_event: {console}"
+    );
     assert!(console.contains("hello ana good day"), "{console}");
 }
 
@@ -1958,14 +2753,26 @@ class WordsInputHandler(sublime_plugin.TextInputHandler):
     };
     let mut view = ViewState::default();
     command_controller::run_from_palette(&mut editor, &mut view, Command::new("ask"));
-    assert!(view.input_panel.is_some(), "{}", editor.state().console);
+    assert!(view.input_panel.is_none(), "{}", editor.state().console);
+    assert_eq!(
+        view.quick_panel.as_ref().map(|p| p.kind),
+        Some(use_cases::search::SearchKind::PluginItems)
+    );
     command_controller::go_back_in_plugin_panel(&mut editor, &mut view);
     assert!(view.input_panel.is_none());
     for command in view.take_commands() {
         command_controller::run(&mut editor, &mut view, &command);
     }
-    assert_eq!(view.quick_panel.as_ref().map(|p| p.kind), Some(use_cases::search::SearchKind::Commands), "the palette");
-    assert!(editor.state().console.contains("cancelled"), "{}", editor.state().console);
+    assert_eq!(
+        view.quick_panel.as_ref().map(|p| p.kind),
+        Some(use_cases::search::SearchKind::Commands),
+        "the palette"
+    );
+    assert!(
+        editor.state().console.contains("cancelled"),
+        "{}",
+        editor.state().console
+    );
 }
 
 /// A plugin of package `name` that says when it loads and unloads, and counts its runs.
@@ -1992,12 +2799,19 @@ class {name}CountCommand(sublime_plugin.ApplicationCommand):
 }
 
 /// Loads `names` from `dir/Packages` and returns the commands and what the plugins printed.
-fn load_packages(host: &mut PythonPluginHost, dir: &Path, names: &[&str]) -> (bool, Vec<String>, String) {
+fn load_packages(
+    host: &mut PythonPluginHost,
+    dir: &Path,
+    names: &[&str],
+) -> (bool, Vec<String>, String) {
     let started = host
         .load(&PluginLoad {
             packages: names
                 .iter()
-                .map(|name| PluginPackage { name: (*name).into(), dirs: vec![dir.join("Packages").join(name)] })
+                .map(|name| PluginPackage {
+                    name: (*name).into(),
+                    dirs: vec![dir.join("Packages").join(name)],
+                })
                 .collect(),
             dependencies: Vec::new(),
             packages_path: dir.join("Packages"),
@@ -2007,16 +2821,24 @@ fn load_packages(host: &mut PythonPluginHost, dir: &Path, names: &[&str]) -> (bo
         })
         .unwrap();
     let mut log = String::new();
-    let PluginMessage::Loaded { commands, errors, .. } = next(host, &mut log) else {
+    let PluginMessage::Loaded {
+        commands, errors, ..
+    } = next(host, &mut log)
+    else {
         panic!("expected Loaded; console:\n{log}");
     };
     assert!(errors.is_empty(), "{errors:?}");
-    (started, commands.into_iter().map(|(name, _)| name).collect(), log)
+    (
+        started,
+        commands.into_iter().map(|(name, _)| name).collect(),
+        log,
+    )
 }
 
 fn run_and_log(host: &mut PythonPluginHost, command: &str) -> String {
     let mut log = String::new();
-    host.run(PluginCommandKind::Application, command, &Value::Null, None).unwrap();
+    host.run(PluginCommandKind::Application, command, &Value::Null, None)
+        .unwrap();
     assert_eq!(next(host, &mut log), PluginMessage::Done { error: None });
     log
 }
@@ -2044,12 +2866,20 @@ fn reloading_loads_only_the_packages_that_changed() {
     // One package changed, one was added: the host goes on, the unchanged package is not touched.
     write("Changed", 22);
     write("Added", 1);
-    let (started, commands, log) = load_packages(&mut host, dir.path(), &["Added", "Changed", "Kept"]);
+    let (started, commands, log) =
+        load_packages(&mut host, dir.path(), &["Added", "Changed", "Kept"]);
     assert!(!started, "the host kept running");
     assert_eq!(commands, vec!["added_count", "changed_count", "kept_count"]);
     assert_eq!(log, "unloaded Changed\nloaded Added 1\nloaded Changed 22\n");
-    assert_eq!(run_and_log(&mut host, "kept_count"), "Kept 1 ran 2\n", "its module state is kept");
-    assert_eq!(run_and_log(&mut host, "changed_count"), "Changed 22 ran 1\n");
+    assert_eq!(
+        run_and_log(&mut host, "kept_count"),
+        "Kept 1 ran 2\n",
+        "its module state is kept"
+    );
+    assert_eq!(
+        run_and_log(&mut host, "changed_count"),
+        "Changed 22 ran 1\n"
+    );
 
     // A package left out (removed, or in `ignored_packages`) is unloaded and its commands go.
     let (_, commands, log) = load_packages(&mut host, dir.path(), &["Changed", "Kept"]);
@@ -2082,13 +2912,24 @@ class SplitCommand(sublime_plugin.WindowCommand):
     let Some(mut editor) = editor_with(dir.path(), plugin) else {
         return;
     };
-    command_controller::run(&mut editor, &mut ViewState::default(), &Command::new("split"));
+    command_controller::run(
+        &mut editor,
+        &mut ViewState::default(),
+        &Command::new("split"),
+    );
     let console = &editor.state().console;
     assert!(console.contains("groups 2 1 (1, 0) 1"), "{console}");
     assert!(console.contains("in group 0 True"), "{console}");
     assert!(console.contains("active True 0"), "{console}");
-    assert!(console.contains("empty [] None [[0, 0, 1, 1], [1, 0, 2, 1]]"), "{console}");
-    assert_eq!(editor.active_group(), 1, "the moved view took the focus along");
+    assert!(
+        console.contains("empty [] None [[0, 0, 1, 1], [1, 0, 2, 1]]"),
+        "{console}"
+    );
+    assert_eq!(
+        editor.active_group(),
+        1,
+        "the moved view took the focus along"
+    );
 }
 
 /// Typing is a command for the plugins: `on_text_command` sees `insert`, may replace the
@@ -2120,16 +2961,128 @@ class TypingListener(sublime_plugin.EventListener):
 
     // The listener replaces the typed character with a command of its own.
     let typed = Command::with_args("insert", json!({ "characters": "(" }));
-    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, interface_adapters::view_state::WidgetEdit::Insert("(".into())));
+    assert!(command_controller::hooked_widget_input(
+        &mut editor,
+        &mut view,
+        typed,
+        interface_adapters::view_state::WidgetEdit::Insert("(".into())
+    ));
     assert_eq!(editor.active_document().unwrap().text, "()");
-    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after pair");
+    assert_eq!(
+        editor
+            .state()
+            .status
+            .as_ref()
+            .map(|s| s.text.clone())
+            .unwrap_or_default(),
+        "after pair"
+    );
 
     // Nobody replaces this one: the widget types it, and the listener hears the end afterwards.
     let typed = Command::with_args("insert", json!({ "characters": "x" }));
     let replay = interface_adapters::view_state::WidgetEdit::Insert("x".into());
-    assert!(command_controller::hooked_widget_input(&mut editor, &mut view, typed, replay.clone()));
-    assert_eq!(view.take_requests(), [interface_adapters::view_state::ViewRequest::WidgetEdit(replay)]);
+    assert!(command_controller::hooked_widget_input(
+        &mut editor,
+        &mut view,
+        typed,
+        replay.clone()
+    ));
+    assert_eq!(
+        view.take_requests(),
+        [interface_adapters::view_state::ViewRequest::WidgetEdit(
+            replay
+        )]
+    );
     command_controller::poll_plugins(&mut editor, &mut view);
     command_controller::poll_plugins(&mut editor, &mut view);
-    assert_eq!(editor.state().status.as_ref().map(|s| s.text.clone()).unwrap_or_default(), "after insert");
+    assert_eq!(
+        editor
+            .state()
+            .status
+            .as_ref()
+            .map(|s| s.text.clone())
+            .unwrap_or_default(),
+        "after insert"
+    );
+}
+
+/// Phase A's stand-ins, now real: sheets of each kind, the view's geometry, `show_popup_menu`.
+#[test]
+fn sheets_geometry_and_popup_menus_reach_the_editor() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("logo.png");
+    fs::write(&image, [0x89, b'P', b'N', b'G', 0]).unwrap();
+    let plugin = r#"
+import json
+import sublime
+import sublime_plugin
+
+class ProbeSheetsCommand(sublime_plugin.WindowCommand):
+    def run(self, image):
+        w = self.window
+        w.active_view().run_command("insert", {"characters": "ab\tc\nd"})
+        w.open_file(image)
+        html = w.new_html_sheet("Notes", "<b>x</b>")
+        sheets = w.sheets()
+        text = sheets[0].view()
+        out = {
+            "kinds": [type(s).__name__ for s in sheets],
+            "views": len(w.views()),
+            "image_view": sheets[1].view() is None,
+            "image_name": sheets[1].file_name().endswith("logo.png"),
+            "html": html == sheets[2] and html.view() is None,
+            "index": w.get_sheet_index(sheets[1]),
+            "layout": list(text.text_to_layout(3)),
+            "back": text.layout_to_text(text.text_to_layout(3)),
+            "window": text.window_to_text(text.text_to_window(5)),
+        }
+        text.set_viewport_position((0, 32))
+        out["viewport"] = list(text.viewport_position())
+        text.show_popup_menu(["One", "Two"], lambda i: sublime.status_message("chosen %d" % i))
+        sublime.status_message(json.dumps(out))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args(
+            "probe_sheets",
+            serde_json::json!({ "image": image.display().to_string() }),
+        ),
+    );
+    let status = |editor: &Editor| {
+        editor
+            .state()
+            .status
+            .as_ref()
+            .map(|s| s.text.clone())
+            .unwrap_or_default()
+    };
+    let out: serde_json::Value = serde_json::from_str(&status(&editor))
+        .unwrap_or_else(|_| panic!("{}\nconsole:\n{}", status(&editor), editor.state().console));
+    assert_eq!(
+        out,
+        serde_json::json!({
+            "kinds": ["TextSheet", "ImageSheet", "HtmlSheet"],
+            "views": 1,
+            "image_view": true,
+            "image_name": true,
+            "html": true,
+            "index": [0, 1],
+            // A tab is four columns, in the 8 × 16 the view has before it draws.
+            "layout": [48.0, 0.0],
+            "back": 3,
+            "window": 5,
+            "viewport": [0.0, 32.0],
+        })
+    );
+    assert_eq!(
+        editor.plugin_popup_menu().map(|m| m.items.clone()),
+        Some(vec!["One".to_string(), "Two".to_string()])
+    );
+    command_controller::choose_plugin_popup_menu(&mut editor, &mut view, Some(1));
+    assert_eq!(status(&editor), "chosen 1", "{}", editor.state().console);
 }

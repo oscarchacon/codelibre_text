@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use entities::document::DocumentId;
+use entities::find::FindOptions;
+use entities::find_in_files::{FileHits, PathFilter};
 use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
@@ -44,9 +46,20 @@ pub struct ArchiveFolder {
 impl PackagePaths {
     /// The folders with one folder per package, in load order: what comes later wins.
     pub fn roots(&self, include_sublime: bool) -> Vec<PathBuf> {
-        let unpacked = self.archive_folders.iter().filter(|f| include_sublime || !f.sublime).map(|f| f.unpacked.clone());
-        let sublime = self.sublime_packages.iter().filter(|_| include_sublime).cloned();
-        unpacked.chain(sublime).chain([self.packages.clone()]).collect()
+        let unpacked = self
+            .archive_folders
+            .iter()
+            .filter(|f| include_sublime || !f.sublime)
+            .map(|f| f.unpacked.clone());
+        let sublime = self
+            .sublime_packages
+            .iter()
+            .filter(|_| include_sublime)
+            .cloned();
+        unpacked
+            .chain(sublime)
+            .chain([self.packages.clone()])
+            .collect()
     }
 
     pub fn user_dir(&self) -> PathBuf {
@@ -132,8 +145,15 @@ pub enum MessageLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageButtons {
     Ok,
-    OkCancel { ok: String, cancel: String },
-    YesNoCancel { yes: String, no: String, cancel: String },
+    OkCancel {
+        ok: String,
+        cancel: String,
+    },
+    YesNoCancel {
+        yes: String,
+        no: String,
+        cancel: String,
+    },
 }
 
 /// The button the user pressed: `Ok` is also "Yes"; closing the dialog is `Cancel`.
@@ -166,7 +186,12 @@ pub trait DialogGateway {
     fn pick_files(&self, start_dir: Option<&Path>, filters: &[FileFilter]) -> Vec<PathBuf>;
     fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf>;
     fn pick_folders(&self, start_dir: Option<&Path>) -> Vec<PathBuf>;
-    fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str, filters: &[FileFilter]) -> Option<PathBuf>;
+    fn pick_save_path(
+        &self,
+        start_dir: Option<&Path>,
+        file_name: &str,
+        filters: &[FileFilter],
+    ) -> Option<PathBuf>;
     /// Shows a message and waits for the user's answer.
     fn show_message(&self, dialog: &MessageDialog) -> MessageAnswer;
 }
@@ -209,23 +234,41 @@ pub trait ResourceGateway {
     fn paths(&self) -> &PackagePaths;
     /// All settings layers. Problems are appended to `errors`.
     fn load_settings(&self, errors: &mut Vec<String>) -> SettingsLayers;
-    fn load_ui_resources(&self, include_sublime_packages: bool, errors: &mut Vec<String>) -> UiResources;
+    fn load_ui_resources(
+        &self,
+        include_sublime_packages: bool,
+        errors: &mut Vec<String>,
+    ) -> UiResources;
     /// The user's `Preferences.sublime-settings` as a JSON object.
     fn read_user_settings(&self) -> Map<String, Value>;
     fn write_user_settings(&self, values: &Map<String, Value>) -> Result<(), String>;
     /// Any other settings file (e.g. a plugin's `Foo.sublime-settings`), merged from every
     /// package in load order (`User` last). Problems are appended to `errors`.
-    fn load_settings_file(&self, file_name: &str, include_sublime_packages: bool, errors: &mut Vec<String>) -> Map<String, Value>;
+    fn load_settings_file(
+        &self,
+        file_name: &str,
+        include_sublime_packages: bool,
+        errors: &mut Vec<String>,
+    ) -> Map<String, Value>;
     /// The `User` package's copy of a settings file (what `save_settings` changes).
     fn read_user_settings_file(&self, file_name: &str) -> Map<String, Value>;
-    fn write_user_settings_file(&self, file_name: &str, values: &Map<String, Value>) -> Result<(), String>;
+    fn write_user_settings_file(
+        &self,
+        file_name: &str,
+        values: &Map<String, Value>,
+    ) -> Result<(), String>;
     /// Contents of a built-in default resource (e.g. `Preferences.sublime-settings`).
     fn default_resource(&self, file_name: &str) -> Option<String>;
     /// Interface languages: the built-in ones plus those of `Localization/<language>.po` files in packages.
     fn languages(&self, include_sublime_packages: bool) -> Vec<Language>;
     /// Translations into `language`: the built-in ones, then every package's in load order (`User`
     /// last), later ones replacing earlier ones. Problems are appended to `errors`.
-    fn load_translations(&self, language: &str, include_sublime_packages: bool, errors: &mut Vec<String>) -> Catalog;
+    fn load_translations(
+        &self,
+        language: &str,
+        include_sublime_packages: bool,
+        errors: &mut Vec<String>,
+    ) -> Catalog;
     /// The operating system's language (e.g. `es-CL`), used when the `language` setting is `auto`.
     fn system_language(&self) -> Option<String>;
     /// Every package file whose name matches `pattern` (`*` and `?` wildcards), as resource names
@@ -244,10 +287,18 @@ pub trait ResourceGateway {
     /// one failed, which loading reports).
     fn poll_unpacking(&self) -> Option<bool>;
     /// A resource read as Sublime's relaxed JSON (e.g. a `.sublime-build`).
-    fn load_json_resource(&self, name: &str, include_sublime_packages: bool) -> Result<Value, String>;
+    fn load_json_resource(
+        &self,
+        name: &str,
+        include_sublime_packages: bool,
+    ) -> Result<Value, String>;
     /// The packages' `.tmPreferences` (TextMate metadata: `shellVariables`, symbol lists…), in
     /// load order. Problems are appended to `errors`.
-    fn load_meta_preferences(&self, include_sublime_packages: bool, errors: &mut Vec<String>) -> Vec<MetaPreference>;
+    fn load_meta_preferences(
+        &self,
+        include_sublime_packages: bool,
+        errors: &mut Vec<String>,
+    ) -> Vec<MetaPreference>;
 }
 
 /// A piece of a line and its scope, e.g. `source.python string.quoted.double.python`.
@@ -298,18 +349,42 @@ pub trait SyntaxGateway {
     fn symbols(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Symbol>;
     /// The scopes of line `line` of `text` (lines end after `\n`), in order, covering the whole
     /// line. Ranges are bytes of the line. Nothing for a line past the end.
-    fn line_scopes(&self, document: DocumentId, text: &str, syntax: &str, line: usize) -> Vec<ScopeSpan>;
+    fn line_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+    ) -> Vec<ScopeSpan>;
     /// The scopes of the lines `lines` (as [`line_scopes`](Self::line_scopes) gives each; the range
     /// stops at the last line), from the highlighting cache: nothing is parsed again but what
     /// changed, and only those lines are copied.
-    fn lines_scopes(&self, document: DocumentId, text: &str, syntax: &str, lines: Range<usize>) -> Vec<Vec<ScopeSpan>>;
+    fn lines_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        lines: Range<usize>,
+    ) -> Vec<Vec<ScopeSpan>>;
     /// The scopes of every line (see [`lines_scopes`](Self::lines_scopes)).
-    fn document_scopes(&self, document: DocumentId, text: &str, syntax: &str) -> Vec<Vec<ScopeSpan>> {
+    fn document_scopes(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+    ) -> Vec<Vec<ScopeSpan>> {
         self.lines_scopes(document, text, syntax, 0..usize::MAX)
     }
     /// The parser's contexts at byte `column` of line `line`, outermost first
     /// (`view.context_backtrace`).
-    fn context_backtrace(&self, document: DocumentId, text: &str, syntax: &str, line: usize, column: usize) -> Vec<ContextFrame>;
+    fn context_backtrace(
+        &self,
+        document: DocumentId,
+        text: &str,
+        syntax: &str,
+        line: usize,
+        column: usize,
+    ) -> Vec<ContextFrame>;
     /// Every syntax loaded (`sublime.list_syntaxes()`), hidden ones too.
     fn syntax_infos(&self) -> Vec<SyntaxInfo>;
     /// The document was closed; cached data about it can go.
@@ -393,7 +468,11 @@ pub enum PluginMessage {
     Log(String),
     /// The plugins are loaded: their commands, the events they listen to (e.g. `on_modified`,
     /// `on_load_async`), and a traceback for each plugin that failed.
-    Loaded { commands: Vec<(String, PluginCommandKind)>, events: Vec<String>, errors: Vec<String> },
+    Loaded {
+        commands: Vec<(String, PluginCommandKind)>,
+        events: Vec<String>,
+        errors: Vec<String>,
+    },
     /// A command or event finished; `error` is its traceback if it failed.
     Done { error: Option<String> },
     /// The listeners' answer to a [`query`](PluginHostGateway::query) (`Null` when none answered).
@@ -410,7 +489,13 @@ pub trait PluginHostGateway {
     /// True when the host started, so nothing of the plugins loaded before is left.
     fn load(&mut self, request: &PluginLoad) -> Result<bool, String>;
     /// Asks the host to run a plugin command on a view (text commands) or the window.
-    fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String>;
+    fn run(
+        &mut self,
+        kind: PluginCommandKind,
+        name: &str,
+        args: &Value,
+        view: Option<DocumentId>,
+    ) -> Result<(), String>;
     /// Tells the listeners about a view event (`on_load`, `on_modified`…).
     fn event(&mut self, name: &str, view: DocumentId) -> Result<(), String>;
     /// Answers a panel a plugin opened: callback `id`, which answer (`select`, `highlight`, `done`,
@@ -477,9 +562,51 @@ pub trait DownloadGateway {
 
 /// Background list of the files in the open folders (for Goto Anything).
 pub trait FileIndexGateway {
-    fn rebuild(&mut self, folders: Vec<PathBuf>, folder_excludes: Vec<String>, file_excludes: Vec<String>);
+    fn rebuild(
+        &mut self,
+        folders: Vec<PathBuf>,
+        folder_excludes: Vec<String>,
+        file_excludes: Vec<String>,
+    );
     /// Picks up a finished scan; true if the list changed.
     fn poll(&mut self) -> bool;
     fn files(&self) -> &[PathBuf];
     fn is_indexing(&self) -> bool;
+}
+
+/// What a Find in Files search reads ([`FileSearchGateway::start`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileSearchRequest {
+    /// Folders (searched with their subfolders) and files.
+    pub roots: Vec<PathBuf>,
+    pub filter: PathFilter,
+    /// A valid, non-empty query.
+    pub options: FindOptions,
+    /// Lines shown around each match (`find_in_files_context_lines`).
+    pub context_lines: usize,
+    /// Files bigger than this are skipped (`find_in_files_max_file_size`; 0: no limit).
+    pub max_file_size: u64,
+    /// The text of open files, searched instead of what is on disk.
+    pub open_texts: Vec<(PathBuf, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileSearchEvent {
+    /// How many files will be searched (first, once they are listed).
+    Listed(usize),
+    /// A file with matches, in path order.
+    Found(FileHits),
+    /// A file that could not be read.
+    Failed(PathBuf, String),
+    /// The search ended (not sent after `cancel`).
+    Done,
+}
+
+/// Searches files in the background (Find in Files).
+pub trait FileSearchGateway {
+    /// Starts a search; one still running is cancelled.
+    fn start(&mut self, request: FileSearchRequest);
+    /// What the search found since the last call; never waits.
+    fn poll(&mut self) -> Vec<FileSearchEvent>;
+    fn cancel(&mut self);
 }

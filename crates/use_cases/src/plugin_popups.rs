@@ -29,17 +29,35 @@ impl Editor {
             Some(bytes)
         } else if let Some(name) = src.strip_prefix("res://") {
             let include = self.global_settings().bool("import_sublime_packages", true);
-            self.gateways.resources.load_resource(name.trim_start_matches('/'), include).ok()
+            self.gateways
+                .resources
+                .load_resource(name.trim_start_matches('/'), include)
+                .ok()
         } else if let Some(path) = src.strip_prefix("file://") {
             // `file:///C:/x.png` and `file:///home/x.png`.
-            let path = if path.len() > 3 && path.as_bytes()[2] == b':' { &path[1..] } else { path };
-            self.gateways.file_system.read(std::path::Path::new(path)).ok()
+            let path = if path.len() > 3 && path.as_bytes()[2] == b':' {
+                &path[1..]
+            } else {
+                path
+            };
+            self.gateways
+                .file_system
+                .read(std::path::Path::new(path))
+                .ok()
         } else {
             None
         };
         let bytes = bytes.map(Rc::new);
-        self.state.html_images.borrow_mut().insert(src.to_string(), bytes.clone());
+        self.state
+            .html_images
+            .borrow_mut()
+            .insert(src.to_string(), bytes.clone());
         bytes
+    }
+
+    /// Reads `src` again the next time it shows (an image sheet's file changed).
+    pub(crate) fn forget_html_image(&self, src: &str) {
+        self.state.html_images.borrow_mut().remove(src);
     }
 
     /// The picture of a region set's gutter icon (`add_regions(icon=…)`): a resource,
@@ -56,11 +74,18 @@ impl Editor {
         }
         let stem = icon.strip_suffix(".png").unwrap_or(icon);
         let include = self.global_settings().bool("import_sublime_packages", true);
-        let bytes = [format!("{stem}@2x.png"), format!("{stem}.png"), icon.to_string()]
-            .iter()
-            .find_map(|name| self.gateways.resources.load_resource(name, include).ok())
-            .map(Rc::new);
-        self.state.html_images.borrow_mut().insert(key, bytes.clone());
+        let bytes = [
+            format!("{stem}@2x.png"),
+            format!("{stem}.png"),
+            icon.to_string(),
+        ]
+        .iter()
+        .find_map(|name| self.gateways.resources.load_resource(name, include).ok())
+        .map(Rc::new);
+        self.state
+            .html_images
+            .borrow_mut()
+            .insert(key, bytes.clone());
         bytes
     }
 }
@@ -76,6 +101,76 @@ pub enum HoverZone {
     Text = 1,
     Gutter = 2,
     Margin = 3,
+}
+
+/// A menu a plugin shows (`view.show_popup_menu`): Sublime draws it at the mouse, as a context
+/// menu, and calls `on_select(index)`, or `on_select(-1)` when it is dismissed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginPopupMenu {
+    /// Changes with every menu shown, so the view places a new one at the mouse again.
+    pub serial: u64,
+    pub view: DocumentId,
+    pub items: Vec<String>,
+    callback: Option<u64>,
+}
+
+impl Editor {
+    pub fn plugin_popup_menu(&self) -> Option<&PluginPopupMenu> {
+        self.state.plugins.popup_menu.as_ref()
+    }
+
+    /// `view.show_popup_menu`: replaces a menu already shown (which hears -1).
+    pub(crate) fn show_plugin_popup_menu(
+        &mut self,
+        view: DocumentId,
+        items: Vec<String>,
+        callback: Option<u64>,
+    ) -> Result<(), String> {
+        self.any_document(view).ok_or("the view is closed")?;
+        self.dismiss_plugin_popup_menu();
+        self.state.plugins.next_popup_menu += 1;
+        self.state.plugins.popup_menu = Some(PluginPopupMenu {
+            serial: self.state.plugins.next_popup_menu,
+            view,
+            items,
+            callback,
+        });
+        Ok(())
+    }
+
+    /// An item of the menu was chosen (`None`: the menu was dismissed): its `on_select`.
+    pub fn choose_plugin_popup_menu(
+        &mut self,
+        index: Option<usize>,
+        run_command: &mut CommandRunner,
+    ) {
+        let Some(menu) = self.state.plugins.popup_menu.take() else {
+            return;
+        };
+        let index = index
+            .filter(|&i| i < menu.items.len())
+            .map_or(-1, |i| i as i64);
+        if let Some(callback) = menu.callback {
+            self.plugin_callback(callback, "select", json!([index]), run_command);
+        }
+    }
+
+    /// The menu goes without a choice in the middle of a plugin's call (another menu replaces
+    /// it): its `on_select(-1)` runs at the next [`Editor::poll_plugins`].
+    fn dismiss_plugin_popup_menu(&mut self) {
+        if let Some(callback) = self
+            .state
+            .plugins
+            .popup_menu
+            .take()
+            .and_then(|menu| menu.callback)
+        {
+            self.state
+                .plugins
+                .pending_callbacks
+                .push((callback, "select".into(), json!([-1])));
+        }
+    }
 }
 
 /// A popup a plugin shows (`view.show_popup`).
@@ -117,7 +212,9 @@ impl Editor {
         let doc = self.any_document(view).ok_or("the view is closed")?;
         let len = doc.char_count();
         let location = usize::try_from(location).map_or(doc.selection().head, |l| l.min(len));
-        let selections = std::iter::once(doc.selection()).chain(doc.extra_selections().iter().copied()).collect();
+        let selections = std::iter::once(doc.selection())
+            .chain(doc.extra_selections().iter().copied())
+            .collect();
         self.hide_plugin_popup();
         self.state.plugins.popup = Some(PluginPopup {
             view,
@@ -140,7 +237,11 @@ impl Editor {
     }
 
     pub(crate) fn plugin_popup_visible(&self, view: DocumentId) -> bool {
-        self.state.plugins.popup.as_ref().is_some_and(|p| p.view == view)
+        self.state
+            .plugins
+            .popup
+            .as_ref()
+            .is_some_and(|p| p.view == view)
     }
 
     /// Hides the popup (Esc, the mouse moved away, a plugin's `hide_popup`); its `on_hide` runs
@@ -148,7 +249,10 @@ impl Editor {
     pub fn hide_plugin_popup(&mut self) {
         if let Some(popup) = self.state.plugins.popup.take() {
             if let Some(callback) = popup.callback {
-                self.state.plugins.pending_callbacks.push((callback, "hide".into(), json!([])));
+                self.state
+                    .plugins
+                    .pending_callbacks
+                    .push((callback, "hide".into(), json!([])));
             }
         }
     }
@@ -162,15 +266,31 @@ impl Editor {
     }
 
     /// A link was clicked in a phantom: its `on_navigate(href)`.
-    pub fn navigate_plugin_phantom(&mut self, phantom: u64, href: &str, run_command: &mut CommandRunner) {
+    pub fn navigate_plugin_phantom(
+        &mut self,
+        phantom: u64,
+        href: &str,
+        run_command: &mut CommandRunner,
+    ) {
         if let Some(&callback) = self.state.plugins.phantom_callbacks.get(&phantom) {
             self.plugin_callback(callback, "navigate", json!([href]), run_command);
         }
     }
 
     /// A link was clicked in an annotation of the region set `key`: its `on_navigate(href)`.
-    pub fn navigate_plugin_annotation(&mut self, view: DocumentId, key: &str, href: &str, run_command: &mut CommandRunner) {
-        if let Some(&callback) = self.state.plugins.region_callbacks.get(&(view, key.to_string())) {
+    pub fn navigate_plugin_annotation(
+        &mut self,
+        view: DocumentId,
+        key: &str,
+        href: &str,
+        run_command: &mut CommandRunner,
+    ) {
+        if let Some(&callback) = self
+            .state
+            .plugins
+            .region_callbacks
+            .get(&(view, key.to_string()))
+        {
             self.plugin_callback(callback, "navigate", json!([href]), run_command);
         }
     }
@@ -181,13 +301,17 @@ impl Editor {
             return;
         };
         let active = self.active_document().map(|d| d.id);
-        let in_panel = active != Some(popup.view) && self.any_document(popup.view).is_some() && self.index_of(popup.view).is_none();
+        let in_panel = active != Some(popup.view)
+            && self.any_document(popup.view).is_some()
+            && self.index_of(popup.view).is_none();
         let gone = match self.any_document(popup.view) {
             None => true,
             Some(_) if in_panel => false,
             Some(_) if active != Some(popup.view) => true,
             Some(doc) => {
-                let now: Vec<Selection> = std::iter::once(doc.selection()).chain(doc.extra_selections().iter().copied()).collect();
+                let now: Vec<Selection> = std::iter::once(doc.selection())
+                    .chain(doc.extra_selections().iter().copied())
+                    .collect();
                 popup.flags & KEEP_ON_SELECTION_MODIFIED == 0 && now != popup.selections
             }
         };
@@ -209,7 +333,13 @@ impl Editor {
         self.state.plugins.next_phantom_id += 1;
         let id = self.state.plugins.next_phantom_id;
         let doc = self.any_document_mut(view).ok_or("the view is closed")?;
-        doc.add_phantom(Phantom { id, key: key.to_string(), region, content: content.to_string(), layout });
+        doc.add_phantom(Phantom {
+            id,
+            key: key.to_string(),
+            region,
+            content: content.to_string(),
+            layout,
+        });
         if let Some(callback) = callback {
             self.state.plugins.phantom_callbacks.insert(id, callback);
         }
@@ -217,8 +347,15 @@ impl Editor {
     }
 
     pub(crate) fn erase_plugin_phantoms(&mut self, view: DocumentId, key: &str) {
-        let Some(doc) = self.any_document_mut(view) else { return };
-        let gone: Vec<u64> = doc.phantoms().iter().filter(|p| p.key == key).map(|p| p.id).collect();
+        let Some(doc) = self.any_document_mut(view) else {
+            return;
+        };
+        let gone: Vec<u64> = doc
+            .phantoms()
+            .iter()
+            .filter(|p| p.key == key)
+            .map(|p| p.id)
+            .collect();
         doc.erase_phantoms(key);
         for id in gone {
             self.state.plugins.phantom_callbacks.remove(&id);
@@ -234,8 +371,15 @@ impl Editor {
 
     /// `view.query_phantom`: `[[a, b]]`, or `[]` when it is gone.
     pub(crate) fn query_plugin_phantom(&self, view: DocumentId, id: u64) -> Value {
-        let phantoms = self.any_document(view).map(|d| d.phantoms()).unwrap_or_default();
-        json!(phantoms.iter().filter(|p| p.id == id).map(|p| [p.region.0, p.region.1]).collect::<Vec<_>>())
+        let phantoms = self
+            .any_document(view)
+            .map(|d| d.phantoms())
+            .unwrap_or_default();
+        json!(phantoms
+            .iter()
+            .filter(|p| p.id == id)
+            .map(|p| [p.region.0, p.region.1])
+            .collect::<Vec<_>>())
     }
 
     /// The mouse rests over a view: `on_hover(view, point, hover_zone)`.

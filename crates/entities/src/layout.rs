@@ -59,17 +59,29 @@ impl Layout {
         for row in 0..rows {
             let in_row = (count - row * columns).min(columns);
             for column in 0..in_row {
-                let right = if column + 1 == in_row { columns } else { column + 1 };
+                let right = if column + 1 == in_row {
+                    columns
+                } else {
+                    column + 1
+                };
                 cells.push([column, row, right, row + 1]);
             }
         }
-        Self { cols: even(columns), rows: even(rows), cells }
+        Self {
+            cols: even(columns),
+            rows: even(rows),
+            cells,
+        }
     }
 
     /// Moves the boundary between columns (`vertical`) or rows `index` (1 to len - 2) to
     /// `fraction`, kept between its neighbours.
     pub fn move_boundary(&mut self, vertical: bool, index: usize, fraction: f64) {
-        let boundaries = if vertical { &mut self.cols } else { &mut self.rows };
+        let boundaries = if vertical {
+            &mut self.cols
+        } else {
+            &mut self.rows
+        };
         if index == 0 || index + 1 >= boundaries.len() {
             return;
         }
@@ -87,7 +99,14 @@ impl Layout {
     /// `{"cols": […], "rows": […], "cells": [[x1, y1, x2, y2], …]}`; `None` when it is not a
     /// layout: boundaries that do not go from 0 to 1 in order, cells outside them or empty.
     pub fn from_json(value: &Value) -> Option<Self> {
-        let numbers = |key: &str| -> Option<Vec<f64>> { value.get(key)?.as_array()?.iter().map(Value::as_f64).collect() };
+        let numbers = |key: &str| -> Option<Vec<f64>> {
+            value
+                .get(key)?
+                .as_array()?
+                .iter()
+                .map(Value::as_f64)
+                .collect()
+        };
         let cols = numbers("cols")?;
         let rows = numbers("rows")?;
         let cells = value
@@ -95,7 +114,11 @@ impl Layout {
             .as_array()?
             .iter()
             .map(|cell| {
-                let parts: Vec<usize> = cell.as_array()?.iter().map(|n| n.as_u64().map(|n| n as usize)).collect::<Option<_>>()?;
+                let parts: Vec<usize> = cell
+                    .as_array()?
+                    .iter()
+                    .map(|n| n.as_u64().map(|n| n as usize))
+                    .collect::<Option<_>>()?;
                 <[usize; 4]>::try_from(parts).ok()
             })
             .collect::<Option<Vec<_>>>()?;
@@ -108,14 +131,17 @@ impl Layout {
     }
 
     fn is_valid(&self) -> bool {
-        let boundaries = |b: &[f64]| b.len() >= 2 && b.windows(2).all(|w| w[0] <= w[1]) && b.iter().all(|x| (0.0..=1.0).contains(x));
+        let boundaries = |b: &[f64]| {
+            b.len() >= 2
+                && b.windows(2).all(|w| w[0] <= w[1])
+                && b.iter().all(|x| (0.0..=1.0).contains(x))
+        };
         boundaries(&self.cols)
             && boundaries(&self.rows)
             && !self.cells.is_empty()
-            && self
-                .cells
-                .iter()
-                .all(|&[x1, y1, x2, y2]| x1 < x2 && y1 < y2 && x2 < self.cols.len() && y2 < self.rows.len())
+            && self.cells.iter().all(|&[x1, y1, x2, y2]| {
+                x1 < x2 && y1 < y2 && x2 < self.cols.len() && y2 < self.rows.len()
+            })
     }
 
     /// Where group `group` is, as fractions of the window: `[left, top, right, bottom]`.

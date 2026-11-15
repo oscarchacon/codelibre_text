@@ -3,21 +3,29 @@
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::selection::Selection;
-use entities::text::{line_to_char, selected_text, word_at};
 use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
-use entities::text_commands::{self as tc, Case, CaretMotion, LineOrder, TrimOptions};
+use entities::text::{line_to_char, selected_text, word_at};
+use entities::text_commands::{self as tc, CaretMotion, Case, LineOrder, TrimOptions};
 
 use crate::editor::Editor;
 
 /// The text commands the editor offers. Each one maps to a function in
 /// `entities::text_commands`; this enum is what controllers ask for.
 pub enum TextCommand {
-    ToggleComment { block: bool },
+    ToggleComment {
+        block: bool,
+    },
     DuplicateLine,
-    SwapLine { up: bool },
+    SwapLine {
+        up: bool,
+    },
     DeleteLine,
-    AddLine { before: bool },
-    DeleteToLineEdge { to_end: bool },
+    AddLine {
+        before: bool,
+    },
+    DeleteToLineEdge {
+        to_end: bool,
+    },
     ExpandSelectionToLine,
     ExpandSelection(Expansion),
     SelectWord,
@@ -25,7 +33,10 @@ pub enum TextCommand {
     Unindent,
     /// `whole_file`: with no selection, every line instead of the caret's; `force`: also lines
     /// already indented.
-    Reindent { whole_file: bool, force: bool },
+    Reindent {
+        whole_file: bool,
+        force: bool,
+    },
     /// Tab key: indent lines or insert a tab / spaces.
     InsertTab,
     /// Enter key with `auto_indent`.
@@ -33,9 +44,14 @@ pub enum TextCommand {
     JoinLines,
     ChangeCase(Case),
     Transpose,
-    ConvertIndentation { to_spaces: bool },
+    ConvertIndentation {
+        to_spaces: bool,
+    },
     /// `only_modified`: only lines changed since the last save; `trim_on_caret`: also the caret's line.
-    TrimTrailingWhitespace { only_modified: bool, trim_on_caret: bool },
+    TrimTrailingWhitespace {
+        only_modified: bool,
+        trim_on_caret: bool,
+    },
     ReorderLines(LineOrder),
     Insert(String),
     /// `insert_snippet`'s `contents` (see `text_commands::insert_snippet`).
@@ -55,17 +71,52 @@ pub enum Expansion {
 }
 
 /// Built-in commands that work on any view, also the panels', which are not the active document.
-pub(crate) const VIEW_COMMANDS: &[&str] = &["move", "move_to", "left_delete", "right_delete", "delete_word", "select_all", "insert"];
+pub(crate) const VIEW_COMMANDS: &[&str] = &[
+    "move",
+    "move_to",
+    "left_delete",
+    "right_delete",
+    "delete_word",
+    "select_all",
+    "insert",
+];
 
 /// Built-in commands that only change a view's text and selections: in a panel's view they run
 /// with the panel as the active view for a moment (see `Editor::run_in_panel`). Not those that
 /// open, close or save views, show panels, or go through the text widget (undo, the clipboard).
 pub(crate) const PANEL_TEXT_COMMANDS: &[&str] = &[
-    "toggle_comment", "duplicate_line", "swap_line_up", "swap_line_down", "expand_selection", "indent", "unindent", "reindent",
-    "join_lines", "upper_case", "lower_case", "title_case", "swap_case", "transpose", "expand_tabs", "unexpand_tabs",
-    "trim_trailing_white_space", "sort_lines", "permute_lines", "run_macro_file", "insert_snippet", "goto_line",
-    "find_under_expand", "find_all_under", "select_lines", "split_selection_into_lines", "single_selection", "next_field",
-    "prev_field", "clear_fields", "set_file_type", "set_line_ending",
+    "toggle_comment",
+    "duplicate_line",
+    "swap_line_up",
+    "swap_line_down",
+    "expand_selection",
+    "indent",
+    "unindent",
+    "reindent",
+    "join_lines",
+    "upper_case",
+    "lower_case",
+    "title_case",
+    "swap_case",
+    "transpose",
+    "expand_tabs",
+    "unexpand_tabs",
+    "trim_trailing_white_space",
+    "sort_lines",
+    "permute_lines",
+    "run_macro_file",
+    "insert_snippet",
+    "goto_line",
+    "find_under_expand",
+    "find_all_under",
+    "select_lines",
+    "split_selection_into_lines",
+    "single_selection",
+    "next_field",
+    "prev_field",
+    "clear_fields",
+    "set_file_type",
+    "set_line_ending",
 ];
 
 impl Editor {
@@ -80,10 +131,16 @@ impl Editor {
         }
     }
 
-    pub(crate) fn run_view_command(&mut self, id: DocumentId, command: &Command) -> Result<(), String> {
+    pub(crate) fn run_view_command(
+        &mut self,
+        id: DocumentId,
+        command: &Command,
+    ) -> Result<(), String> {
         let name = command.name.as_str();
         let extend = command.bool_arg("extend", false);
-        let target = command.str_arg(if name == "move" { "by" } else { "to" }).to_string();
+        let target = command
+            .str_arg(if name == "move" { "by" } else { "to" })
+            .to_string();
         let settings = self.settings_of(id);
         let doc = self.any_document_mut(id).ok_or("the view is closed")?;
         match name {
@@ -91,24 +148,35 @@ impl Editor {
             "insert" => {
                 // Typing goes into every selection; Tab follows the indentation settings.
                 let characters = command.str_arg("characters");
-                let insert = if characters == "\t" && settings.bool("translate_tabs_to_spaces", false) {
-                    " ".repeat(settings.usize("tab_size", 4).max(1))
-                } else {
-                    characters.to_string()
-                };
+                let insert =
+                    if characters == "\t" && settings.bool("translate_tabs_to_spaces", false) {
+                        " ".repeat(settings.usize("tab_size", 4).max(1))
+                    } else {
+                        characters.to_string()
+                    };
                 doc.edit_all(|text, selections| tc::replace_selections(text, selections, &insert));
             }
             "left_delete" | "right_delete" => {
-                doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, name == "right_delete"));
+                doc.edit_all(|text, selections| {
+                    tc::delete_at_selections(text, selections, name == "right_delete")
+                });
             }
             "delete_word" => {
                 // Ctrl+Backspace / Ctrl+Delete: `forward` deletes the word after the caret.
                 let forward = command.bool_arg("forward", false);
-                doc.edit_all(|text, selections| tc::delete_word_at_selections(text, selections, forward));
+                doc.edit_all(|text, selections| {
+                    tc::delete_word_at_selections(text, selections, forward)
+                });
             }
             _ => {
                 let (start, end) = doc.visible_range();
-                let shown = doc.text.chars().skip(start).take(end - start).filter(|&c| c == '\n').count();
+                let shown = doc
+                    .text
+                    .chars()
+                    .skip(start)
+                    .take(end - start)
+                    .filter(|&c| c == '\n')
+                    .count();
                 let flag = |key: &str| command.bool_arg(key, false);
                 let how = tc::MoveBy {
                     by: target.clone(),
@@ -127,17 +195,30 @@ impl Editor {
                     },
                     // A page leaves one line of the last one in sight, as Page Down does.
                     page_lines: shown.saturating_sub(1).max(1),
-                    separators: command.args.get("separators").and_then(|v| v.as_str()).map(String::from),
+                    separators: command
+                        .args
+                        .get("separators")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                 };
                 let motion = |text: &str, selection: Selection| match name {
                     "move" => tc::move_by(text, selection, &how),
                     _ => tc::move_to(text, selection, &target, extend),
                 };
                 let primary = motion(&doc.text, doc.selection());
-                let others: Option<Vec<Selection>> = doc.extra_selections().iter().map(|s| motion(&doc.text, *s)).collect();
+                let others: Option<Vec<Selection>> = doc
+                    .extra_selections()
+                    .iter()
+                    .map(|s| motion(&doc.text, *s))
+                    .collect();
                 match (primary, others) {
                     (Some(primary), Some(others)) => doc.set_selections(primary, others),
-                    _ => return Err(self.tr_args("{command} to {target} is not supported", &[("command", &name), ("target", &target)])),
+                    _ => {
+                        return Err(self.tr_args(
+                            "{command} to {target} is not supported",
+                            &[("command", &name), ("target", &target)],
+                        ))
+                    }
                 }
             }
         }
@@ -169,7 +250,9 @@ impl Editor {
             TextCommand::SwapLine { up } => tc::swap_line(text, sel, up),
             TextCommand::DeleteLine => Some(tc::delete_line(text, sel)),
             TextCommand::AddLine { before } => Some(tc::add_line(text, sel, before)),
-            TextCommand::DeleteToLineEdge { to_end } => Some(tc::delete_to_line_edge(text, sel, to_end)),
+            TextCommand::DeleteToLineEdge { to_end } => {
+                Some(tc::delete_to_line_edge(text, sel, to_end))
+            }
             TextCommand::ExpandSelectionToLine => Some(tc::expand_selection_to_line(text, sel)),
             TextCommand::ExpandSelection(to) => Some(match to {
                 Expansion::LineUpward => tc::expand_selection_to_line_upward(text, sel),
@@ -181,17 +264,27 @@ impl Editor {
             TextCommand::SelectWord => Some(word_at(text, sel.head)),
             TextCommand::Indent => Some(tc::indent(text, sel, tab_size, spaces)),
             TextCommand::Unindent => Some(tc::unindent(text, sel, tab_size)),
-            TextCommand::Reindent { whole_file, force } => tc::reindent(text, sel, &syntax, (tab_size, spaces), whole_file, force),
+            TextCommand::Reindent { whole_file, force } => {
+                tc::reindent(text, sel, &syntax, (tab_size, spaces), whole_file, force)
+            }
             TextCommand::InsertTab => Some(tc::insert_tab(text, sel, tab_size, spaces)),
-            TextCommand::NewlineAutoIndent => Some(tc::newline_auto_indent(text, sel, tab_size, spaces)),
+            TextCommand::NewlineAutoIndent => {
+                Some(tc::newline_auto_indent(text, sel, tab_size, spaces))
+            }
             TextCommand::JoinLines => Some(tc::join_lines(text, sel)),
             TextCommand::ChangeCase(case) => Some(tc::change_case(text, sel, case)),
             TextCommand::Transpose => tc::transpose(text, sel),
             TextCommand::ConvertIndentation { to_spaces } => {
                 Some(tc::convert_indentation(text, sel, tab_size, to_spaces))
             }
-            TextCommand::TrimTrailingWhitespace { only_modified, trim_on_caret } => {
-                let options = TrimOptions { only_modified_since: only_modified.then_some(saved.as_str()), trim_on_caret };
+            TextCommand::TrimTrailingWhitespace {
+                only_modified,
+                trim_on_caret,
+            } => {
+                let options = TrimOptions {
+                    only_modified_since: only_modified.then_some(saved.as_str()),
+                    trim_on_caret,
+                };
                 Some(tc::trim_trailing_whitespace_with(text, sel, &options))
             }
             TextCommand::ReorderLines(order) => Some(tc::reorder_lines(text, sel, order)),
@@ -204,9 +297,14 @@ impl Editor {
     pub fn reindent(&mut self, single_line: bool, force: bool) {
         match self.active_document().map(|d| d.syntax.clone()) {
             Some(syntax) if !tc::can_reindent(&syntax) => {
-                self.notify(self.tr_args("No indentation rules for {syntax}", &[("syntax", &syntax)]));
+                self.notify(
+                    self.tr_args("No indentation rules for {syntax}", &[("syntax", &syntax)]),
+                );
             }
-            Some(_) => self.run_text_command(TextCommand::Reindent { whole_file: !single_line, force }),
+            Some(_) => self.run_text_command(TextCommand::Reindent {
+                whole_file: !single_line,
+                force,
+            }),
             None => {}
         }
     }
@@ -259,7 +357,11 @@ impl Editor {
         let primary = doc.selection();
         let mut pieces = tc::split_into_lines(&doc.text, primary);
         // The primary one stays on the line where the caret was.
-        let new_primary = if primary.head < primary.anchor { pieces[0] } else { pieces[pieces.len() - 1] };
+        let new_primary = if primary.head < primary.anchor {
+            pieces[0]
+        } else {
+            pieces[pieces.len() - 1]
+        };
         for &extra in doc.extra_selections() {
             pieces.extend(tc::split_into_lines(&doc.text, extra));
         }
@@ -283,7 +385,9 @@ impl Editor {
         if let Some(doc) = self.active_document_mut() {
             let start = line_to_char(&doc.text, line);
             let start_byte = char_to_byte(&doc.text, start);
-            let length = doc.text[start_byte..line_end(&doc.text, start_byte)].chars().count();
+            let length = doc.text[start_byte..line_end(&doc.text, start_byte)]
+                .chars()
+                .count();
             doc.set_selection(Selection::caret(start + column.min(length)));
         }
     }
@@ -325,7 +429,12 @@ impl Editor {
         let empty_selection = self
             .active_document()
             .is_some_and(|d| d.selection().is_empty() && d.extra_selections().is_empty());
-        empty_selection && self.gateways.clipboard.read_text().is_ok_and(|text| text == line)
+        empty_selection
+            && self
+                .gateways
+                .clipboard
+                .read_text()
+                .is_ok_and(|text| text == line)
     }
 
     /// `paste` of a whole line (see [`Self::pastes_whole_line`]); the caret stays where it was.
@@ -347,11 +456,19 @@ impl Editor {
         let Some(doc) = self.active_document() else {
             return;
         };
-        let selections: Vec<Selection> = doc.selections().into_iter().filter(|s| !s.is_empty()).collect();
+        let selections: Vec<Selection> = doc
+            .selections()
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
         if selections.is_empty() {
             return;
         }
-        let text = selections.iter().map(|&s| selected_text(&doc.text, s)).collect::<Vec<_>>().join("\n");
+        let text = selections
+            .iter()
+            .map(|&s| selected_text(&doc.text, s))
+            .collect::<Vec<_>>()
+            .join("\n");
         if let Err(e) = self.gateways.clipboard.write_text(&text) {
             self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
             return;

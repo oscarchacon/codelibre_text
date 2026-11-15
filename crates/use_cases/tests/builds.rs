@@ -20,11 +20,19 @@ fn python_build() -> &'static str {
 }
 
 fn world() -> World {
-    World::new().with_file("/p/a.py", "print(1)\n").with_file("/p/notes.txt", "x\n").with_resource(PYTHON, python_build())
+    World::new()
+        .with_file("/p/a.py", "print(1)\n")
+        .with_file("/p/notes.txt", "x\n")
+        .with_resource(PYTHON, python_build())
 }
 
 fn panel_text(editor: &Editor) -> String {
-    editor.shown_output_panel().expect("the panel is shown").document.text.clone()
+    editor
+        .shown_output_panel()
+        .expect("the panel is shown")
+        .document
+        .text
+        .clone()
 }
 
 /// What `build` would run for the active file.
@@ -49,7 +57,10 @@ fn a_build_is_chosen_by_the_scope_of_the_file_and_its_variables_expand() {
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
     assert_eq!(planned(&mut editor).args["shell_cmd"], "python \"/p/a.py\"");
-    assert!(world.processes.started.borrow().is_empty(), "planning runs nothing");
+    assert!(
+        world.processes.started.borrow().is_empty(),
+        "planning runs nothing"
+    );
 }
 
 #[test]
@@ -67,8 +78,14 @@ fn file_patterns_and_keyfiles_also_choose_a_build() {
         .with_file("/p/notes.txt", "x")
         .with_file("/q/sub/a.c", "x")
         .with_file("/q/Makefile", "all:")
-        .with_resource("Packages/U/Text.sublime-build", r#"{ "file_patterns": ["*.txt"], "cmd": ["wc"] }"#)
-        .with_resource("Packages/U/Make.sublime-build", r#"{ "keyfiles": ["Makefile"], "cmd": ["make"] }"#);
+        .with_resource(
+            "Packages/U/Text.sublime-build",
+            r#"{ "file_patterns": ["*.txt"], "cmd": ["wc"] }"#,
+        )
+        .with_resource(
+            "Packages/U/Make.sublime-build",
+            r#"{ "keyfiles": ["Makefile"], "cmd": ["make"] }"#,
+        );
     let mut editor = world.editor();
     open(&mut editor, "/p/notes.txt");
     assert_eq!(planned(&mut editor).args["cmd"], json!(["wc"]));
@@ -78,7 +95,10 @@ fn file_patterns_and_keyfiles_also_choose_a_build() {
 
 #[test]
 fn several_builds_for_a_file_are_a_choice_that_stays() {
-    let world = world().with_resource("Packages/U/Other.sublime-build", r#"{ "selector": "source.python", "cmd": ["other"] }"#);
+    let world = world().with_resource(
+        "Packages/U/Other.sublime-build",
+        r#"{ "selector": "source.python", "cmd": ["other"] }"#,
+    );
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
     assert_eq!(editor.plan_build("", ""), BuildPlan::Choose);
@@ -87,12 +107,19 @@ fn several_builds_for_a_file_are_a_choice_that_stays() {
         panic!("the file was given");
     };
     assert_eq!(command.args["cmd"], json!(["other"]));
-    assert_eq!(planned(&mut editor).args["cmd"], json!(["other"]), "remembered");
+    assert_eq!(
+        planned(&mut editor).args["cmd"],
+        json!(["other"]),
+        "remembered"
+    );
 }
 
 #[test]
 fn the_picker_lists_builds_and_variants_for_the_file() {
-    let world = world().with_resource("Packages/U/Web.sublime-build", r#"{ "selector": "text.html", "cmd": ["x"] }"#);
+    let world = world().with_resource(
+        "Packages/U/Web.sublime-build",
+        r#"{ "selector": "text.html", "cmd": ["x"] }"#,
+    );
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
     editor.refresh_build_options();
@@ -128,14 +155,20 @@ fn building_saves_the_named_files_first_unless_told_not_to() {
     let world = world();
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
-    editor.text_for_editing(editor.active_document().unwrap().id).unwrap().insert(0, '#');
+    editor
+        .text_for_editing(editor.active_document().unwrap().id)
+        .unwrap()
+        .insert(0, '#');
     planned(&mut editor);
     assert_eq!(world.file_text("/p/a.py"), "#print(1)\n");
 
     let world = self::world().with_preferences(json!({ "save_all_on_build": false }));
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
-    editor.text_for_editing(editor.active_document().unwrap().id).unwrap().insert(0, '#');
+    editor
+        .text_for_editing(editor.active_document().unwrap().id)
+        .unwrap()
+        .insert(0, '#');
     planned(&mut editor);
     assert_eq!(world.file_text("/p/a.py"), "print(1)\n");
 }
@@ -149,11 +182,19 @@ fn exec_runs_next_to_the_file_and_the_output_reaches_the_panel() {
     {
         let started = world.processes.started.borrow();
         assert_eq!(started[0].command, Shell("python \"/p/a.py\"".into()));
-        assert_eq!(started[0].working_dir.as_deref(), Some(std::path::Path::new("/p")));
+        assert_eq!(
+            started[0].working_dir.as_deref(),
+            Some(std::path::Path::new("/p"))
+        );
     }
     assert!(editor.build_is_running());
 
-    world.processes.events.borrow_mut().extend([Output("hello\r\n".into()), Output("wor".into()), Output("ld\n".into()), Finished(Some(0))]);
+    world.processes.events.borrow_mut().extend([
+        Output("hello\r\n".into()),
+        Output("wor".into()),
+        Output("ld\n".into()),
+        Finished(Some(0)),
+    ]);
     editor.poll_builds();
     let text = panel_text(&editor);
     assert!(text.starts_with("hello\nworld\n\n[Finished in "), "{text}");
@@ -168,10 +209,17 @@ fn a_failed_build_says_what_ran_and_counts_its_errors() {
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
     build(&mut editor);
-    world.processes.events.borrow_mut().extend([Output("File \"a.py\", line 1\n".into()), Finished(Some(2))]);
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .extend([Output("File \"a.py\", line 1\n".into()), Finished(Some(2))]);
     editor.poll_builds();
     let text = panel_text(&editor);
-    assert!(text.contains("with exit code 2]\n[cmd: python \"/p/a.py\"]\n[dir: /p]\n"), "{text}");
+    assert!(
+        text.contains("with exit code 2]\n[cmd: python \"/p/a.py\"]\n[dir: /p]\n"),
+        "{text}"
+    );
     assert_eq!(status(&editor), "Build finished with 1 error");
 }
 
@@ -182,12 +230,20 @@ fn quiet_builds_only_report_failures() {
     let quiet = json!({ "cmd": ["x"], "quiet": true });
     editor.exec(&quiet);
     editor.show_output_panel("exec");
-    world.processes.events.borrow_mut().push_back(Finished(Some(0)));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(Finished(Some(0)));
     editor.poll_builds();
     assert_eq!(panel_text(&editor), "");
 
     editor.exec(&quiet);
-    world.processes.events.borrow_mut().push_back(Finished(Some(1)));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(Finished(Some(1)));
     editor.poll_builds();
     assert!(panel_text(&editor).contains("exit code 1"));
 }
@@ -196,12 +252,17 @@ fn quiet_builds_only_report_failures() {
 fn cmd_can_be_a_program_or_a_shell_line_with_env_and_path() {
     let world = World::new();
     let mut editor = world.editor();
-    editor.exec(&json!({ "cmd": ["a", "b c"], "working_dir": "/w", "env": { "K": "v" }, "path": "/bin" }));
+    editor.exec(
+        &json!({ "cmd": ["a", "b c"], "working_dir": "/w", "env": { "K": "v" }, "path": "/bin" }),
+    );
     editor.exec(&json!({ "cmd": ["a", "b"], "shell": true }));
     editor.exec(&json!({ "cmd": "a b" }));
     let started = world.processes.started.borrow();
     assert_eq!(started[0].command, Program(vec!["a".into(), "b c".into()]));
-    assert_eq!(started[0].working_dir.as_deref(), Some(std::path::Path::new("/w")));
+    assert_eq!(
+        started[0].working_dir.as_deref(),
+        Some(std::path::Path::new("/w"))
+    );
     assert_eq!(started[0].env, [("K".to_string(), "v".to_string())]);
     assert_eq!(started[0].path.as_deref(), Some("/bin"));
     assert_eq!(started[1].command, Shell("a b".into()));
@@ -214,7 +275,10 @@ fn exec_with_nothing_to_run_is_refused() {
     let mut editor = world.editor();
     assert!(!editor.exec(&json!({ "working_dir": "/w" })));
     assert!(world.processes.started.borrow().is_empty());
-    assert_eq!(status(&editor), "Nothing to run: the build has no shell_cmd or cmd");
+    assert_eq!(
+        status(&editor),
+        "Nothing to run: the build has no shell_cmd or cmd"
+    );
 }
 
 #[test]
@@ -224,7 +288,11 @@ fn a_new_build_kills_the_one_running_and_starts_clean() {
     let args = json!({ "cmd": ["x"] });
     editor.exec(&args);
     editor.show_output_panel("exec");
-    world.processes.events.borrow_mut().push_back(Output("old".into()));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(Output("old".into()));
     editor.poll_builds();
     editor.exec(&args);
     assert_eq!(world.processes.kills.get(), 1);
@@ -239,9 +307,17 @@ fn cancelling_kills_the_process_and_says_so() {
     editor.show_output_panel("exec");
     assert!(!editor.exec(&json!({ "kill": true })));
     assert_eq!(world.processes.kills.get(), 1);
-    world.processes.events.borrow_mut().push_back(Finished(None));
+    world
+        .processes
+        .events
+        .borrow_mut()
+        .push_back(Finished(None));
     editor.poll_builds();
-    assert!(panel_text(&editor).ends_with("\n[Cancelled]\n"), "{}", panel_text(&editor));
+    assert!(
+        panel_text(&editor).ends_with("\n[Cancelled]\n"),
+        "{}",
+        panel_text(&editor)
+    );
 }
 
 #[test]
@@ -267,12 +343,23 @@ fn a_process_that_does_not_start_writes_the_error_to_the_panel() {
 #[test]
 fn a_custom_target_gets_the_arguments_and_cancels_as_it_says() {
     let cases: [(&str, Command); 3] = [
-        (r#"{ "target": "mine", "cmd": ["x"], "selector": "source.python" }"#, Command::with_args("mine", json!({ "kill": true }))),
-        (r#"{ "target": "mine", "cancel": "stop_it", "selector": "source.python" }"#, Command::new("stop_it")),
-        (r#"{ "target": "mine", "cancel": { "stop": 1 }, "selector": "source.python" }"#, Command::with_args("mine", json!({ "stop": 1 }))),
+        (
+            r#"{ "target": "mine", "cmd": ["x"], "selector": "source.python" }"#,
+            Command::with_args("mine", json!({ "kill": true })),
+        ),
+        (
+            r#"{ "target": "mine", "cancel": "stop_it", "selector": "source.python" }"#,
+            Command::new("stop_it"),
+        ),
+        (
+            r#"{ "target": "mine", "cancel": { "stop": 1 }, "selector": "source.python" }"#,
+            Command::with_args("mine", json!({ "stop": 1 })),
+        ),
     ];
     for (json, cancel) in cases {
-        let world = World::new().with_file("/p/a.py", "").with_resource("Packages/U/Mine.sublime-build", json);
+        let world = World::new()
+            .with_file("/p/a.py", "")
+            .with_resource("Packages/U/Mine.sublime-build", json);
         let mut editor = world.editor();
         open(&mut editor, "/p/a.py");
         assert_eq!(planned(&mut editor).name, "mine");

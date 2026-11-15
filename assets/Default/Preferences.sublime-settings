@@ -34,6 +34,11 @@
 	// Show line numbers in the gutter
 	"line_numbers": true,
 
+	// Arrows in the gutter to fold the blocks there; with fade_fold_buttons, only those of folded
+	// blocks show unless the mouse is over the gutter
+	"fold_buttons": true,
+	"fade_fold_buttons": true,
+
 	// Highlight the line the caret is on
 	"highlight_line": true,
 
@@ -90,9 +95,22 @@
 	"show_status_bar": true,
 	"show_side_bar": true,
 
-	// Hidden from the side bar and Goto Anything
+	// Hidden from the side bar and Goto Anything, and not searched by Find in Files
 	"folder_exclude_patterns": [".git", ".svn", ".hg", "CVS", "node_modules", "target", "__pycache__"],
 	"file_exclude_patterns": ["*.pyc", "*.pyo", "*.exe", "*.dll", "*.obj", "*.o", "*.a", "*.lib", "*.so", "*.dylib", "*.ncb", "*.sdf", "*.suo", "*.pdb", "*.idb", ".DS_Store"],
+	// Not searched by Find in Files (files with a NUL byte are not either)
+	"binary_file_patterns": ["*.jpg", "*.jpeg", "*.png", "*.gif", "*.ttf", "*.tga", "*.dds", "*.ico", "*.eot", "*.pdf", "*.swf", "*.jar", "*.zip"],
+
+	// Find: the find panel closes after Find All
+	"close_find_after_find_all": true,
+
+	// Find in Files: lines shown around each match, characters kept around
+	// matches in a long line (0: no limit), files skipped above this size in
+	// bytes (0: no limit), and whether files that cannot be read are listed
+	"find_in_files_context_lines": 2,
+	"find_in_files_context_characters": 300,
+	"find_in_files_max_file_size": 104857600,
+	"find_in_files_suppress_errors": false,
 
 	// Also load syntaxes, color schemes, keymaps, menus, command palette
 	// entries and settings from an installed Sublime Text's Packages folder.

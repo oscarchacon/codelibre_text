@@ -25,19 +25,27 @@ impl Editor {
         if self.state.unpacking {
             self.state.loaded_while_unpacking = true;
         } else {
-            self.gateways.resources.unpack_packages(self.unpacks_sublime_packages(), &mut errors);
+            self.gateways
+                .resources
+                .unpack_packages(self.unpacks_sublime_packages(), &mut errors);
         }
         self.state.settings = self.gateways.resources.load_settings(&mut errors);
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
 
-        let resources = self.gateways.resources.load_ui_resources(include_sublime, &mut errors);
+        let resources = self
+            .gateways
+            .resources
+            .load_ui_resources(include_sublime, &mut errors);
         self.state.keymap = resources.keymap;
         self.state.main_menu = resources.main_menu;
         self.state.context_menus = resources.context_menus;
         self.state.palette = resources.palette;
         self.state.completion_sets = None;
         self.gateways.syntaxes.reload(include_sublime, &mut errors);
-        self.state.meta_preferences = self.gateways.resources.load_meta_preferences(include_sublime, &mut errors);
+        self.state.meta_preferences = self
+            .gateways
+            .resources
+            .load_meta_preferences(include_sublime, &mut errors);
         self.load_translations(&mut errors);
         self.record_errors(&errors);
         self.state.load_errors = errors;
@@ -56,7 +64,12 @@ impl Editor {
     /// `import_sublime_packages` as the user set it: the settings of the packages are not
     /// loaded before they are unpacked.
     fn unpacks_sublime_packages(&self) -> bool {
-        let setting = self.gateways.resources.read_user_settings().get("import_sublime_packages").and_then(|v| v.as_bool());
+        let setting = self
+            .gateways
+            .resources
+            .read_user_settings()
+            .get("import_sublime_packages")
+            .and_then(|v| v.as_bool());
         setting.unwrap_or(true)
     }
 
@@ -65,7 +78,10 @@ impl Editor {
     /// the packages load meanwhile from what was unpacked before;
     /// [`Editor::poll_unpacking`] loads them again when it ends, if something changed.
     pub(crate) fn start_unpacking(&mut self) {
-        self.state.unpacking = self.gateways.resources.start_unpacking(self.unpacks_sublime_packages());
+        self.state.unpacking = self
+            .gateways
+            .resources
+            .start_unpacking(self.unpacks_sublime_packages());
     }
 
     /// Picks up the end of the unpacking the startup began (cheap to call every frame), and
@@ -98,7 +114,11 @@ impl Editor {
     /// Our own `Installed Packages` folder (where Package Control puts what it installs).
     fn own_installed_packages(&self) -> Option<PathBuf> {
         let paths = self.gateways.resources.paths();
-        paths.archive_folders.iter().find(|f| !f.sublime && !f.shipped).map(|f| f.archives.clone())
+        paths
+            .archive_folders
+            .iter()
+            .find(|f| !f.sublime && !f.shipped)
+            .map(|f| f.archives.clone())
     }
 
     /// The `.sublime-package` files of our `Installed Packages` with their dates, and the folders of
@@ -106,18 +126,31 @@ impl Editor {
     /// when it installs or upgrades a package it unpacks there, one with `.no-sublime-package`).
     fn installed_packages_stamp(&self) -> FolderStamp {
         let file_system = &self.gateways.file_system;
-        let archives = self.own_installed_packages().map(|folder| file_system.list_dir(&folder)).unwrap_or_default();
+        let archives = self
+            .own_installed_packages()
+            .map(|folder| file_system.list_dir(&folder))
+            .unwrap_or_default();
         let archives = archives
             .into_iter()
-            .filter(|entry| !entry.is_dir && entry.path.extension().is_some_and(|e| e == "sublime-package"))
+            .filter(|entry| {
+                !entry.is_dir
+                    && entry
+                        .path
+                        .extension()
+                        .is_some_and(|e| e == "sublime-package")
+            })
             .map(|entry| {
                 let modified = file_system.modified(&entry.path);
                 (entry.path, modified)
             });
-        let folders = file_system.list_dir(&self.gateways.resources.paths().packages).into_iter().filter(|entry| entry.is_dir).map(|entry| {
-            let modified = file_system.modified(&entry.path.join("package-metadata.json"));
-            (entry.path, modified)
-        });
+        let folders = file_system
+            .list_dir(&self.gateways.resources.paths().packages)
+            .into_iter()
+            .filter(|entry| entry.is_dir)
+            .map(|entry| {
+                let modified = file_system.modified(&entry.path.join("package-metadata.json"));
+                (entry.path, modified)
+            });
         let mut stamp: FolderStamp = archives.chain(folders).collect();
         stamp.sort();
         stamp
@@ -144,7 +177,12 @@ impl Editor {
     /// `Installed Packages`; [`Editor::poll_downloads`] loads it when it arrives.
     pub fn install_package_control(&mut self) {
         let Some(folder) = self.own_installed_packages() else {
-            self.package_control_failed(self.tr("Package Control cannot be installed: there is no Installed Packages folder").to_string());
+            self.package_control_failed(
+                self.tr(
+                    "Package Control cannot be installed: there is no Installed Packages folder",
+                )
+                .to_string(),
+            );
             return;
         };
         let destination = folder.join(PACKAGE_CONTROL_FILE);
@@ -159,14 +197,24 @@ impl Editor {
                 "Package Control will be downloaded from {url} and run as a plugin. Install it?",
                 &[("url", &PACKAGE_CONTROL_URL)],
             ),
-            buttons: MessageButtons::OkCancel { ok: self.tr("Install").to_string(), cancel: self.tr("Cancel").to_string() },
+            buttons: MessageButtons::OkCancel {
+                ok: self.tr("Install").to_string(),
+                cancel: self.tr("Cancel").to_string(),
+            },
         };
         if self.gateways.dialogs.show_message(&dialog) != MessageAnswer::Ok {
             return;
         }
-        match self.gateways.downloads.start(PACKAGE_CONTROL_URL, &destination) {
+        match self
+            .gateways
+            .downloads
+            .start(PACKAGE_CONTROL_URL, &destination)
+        {
             Ok(()) => self.notify(self.tr("Downloading Package Control…").to_string()),
-            Err(error) => self.package_control_failed(self.tr_args("Could not download Package Control: {error}", &[("error", &error)])),
+            Err(error) => self.package_control_failed(self.tr_args(
+                "Could not download Package Control: {error}",
+                &[("error", &error)],
+            )),
         }
     }
 
@@ -186,7 +234,10 @@ impl Editor {
                 }
             }
             Some(Err(error)) => {
-                self.package_control_failed(self.tr_args("Could not download Package Control: {error}", &[("error", &error)]));
+                self.package_control_failed(self.tr_args(
+                    "Could not download Package Control: {error}",
+                    &[("error", &error)],
+                ));
             }
             None => {}
         }
@@ -258,13 +309,20 @@ impl Editor {
         self.record_errors(&errors);
         self.state.load_errors.extend(errors);
         // Files plugins opened are read again, unless they hold changes not saved yet.
-        self.state.plugins.settings_files.retain(|_, file| !file.changes.is_empty());
+        self.state
+            .plugins
+            .settings_files
+            .retain(|_, file| !file.changes.is_empty());
     }
 
     /// `open_file` with a package path, e.g. `${packages}/User/Foo.sublime-settings`. With
     /// `encoded_position` the name may end in `:line` or `:line:column` (one-based).
     pub fn open_package_file(&mut self, file: &str, encoded_position: bool) {
-        let (file, position) = if encoded_position { split_position(file) } else { (file, None) };
+        let (file, position) = if encoded_position {
+            split_position(file)
+        } else {
+            (file, None)
+        };
         let path = self.gateways.resources.paths().expand(file);
         if self.open_file(&path) {
             if let Some((line, column)) = position {
@@ -277,7 +335,8 @@ impl Editor {
     /// `dir`) that exists, the folder opens with it selected.
     pub fn open_package_folder(&mut self, dir: &str, file: &str) {
         let path = self.gateways.resources.paths().expand(dir);
-        let selected = Some(path.join(file)).filter(|f| !file.is_empty() && self.gateways.file_system.exists(f));
+        let selected = Some(path.join(file))
+            .filter(|f| !file.is_empty() && self.gateways.file_system.exists(f));
         match selected {
             Some(file) => self.gateways.shell.select_in_file_manager(&file),
             None => self.gateways.shell.open_in_file_manager(&path),
@@ -292,7 +351,11 @@ impl Editor {
 
 /// `C:\a.txt:12:3` → (`C:\a.txt`, Some((12, 3))); `a.txt:12` → (`a.txt`, Some((12, 1))).
 fn split_position(file: &str) -> (&str, Option<(usize, usize)>) {
-    let number = |s: &str| s.parse::<usize>().ok().filter(|_| s.bytes().all(|b| b.is_ascii_digit()));
+    let number = |s: &str| {
+        s.parse::<usize>()
+            .ok()
+            .filter(|_| s.bytes().all(|b| b.is_ascii_digit()))
+    };
     if let Some((rest, last)) = file.rsplit_once(':') {
         if let Some(last) = number(last) {
             if let Some((name, line)) = rest.rsplit_once(':') {

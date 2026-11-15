@@ -1,13 +1,17 @@
 use entities::command::Command;
-use entities::document::{DocumentId, RegionSet};
+use entities::document::{Document, DocumentId, RegionSet, SheetKind};
+use entities::folding::fold_headers;
 use entities::minihtml;
+use entities::text::line_col;
 use serde_json::{json, Value};
+use use_cases::documents::image_source;
 use use_cases::plugin_popups::{HIDE_ON_MOUSE_MOVE, HIDE_ON_MOUSE_MOVE_AWAY};
 use use_cases::Editor;
 
 use crate::view_models::{
-    AnnotationViewModel, AutoCompleteViewModel, CompletionViewModel, EditorViewModel, HtmlViewModel, PhantomLayout, PhantomViewModel, PopupViewModel,
-    MinimapViewModel, RegionViewModel, Underline,
+    AnnotationViewModel, AutoCompleteViewModel, CompletionViewModel, EditorViewModel,
+    FoldButtonViewModel, HtmlViewModel, MinimapViewModel, PhantomLayout, PhantomViewModel,
+    PopupViewModel, RegionViewModel, SheetViewModel, Underline,
 };
 use crate::view_state::ViewState;
 
@@ -29,7 +33,10 @@ pub fn present_hints(editor: &Editor) -> Vec<String> {
         (Command::new("new_file"), editor.tr("New File")),
         (Command::new("prompt_open_file"), editor.tr("Open File")),
         (Command::new("prompt_open_folder"), editor.tr("Open Folder")),
-        (Command::with_args("show_overlay", json!({ "overlay": "command_palette" })), editor.tr("Command Palette")),
+        (
+            Command::with_args("show_overlay", json!({ "overlay": "command_palette" })),
+            editor.tr("Command Palette"),
+        ),
     ];
     hints
         .iter()
@@ -47,9 +54,17 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<EditorViewMo
 }
 
 /// The document at `index` as the text area of its group should show it.
-pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize) -> Option<EditorViewModel> {
+pub fn present_document(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    index: usize,
+) -> Option<EditorViewModel> {
     let active = index == editor.state().active;
-    let find_matches = if view.find_panel.visible && active { editor.find_matches() } else { Vec::new() };
+    let find_matches = if view.find_panel.visible && active {
+        editor.find_matches()
+    } else {
+        Vec::new()
+    };
     let color_scheme = editor.color_scheme_name();
     let doc = editor.state().documents.get(index)?;
     let settings = editor.settings_of(doc.id);
@@ -62,14 +77,17 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
         && editor.state().pending_close.is_none();
 
     let len = doc.char_count();
-    let popup = editor.plugin_popup().filter(|p| p.view == doc.id).map(|p| PopupViewModel {
-        location: p.location.min(len),
-        lines: minihtml::parse(&p.content),
-        html: present_html(editor, &p.content),
-        max_width: p.max_width,
-        max_height: p.max_height,
-        hide_on_mouse_move_away: p.flags & (HIDE_ON_MOUSE_MOVE | HIDE_ON_MOUSE_MOVE_AWAY) != 0,
-    });
+    let popup = editor
+        .plugin_popup()
+        .filter(|p| p.view == doc.id)
+        .map(|p| PopupViewModel {
+            location: p.location.min(len),
+            lines: minihtml::parse(&p.content),
+            html: present_html(editor, &p.content),
+            max_width: p.max_width,
+            max_height: p.max_height,
+            hide_on_mouse_move_away: p.flags & (HIDE_ON_MOUSE_MOVE | HIDE_ON_MOUSE_MOVE_AWAY) != 0,
+        });
     let mut phantoms: Vec<PhantomViewModel> = doc
         .phantoms()
         .iter()
@@ -81,8 +99,18 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
                 _ => PhantomLayout::Inline,
             };
             let (a, b) = p.region;
-            let point = if layout == PhantomLayout::Inline { a.min(b) } else { a.max(b) };
-            PhantomViewModel { id: p.id, point, lines: minihtml::parse(&p.content), html: present_html(editor, &p.content), layout }
+            let point = if layout == PhantomLayout::Inline {
+                a.min(b)
+            } else {
+                a.max(b)
+            };
+            PhantomViewModel {
+                id: p.id,
+                point,
+                lines: minihtml::parse(&p.content),
+                html: present_html(editor, &p.content),
+                layout,
+            }
         })
         .filter(|p| !p.lines.is_empty() || !p.html.images.is_empty())
         .collect();
@@ -106,8 +134,28 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
         rulers: settings.numbers("rulers"),
         auto_indent: settings.bool("auto_indent", true),
         find_matches,
-        regions: doc.region_sets().iter().filter_map(|set| present_regions(editor, set, len)).collect(),
-        show: doc.show_request().map(|r| (r.point.min(len), r.center, doc.show_revision())),
+        regions: doc
+            .region_sets()
+            .iter()
+            .filter_map(|set| present_regions(editor, set, len))
+            .collect(),
+        show: doc
+            .show_request()
+            .map(|r| (r.point.min(len), r.center, doc.show_revision())),
+        scroll_to: doc
+            .viewport_request()
+            .map(|position| (position, doc.show_revision())),
+        folds: doc
+            .folds()
+            .iter()
+            .map(|&(a, b)| (a.min(len), b.min(len)))
+            .filter(|(a, b)| a < b)
+            .collect(),
+        fold_buttons: settings
+            .bool("fold_buttons", true)
+            .then(|| present_fold_buttons(doc, settings.usize("tab_size", 4).max(1))),
+        fade_fold_buttons: settings.bool("fade_fold_buttons", true),
+        sheet: present_sheet(editor, doc),
         take_focus,
         popup,
         phantoms,
@@ -123,7 +171,11 @@ pub fn present_document(editor: &mut Editor, view: &mut ViewState, index: usize)
 /// At most this many rows of the auto-complete list are shown.
 const MAX_COMPLETIONS: usize = 200;
 
-fn present_auto_complete(editor: &Editor, document: DocumentId, len: usize) -> Option<AutoCompleteViewModel> {
+fn present_auto_complete(
+    editor: &Editor,
+    document: DocumentId,
+    len: usize,
+) -> Option<AutoCompleteViewModel> {
     let list = editor.auto_complete().filter(|l| l.view == document)?;
     let items = list
         .shown
@@ -142,13 +194,36 @@ fn present_auto_complete(editor: &Editor, document: DocumentId, len: usize) -> O
         })
         .collect();
     let selected = list.selected.min(MAX_COMPLETIONS - 1);
-    let details_source = list.shown.get(selected).map(|s| s.completion.details.clone()).unwrap_or_default();
+    let details_source = list
+        .shown
+        .get(selected)
+        .map(|s| s.completion.details.clone())
+        .unwrap_or_default();
     let details = minihtml::parse(&details_source);
     let details_html = present_html(editor, &details_source);
-    Some(AutoCompleteViewModel { location: list.start.min(len), items, selected, details, details_html })
+    Some(AutoCompleteViewModel {
+        location: list.start.min(len),
+        items,
+        selected,
+        details,
+        details_html,
+    })
 }
 
 /// minihtml read into boxes, with the bytes of its images (`<img src>`).
+/// What an HTML or image sheet shows; `None` for a text sheet.
+fn present_sheet(editor: &Editor, doc: &Document) -> Option<SheetViewModel> {
+    match &doc.sheet {
+        SheetKind::Text => None,
+        SheetKind::Html(contents) => Some(SheetViewModel::Html(present_html(editor, contents))),
+        SheetKind::Image => {
+            let src = image_source(doc.path.as_deref()?);
+            let bytes = editor.html_image(&src);
+            Some(SheetViewModel::Image { src, bytes })
+        }
+    }
+}
+
 pub fn present_html(editor: &Editor, html: &str) -> HtmlViewModel {
     let block = minihtml::parse_html(html);
     let mut images: Vec<(String, std::rc::Rc<Vec<u8>>)> = Vec::new();
@@ -167,9 +242,15 @@ pub fn present_html(editor: &Editor, html: &str) -> HtmlViewModel {
 fn image_sources(block: &minihtml::Block, sources: &mut Vec<String>) {
     for content in &block.content {
         match content {
-            minihtml::Content::Line(line) => sources.extend(line.iter().filter_map(|s| s.image.as_ref().map(|i| i.src.clone()))),
+            minihtml::Content::Line(line) => sources.extend(
+                line.iter()
+                    .filter_map(|s| s.image.as_ref().map(|i| i.src.clone())),
+            ),
             minihtml::Content::Block(inner) => image_sources(inner, sources),
-            minihtml::Content::Table(rows) => rows.iter().flatten().for_each(|cell| image_sources(cell, sources)),
+            minihtml::Content::Table(rows) => rows
+                .iter()
+                .flatten()
+                .for_each(|cell| image_sources(cell, sources)),
             minihtml::Content::Rule => {}
         }
     }
@@ -195,7 +276,11 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         .regions
         .iter()
         .zip(&set.annotations)
-        .map(|(&(a, b), html)| AnnotationViewModel { point: a.min(b).min(len), lines: minihtml::parse(html), html: present_html(editor, html) })
+        .map(|(&(a, b), html)| AnnotationViewModel {
+            point: a.min(b).min(len),
+            lines: minihtml::parse(html),
+            html: present_html(editor, html),
+        })
         .filter(|a| !a.lines.is_empty())
         .collect();
     annotations.sort_by_key(|a| a.point);
@@ -220,4 +305,41 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         annotations,
         annotation_color: set.annotation_color.clone(),
     })
+}
+
+/// The gutter's fold arrows on the lines on screen (and a screen's worth around them, for the
+/// next scroll): an open arrow where a block starts, a closed one where a fold does.
+fn present_fold_buttons(doc: &Document, tab_size: usize) -> Vec<FoldButtonViewModel> {
+    if doc.sheet != SheetKind::Text {
+        return Vec::new();
+    }
+    let (start, end) = doc.visible_range();
+    let (first, last) = (line_col(&doc.text, start).0, line_col(&doc.text, end).0);
+    let margin = last - first + 1;
+    let folded: Vec<usize> = doc
+        .folds()
+        .iter()
+        .map(|&(a, _)| line_col(&doc.text, a).0)
+        .collect();
+    let mut buttons: Vec<FoldButtonViewModel> = fold_headers(
+        &doc.text,
+        first.saturating_sub(margin),
+        last + margin,
+        tab_size,
+    )
+    .into_iter()
+    .filter(|line| !folded.contains(line))
+    .map(|line| FoldButtonViewModel {
+        line,
+        folded: false,
+    })
+    .chain(
+        folded
+            .iter()
+            .map(|&line| FoldButtonViewModel { line, folded: true }),
+    )
+    .collect();
+    buttons.sort_by_key(|b| b.line);
+    buttons.dedup_by_key(|b| b.line);
+    buttons
 }

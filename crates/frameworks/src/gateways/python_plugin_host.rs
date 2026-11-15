@@ -16,43 +16,136 @@ use use_cases::gateways::{PluginCommandKind, PluginHostGateway, PluginLoad, Plug
 
 /// The host and our `sublime` modules, written to `lib_dir` before the host starts.
 const SUPPORT_FILES: &[(&str, &str)] = &[
-    ("plugin_host.py", include_str!("../../../../assets/python/plugin_host.py")),
-    ("codelibre_rpc.py", include_str!("../../../../assets/python/codelibre_rpc.py")),
-    ("compat.py", include_str!("../../../../assets/python/compat.py")),
-    ("sublime_api.py", include_str!("../../../../assets/python/sublime_api.py")),
-    ("sublime.py", include_str!("../../../../assets/python/sublime.py")),
-    ("sublime_plugin.py", include_str!("../../../../assets/python/sublime_plugin.py")),
+    (
+        "plugin_host.py",
+        include_str!("../../../../assets/python/plugin_host.py"),
+    ),
+    (
+        "codelibre_rpc.py",
+        include_str!("../../../../assets/python/codelibre_rpc.py"),
+    ),
+    (
+        "compat.py",
+        include_str!("../../../../assets/python/compat.py"),
+    ),
+    (
+        "sublime_api.py",
+        include_str!("../../../../assets/python/sublime_api.py"),
+    ),
+    (
+        "sublime.py",
+        include_str!("../../../../assets/python/sublime.py"),
+    ),
+    (
+        "sublime_plugin.py",
+        include_str!("../../../../assets/python/sublime_plugin.py"),
+    ),
     // Our own `Default` modules that packages import (Sublime's `Default` is not loaded).
-    ("Default/__init__.py", include_str!("../../../../assets/python/Default/__init__.py")),
-    ("Default/paste_from_history.py", include_str!("../../../../assets/python/Default/paste_from_history.py")),
-    ("Default/exec.py", include_str!("../../../../assets/python/Default/exec.py")),
-    ("Default/history_list.py", include_str!("../../../../assets/python/Default/history_list.py")),
-    ("Default/indentation.py", include_str!("../../../../assets/python/Default/indentation.py")),
-    ("Default/side_bar.py", include_str!("../../../../assets/python/Default/side_bar.py")),
+    (
+        "Default/__init__.py",
+        include_str!("../../../../assets/python/Default/__init__.py"),
+    ),
+    (
+        "Default/paste_from_history.py",
+        include_str!("../../../../assets/python/Default/paste_from_history.py"),
+    ),
+    (
+        "Default/exec.py",
+        include_str!("../../../../assets/python/Default/exec.py"),
+    ),
+    (
+        "Default/history_list.py",
+        include_str!("../../../../assets/python/Default/history_list.py"),
+    ),
+    (
+        "Default/indentation.py",
+        include_str!("../../../../assets/python/Default/indentation.py"),
+    ),
+    (
+        "Default/side_bar.py",
+        include_str!("../../../../assets/python/Default/side_bar.py"),
+    ),
     // Modules newer Pythons removed, put at the end of `sys.path` by `plugin_host.py`.
-    ("shims/imp.py", include_str!("../../../../assets/python/shims/imp.py")),
-    ("shims/distutils/__init__.py", include_str!("../../../../assets/python/shims/distutils/__init__.py")),
-    ("shims/distutils/version.py", include_str!("../../../../assets/python/shims/distutils/version.py")),
-    ("shims/distutils/errors.py", include_str!("../../../../assets/python/shims/distutils/errors.py")),
-    ("shims/distutils/util.py", include_str!("../../../../assets/python/shims/distutils/util.py")),
-    ("shims/distutils/spawn.py", include_str!("../../../../assets/python/shims/distutils/spawn.py")),
-    ("shims/distutils/dir_util.py", include_str!("../../../../assets/python/shims/distutils/dir_util.py")),
-    ("shims/distutils/file_util.py", include_str!("../../../../assets/python/shims/distutils/file_util.py")),
-    ("shims/distutils/sysconfig.py", include_str!("../../../../assets/python/shims/distutils/sysconfig.py")),
-    ("shims/asyncore.py", include_str!("../../../../assets/python/shims/asyncore.py")),
-    ("shims/asynchat.py", include_str!("../../../../assets/python/shims/asynchat.py")),
-    ("shims/pipes.py", include_str!("../../../../assets/python/shims/pipes.py")),
-    ("shims/cgi.py", include_str!("../../../../assets/python/shims/cgi.py")),
-    ("shims/imghdr.py", include_str!("../../../../assets/python/shims/imghdr.py")),
-    ("shims/uu.py", include_str!("../../../../assets/python/shims/uu.py")),
+    (
+        "shims/imp.py",
+        include_str!("../../../../assets/python/shims/imp.py"),
+    ),
+    (
+        "shims/distutils/__init__.py",
+        include_str!("../../../../assets/python/shims/distutils/__init__.py"),
+    ),
+    (
+        "shims/distutils/version.py",
+        include_str!("../../../../assets/python/shims/distutils/version.py"),
+    ),
+    (
+        "shims/distutils/errors.py",
+        include_str!("../../../../assets/python/shims/distutils/errors.py"),
+    ),
+    (
+        "shims/distutils/util.py",
+        include_str!("../../../../assets/python/shims/distutils/util.py"),
+    ),
+    (
+        "shims/distutils/spawn.py",
+        include_str!("../../../../assets/python/shims/distutils/spawn.py"),
+    ),
+    (
+        "shims/distutils/dir_util.py",
+        include_str!("../../../../assets/python/shims/distutils/dir_util.py"),
+    ),
+    (
+        "shims/distutils/file_util.py",
+        include_str!("../../../../assets/python/shims/distutils/file_util.py"),
+    ),
+    (
+        "shims/distutils/sysconfig.py",
+        include_str!("../../../../assets/python/shims/distutils/sysconfig.py"),
+    ),
+    (
+        "shims/asyncore.py",
+        include_str!("../../../../assets/python/shims/asyncore.py"),
+    ),
+    (
+        "shims/asynchat.py",
+        include_str!("../../../../assets/python/shims/asynchat.py"),
+    ),
+    (
+        "shims/pipes.py",
+        include_str!("../../../../assets/python/shims/pipes.py"),
+    ),
+    (
+        "shims/cgi.py",
+        include_str!("../../../../assets/python/shims/cgi.py"),
+    ),
+    (
+        "shims/imghdr.py",
+        include_str!("../../../../assets/python/shims/imghdr.py"),
+    ),
+    (
+        "shims/uu.py",
+        include_str!("../../../../assets/python/shims/uu.py"),
+    ),
     // certifi (MPL-2.0, unmodified from PyPI): Sublime ships it in `Lib/python3` for every plugin
     // host, so libraries import it without declaring it (`lsp_utils` 4, the LSP-* helpers).
     // Last on `sys.path` too: a newer one Package Control installs wins.
-    ("shims/certifi/__init__.py", include_str!("../../../../assets/python/shims/certifi/__init__.py")),
-    ("shims/certifi/core.py", include_str!("../../../../assets/python/shims/certifi/core.py")),
-    ("shims/certifi/cacert.pem", include_str!("../../../../assets/python/shims/certifi/cacert.pem")),
+    (
+        "shims/certifi/__init__.py",
+        include_str!("../../../../assets/python/shims/certifi/__init__.py"),
+    ),
+    (
+        "shims/certifi/core.py",
+        include_str!("../../../../assets/python/shims/certifi/core.py"),
+    ),
+    (
+        "shims/certifi/cacert.pem",
+        include_str!("../../../../assets/python/shims/certifi/cacert.pem"),
+    ),
     ("shims/certifi/py.typed", ""),
-    ("shims/certifi/LICENSE", include_str!("../../../../assets/python/shims/certifi/LICENSE")),
+    (
+        "shims/certifi/LICENSE",
+        include_str!("../../../../assets/python/shims/certifi/LICENSE"),
+    ),
 ];
 
 /// How long the editor waits for a plugin (the window does not respond meanwhile).
@@ -96,7 +189,11 @@ pub struct PythonPluginHost {
 impl PythonPluginHost {
     /// `lib_dir`: where the support modules are written (Sublime's `Lib/python` equivalent).
     pub fn new(lib_dir: PathBuf) -> Self {
-        Self { lib_dir, process: None, waker: None }
+        Self {
+            lib_dir,
+            process: None,
+            waker: None,
+        }
     }
 
     pub fn with_waker(mut self, waker: Waker) -> Self {
@@ -106,11 +203,13 @@ impl PythonPluginHost {
 
     fn start(&mut self, interpreter: Option<&str>) -> Result<(), String> {
         self.stop();
-        std::fs::create_dir_all(&self.lib_dir).map_err(|e| format!("{}: {e}", self.lib_dir.display()))?;
+        std::fs::create_dir_all(&self.lib_dir)
+            .map_err(|e| format!("{}: {e}", self.lib_dir.display()))?;
         for (name, contents) in SUPPORT_FILES {
             let path = self.lib_dir.join(name);
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
             }
             std::fs::write(&path, contents).map_err(|e| format!("{}: {e}", path.display()))?;
         }
@@ -131,7 +230,13 @@ impl PythonPluginHost {
         let stdin = child.stdin.take().expect("piped stdin");
         spawn_reader(stdout, sender.clone(), true, self.waker.clone());
         spawn_reader(stderr, sender, false, self.waker.clone());
-        self.process = Some(HostProcess { child, stdin, lines, open_calls: Vec::new(), interpreter: interpreter.map(String::from) });
+        self.process = Some(HostProcess {
+            child,
+            stdin,
+            lines,
+            open_calls: Vec::new(),
+            interpreter: interpreter.map(String::from),
+        });
         Ok(())
     }
 
@@ -151,7 +256,9 @@ impl PythonPluginHost {
             Line::Message(value) => {
                 let message = parse_message(&value)?;
                 if let PluginMessage::Call { .. } = message {
-                    process.open_calls.push(value.get("id").cloned().unwrap_or(Value::Null));
+                    process
+                        .open_calls
+                        .push(value.get("id").cloned().unwrap_or(Value::Null));
                 }
                 Ok(message)
             }
@@ -193,16 +300,25 @@ fn executable_folder(request: &PluginLoad, data: &Path) -> PathBuf {
 
 impl PluginHostGateway for PythonPluginHost {
     fn load(&mut self, request: &PluginLoad) -> Result<bool, String> {
-        let running = self
-            .process
-            .as_mut()
-            .is_some_and(|p| p.interpreter == request.interpreter && matches!(p.child.try_wait(), Ok(None)));
+        let running = self.process.as_mut().is_some_and(|p| {
+            p.interpreter == request.interpreter && matches!(p.child.try_wait(), Ok(None))
+        });
         if !running {
             self.start(request.interpreter.as_deref())?;
         }
-        let data = request.packages_path.parent().map(PathBuf::from).unwrap_or_default();
-        let file_name = std::env::current_exe().ok().and_then(|p| p.file_name().map(PathBuf::from)).unwrap_or_default();
-        let executable = executable_folder(request, &data).join(file_name).display().to_string();
+        let data = request
+            .packages_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let file_name = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(PathBuf::from))
+            .unwrap_or_default();
+        let executable = executable_folder(request, &data)
+            .join(file_name)
+            .display()
+            .to_string();
         self.send(json!({
             "op": "load",
             "packages": request.packages.iter().map(|p| json!({
@@ -217,13 +333,20 @@ impl PluginHostGateway for PythonPluginHost {
                 "packages": request.packages_path.display().to_string(),
                 "installed_packages": data.join("Installed Packages").display().to_string(),
                 "cache": data.join("Cache").display().to_string(),
+                "lib": data.join("Lib").display().to_string(),
                 "executable": executable,
             },
         }))?;
         Ok(!running)
     }
 
-    fn run(&mut self, kind: PluginCommandKind, name: &str, args: &Value, view: Option<DocumentId>) -> Result<(), String> {
+    fn run(
+        &mut self,
+        kind: PluginCommandKind,
+        name: &str,
+        args: &Value,
+        view: Option<DocumentId>,
+    ) -> Result<(), String> {
         let kind = match kind {
             PluginCommandKind::Text => "text",
             PluginCommandKind::Window => "window",
@@ -245,7 +368,11 @@ impl PluginHostGateway for PythonPluginHost {
     }
 
     fn reply(&mut self, result: Result<Value, String>) -> Result<(), String> {
-        let id = self.process.as_mut().and_then(|p| p.open_calls.pop()).unwrap_or(Value::Null);
+        let id = self
+            .process
+            .as_mut()
+            .and_then(|p| p.open_calls.pop())
+            .unwrap_or(Value::Null);
         self.send(match result {
             Ok(value) => json!({ "op": "result", "id": id, "value": value }),
             Err(error) => json!({ "op": "result", "id": id, "error": error }),
@@ -259,7 +386,10 @@ impl PluginHostGateway for PythonPluginHost {
             Err(RecvTimeoutError::Disconnected) => self.message(Line::Closed),
             Err(RecvTimeoutError::Timeout) => {
                 self.stop();
-                Err(format!("a plugin did not answer in {} seconds; the plugin host was stopped", TIMEOUT.as_secs()))
+                Err(format!(
+                    "a plugin did not answer in {} seconds; the plugin host was stopped",
+                    TIMEOUT.as_secs()
+                ))
             }
         }
     }
@@ -285,7 +415,12 @@ impl PluginHostGateway for PythonPluginHost {
 }
 
 /// Reads lines in the background: JSON messages from stdout, plain text from stderr.
-fn spawn_reader(stream: impl Read + Send + 'static, sender: Sender<Line>, is_stdout: bool, waker: Option<Waker>) {
+fn spawn_reader(
+    stream: impl Read + Send + 'static,
+    sender: Sender<Line>,
+    is_stdout: bool,
+    waker: Option<Waker>,
+) {
     std::thread::spawn(move || {
         let wake = || waker.iter().for_each(|wake| wake());
         for line in BufReader::new(stream).lines() {
@@ -311,18 +446,31 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
     match value.get("op").and_then(Value::as_str) {
         Some("call") => Ok(PluginMessage::Call {
             function: text("fn").unwrap_or_default(),
-            args: value.get("args").and_then(Value::as_array).cloned().unwrap_or_default(),
+            args: value
+                .get("args")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
         }),
         Some("log") => Ok(PluginMessage::Log(text("text").unwrap_or_default())),
-        Some("done") => Ok(PluginMessage::Done { error: text("error") }),
-        Some("answer") => Ok(PluginMessage::Answer(value.get("value").cloned().unwrap_or(Value::Null))),
+        Some("done") => Ok(PluginMessage::Done {
+            error: text("error"),
+        }),
+        Some("answer") => Ok(PluginMessage::Answer(
+            value.get("value").cloned().unwrap_or(Value::Null),
+        )),
         Some("loaded") => {
             let commands = value
                 .get("commands")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter_map(|c| Some((c.get(0)?.as_str()?.to_string(), PluginCommandKind::from_name(c.get(1)?.as_str()?))))
+                .filter_map(|c| {
+                    Some((
+                        c.get(0)?.as_str()?.to_string(),
+                        PluginCommandKind::from_name(c.get(1)?.as_str()?),
+                    ))
+                })
                 .collect();
             let strings = |key: &str| {
                 value
@@ -333,7 +481,11 @@ fn parse_message(value: &Value) -> Result<PluginMessage, String> {
                     .filter_map(|e| e.as_str().map(String::from))
                     .collect()
             };
-            Ok(PluginMessage::Loaded { commands, events: strings("events"), errors: strings("errors") })
+            Ok(PluginMessage::Loaded {
+                commands,
+                events: strings("events"),
+                errors: strings("errors"),
+            })
         }
         _ => Err(format!("unexpected message from the plugin host: {value}")),
     }
@@ -354,10 +506,14 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
         return if is_supported_python(&python) {
             Ok(python)
         } else {
-            Err(format!("\"python_interpreter\": {path} is not a Python 3.8 or newer interpreter"))
+            Err(format!(
+                "\"python_interpreter\": {path} is not a Python 3.8 or newer interpreter"
+            ))
         };
     }
-    let bundled = std::env::current_exe().ok().and_then(|exe| bundled_interpreter(&exe));
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|exe| bundled_interpreter(&exe));
     if let Some(python) = bundled {
         let python = vec![python.display().to_string()];
         if is_supported_python(&python) {
@@ -366,8 +522,16 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
     }
     let words = |candidate: &[&str]| candidate.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let mut candidates = vec![words(&["py", "-3.13"]), words(&["python3.13"])];
-    candidates.extend(PYTHON_FOLDERS.iter().map(|folder| vec![format!("{folder}/python3.13")]));
-    candidates.extend([words(&["py", "-3"]), words(&["python3"]), words(&["python"])]);
+    candidates.extend(
+        PYTHON_FOLDERS
+            .iter()
+            .map(|folder| vec![format!("{folder}/python3.13")]),
+    );
+    candidates.extend([
+        words(&["py", "-3"]),
+        words(&["python3"]),
+        words(&["python"]),
+    ]);
     for python in candidates {
         if is_supported_python(&python) {
             return Ok(python);
@@ -391,7 +555,11 @@ pub fn find_interpreter(setting: Option<&str>) -> Result<Vec<String>, String> {
 /// Where a Python 3.13 installed by hand lives when it is not in `PATH`: an app opened from the
 /// Finder or the Dock gets only `/usr/bin:/bin:/usr/sbin:/sbin`.
 const PYTHON_FOLDERS: &[&str] = if cfg!(target_os = "macos") {
-    &["/Library/Frameworks/Python.framework/Versions/3.13/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+    &[
+        "/Library/Frameworks/Python.framework/Versions/3.13/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ]
 } else {
     &[]
 };
@@ -405,8 +573,17 @@ const PYTHON_FOLDERS: &[&str] = if cfg!(target_os = "macos") {
 /// `target/<profile>/build/.../out` directory.
 pub fn bundled_interpreter(executable: &Path) -> Option<PathBuf> {
     let folder = executable.parent()?;
-    let program = if cfg!(windows) { "python.exe" } else { "bin/python3" };
-    let places = ["python", "../Resources/python", "../lib/codelibre-text/python", "../python"];
+    let program = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "bin/python3"
+    };
+    let places = [
+        "python",
+        "../Resources/python",
+        "../lib/codelibre-text/python",
+        "../python",
+    ];
     if let Some(python) = places
         .into_iter()
         .map(|place| folder.join(place).join(program))

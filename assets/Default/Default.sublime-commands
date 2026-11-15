@@ -34,6 +34,8 @@
 	{ "caption": "View: Show Console", "command": "show_panel", "args": { "panel": "console", "toggle": true } },
 	{ "caption": "View: Toggle Status Bar", "command": "toggle_status_bar" },
 	{ "caption": "View: Toggle Minimap", "command": "toggle_minimap" },
+	{ "caption": "View: Toggle Tabs", "command": "toggle_tabs" },
+	{ "caption": "View: Toggle Menu", "command": "toggle_menu" },
 	{ "caption": "View: Toggle Full Screen", "command": "toggle_full_screen" },
 	{ "caption": "View: Toggle Word Wrap", "command": "toggle_setting", "args": { "setting": "word_wrap" } },
 	{ "caption": "View: Toggle Line Numbers", "command": "toggle_setting", "args": { "setting": "line_numbers" } },
@@ -48,6 +50,8 @@
 
 	{ "caption": "Find: Find…", "command": "show_panel", "args": { "panel": "find" } },
 	{ "caption": "Find: Replace…", "command": "show_panel", "args": { "panel": "replace" } },
+	{ "caption": "Find: Find in Files…", "command": "show_panel", "args": { "panel": "find_in_files" } },
+	{ "caption": "Find: Cancel Find in Files", "command": "cancel_find" },
 
 	{ "caption": "Indentation: Convert to Spaces", "command": "expand_tabs" },
 	{ "caption": "Indentation: Convert to Tabs", "command": "unexpand_tabs" },

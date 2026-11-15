@@ -23,19 +23,28 @@ impl Editor {
             self.state.translations = Rc::default();
             return;
         }
-        let catalog = self.gateways.resources.load_translations(&language, include_sublime, errors);
+        let catalog = self
+            .gateways
+            .resources
+            .load_translations(&language, include_sublime, errors);
         self.state.translations = Rc::new(Translations::new(&language, catalog));
     }
 
     /// The `language` setting (`auto` by default).
     pub fn language_setting(&self) -> String {
-        self.global_settings().str("language").unwrap_or(AUTOMATIC).to_string()
+        self.global_settings()
+            .str("language")
+            .unwrap_or(AUTOMATIC)
+            .to_string()
     }
 
     /// Every language the interface can be shown in, English first.
     pub fn languages(&self) -> Vec<Language> {
         let include_sublime = self.global_settings().bool("import_sublime_packages", true);
-        let mut languages = vec![Language { code: ENGLISH.into(), name: "English".into() }];
+        let mut languages = vec![Language {
+            code: ENGLISH.into(),
+            name: "English".into(),
+        }];
         for language in self.gateways.resources.languages(include_sublime) {
             if !languages.iter().any(|l| l.code == language.code) {
                 languages.push(language);
@@ -48,7 +57,12 @@ impl Editor {
     pub fn select_language(&mut self, code: &str) {
         self.persist_setting("language", Value::String(code.to_string()));
         let current = self.state.translations.language().to_string();
-        let name = self.languages().into_iter().find(|l| l.code == current).map(|l| l.name).unwrap_or(current);
+        let name = self
+            .languages()
+            .into_iter()
+            .find(|l| l.code == current)
+            .map(|l| l.name)
+            .unwrap_or(current);
         self.notify(self.tr_args("Language: {name}", &[("name", &name)]));
     }
 
@@ -78,7 +92,15 @@ impl Editor {
     }
 
     /// The singular or plural message for `count`, in the interface language.
-    pub fn tr_n(&self, singular: &str, plural: &str, count: usize, args: &[(&str, &dyn Display)]) -> String {
-        self.state.translations.tr_n(singular, plural, count as u64, args)
+    pub fn tr_n(
+        &self,
+        singular: &str,
+        plural: &str,
+        count: usize,
+        args: &[(&str, &dyn Display)],
+    ) -> String {
+        self.state
+            .translations
+            .tr_n(singular, plural, count as u64, args)
     }
 }

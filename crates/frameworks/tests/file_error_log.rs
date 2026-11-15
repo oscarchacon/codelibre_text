@@ -8,8 +8,14 @@ use use_cases::gateways::ErrorLogGateway;
 #[test]
 fn utc_time_formats_dates_and_leap_days() {
     assert_eq!(utc_time(UNIX_EPOCH), "1970-01-01 00:00:00 UTC");
-    assert_eq!(utc_time(UNIX_EPOCH + Duration::from_secs(951_825_600)), "2000-02-29 12:00:00 UTC");
-    assert_eq!(utc_time(UNIX_EPOCH + Duration::from_secs(1_793_631_785)), "2026-11-02 15:03:05 UTC");
+    assert_eq!(
+        utc_time(UNIX_EPOCH + Duration::from_secs(951_825_600)),
+        "2000-02-29 12:00:00 UTC"
+    );
+    assert_eq!(
+        utc_time(UNIX_EPOCH + Duration::from_secs(1_793_631_785)),
+        "2026-11-02 15:03:05 UTC"
+    );
 }
 
 #[test]
@@ -22,7 +28,10 @@ fn errors_are_appended_with_their_time_and_tracebacks_indented() {
     let text = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 4, "{text}");
-    assert!(lines[0].starts_with('[') && lines[0].ends_with("UTC] first"), "{text}");
+    assert!(
+        lines[0].starts_with('[') && lines[0].ends_with("UTC] first"),
+        "{text}"
+    );
     assert!(lines[1].ends_with("UTC] Traceback:"));
     assert_eq!(lines[2..], ["      File \"a.py\"", "    ValueError: x"]);
     assert_eq!(log.path(), path);

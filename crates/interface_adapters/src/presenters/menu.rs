@@ -3,7 +3,9 @@ use entities::menu::MenuItem;
 use entities::settings::Settings;
 use use_cases::Editor;
 
-use crate::view_models::{ContextMenuViewModel, MacMenuViewModel, MenuEntryViewModel};
+use crate::view_models::{
+    ContextMenuViewModel, MacMenuViewModel, MenuEntryViewModel, PopupMenuViewModel,
+};
 use crate::view_state::ViewState;
 
 /// The main menu, in the interface language, with key bindings next to each command and check
@@ -25,15 +27,35 @@ pub fn present(editor: &Editor) -> Vec<MenuEntryViewModel> {
 /// Entries hidden by their plugin are left out, as in the main menu.
 pub fn present_context_menu(editor: &Editor, view: &ViewState) -> Option<ContextMenuViewModel> {
     let target = view.context_menu.clone()?;
-    let entries = entries(&editor.context_menu_items(&target), editor, &editor.global_settings());
+    let entries = entries(
+        &editor.context_menu_items(&target),
+        editor,
+        &editor.global_settings(),
+    );
     Some(ContextMenuViewModel { target, entries })
+}
+
+/// The menu a plugin shows (`view.show_popup_menu`), if its view is in this window.
+pub fn present_popup_menu(editor: &Editor) -> Option<PopupMenuViewModel> {
+    let window = editor.current_window();
+    editor
+        .plugin_popup_menu()
+        .filter(|menu| editor.window_of_view(menu.view) == Some(window))
+        .map(|menu| PopupMenuViewModel {
+            serial: menu.serial,
+            items: menu.items.clone(),
+        })
 }
 
 /// A menu's entries; `{"command": "$build_systems"}` becomes one entry per build system.
 fn entries(items: &[MenuItem], editor: &Editor, settings: &Settings) -> Vec<MenuEntryViewModel> {
     let mut entries = Vec::new();
     for item in items {
-        if item.command.as_ref().is_some_and(|c| c.name == "$build_systems") {
+        if item
+            .command
+            .as_ref()
+            .is_some_and(|c| c.name == "$build_systems")
+        {
             entries.extend(build_system_entries(editor));
         } else {
             entries.extend(entry(item, editor, settings));
@@ -71,33 +93,83 @@ fn build_system_entries(editor: &Editor) -> Vec<MenuEntryViewModel> {
         .collect()
 }
 
+/// File > Open Recent: an `open_recent_file` / `open_recent_folder` entry is named after the
+/// path at its `index`, and left out when the history is shorter, as in Sublime.
+fn recent_caption(editor: &Editor, command: &Command) -> Option<Option<String>> {
+    let history = match command.name.as_str() {
+        "open_recent_file" => editor.file_history(),
+        "open_recent_folder" => editor.folder_history(),
+        _ => return None,
+    };
+    Some(
+        history
+            .get(command.usize_arg("index", 0))
+            .map(|path| path.display().to_string()),
+    )
+}
+
 fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEntryViewModel> {
     let state = editor.state();
-    let plugin = item.command.as_ref().and_then(|c| editor.plugin_command_state(c));
+    let recent = match item
+        .command
+        .as_ref()
+        .and_then(|c| recent_caption(editor, c))
+    {
+        Some(None) => return None,
+        Some(Some(path)) => Some(path),
+        None => None,
+    };
+    let plugin = item
+        .command
+        .as_ref()
+        .and_then(|c| editor.plugin_command_state(c));
     if plugin.is_some_and(|p| !p.visible) {
         return None;
     }
     // Sublime's side bar commands hide themselves without the files or folders they act on.
-    if plugin.is_none() && item.command.as_ref().is_some_and(|c| !editor.side_bar_command_visible(c)) {
+    if plugin.is_none()
+        && item
+            .command
+            .as_ref()
+            .is_some_and(|c| !editor.side_bar_command_visible(c))
+    {
         return None;
     }
     let checked = item.checkbox.then(|| match (plugin, &item.command) {
         (Some(plugin), _) => plugin.checked,
-        (None, Some(c)) if c.name == "set_build_system" => editor.is_build_system_set(c.str_arg("file"), c.str_arg("variant")),
-        (None, Some(c)) if c.name == "set_max_columns" => editor.max_columns() == c.usize_arg("columns", 0),
-        (None, command) => command.as_ref().map(|c| c.str_arg("setting")).is_some_and(|setting| settings.bool(setting, false)),
+        (None, Some(c)) if c.name == "set_build_system" => {
+            editor.is_build_system_set(c.str_arg("file"), c.str_arg("variant"))
+        }
+        (None, Some(c)) if c.name == "set_max_columns" => {
+            editor.max_columns() == c.usize_arg("columns", 0)
+        }
+        (None, command) => command
+            .as_ref()
+            .map(|c| c.str_arg("setting"))
+            .is_some_and(|setting| settings.bool(setting, false)),
     });
-    let caption = plugin.and_then(|p| p.description.clone()).filter(|_| item.caption.is_empty());
+    let caption = plugin
+        .and_then(|p| p.description.clone())
+        .filter(|_| item.caption.is_empty());
     let children = entries(&item.children, editor, settings);
     if item.command.is_none() && !item.is_separator() && children.is_empty() {
         return None;
     }
     Some(MenuEntryViewModel {
-        caption: caption.unwrap_or_else(|| state.translations.tr(&item.caption).to_string()),
+        caption: recent
+            .or(caption)
+            .unwrap_or_else(|| state.translations.tr(&item.caption).to_string()),
         id: item.id.clone(),
         separator: item.is_separator(),
-        shortcut: item.command.as_ref().and_then(|c| state.keymap.binding_for(c)),
-        key: item.command.as_ref().and_then(|c| state.keymap.key_for(c)).cloned(),
+        shortcut: item
+            .command
+            .as_ref()
+            .and_then(|c| state.keymap.binding_for(c)),
+        key: item
+            .command
+            .as_ref()
+            .and_then(|c| state.keymap.key_for(c))
+            .cloned(),
         checked,
         enabled: plugin.is_none_or(|p| p.enabled),
         command: item.command.clone(),
@@ -135,7 +207,10 @@ pub fn present_for_macos(editor: &Editor) -> MacMenuViewModel {
 /// Removes the first entry of a top menu that runs `command`.
 fn take_command(menus: &mut [MenuEntryViewModel], command: &str) -> Option<MenuEntryViewModel> {
     for menu in menus {
-        let found = menu.children.iter().position(|e| e.command.as_ref().is_some_and(|c| c.name == command));
+        let found = menu
+            .children
+            .iter()
+            .position(|e| e.command.as_ref().is_some_and(|c| c.name == command));
         if let Some(index) = found {
             let entry = menu.children.remove(index);
             menu.children = tidy(std::mem::take(&mut menu.children));

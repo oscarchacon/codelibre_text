@@ -21,14 +21,21 @@ fn id(editor: &Editor) -> u64 {
 }
 
 fn enclosing() -> HtmlExportOptions {
-    HtmlExportOptions { minihtml: false, enclosing_tags: true, font_size: true, font_family: true }
+    HtmlExportOptions {
+        minihtml: false,
+        enclosing_tags: true,
+        font_size: true,
+        font_family: true,
+    }
 }
 
 #[test]
 fn the_whole_view_gets_a_span_per_scope() {
     let world = World::new();
     let editor = python(&world);
-    let html = editor.export_to_html(id(&editor), None, enclosing()).unwrap();
+    let html = editor
+        .export_to_html(id(&editor), None, enclosing())
+        .unwrap();
     assert_eq!(
         html,
         concat!(
@@ -48,7 +55,14 @@ fn the_regions_asked_for_are_the_ones_exported() {
     let editor = python(&world);
     // Without the enclosing tags there is no background and no font styling.
     let html = editor
-        .export_to_html(id(&editor), Some(&[Selection::new(4, 8)]), HtmlExportOptions { font_size: true, ..Default::default() })
+        .export_to_html(
+            id(&editor),
+            Some(&[Selection::new(4, 8)]),
+            HtmlExportOptions {
+                font_size: true,
+                ..Default::default()
+            },
+        )
         .unwrap();
     assert_eq!(
         html,
@@ -61,9 +75,19 @@ fn the_font_size_and_family_are_left_out_when_not_asked_for() {
     let world = World::new();
     let editor = python(&world);
     let html = editor
-        .export_to_html(id(&editor), None, HtmlExportOptions { enclosing_tags: true, ..Default::default() })
+        .export_to_html(
+            id(&editor),
+            None,
+            HtmlExportOptions {
+                enclosing_tags: true,
+                ..Default::default()
+            },
+        )
         .unwrap();
-    assert!(html.starts_with("<div style=\"color: #ffffff; background-color: #000000;\">"), "{html}");
+    assert!(
+        html.starts_with("<div style=\"color: #ffffff; background-color: #000000;\">"),
+        "{html}"
+    );
 }
 
 #[test]
@@ -72,8 +96,13 @@ fn the_text_is_escaped() {
     world.disk.put("/p/a.py", "a < b & c\n");
     let mut editor = world.editor();
     editor.open_file(Path::new("/p/a.py"));
-    let html = editor.export_to_html(id(&editor), None, HtmlExportOptions::default()).unwrap();
-    assert_eq!(html, "<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">a &lt; b &amp; c\n</span></pre>");
+    let html = editor
+        .export_to_html(id(&editor), None, HtmlExportOptions::default())
+        .unwrap();
+    assert_eq!(
+        html,
+        "<pre style=\"margin: 0;\"><span style=\"color: #ffffff;\">a &lt; b &amp; c\n</span></pre>"
+    );
 }
 
 #[test]
@@ -81,7 +110,11 @@ fn several_regions_follow_one_another() {
     let world = World::new();
     let editor = python(&world);
     let html = editor
-        .export_to_html(id(&editor), Some(&[Selection::new(0, 1), Selection::new(4, 8)]), HtmlExportOptions::default())
+        .export_to_html(
+            id(&editor),
+            Some(&[Selection::new(0, 1), Selection::new(4, 8)]),
+            HtmlExportOptions::default(),
+        )
         .unwrap();
     assert_eq!(
         html,

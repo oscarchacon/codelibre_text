@@ -82,33 +82,52 @@ impl Editor {
             SearchKind::Commands => {
                 // Captions are shown translated but also match in English, the language of
                 // Sublime's documentation and of prefilled queries such as `Set Syntax: `.
-                let score_both = |caption: &str, english: &str| score(caption, query).max(score(english, query));
+                let score_both =
+                    |caption: &str, english: &str| score(caption, query).max(score(english, query));
                 for entry in &self.state.palette {
                     // Sublime leaves out what a plugin command says is hidden or disabled.
                     let state = self.plugin_command_state(&entry.command);
                     if state.is_some_and(|s| !s.visible || !s.enabled) {
                         continue;
                     }
-                    let described = state.and_then(|s| s.description.as_deref()).filter(|_| entry.caption.is_empty());
+                    let described = state
+                        .and_then(|s| s.description.as_deref())
+                        .filter(|_| entry.caption.is_empty());
                     let caption = described.unwrap_or_else(|| self.tr(&entry.caption));
                     if let Some(s) = score_both(caption, &entry.caption) {
-                        let mut c = Candidate::new(caption, CandidateTarget::Command(entry.command.clone()));
-                        c.hint = self.state.keymap.binding_for(&entry.command).unwrap_or_default();
+                        let mut c = Candidate::new(
+                            caption,
+                            CandidateTarget::Command(entry.command.clone()),
+                        );
+                        c.hint = self
+                            .state
+                            .keymap
+                            .binding_for(&entry.command)
+                            .unwrap_or_default();
                         scored.push((s, c));
                     }
                 }
                 for syntax in self.gateways.syntaxes.syntax_names() {
                     let caption = self.tr_args("Set Syntax: {syntax}", &[("syntax", &syntax)]);
                     if let Some(s) = score_both(&caption, &format!("Set Syntax: {syntax}")) {
-                        let command = Command::with_args("set_file_type", serde_json::json!({ "syntax": syntax }));
-                        scored.push((s, Candidate::new(caption, CandidateTarget::Command(command))));
+                        let command = Command::with_args(
+                            "set_file_type",
+                            serde_json::json!({ "syntax": syntax }),
+                        );
+                        scored.push((
+                            s,
+                            Candidate::new(caption, CandidateTarget::Command(command)),
+                        ));
                     }
                 }
             }
             SearchKind::ColorSchemes => {
                 for name in self.gateways.syntaxes.color_scheme_names() {
                     if let Some(s) = score(&name, query) {
-                        scored.push((s, Candidate::new(&name, CandidateTarget::ColorScheme(name.clone()))));
+                        scored.push((
+                            s,
+                            Candidate::new(&name, CandidateTarget::ColorScheme(name.clone())),
+                        ));
                     }
                 }
             }
@@ -119,9 +138,20 @@ impl Editor {
                 for (name, code) in languages {
                     if let Some(s) = score(&name, query).max(score(&code, query)) {
                         let mut c = Candidate::new(name, CandidateTarget::Language(code.clone()));
-                        c.hint = if code == AUTOMATIC { String::new() } else { code };
+                        c.hint = if code == AUTOMATIC {
+                            String::new()
+                        } else {
+                            code
+                        };
                         // An empty query keeps the order: automatic, English, then the others.
-                        scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
+                        scored.push((
+                            if query.is_empty() {
+                                -(scored.len() as i64)
+                            } else {
+                                s
+                            },
+                            c,
+                        ));
                     }
                 }
             }
@@ -129,27 +159,47 @@ impl Editor {
                 for option in &self.state.build_options {
                     if let Some(s) = score(&option.caption, query) {
                         let args = serde_json::json!({ "file": option.resource, "variant": option.variant });
-                        let mut c = Candidate::new(&option.caption, CandidateTarget::Command(Command::with_args("build", args)));
+                        let mut c = Candidate::new(
+                            &option.caption,
+                            CandidateTarget::Command(Command::with_args("build", args)),
+                        );
                         c.detail = option.resource.clone();
                         // An empty query keeps the order: each build, then its variants.
-                        scored.push((if query.is_empty() { -(scored.len() as i64) } else { s }, c));
+                        scored.push((
+                            if query.is_empty() {
+                                -(scored.len() as i64)
+                            } else {
+                                s
+                            },
+                            c,
+                        ));
                     }
                 }
             }
             SearchKind::ClipboardHistory => {
                 for (index, caption) in self.clipboard_history_captions().into_iter().enumerate() {
                     if let Some(s) = score(&caption, query) {
-                        let command = Command::with_args("paste_from_history", serde_json::json!({ "index": index }));
+                        let command = Command::with_args(
+                            "paste_from_history",
+                            serde_json::json!({ "index": index }),
+                        );
                         // An empty query keeps the order: newest first.
-                        scored.push((if query.is_empty() { -(index as i64) } else { s }, Candidate::new(caption, CandidateTarget::Command(command))));
+                        scored.push((
+                            if query.is_empty() { -(index as i64) } else { s },
+                            Candidate::new(caption, CandidateTarget::Command(command)),
+                        ));
                     }
                 }
             }
             SearchKind::PluginItems => {
-                let items = self.plugin_quick_panel().map(|p| p.items.as_slice()).unwrap_or_default();
+                let items = self
+                    .plugin_quick_panel()
+                    .map(|p| p.items.as_slice())
+                    .unwrap_or_default();
                 for (index, item) in items.iter().enumerate() {
                     if let Some(s) = score(&item.caption, query).max(score(&item.detail, query)) {
-                        let mut c = Candidate::new(&item.caption, CandidateTarget::PluginItem(index));
+                        let mut c =
+                            Candidate::new(&item.caption, CandidateTarget::PluginItem(index));
                         c.detail = item.detail.clone();
                         c.hint = item.hint.clone();
                         scored.push((s, c));
@@ -180,15 +230,24 @@ impl Editor {
         let symbols = if self.has_symbol_preferences() {
             self.symbol_regions(doc.id, crate::scopes::SymbolList::Symbols)
                 .into_iter()
-                .map(|s| entities::symbol::Symbol { line: entities::text::line_col(&doc.text, s.start).0, name: s.name })
+                .map(|s| entities::symbol::Symbol {
+                    line: entities::text::line_col(&doc.text, s.start).0,
+                    name: s.name,
+                })
                 .collect()
         } else {
-            self.gateways.syntaxes.symbols(doc.id, &doc.text, &doc.syntax)
+            self.gateways
+                .syntaxes
+                .symbols(doc.id, &doc.text, &doc.syntax)
         };
         let mut scored: Vec<(i64, Candidate)> = symbols
             .into_iter()
             .filter_map(|symbol| {
-                let s = if query.is_empty() { Some(0) } else { matcher.fuzzy_match(&symbol.name, query) }?;
+                let s = if query.is_empty() {
+                    Some(0)
+                } else {
+                    matcher.fuzzy_match(&symbol.name, query)
+                }?;
                 let mut c = Candidate::new(&symbol.name, CandidateTarget::Line(symbol.line));
                 c.hint = (symbol.line + 1).to_string();
                 Some((s, c))
@@ -201,14 +260,32 @@ impl Editor {
         scored.into_iter().map(|(_, c)| c).collect()
     }
 
-    fn file_candidates(&self, query: &str, matcher: &SkimMatcherV2, scored: &mut Vec<(i64, Candidate)>) {
-        let open_paths: Vec<&PathBuf> = self.state.documents.iter().filter_map(|d| d.path.as_ref()).collect();
+    fn file_candidates(
+        &self,
+        query: &str,
+        matcher: &SkimMatcherV2,
+        scored: &mut Vec<(i64, Candidate)>,
+    ) {
+        let open_paths: Vec<&PathBuf> = self
+            .state
+            .documents
+            .iter()
+            .filter_map(|d| d.path.as_ref())
+            .collect();
         for doc in &self.state.documents {
             let name = self.document_name(doc);
-            let s = if query.is_empty() { Some(0) } else { matcher.fuzzy_match(&name, query) };
+            let s = if query.is_empty() {
+                Some(0)
+            } else {
+                matcher.fuzzy_match(&name, query)
+            };
             if let Some(s) = s {
                 let mut c = Candidate::new(name, CandidateTarget::Document(doc.id));
-                c.detail = doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                c.detail = doc
+                    .path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
                 c.hint = self.tr("open").to_string();
                 // Open files rank slightly above other files.
                 scored.push((s + 10, c));
@@ -226,7 +303,10 @@ impl Editor {
                 .unwrap_or(path)
                 .to_string_lossy()
                 .into_owned();
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let s = if query.is_empty() {
                 Some(0)
             } else {
@@ -271,7 +351,13 @@ impl Editor {
 
 fn goto_line_candidate(line: &str, translations: &Translations) -> Candidate {
     match line.trim().parse::<usize>() {
-        Ok(n) => Candidate::new(translations.tr_args("Go to line {line}", &[("line", &n)]), CandidateTarget::Line(n.saturating_sub(1))),
-        Err(_) => Candidate::new(translations.tr("Type a line number"), CandidateTarget::Line(0)),
+        Ok(n) => Candidate::new(
+            translations.tr_args("Go to line {line}", &[("line", &n)]),
+            CandidateTarget::Line(n.saturating_sub(1)),
+        ),
+        Err(_) => Candidate::new(
+            translations.tr("Type a line number"),
+            CandidateTarget::Line(0),
+        ),
     }
 }

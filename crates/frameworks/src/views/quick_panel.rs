@@ -8,8 +8,14 @@ use interface_adapters::view_models::QuickPanelViewModel;
 
 use super::theme::Chrome;
 
-pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(
+    ctx: &egui::Context,
+    chrome: &Chrome,
+    panel: &QuickPanelViewModel,
+    events: &mut Vec<UiEvent>,
+) {
     let input_id = Id::new("quick_panel_input");
+    let event_modifiers = crate::input::current_modifiers(ctx);
 
     // Keyboard navigation of the results.
     let (up, down, enter, page_up, page_down) = ctx.input_mut(|i| {
@@ -43,11 +49,26 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
         events.push(UiEvent::QuickPanelHighlighted(selected));
     }
     if enter {
-        events.push(if count > 0 { UiEvent::QuickPanelAccepted(selected) } else { UiEvent::QuickPanelDismissed });
+        events.push(if panel.text_input {
+            UiEvent::PluginInputPanelDone(crate::input::plugin_event(event_modifiers))
+        } else if count > 0 && panel.wants_event {
+            UiEvent::PluginQuickPanelAccepted {
+                index: selected,
+                event: crate::input::plugin_event(event_modifiers),
+            }
+        } else if count > 0 {
+            UiEvent::QuickPanelAccepted(selected)
+        } else {
+            UiEvent::QuickPanelDismissed
+        });
     }
     // An input handler's panel: Backspace in the empty field goes back to the previous argument.
-    let can_go_back = panel.input.as_ref().is_some_and(|input| input.can_go_back) && panel.query.is_empty();
-    if can_go_back && ctx.memory(|m| m.has_focus(input_id)) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Backspace)) {
+    let can_go_back =
+        panel.input.as_ref().is_some_and(|input| input.can_go_back) && panel.query.is_empty();
+    if can_go_back
+        && ctx.memory(|m| m.has_focus(input_id))
+        && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Backspace))
+    {
         events.push(UiEvent::PluginPanelBack);
     }
 
@@ -55,7 +76,10 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
     let width = (screen.width() * 0.5).clamp(420.0, 720.0);
     let area = egui::Area::new(Id::new("quick_panel"))
         .order(egui::Order::Foreground)
-        .fixed_pos(egui::pos2(screen.center().x - width / 2.0, screen.top() + 44.0))
+        .fixed_pos(egui::pos2(
+            screen.center().x - width / 2.0,
+            screen.top() + 44.0,
+        ))
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
                 .fill(chrome.panel_bg)
@@ -80,10 +104,39 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
                         state.cursor.set_char_range(Some(CCursorRange::one(end)));
                         state.store(ui.ctx(), input_id);
                     }
+                    if let Some((document, revision, anchor, head)) = panel.input_selection {
+                        let seen = input_id.with("plugin_input_selection_revision");
+                        let current = (document, revision);
+                        if ui.data(|data| data.get_temp::<(u64, u64)>(seen)) != Some(current) {
+                            ui.data_mut(|data| data.insert_temp(seen, current));
+                            let mut state = input.state.clone();
+                            state.cursor.set_char_range(Some(CCursorRange::two(
+                                CCursor::new(anchor),
+                                CCursor::new(head),
+                            )));
+                            state.store(ui.ctx(), input_id);
+                        } else if let Some(range) = input.cursor_range {
+                            let range = range.as_ccursor_range();
+                            let selected = (range.secondary.index, range.primary.index);
+                            if selected != (anchor, head) {
+                                events.insert(
+                                    0,
+                                    UiEvent::InputPanelSelected {
+                                        anchor: selected.0,
+                                        head: selected.1,
+                                    },
+                                );
+                            }
+                        }
+                    }
                     if query != panel.query {
                         events.push(UiEvent::QuickPanelQueryChanged(query));
                     }
-                    if let Some(input) = panel.input.as_ref().filter(|input| !input.preview.is_empty()) {
+                    if let Some(input) = panel
+                        .input
+                        .as_ref()
+                        .filter(|input| !input.preview.is_empty())
+                    {
                         ui.add_space(4.0);
                         for line in &input.preview {
                             if let Some(href) = detail_line(ui, chrome, line) {
@@ -91,14 +144,27 @@ pub fn show(ctx: &egui::Context, chrome: &Chrome, panel: &QuickPanelViewModel, e
                             }
                         }
                     }
-                    ui.add_space(6.0);
-                    results(ui, chrome, panel, selected, moved, screen.height() * 0.55, events);
+                    if !panel.text_input {
+                        ui.add_space(6.0);
+                        results(
+                            ui,
+                            chrome,
+                            panel,
+                            selected,
+                            moved,
+                            screen.height() * 0.55,
+                            events,
+                        );
+                    }
                 });
         });
 
     // Clicking anywhere else dismisses the panel.
     let clicked_outside = ctx.input(|i| {
-        i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p))
+        i.pointer.any_pressed()
+            && i.pointer
+                .interact_pos()
+                .is_some_and(|p| !area.response.rect.contains(p))
     });
     if clicked_outside && !panel.keep_open {
         events.push(UiEvent::QuickPanelDismissed);
@@ -111,7 +177,11 @@ pub fn breadcrumb(ui: &mut egui::Ui, chrome: &Chrome, crumbs: &[String]) {
     if crumbs.is_empty() {
         return;
     }
-    ui.label(RichText::new(crumbs.join("  >  ")).color(chrome.fg_dim).size(12.0));
+    ui.label(
+        RichText::new(crumbs.join("  >  "))
+            .color(chrome.fg_dim)
+            .size(12.0),
+    );
     ui.add_space(4.0);
 }
 
@@ -122,30 +192,44 @@ const DETAIL_LINE_HEIGHT: f32 = 14.0;
 /// (a click anywhere else is the row's: it accepts the item).
 pub fn detail_line(ui: &mut egui::Ui, chrome: &Chrome, line: &[Span]) -> Option<String> {
     let mut clicked = None;
-    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), DETAIL_LINE_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for span in line.iter().filter(|s| !s.text.is_empty()) {
-            let mut text = RichText::new(&span.text).size(11.5).color(if span.link.is_some() { chrome.accent } else { chrome.fg_dim });
-            if span.bold {
-                text = text.strong();
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), DETAIL_LINE_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for span in line.iter().filter(|s| !s.text.is_empty()) {
+                let mut text = RichText::new(&span.text)
+                    .size(11.5)
+                    .color(if span.link.is_some() {
+                        chrome.accent
+                    } else {
+                        chrome.fg_dim
+                    });
+                if span.bold {
+                    text = text.strong();
+                }
+                if span.italic {
+                    text = text.italics();
+                }
+                if span.monospace {
+                    text = text.monospace();
+                }
+                let Some(href) = &span.link else {
+                    ui.add(egui::Label::new(text).truncate());
+                    continue;
+                };
+                let response = ui.add(
+                    egui::Label::new(text.underline())
+                        .truncate()
+                        .sense(Sense::CLICK),
+                );
+                if response.clicked() {
+                    clicked = Some(href.clone());
+                }
+                response.on_hover_cursor(egui::CursorIcon::PointingHand);
             }
-            if span.italic {
-                text = text.italics();
-            }
-            if span.monospace {
-                text = text.monospace();
-            }
-            let Some(href) = &span.link else {
-                ui.add(egui::Label::new(text).truncate());
-                continue;
-            };
-            let response = ui.add(egui::Label::new(text.underline()).truncate().sense(Sense::CLICK));
-            if response.clicked() {
-                clicked = Some(href.clone());
-            }
-            response.on_hover_cursor(egui::CursorIcon::PointingHand);
-        }
-    });
+        },
+    );
     clicked
 }
 
@@ -160,8 +244,21 @@ fn results(
 ) {
     // An Area lays out its contents within last frame's size, so after showing a single result
     // the list could never grow back. Give it room for `max_height` explicitly.
-    let room = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), max_height));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| result_list(ui, chrome, panel, selected, scroll_to_selected, max_height, events));
+    let room = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), max_height),
+    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+        result_list(
+            ui,
+            chrome,
+            panel,
+            selected,
+            scroll_to_selected,
+            max_height,
+            events,
+        )
+    });
 }
 
 fn result_list(
@@ -181,12 +278,19 @@ fn result_list(
             for (index, item) in panel.items.iter().enumerate() {
                 let is_selected = index == selected;
                 let height = 28.0 + DETAIL_LINE_HEIGHT * item.details.len() as f32;
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::CLICK);
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::CLICK);
                 if is_selected || response.hovered() {
-                    let fill = if is_selected { chrome.hover_bg } else { chrome.hover_bg.gamma_multiply(0.5) };
+                    let fill = if is_selected {
+                        chrome.hover_bg
+                    } else {
+                        chrome.hover_bg.gamma_multiply(0.5)
+                    };
                     ui.painter().rect_filled(rect, 4.0, fill);
                 }
-                let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 4.0))));
+                let mut row = ui.new_child(
+                    egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 4.0))),
+                );
                 // Selectable labels sense clicks and, laid out after the row, take them from it:
                 // a click on the text would select it instead of accepting the item.
                 row.style_mut().interaction.selectable_labels = false;
@@ -194,17 +298,39 @@ fn result_list(
                 // are cut to one line each: the row has a fixed height.
                 row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if !item.hint.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(&item.hint).size(12.0).color(chrome.fg_dim)).extend());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&item.hint).size(12.0).color(chrome.fg_dim),
+                            )
+                            .extend(),
+                        );
                         ui.add_space(12.0);
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         if !item.kind.is_empty() {
-                            ui.label(RichText::new(&item.kind).size(12.0).monospace().color(chrome.panel_bg).background_color(chrome.accent));
+                            ui.label(
+                                RichText::new(&item.kind)
+                                    .size(12.0)
+                                    .monospace()
+                                    .color(chrome.panel_bg)
+                                    .background_color(chrome.accent),
+                            );
                         }
                         ui.vertical(|ui| {
-                            let color = if is_selected { chrome.accent } else { chrome.fg };
+                            let color = if is_selected {
+                                chrome.accent
+                            } else {
+                                chrome.fg
+                            };
                             let caption = RichText::new(&item.caption).size(14.0).color(color);
-                            ui.add(egui::Label::new(if panel.monospace { caption.monospace() } else { caption }).truncate());
+                            ui.add(
+                                egui::Label::new(if panel.monospace {
+                                    caption.monospace()
+                                } else {
+                                    caption
+                                })
+                                .truncate(),
+                            );
                             ui.spacing_mut().item_spacing.y = 0.0;
                             for line in &item.details {
                                 if let Some(href) = detail_line(ui, chrome, line) {
@@ -218,7 +344,16 @@ fn result_list(
                     response.scroll_to_me(None);
                 }
                 if response.clicked() {
-                    events.push(UiEvent::QuickPanelAccepted(index));
+                    events.push(if panel.wants_event {
+                        UiEvent::PluginQuickPanelAccepted {
+                            index,
+                            event: crate::input::plugin_event(crate::input::current_modifiers(
+                                ui.ctx(),
+                            )),
+                        }
+                    } else {
+                        UiEvent::QuickPanelAccepted(index)
+                    });
                 }
             }
             if panel.items.is_empty() {
