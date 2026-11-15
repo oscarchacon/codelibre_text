@@ -13,17 +13,19 @@ use std::ops::Range;
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
 use egui::{
-    Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, Shape, Stroke, TextEdit, Vec2,
+    Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, RichText, Shape, Stroke, TextEdit,
+    Vec2,
 };
 use entities::document::DocumentId;
 use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
+use entities::view_geometry::ViewGeometry;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{
     AutoCompleteViewModel, CompletionViewModel, ContextMenuViewModel, EditorViewModel,
-    PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, Underline,
+    PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, SheetViewModel, Underline,
 };
 use use_cases::plugin_popups::HoverZone;
 
@@ -114,6 +116,13 @@ pub fn show(
     if let Some((_, _, revision)) = show {
         sync.applied_show.insert(model.document, revision);
     }
+    // And `view.set_viewport_position`.
+    let scroll_to = model
+        .scroll_to
+        .filter(|&(_, revision)| sync.applied_show.get(&model.document) != Some(&revision));
+    if let Some((_, revision)) = scroll_to {
+        sync.applied_show.insert(model.document, revision);
+    }
 
     // Tab, Shift+Tab and Enter follow Sublime's indentation settings, so the use cases handle them.
     // With several selections (Ctrl+D) the widget only knows the primary one, so typing, deleting
@@ -167,7 +176,7 @@ pub fn show(
         (line_count.to_string().len().max(3) as f32 + 2.5) * char_width
     } else {
         char_width
-    };
+    } + fold_column(model, char_width);
     // A column for the regions' icons, left of the line numbers, while some region set has one.
     let gutter_width = gutter_width
         + if has_icons(model) {
@@ -233,6 +242,7 @@ pub fn show(
                         row_height,
                         char_width,
                     );
+                    hide_folds(&mut job, text, &model.folds, char_width);
                     ui.fonts(|f| f.layout_job(job))
                 };
                 let min_height = if model.scroll_past_end {
@@ -339,6 +349,48 @@ pub fn show(
                     char_width,
                     colors.find_highlight,
                 ));
+                for &(start, _) in &model.folds {
+                    let at = galley
+                        .pos_from_ccursor(CCursor::new(start))
+                        .translate(origin.to_vec2());
+                    let marker = Rect::from_min_size(
+                        egui::pos2(at.left() + char_width * 0.5, at.top() + 1.0),
+                        Vec2::new(char_width * FOLD_MARKER_COLUMNS, row_height - 2.0),
+                    );
+                    if !viewport.intersects(marker) {
+                        continue;
+                    }
+                    let response =
+                        ui.interact(marker, id.with(("fold", start)), egui::Sense::CLICK);
+                    shapes.push(Shape::rect_filled(
+                        marker,
+                        3.0,
+                        if response.hovered() {
+                            colors.selection
+                        } else {
+                            colors.line_highlight
+                        },
+                    ));
+                    shapes.push(Shape::rect_stroke(
+                        marker,
+                        3.0,
+                        Stroke::new(1.0_f32, colors.guide),
+                        egui::StrokeKind::Inside,
+                    ));
+                    shapes.push(ctx.fonts(|f| {
+                        Shape::text(
+                            f,
+                            marker.center(),
+                            Align2::CENTER_CENTER,
+                            "...",
+                            font.clone(),
+                            colors.foreground,
+                        )
+                    }));
+                    if response.clicked() {
+                        events.push(UiEvent::Unfold(model.document, start));
+                    }
+                }
                 let visible = visible_chars(galley, origin, viewport);
                 events.push(UiEvent::VisibleRange(
                     model.document,
@@ -389,6 +441,7 @@ pub fn show(
                     &font,
                     &colors,
                     selection,
+                    events,
                 );
                 paint_region_icons(
                     ui,
@@ -549,6 +602,37 @@ pub fn show(
             ctx.request_repaint();
         }
     }
+
+    // The geometry plugins read (`view.text_to_layout`, `viewport_position`…), and where they
+    // asked to scroll to.
+    let mut offset = scroll.state.offset;
+    if let Some(((x, y), _)) = scroll_to {
+        let mut state = scroll.state;
+        state.offset = Vec2::new(x, y);
+        state.store(&ctx, scroll.id);
+        offset = state.offset;
+        ctx.request_repaint();
+        events.push(UiEvent::ViewportScrolled(model.document));
+    }
+    let text_width = (scroll.inner_rect.width() - reserved - gutter_width).max(0.0);
+    events.push(UiEvent::ViewGeometry(
+        model.document,
+        ViewGeometry {
+            line_height: row_height,
+            em_width: char_width,
+            viewport_position: (offset.x, offset.y),
+            viewport_extent: (text_width, scroll.inner_rect.height()),
+            // The text widget's margin is 4 points.
+            text_origin: (gutter_width + 4.0, 0.0),
+            tab_width: egui::epaint::text::TAB_SIZE,
+            wrap_columns: model.word_wrap.then(|| {
+                let wrap_width =
+                    (scroll.inner_rect.width() - reserved - gutter_width - char_width * 2.0)
+                        .max(char_width * 10.0);
+                (wrap_width / char_width).floor() as usize
+            }),
+        },
+    ));
 
     // After SelectionChanged, so the command sees the caret it was pressed at.
     events.extend(key_events);
@@ -870,6 +954,7 @@ fn paint_gutter(
     font: &FontId,
     colors: &Colors,
     selection: Selection,
+    events: &mut Vec<UiEvent>,
 ) {
     let gutter = Rect::from_min_max(
         viewport.left_top(),
@@ -877,9 +962,9 @@ fn paint_gutter(
     );
     let painter = ui.painter().with_clip_rect(gutter);
     painter.rect_filled(gutter, 0.0, colors.gutter);
-    if !model.line_numbers {
-        return;
-    }
+    let fold_column = fold_column(model, char_width);
+    let buttons = model.fold_buttons.as_deref().unwrap_or_default();
+    let gutter_hovered = ui.rect_contains_pointer(gutter);
     let caret_line = line_col(text, selection.head).0;
     let mut line = 0;
     let mut starts_line = true;
@@ -888,9 +973,37 @@ fn paint_gutter(
         if y > viewport.bottom() {
             break;
         }
-        if starts_line && y + row_height >= viewport.top() {
+        // A folded line's rows have no height (`hide_folds`): no number.
+        let shown = row.rect.height() > row_height * 0.5;
+        if starts_line && shown && y + row_height >= viewport.top() {
+            if let Ok(index) = buttons.binary_search_by_key(&line, |b| b.line) {
+                let button = buttons[index];
+                if button.folded || gutter_hovered || !model.fade_fold_buttons {
+                    let center = egui::pos2(
+                        gutter.right() - fold_column / 2.0 - char_width * 0.5,
+                        y + row_height / 2.0,
+                    );
+                    let hit = Rect::from_center_size(center, Vec2::new(fold_column, row_height));
+                    let response = ui.interact(
+                        hit,
+                        widget_id(model.document).with(("fold_button", line)),
+                        egui::Sense::CLICK,
+                    );
+                    let color = if response.hovered() {
+                        colors.foreground
+                    } else {
+                        colors.gutter_foreground
+                    };
+                    painter.add(fold_arrow(center, char_width * 0.4, button.folded, color));
+                    if response.clicked() {
+                        events.push(UiEvent::ToggleFold(model.document, line));
+                    }
+                }
+            }
+        }
+        if model.line_numbers && starts_line && shown && y + row_height >= viewport.top() {
             painter.text(
-                egui::pos2(gutter.right() - char_width * 1.5, y),
+                egui::pos2(gutter.right() - char_width * 1.5 - fold_column, y),
                 Align2::RIGHT_TOP,
                 (line + 1).to_string(),
                 font.clone(),
@@ -906,6 +1019,34 @@ fn paint_gutter(
             line += 1;
         }
     }
+}
+
+/// The gutter's column for fold arrows, right of the line numbers (none without `fold_buttons`).
+fn fold_column(model: &EditorViewModel, char_width: f32) -> f32 {
+    if model.fold_buttons.is_some() {
+        char_width * 1.5
+    } else {
+        0.0
+    }
+}
+
+/// A fold arrow: pointing down (a block that can fold) or right (a folded one). The default
+/// fonts lack ▸ ▾, so it is a triangle.
+fn fold_arrow(center: egui::Pos2, size: f32, folded: bool, color: Color32) -> Shape {
+    let points = if folded {
+        vec![
+            center + Vec2::new(-size * 0.6, -size),
+            center + Vec2::new(size * 0.9, 0.0),
+            center + Vec2::new(-size * 0.6, size),
+        ]
+    } else {
+        vec![
+            center + Vec2::new(-size, -size * 0.6),
+            center + Vec2::new(size, -size * 0.6),
+            center + Vec2::new(0.0, size * 0.9),
+        ]
+    };
+    Shape::convex_polygon(points, color, Stroke::NONE)
 }
 
 /// How long the mouse rests before `on_hover`, in seconds (Sublime's is about this).
@@ -977,6 +1118,43 @@ fn make_room_for_phantoms(
         };
         if let Some(section) = target.and_then(|at| isolate(job, at, true)) {
             job.sections[section].format.line_height = Some(row_height + height);
+        }
+    }
+}
+
+/// Columns the "…" marker of a fold takes.
+const FOLD_MARKER_COLUMNS: f32 = 3.0;
+
+/// Folded text takes no room: its chars get no height (so its rows are 0 high: a line break does
+/// not count in its row's height, and an empty row takes the height of the section of the break
+/// that starts it) and a tiny transparent font. Room is left after a fold for its "…" marker.
+fn hide_folds(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    folds: &[(usize, usize)],
+    char_width: f32,
+) {
+    for &(start, end) in folds {
+        let (from, to) = (char_to_byte(text, start), char_to_byte(text, end));
+        if from >= to || to > text.len() {
+            continue;
+        }
+        let Some(first) = isolate(job, from, false) else {
+            continue;
+        };
+        // The section after the fold (if any) makes room for the marker.
+        let after = isolate(job, to, false);
+        let last = after.unwrap_or(job.sections.len());
+        for section in &mut job.sections[first..last] {
+            section.format.line_height = Some(0.0);
+            section.format.font_id.size = 1.0;
+            section.format.color = Color32::TRANSPARENT;
+            section.format.background = Color32::TRANSPARENT;
+            section.format.underline = Stroke::NONE;
+            section.leading_space = 0.0;
+        }
+        if let Some(after) = after {
+            job.sections[after].leading_space += char_width * (FOLD_MARKER_COLUMNS + 1.0);
         }
     }
 }
@@ -1577,4 +1755,50 @@ impl Colors {
             minimap_border: s.minimap_border.map(to_color32),
         }
     }
+}
+
+/// An HTML sheet (the plugin's minihtml) or an image sheet (the picture, at its size, smaller to
+/// fit the tab), in the color scheme's colors, where a text sheet shows its text.
+pub fn show_sheet(
+    ui: &mut egui::Ui,
+    model: &EditorViewModel,
+    sheet: &SheetViewModel,
+    engine: &SharedSyntaxEngine,
+) {
+    let colors = Colors::from_scheme(&engine.borrow_mut().scheme(&model.color_scheme).settings);
+    ui.painter()
+        .rect_filled(ui.available_rect_before_wrap(), 0.0, colors.background);
+    egui::ScrollArea::both()
+        .id_salt(("sheet_scroll", model.document))
+        .auto_shrink([false, false])
+        .show(ui, |ui| match sheet {
+            SheetViewModel::Html(html) => {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        let html_colors = HtmlColors {
+                            foreground: colors.foreground,
+                            background: colors.background,
+                            link: colors.caret,
+                        };
+                        show_html(ui, html, &html_colors, model.font_size * POINTS_TO_PIXELS);
+                    });
+            }
+            SheetViewModel::Image { src, bytes } => {
+                let texture = bytes
+                    .as_ref()
+                    .and_then(|bytes| super::minihtml_view::texture(ui.ctx(), src, bytes));
+                ui.centered_and_justified(|ui| match texture {
+                    Some(texture) => {
+                        let natural = texture.size_vec2();
+                        let room = ui.available_size();
+                        let scale = (room.x / natural.x).min(room.y / natural.y).min(1.0);
+                        ui.add(egui::Image::new(&texture).fit_to_exact_size(natural * scale));
+                    }
+                    None => {
+                        ui.label(RichText::new("?").color(colors.foreground).size(32.0));
+                    }
+                });
+            }
+        });
 }

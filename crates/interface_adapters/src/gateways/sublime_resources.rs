@@ -22,6 +22,11 @@ const PREFERENCES: &str = "Preferences.sublime-settings";
 
 type Waker = Arc<dyn Fn() + Send + Sync>;
 
+/// Package Control's settings file.
+const PACKAGE_CONTROL_SETTINGS: &str = "Package Control.sublime-settings";
+/// What is adopted from Sublime's own Package Control settings: where packages come from.
+const ADOPTED_FROM_SUBLIME: &[&str] = &["channels", "repositories"];
+
 pub struct SublimeResourceGateway {
     paths: PackagePaths,
     system_language: Option<String>,
@@ -221,7 +226,8 @@ impl ResourceGateway for SublimeResourceGateway {
         let mut values = Map::new();
         // Package Control's own settings say what is installed in a profile (`installed_packages`,
         // which it installs again where missing): Sublime's are about Sublime's `Installed Packages`,
-        // not ours, so they are not adopted.
+        // not ours, so they are not adopted. Only where packages come from is (`ADOPTED_FROM_SUBLIME`:
+        // custom channels and repositories); our `User` file, read later, still wins.
         let sublime_user = self.paths.sublime_packages.as_ref().map(|p| p.join("User"));
         let foreign = |path: &Path| {
             stem.starts_with("Package Control")
@@ -232,13 +238,18 @@ impl ResourceGateway for SublimeResourceGateway {
         for path in find_resources(&self.paths, include_sublime, |n| {
             n == file_name || n == platform_file
         }) {
-            if is_in_default_package(&path) || foreign(&path) {
+            let foreign = foreign(&path);
+            if is_in_default_package(&path) || (foreign && file_name != PACKAGE_CONTROL_SETTINGS) {
                 continue;
             }
             let parsed = std::fs::read_to_string(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|text| sublime_json::parse(&text).map_err(|e| e.to_string()));
             match parsed {
+                Ok(Value::Object(map)) if foreign => values.extend(
+                    map.into_iter()
+                        .filter(|(key, _)| ADOPTED_FROM_SUBLIME.contains(&key.as_str())),
+                ),
                 Ok(Value::Object(map)) => values.extend(map),
                 Ok(_) => {}
                 Err(e) => errors.push(format!("{}: {e}", path.display())),

@@ -270,6 +270,12 @@ msgstr "Statusleiste"
 msgid "Minimap"
 msgstr "Minimap"
 
+msgid "Tabs"
+msgstr "Tabs"
+
+msgid "Menu"
+msgstr "Menü"
+
 #: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Konsole anzeigen"
@@ -511,6 +517,12 @@ msgstr "Ansicht: Statusleiste ein-/ausblenden"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
 msgstr "Ansicht: Minimap ein-/ausblenden"
+
+msgid "View: Toggle Tabs"
+msgstr "Ansicht: Tabs ein-/ausblenden"
+
+msgid "View: Toggle Menu"
+msgstr "Ansicht: Menü ein-/ausblenden"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"
@@ -1409,3 +1421,67 @@ msgid "{count} match in 1 file"
 msgid_plural "{count} matches in 1 file"
 msgstr[0] "{count} Treffer in 1 Datei"
 msgstr[1] "{count} Treffer in 1 Datei"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr "Zuletzt geöffnet"
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
+msgstr "Einträge löschen"
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
+msgstr "{path} ist kein Ordner mehr"
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr "Code-Faltung"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr "Falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr "Entfalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr "Alles entfalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr "Alles falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr "Ebene 2 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr "Ebene 3 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr "Ebene 4 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr "Ebene 5 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr "Ebene 6 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr "Ebene 7 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr "Ebene 8 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
+msgstr "Ebene 9 falten"

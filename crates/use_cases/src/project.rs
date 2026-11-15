@@ -14,6 +14,7 @@ use crate::gateways::{DirectoryEntry, FileFilter};
 impl Editor {
     pub fn add_folder(&mut self, folder: PathBuf) {
         let folder = self.gateways.file_system.canonicalize(&folder);
+        self.state.recent_folders.push(folder.clone());
         if !self.state.folders.contains(&folder) {
             self.state.folders.push(folder);
             self.refresh_file_index();

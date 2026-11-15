@@ -3,9 +3,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use entities::document::{Document, DocumentError, DocumentId, LineEnding};
+use entities::document::{
+    is_image_path, Document, DocumentError, DocumentId, LineEnding, SheetKind,
+};
 use entities::minihtml;
 use entities::selection::Selection;
+use entities::view_geometry::ViewGeometry;
 
 use crate::editor::{CloseChoice, Editor, PendingClose};
 
@@ -62,6 +65,13 @@ impl Editor {
 
         let id = self.next_document_id();
         let exists = self.gateways.file_system.exists(&path);
+        // A picture opens as an image sheet, as in Sublime (its view draws it).
+        if exists && is_image_path(&path) {
+            let modified = self.gateways.file_system.modified(&path);
+            self.state.recent_files.push(path.clone());
+            self.insert_document(Document::image(id, &path, modified));
+            return true;
+        }
         let mut doc = if exists {
             let bytes = match self.gateways.file_system.read(&path) {
                 Ok(bytes) => bytes,
@@ -87,6 +97,9 @@ impl Editor {
             doc
         };
         doc.syntax = self.gateways.syntaxes.detect(&path, doc.first_line());
+        if exists {
+            self.state.recent_files.push(path.clone());
+        }
         self.insert_document(doc);
         self.plugin_event(if exists { "on_load" } else { "on_new" }, id);
         true
@@ -143,7 +156,9 @@ impl Editor {
         }
         let id = self.next_document_id();
         let syntax = self.gateways.syntaxes.resolve("Plain Text");
-        self.add_document(Document::scratch(id, name, &text, &syntax, true), false);
+        let mut doc = Document::scratch(id, name, &text, &syntax, true);
+        doc.sheet = SheetKind::Html(contents.to_string());
+        self.add_document(doc, false);
         if let Some(group) = group {
             self.set_view_index(id, group, usize::MAX);
         }
@@ -161,6 +176,7 @@ impl Editor {
         let end = doc.char_count();
         doc.replace_range(0, end, &minihtml_text(contents));
         doc.read_only = read_only;
+        doc.sheet = SheetKind::Html(contents.to_string());
     }
 
     /// An empty, unmodified untitled tab, alone in its group, is replaced by the opened file, as
@@ -411,6 +427,13 @@ impl Editor {
         let Some(path) = doc.path.clone() else {
             return Ok(());
         };
+        if doc.sheet == SheetKind::Image {
+            // The picture is read again when it shows next.
+            let modified = self.gateways.file_system.modified(&path);
+            self.state.documents[index].modified_at = modified;
+            self.forget_html_image(&image_source(&path));
+            return Ok(());
+        }
         let bytes = self
             .gateways
             .file_system
@@ -466,6 +489,7 @@ impl Editor {
     pub fn sync_selection_from_view(&mut self, id: DocumentId, selection: Selection) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].sync_selection_from_view(selection);
+            self.unfold_around_carets(id);
         }
     }
 
@@ -473,6 +497,24 @@ impl Editor {
     pub fn sync_visible_range(&mut self, id: DocumentId, start: usize, end: usize) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].set_visible_range(start, end);
+        }
+    }
+
+    /// The view reports how it lays the text out and where it is scrolled (`view.text_to_layout`,
+    /// `viewport_position`…). A `set_viewport_position` the view has not applied yet still wins.
+    pub fn sync_view_geometry(&mut self, id: DocumentId, mut geometry: ViewGeometry) {
+        if let Some(doc) = self.any_document_mut(id) {
+            if let Some(position) = doc.viewport_request() {
+                geometry.viewport_position = position;
+            }
+            doc.set_geometry(geometry);
+        }
+    }
+
+    /// The view scrolled where a plugin's `set_viewport_position` asked.
+    pub fn note_viewport_scrolled(&mut self, id: DocumentId) {
+        if let Some(doc) = self.any_document_mut(id) {
+            doc.viewport_request_applied();
         }
     }
 
@@ -501,4 +543,9 @@ impl Editor {
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .or_else(|| self.state.folders.first().cloned())
     }
+}
+
+/// The `src` an image sheet's picture is read from and cached by (see [`Editor::html_image`]).
+pub fn image_source(path: &Path) -> String {
+    format!("file://{}", path.display())
 }

@@ -100,6 +100,8 @@ pub enum UiEvent {
     },
     /// Esc, or the mouse moved away from a popup that asked for it.
     PopupDismissed,
+    /// An item of a plugin's popup menu was chosen (`None`: it was dismissed).
+    PopupMenuChosen(Option<usize>),
     /// The mouse rests over a view (for `on_hover`).
     Hover {
         document: DocumentId,
@@ -134,6 +136,14 @@ pub enum UiEvent {
     CompletionClicked(usize),
     /// Every frame: the chars on screen.
     VisibleRange(DocumentId, usize, usize),
+    /// The "…" marker of the fold that starts at this char was clicked.
+    Unfold(DocumentId, usize),
+    /// A fold arrow in the gutter was clicked, on this line (0-based).
+    ToggleFold(DocumentId, usize),
+    /// The view scrolled where a plugin's `set_viewport_position` asked (before its geometry).
+    ViewportScrolled(DocumentId),
+    /// How the view lays its text out and where it is scrolled, every frame.
+    ViewGeometry(DocumentId, entities::view_geometry::ViewGeometry),
     /// Keys the editor handles with Sublime's indentation rules instead of the widget's.
     TabPressed,
     ShiftTabPressed,
@@ -353,6 +363,9 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             href,
         } => command_controller::navigate_plugin_annotation(editor, view, document, &key, &href),
         UiEvent::PopupDismissed => editor.hide_plugin_popup(),
+        UiEvent::PopupMenuChosen(index) => {
+            command_controller::choose_plugin_popup_menu(editor, view, index)
+        }
         UiEvent::Hover {
             document,
             point,
@@ -398,6 +411,10 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::VisibleRange(document, start, end) => {
             editor.sync_visible_range(document, start, end)
         }
+        UiEvent::Unfold(document, point) => editor.unfold_at(document, point),
+        UiEvent::ToggleFold(document, line) => editor.toggle_fold_at_line(document, line),
+        UiEvent::ViewportScrolled(document) => editor.note_viewport_scrolled(document),
+        UiEvent::ViewGeometry(document, geometry) => editor.sync_view_geometry(document, geometry),
         UiEvent::TextTyped(document, text) => editor.typed_in_view(document, &text),
         UiEvent::CompletionClicked(index) => {
             editor.commit_completion(Some(index));

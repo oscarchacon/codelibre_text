@@ -142,6 +142,75 @@ fn a_popup_kept_on_selection_changes_goes_with_esc_or_another_popup() {
 }
 
 #[test]
+fn a_popup_menu_answers_the_item_chosen_or_minus_one() {
+    let world = World::new().with_plugin_commands(&[("probe", Text)]);
+    let (mut editor, v) = editor_with_text(&world, "hello");
+    call(
+        &world,
+        &mut editor,
+        "view_show_popup_menu",
+        json!([v, ["Cut", "Copy"], 5]),
+    )
+    .unwrap();
+    let menu = editor.plugin_popup_menu().expect("shown");
+    assert_eq!(
+        (menu.view, menu.items.clone()),
+        (v, vec!["Cut".to_string(), "Copy".to_string()])
+    );
+    let first = menu.serial;
+
+    world.plugins.then([done()]);
+    editor.choose_plugin_popup_menu(Some(1), &mut |_, _| {});
+    assert!(editor.plugin_popup_menu().is_none());
+    assert_eq!(
+        callbacks(&world).last(),
+        Some(&(5, "select".into(), json!([1])))
+    );
+
+    // Dismissed.
+    call(
+        &world,
+        &mut editor,
+        "view_show_popup_menu",
+        json!([v, ["A"], 6]),
+    )
+    .unwrap();
+    assert_ne!(editor.plugin_popup_menu().unwrap().serial, first);
+    world.plugins.then([done()]);
+    editor.choose_plugin_popup_menu(None, &mut |_, _| {});
+    assert_eq!(
+        callbacks(&world).last(),
+        Some(&(6, "select".into(), json!([-1])))
+    );
+
+    // A menu that replaces another: the first hears -1 at the next poll.
+    call(
+        &world,
+        &mut editor,
+        "view_show_popup_menu",
+        json!([v, ["A"], 8]),
+    )
+    .unwrap();
+    call(
+        &world,
+        &mut editor,
+        "view_show_popup_menu",
+        json!([v, ["B"], 9]),
+    )
+    .unwrap();
+    world.plugins.then([done()]);
+    editor.poll_plugins(&mut |_, _| {});
+    assert_eq!(
+        callbacks(&world).last(),
+        Some(&(8, "select".into(), json!([-1])))
+    );
+    assert_eq!(
+        editor.plugin_popup_menu().unwrap().items,
+        vec!["B".to_string()]
+    );
+}
+
+#[test]
 fn phantoms_move_with_edits_answer_their_links_and_are_erased() {
     let world = World::new().with_plugin_commands(&[("probe", Text)]);
     let (mut editor, v) = editor_with_text(&world, "one two");

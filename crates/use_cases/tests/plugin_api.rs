@@ -1565,3 +1565,146 @@ fn expand_variables_uses_the_given_values() {
     );
     assert_eq!(answer, Ok(json!("x c")));
 }
+
+#[test]
+fn file_and_folder_history_answer_open_recent() {
+    let world = plugin_world().with_file("/p/a.txt", "a").with_dir("/q");
+    let mut editor = world.editor();
+    test_support::open(&mut editor, "/p/a.txt");
+    editor.add_folder("/q".into());
+    let shown = |path: &str| std::path::PathBuf::from(path).display().to_string();
+    assert_eq!(
+        call(&world, &mut editor, "window_file_history", json!([])),
+        Ok(json!([shown("/p/a.txt")]))
+    );
+    assert_eq!(
+        call(&world, &mut editor, "folder_history", json!([])),
+        Ok(json!([shown("/q")]))
+    );
+}
+
+#[test]
+fn the_view_geometry_is_what_the_view_reported() {
+    use entities::view_geometry::ViewGeometry;
+    let world = plugin_world();
+    let mut editor = world.editor();
+    editor.insert_at_selections("ab\ncd");
+    let v = view_id(&editor);
+    editor.sync_view_geometry(
+        v,
+        ViewGeometry {
+            line_height: 20.0,
+            em_width: 10.0,
+            viewport_position: (0.0, 40.0),
+            viewport_extent: (300.0, 200.0),
+            text_origin: (30.0, 0.0),
+            ..ViewGeometry::default()
+        },
+    );
+    let mut ask = |function: &str, args: Value| call(&world, &mut editor, function, args);
+    assert_eq!(ask("view_line_height", json!([v])), Ok(json!(20.0)));
+    assert_eq!(ask("view_em_width", json!([v])), Ok(json!(10.0)));
+    assert_eq!(
+        ask("view_viewport_extent", json!([v])),
+        Ok(json!([300.0, 200.0]))
+    );
+    assert_eq!(
+        ask("view_layout_extent", json!([v])),
+        Ok(json!([20.0, 40.0]))
+    );
+    assert_eq!(
+        ask("view_text_to_layout", json!([v, 4])),
+        Ok(json!([10.0, 20.0]))
+    );
+    assert_eq!(
+        ask("view_layout_to_text", json!([v, [12.0, 25.0]])),
+        Ok(json!(4))
+    );
+    assert_eq!(
+        ask("view_window_to_layout", json!([v, [40.0, 0.0]])),
+        Ok(json!([10.0, 40.0]))
+    );
+    assert_eq!(
+        ask("view_layout_to_window", json!([v, [10.0, 40.0]])),
+        Ok(json!([40.0, 0.0]))
+    );
+    // Scrolling: the view is asked, and the position answers at once.
+    ask("view_set_viewport_position", json!([v, [0.0, 100.0]])).unwrap();
+    assert_eq!(
+        ask("view_viewport_position", json!([v])),
+        Ok(json!([0.0, 100.0]))
+    );
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.viewport_request(), Some((0.0, 100.0)));
+    // Until the view has scrolled, a report of the old position does not undo it.
+    editor.sync_view_geometry(v, ViewGeometry::default());
+    assert_eq!(
+        editor
+            .active_document()
+            .unwrap()
+            .geometry()
+            .viewport_position,
+        (0.0, 100.0)
+    ); // Once it has, the position is the view's again (the user scrolls).
+    editor.note_viewport_scrolled(v);
+    editor.sync_view_geometry(v, ViewGeometry::default());
+    assert_eq!(
+        editor
+            .active_document()
+            .unwrap()
+            .geometry()
+            .viewport_position,
+        (0.0, 0.0)
+    );
+}
+
+#[test]
+fn views_are_the_text_sheets_and_sheets_are_every_tab() {
+    let world = plugin_world().with_file("/p/logo.png", vec![0x89, 0]);
+    let mut editor = world.editor();
+    editor.insert_at_selections("kept");
+    let text = view_id(&editor);
+    editor.open_file(std::path::Path::new("/p/logo.png"));
+    let image = view_id(&editor);
+    let html = editor.new_html_sheet("Notes", "<b>x</b>", None);
+    let mut ask = |function: &str, args: Value| call(&world, &mut editor, function, args);
+    assert_eq!(ask("window_views", json!([])), Ok(json!([text])));
+    assert_eq!(
+        ask("window_sheets", json!([])),
+        Ok(json!([text, image, html]))
+    );
+    assert_eq!(ask("window_views_in_group", json!([0])), Ok(json!([text])));
+    assert_eq!(
+        ask("window_sheets_in_group", json!([0])),
+        Ok(json!([text, image, html]))
+    );
+    assert_eq!(ask("view_sheet_kind", json!([text])), Ok(json!("text")));
+    assert_eq!(ask("view_sheet_kind", json!([image])), Ok(json!("image")));
+    assert_eq!(ask("view_sheet_kind", json!([html])), Ok(json!("html")));
+    assert_eq!(
+        ask("view_file_name", json!([image])),
+        Ok(json!(std::path::PathBuf::from("/p/logo.png")
+            .display()
+            .to_string()))
+    );
+}
+
+#[test]
+fn plugins_fold_and_unfold_regions() {
+    let world = plugin_world();
+    let mut editor = world.editor();
+    editor.insert_at_selections("abcdefghij");
+    let v = view_id(&editor);
+    let mut ask = |function: &str, args: Value| call(&world, &mut editor, function, args);
+    assert_eq!(
+        ask("view_fold", json!([v, [[2, 4], [3, 6]]])),
+        Ok(json!(true))
+    );
+    assert_eq!(ask("view_fold", json!([v, [[2, 5]]])), Ok(json!(false)));
+    assert_eq!(ask("view_folded_regions", json!([v])), Ok(json!([[2, 6]])));
+    assert_eq!(
+        ask("view_unfold", json!([v, [[0, 10]]])),
+        Ok(json!([[2, 6]]))
+    );
+    assert_eq!(ask("view_folded_regions", json!([v])), Ok(json!([])));
+}

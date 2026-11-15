@@ -30,13 +30,13 @@ cannot be told apart by the string scan and are listed under native.
 |---|---|---|
 | Multiple cursors | ~~`select_lines`, `split_selection_into_lines`, `find_all_under`~~ (done), `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `find_all` | native |
 | Selection | `expand_selection_to_paragraph`, `expand_selection` with `to: scope/tag` (brackets, indentation, smart: done) | native |
-| Code folding | `fold`, `unfold`, `fold_by_level`, `unfold_all`, `fold_tag_attributes`, `fold_unfold` | native / py |
+| Code folding | ~~`fold`, `unfold`, `fold_by_level`, `unfold_all`~~ (done), `fold_tag_attributes`, `fold_unfold` | native / py |
 | Bookmarks | `toggle_bookmark`, `next_bookmark`, `prev_bookmark`, `clear_bookmarks`, `select_all_bookmarks`, `select_bookmark` | native |
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |
 | Navigation history | `jump_back`, `jump_forward`, `_jump`, `add_jump_record` | native / py |
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
 | Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
-| Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, `toggle_tabs`, `toggle_show_open_files` | native |
+| Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, ~~`toggle_tabs`~~ (done), `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), results in a tab (`use_buffer`), `find_in_files_side_by_side` | native / py |
 | Snippets | `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
@@ -46,9 +46,9 @@ cannot be told apart by the string scan and are listed under native.
 | Encoding | `set_encoding`, `reopen` with `encoding`, `detect_indentation` | native |
 | Spelling | `next_misspelling`, `prev_misspelling` | native |
 | Side bar | ~~`new_file_at`, `new_folder`, `rename_path`, `delete_file`, `delete_folder`, `remove_folder`, `open_containing_folder`~~ (done), `reveal_in_side_bar`, `focus_side_bar`, `copy_path`, `rename_file` | native / py |
-| Recent / projects | `open_recent_file`, `open_recent_folder`, `clear_recent_files`, `*project_or_workspace*`, `new_window`, `save_workspace_as`, `close_workspace` | native |
+| Recent / projects | ~~`open_recent_file`, `open_recent_folder`, `clear_recent_files`~~ (done), `*project_or_workspace*`, `new_window`, `save_workspace_as`, `close_workspace` | native |
 | Build | `toggle_save_all_on_build` | native / py |
-| UI toggles | ~~`toggle_minimap`~~ (done), `toggle_menu`, `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |
+| UI toggles | ~~`toggle_minimap`, `toggle_menu`~~ (done), `select_theme`, `customize_theme`, `customize_color_scheme`, `choose_font`, `show_scope_name` | native / py |
 | Misc | `switch_file` (Alt+O), ~~`open_url`~~ (done), `open_in_browser`, `open_context_url`, `open_terminal`, `copy_as_html`, `html_print`, `view_resource`, `edit_syntax_settings`, `convert_syntax`, `chain`, `context_menu` | native / py |
 | Out of scope | `sublime_merge_*`, license/update commands, `new_plugin`, syntax-test/profiling commands | — |
 
@@ -59,7 +59,7 @@ cannot be told apart by the string scan and are listed under native.
   `word_separators`, `sub_word_separators`, `drag_text`, `trim_automatic_white_space`, `indent_to_bracket`, `use_tab_stops`.
 - Display: `font_face`, `font_options`, `draw_white_space`, `draw_indent_guides`, `indent_guide_options`, `match_brackets*`, `match_selection`,
   `match_tags`, `caret_style`, `block_caret`, `line_padding_top/bottom`, `wrap_width`, `relative_line_numbers`, `highlight_line_number`,
-  `ruler_style`, `margin`, `draw_centered`, `fold_buttons`, `ui_scale`, `theme`, `light/dark_color_scheme`.
+  `ruler_style`, `margin`, `draw_centered`, ~~`fold_buttons`~~ (done, with `fade_fold_buttons`), `ui_scale`, `theme`, `light/dark_color_scheme`.
 - Files: `default_encoding`, `fallback_encoding`, `reload_file_on_change`, `always_prompt_for_file_reload`, `save_on_focus_lost`,
   `binary_file_patterns`, `close_windows_when_empty`, `open_files_in_new_window`.
 - Status bar: `show_encoding`, `show_line_endings`, `show_line_column`, `show_syntax`, `show_indentation`, `show_full_path`.

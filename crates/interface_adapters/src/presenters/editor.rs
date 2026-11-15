@@ -1,14 +1,17 @@
 use entities::command::Command;
-use entities::document::{DocumentId, RegionSet};
+use entities::document::{Document, DocumentId, RegionSet, SheetKind};
+use entities::folding::fold_headers;
 use entities::minihtml;
+use entities::text::line_col;
 use serde_json::{json, Value};
+use use_cases::documents::image_source;
 use use_cases::plugin_popups::{HIDE_ON_MOUSE_MOVE, HIDE_ON_MOUSE_MOVE_AWAY};
 use use_cases::Editor;
 
 use crate::view_models::{
     AnnotationViewModel, AutoCompleteViewModel, CompletionViewModel, EditorViewModel,
-    HtmlViewModel, MinimapViewModel, PhantomLayout, PhantomViewModel, PopupViewModel,
-    RegionViewModel, Underline,
+    FoldButtonViewModel, HtmlViewModel, MinimapViewModel, PhantomLayout, PhantomViewModel,
+    PopupViewModel, RegionViewModel, SheetViewModel, Underline,
 };
 use crate::view_state::ViewState;
 
@@ -139,6 +142,20 @@ pub fn present_document(
         show: doc
             .show_request()
             .map(|r| (r.point.min(len), r.center, doc.show_revision())),
+        scroll_to: doc
+            .viewport_request()
+            .map(|position| (position, doc.show_revision())),
+        folds: doc
+            .folds()
+            .iter()
+            .map(|&(a, b)| (a.min(len), b.min(len)))
+            .filter(|(a, b)| a < b)
+            .collect(),
+        fold_buttons: settings
+            .bool("fold_buttons", true)
+            .then(|| present_fold_buttons(doc, settings.usize("tab_size", 4).max(1))),
+        fade_fold_buttons: settings.bool("fade_fold_buttons", true),
+        sheet: present_sheet(editor, doc),
         take_focus,
         popup,
         phantoms,
@@ -194,6 +211,19 @@ fn present_auto_complete(
 }
 
 /// minihtml read into boxes, with the bytes of its images (`<img src>`).
+/// What an HTML or image sheet shows; `None` for a text sheet.
+fn present_sheet(editor: &Editor, doc: &Document) -> Option<SheetViewModel> {
+    match &doc.sheet {
+        SheetKind::Text => None,
+        SheetKind::Html(contents) => Some(SheetViewModel::Html(present_html(editor, contents))),
+        SheetKind::Image => {
+            let src = image_source(doc.path.as_deref()?);
+            let bytes = editor.html_image(&src);
+            Some(SheetViewModel::Image { src, bytes })
+        }
+    }
+}
+
 pub fn present_html(editor: &Editor, html: &str) -> HtmlViewModel {
     let block = minihtml::parse_html(html);
     let mut images: Vec<(String, std::rc::Rc<Vec<u8>>)> = Vec::new();
@@ -275,4 +305,41 @@ fn present_regions(editor: &Editor, set: &RegionSet, len: usize) -> Option<Regio
         annotations,
         annotation_color: set.annotation_color.clone(),
     })
+}
+
+/// The gutter's fold arrows on the lines on screen (and a screen's worth around them, for the
+/// next scroll): an open arrow where a block starts, a closed one where a fold does.
+fn present_fold_buttons(doc: &Document, tab_size: usize) -> Vec<FoldButtonViewModel> {
+    if doc.sheet != SheetKind::Text {
+        return Vec::new();
+    }
+    let (start, end) = doc.visible_range();
+    let (first, last) = (line_col(&doc.text, start).0, line_col(&doc.text, end).0);
+    let margin = last - first + 1;
+    let folded: Vec<usize> = doc
+        .folds()
+        .iter()
+        .map(|&(a, _)| line_col(&doc.text, a).0)
+        .collect();
+    let mut buttons: Vec<FoldButtonViewModel> = fold_headers(
+        &doc.text,
+        first.saturating_sub(margin),
+        last + margin,
+        tab_size,
+    )
+    .into_iter()
+    .filter(|line| !folded.contains(line))
+    .map(|line| FoldButtonViewModel {
+        line,
+        folded: false,
+    })
+    .chain(
+        folded
+            .iter()
+            .map(|&line| FoldButtonViewModel { line, folded: true }),
+    )
+    .collect();
+    buttons.sort_by_key(|b| b.line);
+    buttons.dedup_by_key(|b| b.line);
+    buttons
 }

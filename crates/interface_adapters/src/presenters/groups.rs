@@ -19,6 +19,7 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Vec<GroupViewModel>
                 group,
                 rect,
                 active: group == active_group,
+                show_tabs: view.show_tabs,
                 tabs: tabs::present_group(editor, group),
                 editor: shown
                     .and_then(|index| editor_presenter::present_document(editor, view, index)),

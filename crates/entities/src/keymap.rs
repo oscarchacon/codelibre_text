@@ -226,13 +226,15 @@ impl Keymap {
             .join(", ")
     }
 
-    /// Feeds one key press. `alternatives` are equivalent readings of the same key, e.g. the
-    /// character it produced and the physical key, for keyboard layouts where they differ.
+    /// Feeds one key press. `alternatives` are equivalent readings of the same key: first the
+    /// character it produced, then the physical key, for keyboard layouts where they differ.
     pub fn press(&mut self, alternatives: &[KeyCombo], context: &dyn KeyContext) -> KeyResult {
         let mut candidates = Vec::new();
-        for combo in alternatives {
-            // A shifted symbol (`?`) may be written without shift in the keymap.
-            if combo.shift && combo.is_symbol() {
+        for (index, combo) in alternatives.iter().enumerate() {
+            // A symbol typed with shift (`?`, `/` on a Spanish keyboard) may be written without
+            // it in the keymap. Only the character: the physical key's shift is a real modifier
+            // (Shift+[ types `{`, and its physical `[` must find `ctrl+shift+[`, not `ctrl+[`).
+            if index == 0 && combo.shift && combo.is_symbol() {
                 candidates.push(KeyCombo {
                     shift: false,
                     ..combo.clone()

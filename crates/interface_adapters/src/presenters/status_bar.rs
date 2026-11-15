@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use entities::document::SheetKind;
 use entities::text::line_col;
 use use_cases::Editor;
 
@@ -28,6 +29,19 @@ pub fn present(editor: &Editor) -> StatusBarViewModel {
             syntax: String::new(),
         };
     };
+    // An image or HTML sheet has no caret, indentation, line endings, encoding or syntax.
+    if doc.sheet != SheetKind::Text {
+        return StatusBarViewModel {
+            position: String::new(),
+            overwrite: false,
+            plugin_statuses: Vec::new(),
+            message,
+            indentation: String::new(),
+            line_ending: String::new(),
+            encoding: String::new(),
+            syntax: String::new(),
+        };
+    }
 
     let selection = doc.selection();
     let (line, column) = line_col(&doc.text, selection.head);

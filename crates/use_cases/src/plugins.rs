@@ -78,6 +78,9 @@ pub struct PluginState {
     depth: usize,
     /// The popup a plugin shows (`view.show_popup`), see `plugin_popups`.
     pub(crate) popup: Option<crate::plugin_popups::PluginPopup>,
+    /// The menu a plugin shows (`view.show_popup_menu`), one at a time.
+    pub(crate) popup_menu: Option<crate::plugin_popups::PluginPopupMenu>,
+    pub(crate) next_popup_menu: u64,
     /// The `on_navigate` callback of each phantom that has one, by phantom id.
     pub(crate) phantom_callbacks: HashMap<u64, u64>,
     /// The callbacks (`on_navigate`, `on_close`) of region sets with annotations, by view and key.

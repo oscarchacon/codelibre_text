@@ -178,6 +178,14 @@ pub fn navigate_plugin_popup(editor: &mut Editor, view: &mut ViewState, href: &s
     show_plugin_panels(editor, view);
 }
 
+/// An item of a plugin's popup menu chosen, or the menu dismissed: its `on_select`.
+pub fn choose_plugin_popup_menu(editor: &mut Editor, view: &mut ViewState, index: Option<usize>) {
+    editor.choose_plugin_popup_menu(index, &mut |editor: &mut Editor, command: &Command| {
+        run(editor, view, command)
+    });
+    show_plugin_panels(editor, view);
+}
+
 /// A link clicked in a plugin's phantom: its `on_navigate`.
 pub fn navigate_plugin_phantom(
     editor: &mut Editor,
@@ -325,6 +333,9 @@ const WINDOW_COMMANDS: &[&str] = &[
     "close_window",
     "exit",
     "reopen_last_file",
+    "open_recent_file",
+    "open_recent_folder",
+    "clear_recent_files",
     "close_folder_list",
     "prompt_open_project",
     "prompt_open_project_or_workspace",
@@ -346,6 +357,8 @@ const WINDOW_COMMANDS: &[&str] = &[
     "toggle_side_bar",
     "toggle_status_bar",
     "toggle_minimap",
+    "toggle_tabs",
+    "toggle_menu",
     "toggle_full_screen",
     "toggle_distraction_free",
     "increase_font_size",
@@ -606,6 +619,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             editor.clone_active_document();
         }
         "reopen_last_file" => editor.reopen_closed_file(),
+        "open_recent_file" => editor.open_recent_file(command.usize_arg("index", 0)),
+        "open_recent_folder" => editor.open_recent_folder(command.usize_arg("index", 0)),
+        "clear_recent_files" => editor.clear_recent_files(),
         "close_folder_list" => editor.close_all_folders(),
         "prompt_open_project" | "prompt_open_project_or_workspace" => editor.prompt_open_project(),
         "open_project" | "open_project_or_workspace" => {
@@ -792,6 +808,8 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "toggle_side_bar" => view.show_side_bar = !view.show_side_bar,
         "toggle_status_bar" => view.show_status_bar = !view.show_status_bar,
         "toggle_minimap" => view.show_minimap = !view.show_minimap,
+        "toggle_tabs" => view.show_tabs = !view.show_tabs,
+        "toggle_menu" => view.show_menu = !view.show_menu,
         "toggle_full_screen" | "toggle_distraction_free" => {
             view.fullscreen = !view.fullscreen;
             view.request(ViewRequest::SetFullscreen(view.fullscreen));
@@ -1013,6 +1031,11 @@ const EDITOR_COMMANDS: &[&str] = &[
     "select_lines",
     "split_selection_into_lines",
     "single_selection",
+    "fold",
+    "unfold",
+    "unfold_all",
+    "fold_by_level",
+    "fold_all",
     "increase_font_size",
     "decrease_font_size",
     "reset_font_size",
@@ -1034,6 +1057,11 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
         "split_selection_into_lines" => editor.split_selection_into_lines(),
         "single_selection" => editor.single_selection(),
+        "fold" => editor.fold_selections(),
+        "unfold" => editor.unfold_selections(),
+        "unfold_all" => editor.unfold_all(),
+        "fold_by_level" => editor.fold_by_level(command.usize_arg("level", 1)),
+        "fold_all" => editor.fold_by_level(1),
         "increase_font_size" => editor.change_font_size(1.0),
         "decrease_font_size" => editor.change_font_size(-1.0),
         "reset_font_size" => editor.reset_font_size(),
@@ -1113,17 +1141,25 @@ fn runs_during_event(name: &str) -> bool {
 }
 
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
-/// state: a formatter's command in `on_pre_save` must reach the file being saved. The others
-/// (panels, builds, the widget's undo and redo) answer false and wait for the next frame, which
-/// runs them on the view that asked.
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. Output panels,
+/// the console and `exec` do their editor's part at once ([`panel_part_during_event`]). The
+/// others (the find and input panels, `build`, the widget's undo and redo) answer false and wait
+/// for the next frame, which runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
-    if !runs_during_event(&command.name) {
+    let at_once = |name: &str| runs_during_event(name) || PANEL_COMMANDS.contains(&name);
+    if !at_once(&command.name) {
         return false;
     }
     let target = hook_target(editor, &command.name).unwrap_or(CommandTarget::View);
     let rewritten = editor.plugin_rewrite_command(command, target);
-    if !runs_during_event(&rewritten.name) {
+    if !at_once(&rewritten.name) {
         editor.queue_plugin_command(rewritten);
+        return true;
+    }
+    if PANEL_COMMANDS.contains(&rewritten.name.as_str()) {
+        if !panel_part_during_event(editor, &rewritten) {
+            editor.queue_plugin_command(rewritten);
+        }
         return true;
     }
     let undo_before = plugin_edit_undo_snapshot(editor, &rewritten);
@@ -1140,6 +1176,61 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
         hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View),
     );
     true
+}
+
+/// The panel and build commands whose part in the editor runs during an event.
+const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec"];
+
+/// The editor's part of a panel command run during an event, at once: a plugin that shows
+/// `output.exec` in `on_post_save` and writes to it, or asks `window.active_panel()`, finds it
+/// shown. The view's part (the find or input panel closed, the focus) follows next frame as the
+/// same command, which shows again what is already shown. False when it must all wait (the find
+/// panel, an unknown panel, a plugin's own `exec`).
+fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
+    match command.name.as_str() {
+        "show_panel" => {
+            let panel = command.str_arg("panel");
+            let toggle = command.bool_arg("toggle", false);
+            if panel == "console" {
+                if toggle {
+                    editor.toggle_console();
+                } else {
+                    editor.show_console();
+                }
+                return true;
+            }
+            let Some(name) = panel.strip_prefix("output.") else {
+                return false;
+            };
+            if toggle && editor.shown_output_panel().is_some_and(|p| p.name == name) {
+                editor.hide_output_panel();
+                return true;
+            }
+            if !editor.show_output_panel(name) {
+                return false;
+            }
+            // It takes the find panel's place (closed next frame).
+            editor.sync_find_panel(None);
+            let show = serde_json::json!({ "panel": panel });
+            editor.queue_plugin_command(Command::with_args("show_panel", show));
+            true
+        }
+        "hide_panel" => {
+            editor.hide_output_panel();
+            editor.sync_find_panel(None);
+            editor.queue_plugin_command(Command::new("hide_panel"));
+            true
+        }
+        "exec" if editor.plugin_command_kind("exec").is_none() => {
+            if editor.exec(&command.args) && editor.show_output_panel("exec") {
+                editor.sync_find_panel(None);
+                let show = serde_json::json!({ "panel": "output.exec" });
+                editor.queue_plugin_command(Command::with_args("show_panel", show));
+            }
+            true
+        }
+        _ => false,
+    }
 }
 
 /// What Tab does in the text: a tab (or spaces, or indentation) at every selection.

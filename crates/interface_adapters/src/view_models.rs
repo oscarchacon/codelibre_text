@@ -86,6 +86,14 @@ pub struct MenuEntryViewModel {
 }
 
 /// The open context menu: what it was opened on (a view draws it only over that) and its entries.
+/// A plugin's menu (`view.show_popup_menu`), drawn at the mouse.
+#[derive(Clone, PartialEq, Debug)]
+pub struct PopupMenuViewModel {
+    /// New for every menu shown (the view places each at the mouse once).
+    pub serial: u64,
+    pub items: Vec<String>,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct ContextMenuViewModel {
     pub target: ContextMenuTarget,
@@ -231,8 +239,18 @@ pub struct GroupViewModel {
     pub rect: [f32; 4],
     /// It has the focus.
     pub active: bool,
+    /// Its tab bar is drawn (`toggle_tabs`).
+    pub show_tabs: bool,
     pub tabs: Vec<TabViewModel>,
     pub editor: Option<EditorViewModel>,
+}
+
+/// A fold arrow in the gutter: on a line (0-based) that heads a block or starts a fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoldButtonViewModel {
+    pub line: usize,
+    /// Its block is folded (the arrow points right, and shows always).
+    pub folded: bool,
 }
 
 pub struct EditorViewModel {
@@ -265,6 +283,18 @@ pub struct EditorViewModel {
     /// A plugin's `view.show`: the char to scroll to, whether centered, and a counter that
     /// changes with each request.
     pub show: Option<(usize, bool, u64)>,
+    /// A plugin's `set_viewport_position`: the layout point to scroll to the top left, and the
+    /// `show` revision it came with.
+    pub scroll_to: Option<((f32, f32), u64)>,
+    /// Folded regions (chars), sorted and apart: hidden, a "…" marker in their place.
+    pub folds: Vec<(usize, usize)>,
+    /// The gutter's fold arrows on the lines around the visible ones; `None` without the
+    /// `fold_buttons` setting (no column for them).
+    pub fold_buttons: Option<Vec<FoldButtonViewModel>>,
+    /// Only the arrows of folded blocks show unless the mouse is over the gutter.
+    pub fade_fold_buttons: bool,
+    /// An HTML or image sheet: its tab shows this instead of the text.
+    pub sheet: Option<SheetViewModel>,
     pub take_focus: bool,
     /// A plugin's popup on this view.
     pub popup: Option<PopupViewModel>,
@@ -292,6 +322,17 @@ pub struct MinimapViewModel {
 pub struct HtmlViewModel {
     pub block: minihtml::Block,
     pub images: Vec<(String, std::rc::Rc<Vec<u8>>)>,
+}
+
+/// What an HTML or image sheet shows in place of the text.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SheetViewModel {
+    Html(HtmlViewModel),
+    /// A picture file; `bytes` is `None` when it cannot be read.
+    Image {
+        src: String,
+        bytes: Option<std::rc::Rc<Vec<u8>>>,
+    },
 }
 
 /// The auto-complete list, under the typed word.

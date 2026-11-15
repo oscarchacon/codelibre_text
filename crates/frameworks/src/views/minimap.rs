@@ -1,6 +1,6 @@
-//! The minimap: the whole text drawn small right of the text area, in the colors of its syntax, with
-//! the plugins' regions (except `HIDE_ON_MINIMAP` ones) and the selection. A box marks the part the
-//! text area shows (while the mouse is over the minimap, or always with `always_show_minimap_viewport`);
+//! The minimap: the whole text drawn small (its glyphs, as Sublime's) right of the text area, in the
+//! colors of its syntax, with the plugins' regions (except `HIDE_ON_MINIMAP` ones) and the
+//! selection. A box marks the part the text area shows (while the mouse is over the minimap, or always with `always_show_minimap_viewport`);
 //! clicking or dragging on it scrolls the text there.
 //!
 //! When the text is taller than the minimap, the minimap scrolls too, in step with the text: at the
@@ -155,46 +155,65 @@ pub fn show(
             mark(range, color.gamma_multiply(0.6));
         }
     }
-    // The text, a bar for each word in its color.
+    // The text itself, tiny, in its colors: one small galley per row, at the row's place.
     let sections = &text.galley.job.sections;
     for row in text
         .galley
         .rows
         .iter()
         .filter(|r| r.rect.bottom() >= shown.start && r.rect.top() <= shown.end)
+        // A folded row has no height.
+        .filter(|r| r.rect.height() > text.row_height * 0.5)
     {
-        let mut word: Option<(f32, f32, u32)> = None;
-        let mut flush = |word: &mut Option<(f32, f32, u32)>| {
-            if let Some((start, end, section)) = word.take() {
-                let color = sections
-                    .get(section as usize)
-                    .map_or(colors.foreground, |s| s.format.color);
-                let min = to_screen(start, row.rect.top());
-                shapes.push(Shape::rect_filled(
-                    Rect::from_min_max(
-                        min,
-                        egui::pos2(area.left() + end * SCALE, min.y + line * 0.7),
-                    ),
-                    0.0,
-                    color.gamma_multiply(0.75),
-                ));
-            }
+        let Some(first) = row.glyphs.iter().find(|g| !g.chr.is_whitespace()) else {
+            continue;
         };
-        for glyph in &row.glyphs {
-            if glyph.chr.is_whitespace() {
-                flush(&mut word);
+        let mut job = egui::text::LayoutJob {
+            wrap: egui::text::TextWrapping::no_max_width(),
+            ..Default::default()
+        };
+        for glyph in row.glyphs.iter().skip_while(|g| g.chr.is_whitespace()) {
+            let Some(section) = sections.get(glyph.section_index as usize) else {
+                continue;
+            };
+            // Folded or hidden text (`hide_folds`) is transparent: not drawn here either.
+            if section.format.color == Color32::TRANSPARENT {
                 continue;
             }
-            let right = glyph.pos.x + glyph.advance_width;
-            match &mut word {
-                Some((_, end, section)) if *section == glyph.section_index => *end = right,
-                _ => {
-                    flush(&mut word);
-                    word = Some((glyph.pos.x, right, glyph.section_index));
-                }
+            let chr = if glyph.chr == '\t' { ' ' } else { glyph.chr };
+            let mut buffer = [0; 4];
+            let same = job.sections.last().is_some_and(|last| {
+                last.format.color == section.format.color && last.byte_range.end == job.text.len()
+            });
+            let start = job.text.len();
+            job.text.push_str(chr.encode_utf8(&mut buffer));
+            if same {
+                job.sections.last_mut().unwrap().byte_range.end = job.text.len();
+            } else {
+                job.sections.push(egui::text::LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: start..job.text.len(),
+                    format: egui::TextFormat {
+                        font_id: egui::FontId::new(
+                            (section.format.font_id.size * SCALE).max(1.0),
+                            section.format.font_id.family.clone(),
+                        ),
+                        color: section.format.color,
+                        line_height: Some(line),
+                        ..Default::default()
+                    },
+                });
             }
         }
-        flush(&mut word);
+        if job.text.is_empty() {
+            continue;
+        }
+        let galley = ui.fonts(|f| f.layout_job(job));
+        shapes.push(Shape::galley(
+            to_screen(first.pos.x, row.rect.top()),
+            galley,
+            colors.foreground,
+        ));
     }
     painter.extend(shapes);
 

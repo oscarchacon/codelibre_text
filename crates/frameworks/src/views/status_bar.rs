@@ -31,6 +31,10 @@ pub fn show(
             ui.add_space(16.0);
             ui.label(RichText::new(message).size(12.0).color(chrome.fg));
         }
+        // Nothing to show for an image or HTML sheet.
+        if status.syntax.is_empty() && status.encoding.is_empty() {
+            return;
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
             let link =

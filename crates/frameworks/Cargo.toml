@@ -58,3 +58,5 @@ winresource = "0.1"
 tempfile.workspace = true
 # Rewriting an installed package's metadata (tests/sublime_packages.rs, the upgrade)
 zip.workspace = true
+# Draws the whole window off screen and saves what it shows (tests/app.rs, run by hand: `--ignored`)
+egui_kittest = { version = "0.31", features = ["eframe", "wgpu", "snapshot"] }

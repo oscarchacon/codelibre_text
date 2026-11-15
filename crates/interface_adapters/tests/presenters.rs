@@ -11,7 +11,9 @@ use interface_adapters::presenters::{
     dialogs, editor as editor_presenter, find_panel, menu, output_panel, quick_panel, side_bar,
     status_bar, tabs, window,
 };
-use interface_adapters::view_models::{DialogViewModel, MinimapViewModel, TreeRowKind};
+use interface_adapters::view_models::{
+    DialogViewModel, FoldButtonViewModel, MinimapViewModel, TreeRowKind,
+};
 use interface_adapters::view_state::{QuickPanel, ViewState};
 use serde_json::json;
 use test_support::{open, World};
@@ -233,6 +235,15 @@ fn the_status_bar_is_empty_without_documents() {
     assert!(status.position.is_empty() && status.syntax.is_empty());
 }
 
+#[test]
+fn the_status_bar_has_no_caret_or_file_details_for_an_html_sheet() {
+    let world = World::new();
+    let mut editor = world.editor();
+    editor.new_html_sheet("Sheet", "<p>hi</p>", None);
+    let status = status_bar::present(&editor);
+    assert!(status.position.is_empty() && status.syntax.is_empty() && status.encoding.is_empty());
+}
+
 // ----- menu ----------------------------------------------------------------------------------------
 
 #[test]
@@ -294,6 +305,38 @@ fn the_menu_shows_shortcuts_and_check_marks() {
     assert!(file[1].separator);
     assert_eq!(file[2].checked, Some(true));
     assert_eq!(file[3].checked, Some(false));
+}
+
+#[test]
+fn open_recent_names_its_entries_after_the_history_and_hides_the_rest() {
+    let recent = |name: &str, index: usize| MenuItem {
+        caption: String::new(),
+        id: None,
+        command: Some(Command::with_args(name, json!({ "index": index }))),
+        checkbox: false,
+        children: vec![],
+    };
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_dir("/q")
+        .with_menu(MenuItem {
+            caption: "File".into(),
+            id: None,
+            command: None,
+            checkbox: false,
+            children: vec![
+                recent("open_recent_file", 0),
+                recent("open_recent_file", 1),
+                recent("open_recent_folder", 0),
+            ],
+        });
+    let mut editor = world.editor();
+    open(&mut editor, "/p/a.txt");
+    editor.add_folder("/q".into());
+    let menu = menu::present(&editor);
+    let captions: Vec<_> = menu[0].children.iter().map(|e| e.caption.clone()).collect();
+    let shown = |path: &str| PathBuf::from(path).display().to_string();
+    assert_eq!(captions, vec![shown("/p/a.txt"), shown("/q")]);
 }
 
 #[test]
@@ -700,6 +743,36 @@ fn the_editor_view_model_reflects_the_document_and_its_settings() {
     assert!(model.word_wrap && model.line_numbers && model.highlight_line && model.auto_indent);
     assert_eq!(model.rulers, vec![79]);
     assert!(!model.read_only);
+}
+
+#[test]
+fn the_gutter_has_fold_arrows_on_block_headers_and_folds() {
+    let world = World::new();
+    let mut editor = editor_with_text(&world, "a:\n    b\nc\nd:\n    e\n", Selection::caret(0));
+    let id = editor.active_document().unwrap().id;
+    editor.toggle_fold_at_line(id, 3);
+    let buttons = editor_presenter::present(&mut editor, &mut ViewState::default())
+        .unwrap()
+        .fold_buttons
+        .unwrap();
+    assert_eq!(
+        buttons,
+        vec![
+            FoldButtonViewModel {
+                line: 0,
+                folded: false
+            },
+            FoldButtonViewModel {
+                line: 3,
+                folded: true
+            },
+        ]
+    );
+
+    let world = World::new().with_preferences(json!({ "fold_buttons": false }));
+    let mut editor = editor_with_text(&world, "a:\n    b\n", Selection::caret(0));
+    let model = editor_presenter::present(&mut editor, &mut ViewState::default()).unwrap();
+    assert_eq!(model.fold_buttons, None, "no column for them");
 }
 
 #[test]

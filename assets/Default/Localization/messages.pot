@@ -38,7 +38,15 @@ msgid "Open Project…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Reopen Closed File"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -165,6 +173,58 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Toggle Block Comment"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -326,6 +386,14 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Minimap"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Tabs"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Menu"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -708,6 +776,14 @@ msgstr ""
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Tabs"
+msgstr ""
+
+#: assets/Default/Default.sublime-commands
+msgid "View: Toggle Menu"
 msgstr ""
 
 #: assets/Default/Default.sublime-commands
@@ -1155,6 +1231,10 @@ msgstr ""
 
 #: crates/use_cases/src/project.rs
 msgid "Could not save {name}: {error}"
+msgstr ""
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
 msgstr ""
 
 #: crates/use_cases/src/saving.rs
