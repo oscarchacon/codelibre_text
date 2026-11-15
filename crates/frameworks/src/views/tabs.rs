@@ -4,8 +4,8 @@
 //! focusable chrome would steal arrow keys / Enter from the text.
 
 use egui::{Align2, FontId, Rect, Sense, Ui};
-use interface_adapters::controllers::ui_controller::UiEvent;
 use entities::menu::ContextMenuTarget;
+use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{ContextMenuViewModel, TabViewModel};
 
 use super::context_menu;
@@ -37,17 +37,36 @@ pub fn show(
                 for (position, tab) in tabs.iter().enumerate() {
                     let (event, response) = tab_button(ui, chrome, tab, focused);
                     events.extend(event);
-                    context_menu::attach(&response, ContextMenuTarget::Tab { group, index: position }, menu, events);
+                    context_menu::attach(
+                        &response,
+                        ContextMenuTarget::Tab {
+                            group,
+                            index: position,
+                        },
+                        menu,
+                        events,
+                    );
                     if let Some(dragged) = response.dnd_release_payload::<DraggedTab>() {
-                        events.push(UiEvent::TabDropped { tab: dragged.0, group, index: position });
+                        events.push(UiEvent::TabDropped {
+                            tab: dragged.0,
+                            group,
+                            index: position,
+                        });
                     } else if response.dnd_hover_payload::<DraggedTab>().is_some() {
                         let x = response.rect.left() - 1.0;
-                        ui.painter().line_segment([egui::pos2(x, response.rect.top()), egui::pos2(x, response.rect.bottom())], egui::Stroke::new(2.0_f32, chrome.accent));
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(x, response.rect.top()),
+                                egui::pos2(x, response.rect.bottom()),
+                            ],
+                            egui::Stroke::new(2.0_f32, chrome.accent),
+                        );
                     }
                 }
                 // Double click on the empty strip creates a new file, as in Sublime.
                 let rest = ui.available_rect_before_wrap();
-                let rest = Rect::from_min_size(rest.min, egui::vec2(rest.width().max(40.0), HEIGHT));
+                let rest =
+                    Rect::from_min_size(rest.min, egui::vec2(rest.width().max(40.0), HEIGHT));
                 let strip = ui.interact(rest, ui.id().with(("tab_strip", group)), Sense::CLICK);
                 if strip.clicked() || strip.double_clicked() {
                     events.push(UiEvent::FocusGroup(group));
@@ -56,19 +75,33 @@ pub fn show(
                     events.push(UiEvent::NewTab);
                 }
                 if let Some(dragged) = strip.dnd_release_payload::<DraggedTab>() {
-                    events.push(UiEvent::TabDropped { tab: dragged.0, group, index: usize::MAX });
+                    events.push(UiEvent::TabDropped {
+                        tab: dragged.0,
+                        group,
+                        index: usize::MAX,
+                    });
                 }
             });
         });
 }
 
 /// `focused`: its group has the focus (its active tab is underlined in the accent color).
-fn tab_button(ui: &mut Ui, chrome: &Chrome, tab: &TabViewModel, focused: bool) -> (Option<UiEvent>, egui::Response) {
+fn tab_button(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    tab: &TabViewModel,
+    focused: bool,
+) -> (Option<UiEvent>, egui::Response) {
     let index = tab.index;
     let font = FontId::proportional(13.0);
-    let text_width = ui.fonts(|f| f.layout_no_wrap(tab.title.clone(), font.clone(), chrome.fg).size().x);
+    let text_width = ui.fonts(|f| {
+        f.layout_no_wrap(tab.title.clone(), font.clone(), chrome.fg)
+            .size()
+            .x
+    });
     let width = (text_width + 48.0).clamp(90.0, 260.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, HEIGHT), Sense::CLICK | Sense::DRAG);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, HEIGHT), Sense::CLICK | Sense::DRAG);
     if response.drag_started() {
         response.dnd_set_drag_payload(DraggedTab(index));
     }
@@ -81,29 +114,62 @@ fn tab_button(ui: &mut Ui, chrome: &Chrome, tab: &TabViewModel, focused: bool) -
         chrome.tab_bg
     };
     let painter = ui.painter();
-    painter.rect_filled(rect, egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 }, background);
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius {
+            nw: 5,
+            ne: 5,
+            sw: 0,
+            se: 0,
+        },
+        background,
+    );
     if tab.active && focused {
         painter.line_segment(
-            [rect.left_top() + egui::vec2(4.0, 0.5), rect.right_top() + egui::vec2(-4.0, 0.5)],
+            [
+                rect.left_top() + egui::vec2(4.0, 0.5),
+                rect.right_top() + egui::vec2(-4.0, 0.5),
+            ],
             egui::Stroke::new(2.0_f32, chrome.accent),
         );
     }
     let color = if tab.active { chrome.fg } else { chrome.fg_dim };
     // A transient view (a preview) has its title in italics, as in Sublime.
     let title = egui::RichText::new(&tab.title).font(font).color(color);
-    let title = if tab.transient { title.italics() } else { title };
-    let galley = egui::WidgetText::from(title).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
-    painter.galley(egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0), galley, color);
+    let title = if tab.transient {
+        title.italics()
+    } else {
+        title
+    };
+    let galley = egui::WidgetText::from(title).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    painter.galley(
+        egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
 
-    let close_rect = Rect::from_center_size(egui::pos2(rect.right() - 16.0, rect.center().y), egui::vec2(16.0, 16.0));
+    let close_rect = Rect::from_center_size(
+        egui::pos2(rect.right() - 16.0, rect.center().y),
+        egui::vec2(16.0, 16.0),
+    );
     let close = ui.interact(close_rect, ui.id().with(("close_tab", index)), Sense::CLICK);
     if close.hovered() {
         ui.painter().rect_filled(close_rect, 3.0, chrome.hover_bg);
     }
     let show_close = close.hovered() || (!tab.dirty && (response.hovered() || tab.active));
     if show_close {
-        ui.painter()
-            .text(close_rect.center(), Align2::CENTER_CENTER, "×", FontId::proportional(15.0), color);
+        ui.painter().text(
+            close_rect.center(),
+            Align2::CENTER_CENTER,
+            "×",
+            FontId::proportional(15.0),
+            color,
+        );
     } else if tab.dirty {
         ui.painter().circle_filled(close_rect.center(), 3.5, color);
     }

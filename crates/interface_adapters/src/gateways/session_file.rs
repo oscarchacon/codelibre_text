@@ -22,14 +22,17 @@ impl SessionFileGateway {
 impl SessionGateway for SessionFileGateway {
     fn load(&self) -> Option<Session> {
         let text = std::fs::read_to_string(&self.path).ok()?;
-        serde_json::from_str::<SessionFile>(&text).ok().map(Into::into)
+        serde_json::from_str::<SessionFile>(&text)
+            .ok()
+            .map(Into::into)
     }
 
     fn save(&self, session: &Session) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let json = serde_json::to_string_pretty(&SessionFile::from(session)).map_err(|e| e.to_string())?;
+        let json =
+            serde_json::to_string_pretty(&SessionFile::from(session)).map_err(|e| e.to_string())?;
         std::fs::write(&self.path, json).map_err(|e| e.to_string())
     }
 }
@@ -55,6 +58,11 @@ struct SessionFile {
     /// The other windows.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     windows: Vec<SessionFile>,
+    /// File > Open Recent (Sublime keeps them in its session too).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    file_history: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folder_history: Vec<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -68,6 +76,9 @@ struct SessionFileDocument {
     /// The `PERSISTENT` region sets of the view.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     regions: Vec<SessionFileRegion>,
+    /// Its folded regions (chars).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folds: Vec<(usize, usize)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -101,6 +112,7 @@ impl From<&Session> for SessionFile {
                     selection: (d.selection.anchor, d.selection.head),
                     group: d.group,
                     regions: d.regions.iter().map(region_to_file).collect(),
+                    folds: d.folds.clone(),
                 })
                 .collect(),
             active: session.active,
@@ -108,6 +120,8 @@ impl From<&Session> for SessionFile {
             groups: session.groups.as_ref().map(Layout::to_json),
             active_group: session.active_group,
             windows: session.windows.iter().map(SessionFile::from).collect(),
+            file_history: session.file_history.clone(),
+            folder_history: session.folder_history.clone(),
         }
     }
 }
@@ -127,6 +141,7 @@ impl From<SessionFile> for Session {
                     selection: Selection::new(d.selection.0, d.selection.1),
                     group: d.group,
                     regions: d.regions.into_iter().map(region_from_file).collect(),
+                    folds: d.folds,
                 })
                 .collect(),
             active: file.active,
@@ -134,6 +149,8 @@ impl From<SessionFile> for Session {
             groups: file.groups.as_ref().and_then(Layout::from_json),
             active_group: file.active_group,
             windows: file.windows.into_iter().map(Session::from).collect(),
+            file_history: file.file_history,
+            folder_history: file.folder_history,
         }
     }
 }

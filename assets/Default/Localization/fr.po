@@ -270,6 +270,12 @@ msgstr "Barre d'état"
 msgid "Minimap"
 msgstr "Minimap"
 
+msgid "Tabs"
+msgstr "Onglets"
+
+msgid "Menu"
+msgstr "Menu"
+
 #: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Afficher la console"
@@ -394,6 +400,10 @@ msgstr "Masquer les autres"
 msgid "Show All"
 msgstr "Tout afficher"
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr "Console"
+
 #: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Aide"
@@ -507,6 +517,12 @@ msgstr "Affichage : Afficher/masquer la barre d'état"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
 msgstr "Affichage : Afficher/masquer la minimap"
+
+msgid "View: Toggle Tabs"
+msgstr "Affichage : Afficher/masquer les onglets"
+
+msgid "View: Toggle Menu"
+msgstr "Affichage : Afficher/masquer le menu"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"
@@ -1275,3 +1291,197 @@ msgstr "Supprimer"
 
 msgid "Unable to delete {path}: {error}"
 msgstr "Impossible de supprimer {path} : {error}"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "0 matches"
+msgstr "0 résultat"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "<skipped {count} character>"
+msgid_plural "<skipped {count} characters>"
+msgstr[0] "<{count} caractère omis>"
+msgstr[1] "<{count} caractères omis>"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Current File"
+msgstr "Ajouter le fichier actuel"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Exclude Filter"
+msgstr "Ajouter un filtre d’exclusion"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Folder"
+msgstr "Ajouter un dossier"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Include Filter"
+msgstr "Ajouter un filtre d’inclusion"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Files"
+msgstr "Ajouter les fichiers ouverts"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Folders"
+msgstr "Ajouter les dossiers ouverts"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Project Filters"
+msgstr "Ajouter les filtres du projet"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Find in Files"
+msgstr "Annuler la recherche dans les fichiers"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Clear"
+msgstr "Effacer"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Results"
+msgstr "Résultats de recherche"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Find in Files cancelled"
+msgstr "Recherche dans les fichiers annulée"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find in Files…"
+msgstr "Rechercher dans les fichiers…"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Find in Folder…"
+msgstr "Rechercher dans le dossier…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Cancel Find in Files"
+msgstr "Rechercher : Annuler la recherche dans les fichiers"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Find in Files…"
+msgstr "Rechercher : Rechercher dans les fichiers…"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "No open folders or files to search"
+msgstr "Aucun dossier ni fichier ouvert dans lequel rechercher"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace in Files"
+msgstr "Remplacer dans les fichiers"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace {count} occurrence across {files} files?"
+msgid_plural "Replace {count} occurrences across {files} files?"
+msgstr[0] "Remplacer {count} occurrence dans {files} fichiers ?"
+msgstr[1] "Remplacer {count} occurrences dans {files} fichiers ?"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Searching {count} file for \"{query}\""
+msgid_plural "Searching {count} files for \"{query}\""
+msgstr[0] "Recherche de \"{query}\" dans {count} fichier"
+msgstr[1] "Recherche de \"{query}\" dans {count} fichiers"
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Searching…"
+msgstr "Recherche…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Results Panel"
+msgstr "Afficher le panneau des résultats"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where"
+msgstr "Où"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where to search"
+msgstr "Où rechercher"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "case sensitive"
+msgstr "sensible à la casse"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "regex"
+msgstr "regex"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "whole word"
+msgstr "mot entier"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match across {files} files"
+msgid_plural "{count} matches across {files} files"
+msgstr[0] "{count} résultat dans {files} fichiers"
+msgstr[1] "{count} résultats dans {files} fichiers"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match in 1 file"
+msgid_plural "{count} matches in 1 file"
+msgstr[0] "{count} résultat dans 1 fichier"
+msgstr[1] "{count} résultats dans 1 fichier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr "Ouvrir un fichier récent"
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
+msgstr "Effacer les éléments"
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
+msgstr "{path} n’est plus un dossier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr "Repli du code"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr "Replier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr "Déplier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr "Tout déplier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr "Tout replier"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr "Replier le niveau 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr "Replier le niveau 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr "Replier le niveau 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr "Replier le niveau 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr "Replier le niveau 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr "Replier le niveau 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr "Replier le niveau 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
+msgstr "Replier le niveau 9"

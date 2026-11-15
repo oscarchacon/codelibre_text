@@ -31,7 +31,9 @@ fn new_has_no_arguments() {
 #[test]
 fn same_as_treats_missing_and_empty_arguments_as_equal() {
     assert!(Command::new("save").same_as(&Command::with_args("save", json!({}))));
-    assert!(Command::with_args("a", json!({ "x": 1 })).same_as(&Command::with_args("a", json!({ "x": 1 }))));
-    assert!(!Command::with_args("a", json!({ "x": 1 })).same_as(&Command::with_args("a", json!({ "x": 2 }))));
+    assert!(Command::with_args("a", json!({ "x": 1 }))
+        .same_as(&Command::with_args("a", json!({ "x": 1 }))));
+    assert!(!Command::with_args("a", json!({ "x": 1 }))
+        .same_as(&Command::with_args("a", json!({ "x": 2 }))));
     assert!(!Command::new("a").same_as(&Command::new("b")));
 }

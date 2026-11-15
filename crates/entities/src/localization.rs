@@ -73,13 +73,23 @@ impl Catalog {
     }
 
     fn get(&self, msgid: &str) -> Option<&str> {
-        self.messages.get(msgid).and_then(|forms| forms.first()).map(String::as_str).filter(|s| !s.is_empty())
+        self.messages
+            .get(msgid)
+            .and_then(|forms| forms.first())
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
     }
 
     fn get_plural(&self, msgid: &str, n: u64) -> Option<&str> {
         let forms = self.messages.get(msgid)?;
-        let index = self.plural.as_ref().map_or(usize::from(n != 1), |rule| rule.index(n));
-        forms.get(index).map(String::as_str).filter(|s| !s.is_empty())
+        let index = self
+            .plural
+            .as_ref()
+            .map_or(usize::from(n != 1), |rule| rule.index(n));
+        forms
+            .get(index)
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
     }
 }
 
@@ -106,7 +116,10 @@ impl Default for Translations {
 
 impl Translations {
     pub fn new(language: &str, catalog: Catalog) -> Self {
-        Self { language: language.to_string(), catalog }
+        Self {
+            language: language.to_string(),
+            catalog,
+        }
     }
 
     /// The code of the language in use (`en` when nothing is translated).
@@ -125,7 +138,13 @@ impl Translations {
     }
 
     /// The singular or plural translation for `count`, with `{count}` and `args` filled.
-    pub fn tr_n(&self, singular: &str, plural: &str, count: u64, args: &[(&str, &dyn Display)]) -> String {
+    pub fn tr_n(
+        &self,
+        singular: &str,
+        plural: &str,
+        count: u64,
+        args: &[(&str, &dyn Display)],
+    ) -> String {
         let template = self
             .catalog
             .get_plural(singular, count)
@@ -143,9 +162,11 @@ pub fn fill(template: &str, args: &[(&str, &dyn Display)]) -> String {
     while let Some(open) = rest.find('{') {
         out.push_str(&rest[..open]);
         let after = &rest[open + 1..];
-        let value = after
-            .find('}')
-            .and_then(|close| args.iter().find(|(name, _)| *name == &after[..close]).map(|(_, v)| (close, v)));
+        let value = after.find('}').and_then(|close| {
+            args.iter()
+                .find(|(name, _)| *name == &after[..close])
+                .map(|(_, v)| (close, v))
+        });
         match value {
             Some((close, value)) => {
                 out.push_str(&value.to_string());
@@ -163,9 +184,15 @@ pub fn fill(template: &str, args: &[(&str, &dyn Display)]) -> String {
 
 /// `pt-BR`, `pt_br.UTF-8` → `pt_BR`.
 pub fn normalize_language_code(code: &str) -> String {
-    let code = code.split(['.', '@']).next().unwrap_or("").replace('-', "_");
+    let code = code
+        .split(['.', '@'])
+        .next()
+        .unwrap_or("")
+        .replace('-', "_");
     match code.split_once('_') {
-        Some((language, region)) => format!("{}_{}", language.to_lowercase(), region.to_uppercase()),
+        Some((language, region)) => {
+            format!("{}_{}", language.to_lowercase(), region.to_uppercase())
+        }
         None => code.to_lowercase(),
     }
 }
@@ -180,7 +207,10 @@ pub fn resolve_language(setting: &str, system: Option<&str>, available: &[Langua
     };
     let requested = normalize_language_code(requested);
     let base = |code: &str| code.split('_').next().unwrap_or("").to_string();
-    let codes: Vec<String> = available.iter().map(|l| normalize_language_code(&l.code)).collect();
+    let codes: Vec<String> = available
+        .iter()
+        .map(|l| normalize_language_code(&l.code))
+        .collect();
     codes
         .iter()
         .position(|c| *c == requested)
@@ -265,7 +295,14 @@ impl Expression {
 }
 
 /// Binary operators from the loosest to the tightest.
-const LEVELS: &[&[&str]] = &[&["||"], &["&&"], &["==", "!="], &["<=", ">=", "<", ">"], &["+", "-"], &["*", "/", "%"]];
+const LEVELS: &[&[&str]] = &[
+    &["||"],
+    &["&&"],
+    &["==", "!="],
+    &["<=", ">=", "<", ">"],
+    &["+", "-"],
+    &["*", "/", "%"],
+];
 
 struct Parser<'a> {
     rest: &'a str,
@@ -309,7 +346,11 @@ impl Parser<'_> {
             return Err("missing `:` in plural formula".into());
         }
         let no = self.choice()?;
-        Ok(Expression::Choice(Box::new(condition), Box::new(yes), Box::new(no)))
+        Ok(Expression::Choice(
+            Box::new(condition),
+            Box::new(yes),
+            Box::new(no),
+        ))
     }
 
     fn binary(&mut self, level: usize) -> Result<Expression, String> {
@@ -335,18 +376,28 @@ impl Parser<'_> {
         }
         if self.eat("(") {
             let inner = self.choice()?;
-            return if self.eat(")") { Ok(inner) } else { Err("missing `)` in plural formula".into()) };
+            return if self.eat(")") {
+                Ok(inner)
+            } else {
+                Err("missing `)` in plural formula".into())
+            };
         }
         self.skip_spaces();
         if let Some(rest) = self.rest.strip_prefix('n') {
             self.rest = rest;
             return Ok(Expression::N);
         }
-        let digits = self.rest.len() - self.rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let digits = self.rest.len()
+            - self
+                .rest
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .len();
         if digits == 0 {
             return Err(format!("unexpected `{}` in plural formula", self.rest));
         }
-        let value = self.rest[..digits].parse().map_err(|_| "number too large in plural formula".to_string())?;
+        let value = self.rest[..digits]
+            .parse()
+            .map_err(|_| "number too large in plural formula".to_string())?;
         self.rest = &self.rest[digits..];
         Ok(Expression::Number(value))
     }

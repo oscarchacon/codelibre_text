@@ -8,7 +8,13 @@ use interface_adapters::view_models::StatusBarViewModel;
 
 use super::theme::Chrome;
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, status: &StatusBarViewModel, events: &mut Vec<UiEvent>) {
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    text: &Translations,
+    status: &StatusBarViewModel,
+    events: &mut Vec<UiEvent>,
+) {
     let small = |s: &str| RichText::new(s).size(12.0).color(chrome.fg_dim);
     ui.horizontal_centered(|ui| {
         ui.add_space(8.0);
@@ -25,20 +31,34 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, text: &Translations, status: &StatusBa
             ui.add_space(16.0);
             ui.label(RichText::new(message).size(12.0).color(chrome.fg));
         }
+        // Nothing to show for an image or HTML sheet.
+        if status.syntax.is_empty() && status.encoding.is_empty() {
+            return;
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
-            let link = |ui: &mut Ui, s: &str| ui.add(egui::Label::new(small(s)).sense(Sense::CLICK));
-            if link(ui, &status.syntax).on_hover_text(text.tr("Set syntax")).clicked() {
+            let link =
+                |ui: &mut Ui, s: &str| ui.add(egui::Label::new(small(s)).sense(Sense::CLICK));
+            if link(ui, &status.syntax)
+                .on_hover_text(text.tr("Set syntax"))
+                .clicked()
+            {
                 events.push(UiEvent::SyntaxClicked);
             }
             ui.add_space(14.0);
             ui.label(small(&status.encoding));
             ui.add_space(14.0);
-            if link(ui, &status.line_ending).on_hover_text(text.tr("Toggle line endings")).clicked() {
+            if link(ui, &status.line_ending)
+                .on_hover_text(text.tr("Toggle line endings"))
+                .clicked()
+            {
                 events.push(UiEvent::LineEndingClicked);
             }
             ui.add_space(14.0);
-            if link(ui, &status.indentation).on_hover_text(text.tr("Toggle translate tabs to spaces")).clicked() {
+            if link(ui, &status.indentation)
+                .on_hover_text(text.tr("Toggle translate tabs to spaces"))
+                .clicked()
+            {
                 events.push(UiEvent::IndentationClicked);
             }
         });

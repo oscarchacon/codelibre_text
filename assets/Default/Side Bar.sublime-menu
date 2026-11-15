@@ -6,5 +6,6 @@
 	{ "caption": "-", "id": "folder_commands" },
 	{ "command": "new_folder", "args": { "dirs": [] }, "caption": "New Folder…" },
 	{ "command": "delete_folder", "args": { "dirs": [] }, "caption": "Delete Folder" },
+	{ "command": "find_in_folder", "args": { "dirs": [] }, "caption": "Find in Folder…" },
 	{ "caption": "-", "id": "end" },
 ]

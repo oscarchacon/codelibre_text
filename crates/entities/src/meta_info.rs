@@ -21,17 +21,31 @@ impl MetaPreference {
     /// Reads the plist value of a `.tmPreferences` file (`scope` and `settings`).
     pub fn from_plist(name: &str, plist: &Value) -> Option<Self> {
         let settings = plist.get("settings")?.as_object()?.clone();
-        let selector = plist.get("scope").and_then(Value::as_str).unwrap_or_default().to_string();
-        Some(Self { name: name.to_string(), selector, settings })
+        let selector = plist
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        Some(Self {
+            name: name.to_string(),
+            selector,
+            settings,
+        })
     }
 }
 
 /// The value of `key` for the scope `scope` (space-separated names): that of the preference whose
 /// selector matches best; at equal scores, the one read last (a later package overrides).
-pub fn meta_value<'a>(preferences: &'a [MetaPreference], scope: &str, key: &str) -> Option<&'a Value> {
+pub fn meta_value<'a>(
+    preferences: &'a [MetaPreference],
+    scope: &str,
+    key: &str,
+) -> Option<&'a Value> {
     let mut best: Option<(u64, &Value)> = None;
     for preference in preferences {
-        let Some(value) = preference.settings.get(key) else { continue };
+        let Some(value) = preference.settings.get(key) else {
+            continue;
+        };
         let score = score_selector(scope, &preference.selector);
         if score > 0 && best.is_none_or(|(s, _)| score >= s) {
             best = Some((score, value));
@@ -43,7 +57,12 @@ pub fn meta_value<'a>(preferences: &'a [MetaPreference], scope: &str, key: &str)
 /// A `shellVariables` entry (`[{"name": "TM_COMMENT_START", "value": "# "}]`) for `scope`.
 pub fn shell_variable(preferences: &[MetaPreference], scope: &str, name: &str) -> Option<String> {
     let variables = meta_value(preferences, scope, "shellVariables")?.as_array()?;
-    variables.iter().find(|v| v.get("name").and_then(Value::as_str) == Some(name))?.get("value")?.as_str().map(String::from)
+    variables
+        .iter()
+        .find(|v| v.get("name").and_then(Value::as_str) == Some(name))?
+        .get("value")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Whether a plist setting is on: `1`, `"1"`, `true`.
@@ -74,9 +93,16 @@ pub fn selectors_where_on(preferences: &[MetaPreference], key: &str) -> String {
 pub fn transform_symbol(text: &str, transformation: &str) -> String {
     let mut result = text.to_string();
     for (pattern, format, global) in substitutions(transformation) {
-        let Ok(regex) = Regex::new(&pattern) else { continue };
+        let Ok(regex) = Regex::new(&pattern) else {
+            continue;
+        };
         let format = format_to_regex_replacement(&format);
-        result = if global { regex.replace_all(&result, format.as_str()) } else { regex.replace(&result, format.as_str()) }.into_owned();
+        result = if global {
+            regex.replace_all(&result, format.as_str())
+        } else {
+            regex.replace(&result, format.as_str())
+        }
+        .into_owned();
     }
     result
 }
@@ -165,23 +191,40 @@ pub struct SymbolKind {
 
 /// The kind of a symbol from its scope, as Sublime guesses it when the syntax does not say.
 pub fn symbol_kind(scope: &str) -> SymbolKind {
-    let has = |name: &str| scope.split_whitespace().any(|s| s == name || s.starts_with(&format!("{name}.")));
-    // `KIND_FUNCTION`, `KIND_TYPE`, `KIND_NAMESPACE`, `KIND_MARKUP`, `KIND_VARIABLE`, `KIND_AMBIGUOUS`.
-    let (id, letter, description) = if has("entity.name.function") || has("entity.name.method") || has("entity.name.macro") {
-        (3, 'f', "Function")
-    } else if has("entity.name.class") || has("entity.name.struct") || has("entity.name.enum")
-        || has("entity.name.trait") || has("entity.name.interface") || has("entity.name.type")
-        || has("entity.name.union") || has("entity.name.impl")
-    {
-        (2, 't', "Type")
-    } else if has("entity.name.namespace") || has("entity.name.module") || has("entity.name.package") {
-        (4, 'a', "Namespace")
-    } else if has("entity.name.section") || has("markup.heading") {
-        (6, 'm', "Markup")
-    } else if has("entity.name.constant") || has("entity.name.variable") || has("variable") {
-        (7, 'v', "Variable")
-    } else {
-        (0, ' ', "")
+    let has = |name: &str| {
+        scope
+            .split_whitespace()
+            .any(|s| s == name || s.starts_with(&format!("{name}.")))
     };
-    SymbolKind { id, letter, description }
+    // `KIND_FUNCTION`, `KIND_TYPE`, `KIND_NAMESPACE`, `KIND_MARKUP`, `KIND_VARIABLE`, `KIND_AMBIGUOUS`.
+    let (id, letter, description) =
+        if has("entity.name.function") || has("entity.name.method") || has("entity.name.macro") {
+            (3, 'f', "Function")
+        } else if has("entity.name.class")
+            || has("entity.name.struct")
+            || has("entity.name.enum")
+            || has("entity.name.trait")
+            || has("entity.name.interface")
+            || has("entity.name.type")
+            || has("entity.name.union")
+            || has("entity.name.impl")
+        {
+            (2, 't', "Type")
+        } else if has("entity.name.namespace")
+            || has("entity.name.module")
+            || has("entity.name.package")
+        {
+            (4, 'a', "Namespace")
+        } else if has("entity.name.section") || has("markup.heading") {
+            (6, 'm', "Markup")
+        } else if has("entity.name.constant") || has("entity.name.variable") || has("variable") {
+            (7, 'v', "Variable")
+        } else {
+            (0, ' ', "")
+        };
+    SymbolKind {
+        id,
+        letter,
+        description,
+    }
 }

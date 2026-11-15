@@ -5,7 +5,9 @@
 use std::collections::HashSet;
 
 use crate::selection::Selection;
-use crate::text::{byte_to_char, char_to_byte, is_word_char, line_end, line_start, selected_text, word_at};
+use crate::text::{
+    byte_to_char, char_to_byte, is_word_char, line_end, line_start, selected_text, word_at,
+};
 
 /// Byte range of the whole lines touched by the selection (without the last newline).
 /// A selection that ends at column 0 does not include that last line, as in Sublime.
@@ -109,11 +111,21 @@ pub fn insert_snippet(text: &mut String, selection: Selection, snippet: &str) ->
 /// `$0` (where the caret ends; the end of the snippet when it has none). Each field is its
 /// regions (several when the field is mirrored, `$1 … $1`), in chars of the new text. Nothing
 /// to visit when the snippet has no numbered field.
-pub fn insert_snippet_fields(text: &mut String, selection: Selection, snippet: &str) -> (Selection, Vec<Vec<(usize, usize)>>) {
+pub fn insert_snippet_fields(
+    text: &mut String,
+    selection: Selection,
+    snippet: &str,
+) -> (Selection, Vec<Vec<(usize, usize)>>) {
     let selected = selected_text(text, selection).to_string();
     let mut out = String::new();
     let mut found = Vec::new();
-    expand_snippet(&mut snippet.chars().peekable(), &selected, &mut out, &mut found, false);
+    expand_snippet(
+        &mut snippet.chars().peekable(),
+        &selected,
+        &mut out,
+        &mut found,
+        false,
+    );
     let inserted = replace_selection(text, selection, &out);
     let start = selection.start();
     if found.is_empty() {
@@ -125,7 +137,13 @@ pub fn insert_snippet_fields(text: &mut String, selection: Selection, snippet: &
     numbers.dedup();
     let mut fields: Vec<Vec<(usize, usize)>> = numbers
         .iter()
-        .map(|number| found.iter().filter(|(n, _, _)| n == number).map(|&(_, a, b)| (start + a, start + b)).collect())
+        .map(|number| {
+            found
+                .iter()
+                .filter(|(n, _, _)| n == number)
+                .map(|&(_, a, b)| (start + a, start + b))
+                .collect()
+        })
         .collect();
     if numbers.last() != Some(&0) {
         let end = start + out.chars().count();
@@ -152,10 +170,17 @@ pub fn complete_at_each(
         let shift = |p: usize| (p as isize + offset).max(0) as usize;
         let (start, end) = (shift(selection.start()), shift(selection.end()));
         let typed = start >= prefix_len && {
-            let (a, b) = (char_to_byte(text, start - prefix_len), char_to_byte(text, start));
+            let (a, b) = (
+                char_to_byte(text, start - prefix_len),
+                char_to_byte(text, start),
+            );
             &text[a..b] == prefix
         };
-        let from = if selection.is_empty() && typed && !keep_prefix { start - prefix_len } else { start };
+        let from = if selection.is_empty() && typed && !keep_prefix {
+            start - prefix_len
+        } else {
+            start
+        };
         let before = text.chars().count();
         new.push(insert(text, Selection::new(from, end)));
         offset += text.chars().count() as isize - before as isize;
@@ -175,14 +200,19 @@ fn expand_snippet(
     while let Some(c) = chars.next() {
         match c {
             '}' if in_field => return,
-            '\\' if matches!(chars.peek(), Some('$' | '}' | '\\')) => out.push(chars.next().unwrap_or(c)),
+            '\\' if matches!(chars.peek(), Some('$' | '}' | '\\')) => {
+                out.push(chars.next().unwrap_or(c))
+            }
             '$' => {
                 let braced = chars.peek() == Some(&'{');
                 if braced {
                     chars.next();
                 }
                 let mut name = String::new();
-                while let Some(&n) = chars.peek().filter(|n| n.is_ascii_alphanumeric() || **n == '_') {
+                while let Some(&n) = chars
+                    .peek()
+                    .filter(|n| n.is_ascii_alphanumeric() || **n == '_')
+                {
                     name.push(n);
                     chars.next();
                 }
@@ -227,7 +257,12 @@ fn skip_to_closing_brace(chars: &mut std::iter::Peekable<std::str::Chars>) {
 }
 
 /// Tab key: indents a multi-line selection, otherwise inserts a tab (or spaces up to the next tab stop).
-pub fn insert_tab(text: &mut String, selection: Selection, tab_size: usize, use_spaces: bool) -> Selection {
+pub fn insert_tab(
+    text: &mut String,
+    selection: Selection,
+    tab_size: usize,
+    use_spaces: bool,
+) -> Selection {
     let (s, e) = selected_lines(text, selection);
     if text[s..e].contains('\n') {
         return indent(text, selection, tab_size, use_spaces);
@@ -244,7 +279,12 @@ pub fn insert_tab(text: &mut String, selection: Selection, tab_size: usize, use_
 
 /// Enter with `auto_indent`: keeps the indentation, adds a level after an opening bracket or a
 /// trailing `:` (Python, YAML) and moves a matching closing bracket to its own line.
-pub fn newline_auto_indent(text: &mut String, selection: Selection, tab_size: usize, use_spaces: bool) -> Selection {
+pub fn newline_auto_indent(
+    text: &mut String,
+    selection: Selection,
+    tab_size: usize,
+    use_spaces: bool,
+) -> Selection {
     let start = char_to_byte(text, selection.start());
     let end = char_to_byte(text, selection.end());
     let ls = line_start(text, start);
@@ -271,14 +311,23 @@ pub fn newline_auto_indent(text: &mut String, selection: Selection, tab_size: us
     }
 }
 
-pub fn indent(text: &mut String, selection: Selection, tab_size: usize, use_spaces: bool) -> Selection {
+pub fn indent(
+    text: &mut String,
+    selection: Selection,
+    tab_size: usize,
+    use_spaces: bool,
+) -> Selection {
     let (s, e) = selected_lines(text, selection);
     let unit = indent_unit(tab_size, use_spaces);
     let single_line = s == e;
     let edits = line_starts(text, s, e)
         .into_iter()
         .filter(|&pos| single_line || line_end(text, pos) > pos)
-        .map(|pos| Edit { start: pos, end: pos, insert: unit.clone() })
+        .map(|pos| Edit {
+            start: pos,
+            end: pos,
+            insert: unit.clone(),
+        })
         .collect();
     apply_edits(text, edits, selection)
 }
@@ -292,9 +341,16 @@ pub fn unindent(text: &mut String, selection: Selection, tab_size: usize) -> Sel
             let remove = if line.starts_with('\t') {
                 1
             } else {
-                line.chars().take(tab_size).take_while(|c| *c == ' ').count()
+                line.chars()
+                    .take(tab_size)
+                    .take_while(|c| *c == ' ')
+                    .count()
             };
-            (remove > 0).then(|| Edit { start: pos, end: pos + remove, insert: String::new() })
+            (remove > 0).then(|| Edit {
+                start: pos,
+                end: pos + remove,
+                insert: String::new(),
+            })
         })
         .collect();
     apply_edits(text, edits, selection)
@@ -327,7 +383,10 @@ pub fn swap_line(text: &mut String, selection: Selection, up: bool) -> Option<Se
         let previous = text[ps..s - 1].to_string();
         text.replace_range(ps..e, &format!("{block}\n{previous}"));
         let shift = previous.chars().count() + 1;
-        Some(Selection::new(selection.anchor - shift, selection.head - shift))
+        Some(Selection::new(
+            selection.anchor - shift,
+            selection.head - shift,
+        ))
     } else {
         if e >= text.len() {
             return None;
@@ -336,7 +395,10 @@ pub fn swap_line(text: &mut String, selection: Selection, up: bool) -> Option<Se
         let next = text[e + 1..ne].to_string();
         text.replace_range(s..ne, &format!("{next}\n{block}"));
         let shift = next.chars().count() + 1;
-        Some(Selection::new(selection.anchor + shift, selection.head + shift))
+        Some(Selection::new(
+            selection.anchor + shift,
+            selection.head + shift,
+        ))
     }
 }
 
@@ -376,7 +438,14 @@ pub fn delete_to_line_edge(text: &mut String, selection: Selection, to_end: bool
     let (from, to) = if to_end {
         let le = line_end(text, caret);
         // At the end of a line, delete the newline (joins with the next line).
-        (caret, if le == caret { (le + 1).min(text.len()) } else { le })
+        (
+            caret,
+            if le == caret {
+                (le + 1).min(text.len())
+            } else {
+                le
+            },
+        )
     } else {
         (line_start(text, caret), caret)
     };
@@ -391,7 +460,11 @@ pub fn expand_selection_to_line(text: &str, selection: Selection) -> Selection {
     let (start, end) = (byte_to_char(text, s), byte_to_char(text, full_end));
     if selection.start() == start && selection.end() == end && full_end < text.len() {
         let next_end = line_end(text, full_end);
-        let next_end = if next_end < text.len() { next_end + 1 } else { next_end };
+        let next_end = if next_end < text.len() {
+            next_end + 1
+        } else {
+            next_end
+        };
         return Selection::new(start, byte_to_char(text, next_end));
     }
     Selection::new(start, end)
@@ -509,8 +582,15 @@ pub fn expand_selection_to_brackets(text: &str, selection: Selection) -> Selecti
 
 /// `expand_selection {"to": "indentation"}`: the lines around the selection indented at least as
 /// much as it (blank lines in between included); repeating goes out one indentation level.
-pub fn expand_selection_to_indentation(text: &str, selection: Selection, tab_size: usize) -> Selection {
-    let lines: Vec<(usize, usize)> = line_starts(text, 0, text.len()).into_iter().map(|s| (s, line_end(text, s))).collect();
+pub fn expand_selection_to_indentation(
+    text: &str,
+    selection: Selection,
+    tab_size: usize,
+) -> Selection {
+    let lines: Vec<(usize, usize)> = line_starts(text, 0, text.len())
+        .into_iter()
+        .map(|s| (s, line_end(text, s)))
+        .collect();
     let indent = |i: usize| {
         let line = &text[lines[i].0..lines[i].1];
         (!line.trim().is_empty()).then(|| visual_column(leading_whitespace(line), tab_size))
@@ -540,25 +620,37 @@ pub fn expand_selection_to_indentation(text: &str, selection: Selection, tab_siz
         while bottom > top && indent(bottom).is_none() {
             bottom -= 1;
         }
-        let block = Selection::new(byte_to_char(text, lines[top].0), byte_to_char(text, lines[bottom].1));
+        let block = Selection::new(
+            byte_to_char(text, lines[top].0),
+            byte_to_char(text, lines[bottom].1),
+        );
         if (block.start(), block.end()) != (selection.start(), selection.end()) || level == 0 {
             return block;
         }
         // Already the whole block: go out to the indentation of the lines around it.
-        let outer = [top.checked_sub(1), Some(bottom + 1).filter(|&b| b < lines.len())]
-            .into_iter()
-            .flatten()
-            .filter_map(indent)
-            .filter(|&n| n < level)
-            .max();
+        let outer = [
+            top.checked_sub(1),
+            Some(bottom + 1).filter(|&b| b < lines.len()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(indent)
+        .filter(|&n| n < level)
+        .max();
         level = outer.unwrap_or(0);
     }
 }
 
 /// The quotes around the chars `start..end` on one line, as (opening quote, closing quote).
 fn enclosing_quotes(chars: &[char], start: usize, end: usize) -> Option<(usize, usize)> {
-    let line_begin = chars[..start].iter().rposition(|&c| c == '\n').map_or(0, |i| i + 1);
-    let line_end = chars[end..].iter().position(|&c| c == '\n').map_or(chars.len(), |i| end + i);
+    let line_begin = chars[..start]
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |i| i + 1);
+    let line_end = chars[end..]
+        .iter()
+        .position(|&c| c == '\n')
+        .map_or(chars.len(), |i| end + i);
     let mut best: Option<(usize, usize)> = None;
     for quote in ['"', '\'', '`'] {
         let mut open = None;
@@ -593,11 +685,17 @@ pub fn expand_selection_smart(text: &str, selection: Selection, tab_size: usize)
     let (start, end) = (selection.start(), selection.end());
     let mut candidates = vec![word_at(text, start), word_at(text, end)];
     if let Some((open, close)) = enclosing_quotes(&chars, start, end) {
-        candidates.extend([Selection::new(open + 1, close), Selection::new(open, close + 1)]);
+        candidates.extend([
+            Selection::new(open + 1, close),
+            Selection::new(open, close + 1),
+        ]);
     }
     let (mut from, mut to) = (start, end);
     while let Some((open, close)) = enclosing_brackets(&chars, from, to) {
-        candidates.extend([Selection::new(open + 1, close), Selection::new(open, close + 1)]);
+        candidates.extend([
+            Selection::new(open + 1, close),
+            Selection::new(open, close + 1),
+        ]);
         (from, to) = (open, close + 1);
     }
     candidates.push(expand_selection_to_line_content(text, selection));
@@ -625,12 +723,17 @@ pub fn join_lines(text: &mut String, selection: Selection) -> Selection {
         let newline = s + i;
         let next = &text[newline + 1..];
         let next_ws = next.len() - next.trim_start_matches([' ', '\t']).len();
-        let trailing_ws = text[..newline].len() - text[..newline].trim_end_matches([' ', '\t']).len();
+        let trailing_ws =
+            text[..newline].len() - text[..newline].trim_end_matches([' ', '\t']).len();
         let next_is_empty = next[next_ws..].starts_with('\n') || next_ws == next.len();
         edits.push(Edit {
             start: newline - trailing_ws,
             end: newline + 1 + next_ws,
-            insert: if next_is_empty { String::new() } else { " ".into() },
+            insert: if next_is_empty {
+                String::new()
+            } else {
+                " ".into()
+            },
         });
     }
     apply_edits(text, edits, selection)
@@ -683,7 +786,10 @@ pub fn change_case(text: &mut String, selection: Selection, case: Case) -> Selec
     let start = char_to_byte(text, selection.start());
     let end = char_to_byte(text, selection.end());
     text.replace_range(start..end, &changed);
-    Selection::new(selection.start(), selection.start() + changed.chars().count())
+    Selection::new(
+        selection.start(),
+        selection.start() + changed.chars().count(),
+    )
 }
 
 /// Swaps the characters around the caret.
@@ -703,17 +809,38 @@ pub fn transpose(text: &mut String, selection: Selection) -> Option<Selection> {
 
 /// Line and block comment markers for a syntax name.
 /// (Sublime reads them from `Comments.tmPreferences`; these are the common ones.)
-pub fn comment_tokens(syntax: &str) -> (Option<&'static str>, Option<(&'static str, &'static str)>) {
+pub fn comment_tokens(
+    syntax: &str,
+) -> (Option<&'static str>, Option<(&'static str, &'static str)>) {
     match syntax.to_lowercase().as_str() {
-        "python" | "ruby" | "perl" | "yaml" | "toml" | "makefile" | "r" | "dockerfile" | "powershell"
-        | "coffeescript" | "nim" | "elixir" | "julia" | "cmake" | "nginx" | "git ignore" | "git config"
-        | "bourne again shell (bash)" | "shell-unix-generic" | "shell script" => (Some("# "), None),
+        "python"
+        | "ruby"
+        | "perl"
+        | "yaml"
+        | "toml"
+        | "makefile"
+        | "r"
+        | "dockerfile"
+        | "powershell"
+        | "coffeescript"
+        | "nim"
+        | "elixir"
+        | "julia"
+        | "cmake"
+        | "nginx"
+        | "git ignore"
+        | "git config"
+        | "bourne again shell (bash)"
+        | "shell-unix-generic"
+        | "shell script" => (Some("# "), None),
         "sql" | "lua" | "haskell" | "ada" | "elm" => (Some("-- "), None),
         "lisp" | "clojure" | "scheme" | "ini" | "assembly" | "asm" => (Some("; "), None),
         "latex" | "tex" | "erlang" | "matlab" | "bibtex" => (Some("% "), None),
         "batch file" => (Some("REM "), None),
         "vimscript" | "viml" => (Some("\" "), None),
-        "html" | "xml" | "markdown" | "multimarkdown" | "vue component" | "svg" => (None, Some(("<!--", "-->"))),
+        "html" | "xml" | "markdown" | "multimarkdown" | "vue component" | "svg" => {
+            (None, Some(("<!--", "-->")))
+        }
         "css" => (None, Some(("/*", "*/"))),
         "plain text" => (None, None),
         _ => (Some("// "), Some(("/*", "*/"))),
@@ -724,9 +851,34 @@ pub fn comment_tokens(syntax: &str) -> (Option<&'static str>, Option<(&'static s
 /// (Sublime reads indentation rules from `.tmPreferences`.) Python is not here on purpose: its
 /// indentation is the meaning of the code, and cannot be worked out from the text.
 const BRACKET_SYNTAXES: &[&str] = &[
-    "c", "c++", "c#", "java", "javascript", "javascript (babel)", "typescript", "typescriptreact", "tsx", "jsx", "rust", "go",
-    "css", "scss", "sass", "less", "json", "php", "swift", "kotlin", "scala", "objective-c", "objective-c++", "dart", "d",
-    "groovy", "graphql", "glsl",
+    "c",
+    "c++",
+    "c#",
+    "java",
+    "javascript",
+    "javascript (babel)",
+    "typescript",
+    "typescriptreact",
+    "tsx",
+    "jsx",
+    "rust",
+    "go",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "json",
+    "php",
+    "swift",
+    "kotlin",
+    "scala",
+    "objective-c",
+    "objective-c++",
+    "dart",
+    "d",
+    "groovy",
+    "graphql",
+    "glsl",
 ];
 
 /// Syntaxes with lines that stay at the left margin whatever the depth (`#include`).
@@ -768,7 +920,10 @@ impl BracketScanner {
     }
 
     fn scan(&mut self, line: &str) -> LineBrackets {
-        let mut brackets = LineBrackets { starts_in_comment: self.in_block_comment, ..Default::default() };
+        let mut brackets = LineBrackets {
+            starts_in_comment: self.in_block_comment,
+            ..Default::default()
+        };
         let mut only_closers = true;
         let mut rest = line;
         while let Some(c) = rest.chars().next() {
@@ -783,10 +938,16 @@ impl BracketScanner {
                     None => break,
                 }
             }
-            if self.line_comment.is_some_and(|token| rest.starts_with(token)) {
+            if self
+                .line_comment
+                .is_some_and(|token| rest.starts_with(token))
+            {
                 break;
             }
-            if let Some(after) = self.block_comment.and_then(|(open, _)| rest.strip_prefix(open)) {
+            if let Some(after) = self
+                .block_comment
+                .and_then(|(open, _)| rest.strip_prefix(open))
+            {
                 self.in_block_comment = true;
                 rest = after;
                 continue;
@@ -817,7 +978,10 @@ impl BracketScanner {
 fn skip_string(quote: char, rest: &str, lifetimes: bool) -> &str {
     if quote == '\'' && lifetimes {
         let mut chars = rest.chars();
-        let is_char = matches!((chars.next(), chars.next()), (Some('\\'), _) | (_, Some('\'')));
+        let is_char = matches!(
+            (chars.next(), chars.next()),
+            (Some('\\'), _) | (_, Some('\''))
+        );
         if !is_char {
             return rest;
         }
@@ -837,11 +1001,22 @@ fn skip_string(quote: char, rest: &str, lifetimes: bool) -> &str {
 /// selection, the caret's line, or every line with `whole_file`. Blank lines and comment blocks
 /// stay as they are. With `force` false, so do lines that have some indentation already. `None`
 /// when nothing changed or the syntax has no rules ([`can_reindent`]).
-pub fn reindent(text: &mut String, selection: Selection, syntax: &str, indent: (usize, bool), whole_file: bool, force: bool) -> Option<Selection> {
+pub fn reindent(
+    text: &mut String,
+    selection: Selection,
+    syntax: &str,
+    indent: (usize, bool),
+    whole_file: bool,
+    force: bool,
+) -> Option<Selection> {
     if !can_reindent(syntax) {
         return None;
     }
-    let (start, end) = if selection.is_empty() && whole_file { (0, text.len()) } else { selected_lines(text, selection) };
+    let (start, end) = if selection.is_empty() && whole_file {
+        (0, text.len())
+    } else {
+        selected_lines(text, selection)
+    };
     let preprocessor = PREPROCESSOR_SYNTAXES.contains(&syntax.to_lowercase().as_str());
     let unit = indent_unit(indent.0, indent.1);
     let mut scanner = BracketScanner::new(syntax);
@@ -859,7 +1034,11 @@ pub fn reindent(text: &mut String, selection: Selection, syntax: &str, indent: (
         if pos >= start && !keep {
             let wanted = unit.repeat((depth - brackets.leading_closers).max(0) as usize);
             if wanted != old_indent {
-                edits.push(Edit { start: pos, end: pos + old_indent.len(), insert: wanted });
+                edits.push(Edit {
+                    start: pos,
+                    end: pos + old_indent.len(),
+                    insert: wanted,
+                });
             }
         }
         depth = (depth + brackets.opens - brackets.closes).max(0);
@@ -868,7 +1047,12 @@ pub fn reindent(text: &mut String, selection: Selection, syntax: &str, indent: (
 }
 
 /// Comments or uncomments the selected lines (`block = false`) or the selection (`block = true`).
-pub fn toggle_comment(text: &mut String, selection: Selection, syntax: &str, block: bool) -> Option<Selection> {
+pub fn toggle_comment(
+    text: &mut String,
+    selection: Selection,
+    syntax: &str,
+    block: bool,
+) -> Option<Selection> {
     match (block, comment_tokens(syntax)) {
         (false, (Some(token), _)) => Some(toggle_line_comment(text, selection, token)),
         (_, (_, Some((open, close)))) => Some(toggle_block_comment(text, selection, open, close)),
@@ -884,40 +1068,71 @@ fn toggle_line_comment(text: &mut String, selection: Selection, token: &str) -> 
         .into_iter()
         .map(|pos| (pos, &text[pos..line_end(text, pos)]))
         .collect();
-    let non_empty: Vec<&(usize, &str)> = lines.iter().filter(|(_, l)| !l.trim().is_empty()).collect();
-    let all_commented = !non_empty.is_empty() && non_empty.iter().all(|(_, l)| l.trim_start().starts_with(bare));
+    let non_empty: Vec<&(usize, &str)> =
+        lines.iter().filter(|(_, l)| !l.trim().is_empty()).collect();
+    let all_commented = !non_empty.is_empty()
+        && non_empty
+            .iter()
+            .all(|(_, l)| l.trim_start().starts_with(bare));
 
     let mut edits = Vec::new();
     if all_commented {
         for (pos, line) in &non_empty {
             let ws = leading_whitespace(line).len();
-            let len = if line[ws..].starts_with(token) { token.len() } else { bare.len() };
-            edits.push(Edit { start: pos + ws, end: pos + ws + len, insert: String::new() });
+            let len = if line[ws..].starts_with(token) {
+                token.len()
+            } else {
+                bare.len()
+            };
+            edits.push(Edit {
+                start: pos + ws,
+                end: pos + ws + len,
+                insert: String::new(),
+            });
         }
     } else {
         // Comment markers go at the smallest indentation, so the block stays aligned.
-        let min_indent = non_empty.iter().map(|(_, l)| leading_whitespace(l).len()).min().unwrap_or(0);
+        let min_indent = non_empty
+            .iter()
+            .map(|(_, l)| leading_whitespace(l).len())
+            .min()
+            .unwrap_or(0);
         for (pos, line) in &lines {
             if line.trim().is_empty() && !non_empty.is_empty() {
                 continue;
             }
             let at = min_indent.min(line.len());
-            edits.push(Edit { start: pos + at, end: pos + at, insert: token.to_string() });
+            edits.push(Edit {
+                start: pos + at,
+                end: pos + at,
+                insert: token.to_string(),
+            });
         }
     }
     apply_edits(text, edits, selection)
 }
 
-fn toggle_block_comment(text: &mut String, selection: Selection, open: &str, close: &str) -> Selection {
+fn toggle_block_comment(
+    text: &mut String,
+    selection: Selection,
+    open: &str,
+    close: &str,
+) -> Selection {
     let (s, e) = if selection.is_empty() {
         let (s, e) = selected_lines(text, selection);
         (s + leading_whitespace(&text[s..e]).len(), e)
     } else {
-        (char_to_byte(text, selection.start()), char_to_byte(text, selection.end()))
+        (
+            char_to_byte(text, selection.start()),
+            char_to_byte(text, selection.end()),
+        )
     };
     let region = &text[s..e];
     let trimmed = region.trim();
-    let edits = if trimmed.starts_with(open) && trimmed.ends_with(close) && trimmed.len() >= open.len() + close.len() {
+    let edits = if trimmed.starts_with(open)
+        && trimmed.ends_with(close)
+        && trimmed.len() >= open.len() + close.len()
+    {
         let open_start = s + (region.len() - region.trim_start().len());
         let close_end = e - (region.len() - region.trim_end().len());
         let mut open_end = open_start + open.len();
@@ -929,13 +1144,29 @@ fn toggle_block_comment(text: &mut String, selection: Selection, open: &str, clo
             close_start -= 1;
         }
         vec![
-            Edit { start: open_start, end: open_end, insert: String::new() },
-            Edit { start: close_start, end: close_end, insert: String::new() },
+            Edit {
+                start: open_start,
+                end: open_end,
+                insert: String::new(),
+            },
+            Edit {
+                start: close_start,
+                end: close_end,
+                insert: String::new(),
+            },
         ]
     } else {
         vec![
-            Edit { start: s, end: s, insert: format!("{open} ") },
-            Edit { start: e, end: e, insert: format!(" {close}") },
+            Edit {
+                start: s,
+                end: s,
+                insert: format!("{open} "),
+            },
+            Edit {
+                start: e,
+                end: e,
+                insert: format!(" {close}"),
+            },
         ]
     };
     apply_edits(text, edits, selection)
@@ -958,8 +1189,12 @@ pub fn reorder_lines(text: &mut String, selection: Selection, order: LineOrder) 
     let trailing_newline = region.ends_with('\n');
     let mut lines: Vec<&str> = region.lines().collect();
     match order {
-        LineOrder::Sort { case_sensitive: true } => lines.sort(),
-        LineOrder::Sort { case_sensitive: false } => lines.sort_by_key(|l| l.to_lowercase()),
+        LineOrder::Sort {
+            case_sensitive: true,
+        } => lines.sort(),
+        LineOrder::Sort {
+            case_sensitive: false,
+        } => lines.sort_by_key(|l| l.to_lowercase()),
         LineOrder::Reverse => lines.reverse(),
         LineOrder::Unique => {
             let mut seen = HashSet::new();
@@ -974,7 +1209,10 @@ pub fn reorder_lines(text: &mut String, selection: Selection, order: LineOrder) 
     if selection.is_empty() {
         Selection::caret(selection.head.min(text.chars().count()))
     } else {
-        Selection::new(byte_to_char(text, s), byte_to_char(text, s + reordered.len()))
+        Selection::new(
+            byte_to_char(text, s),
+            byte_to_char(text, s + reordered.len()),
+        )
     }
 }
 
@@ -994,7 +1232,10 @@ pub struct TrimOptions<'a> {
 
 impl Default for TrimOptions<'_> {
     fn default() -> Self {
-        Self { only_modified_since: None, trim_on_caret: true }
+        Self {
+            only_modified_since: None,
+            trim_on_caret: true,
+        }
     }
 }
 
@@ -1016,24 +1257,44 @@ fn modified_lines(text: &str, saved: &str) -> HashSet<usize> {
         .collect()
 }
 
-pub fn trim_trailing_whitespace_with(text: &mut String, selection: Selection, options: &TrimOptions) -> Selection {
-    let modified = options.only_modified_since.map(|saved| modified_lines(text, saved));
-    let caret_line = text[..char_to_byte(text, selection.head)].matches('\n').count();
+pub fn trim_trailing_whitespace_with(
+    text: &mut String,
+    selection: Selection,
+    options: &TrimOptions,
+) -> Selection {
+    let modified = options
+        .only_modified_since
+        .map(|saved| modified_lines(text, saved));
+    let caret_line = text[..char_to_byte(text, selection.head)]
+        .matches('\n')
+        .count();
     let edits = line_starts(text, 0, text.len())
         .into_iter()
         .enumerate()
-        .filter(|&(i, _)| modified.as_ref().is_none_or(|m| m.contains(&i)) && (options.trim_on_caret || i != caret_line))
+        .filter(|&(i, _)| {
+            modified.as_ref().is_none_or(|m| m.contains(&i))
+                && (options.trim_on_caret || i != caret_line)
+        })
         .filter_map(|(_, pos)| {
             let le = line_end(text, pos);
             let kept = text[pos..le].trim_end_matches([' ', '\t']).len();
-            (pos + kept < le).then(|| Edit { start: pos + kept, end: le, insert: String::new() })
+            (pos + kept < le).then(|| Edit {
+                start: pos + kept,
+                end: le,
+                insert: String::new(),
+            })
         })
         .collect();
     apply_edits(text, edits, selection)
 }
 
 /// Converts leading indentation to spaces (`to_spaces`) or to tabs.
-pub fn convert_indentation(text: &mut String, selection: Selection, tab_size: usize, to_spaces: bool) -> Selection {
+pub fn convert_indentation(
+    text: &mut String,
+    selection: Selection,
+    tab_size: usize,
+    to_spaces: bool,
+) -> Selection {
     let edits = line_starts(text, 0, text.len())
         .into_iter()
         .filter_map(|pos| {
@@ -1042,9 +1303,17 @@ pub fn convert_indentation(text: &mut String, selection: Selection, tab_size: us
             let replacement = if to_spaces {
                 " ".repeat(width)
             } else {
-                format!("{}{}", "\t".repeat(width / tab_size), " ".repeat(width % tab_size))
+                format!(
+                    "{}{}",
+                    "\t".repeat(width / tab_size),
+                    " ".repeat(width % tab_size)
+                )
             };
-            (replacement != ws).then(|| Edit { start: pos, end: pos + ws.len(), insert: replacement })
+            (replacement != ws).then(|| Edit {
+                start: pos,
+                end: pos + ws.len(),
+                insert: replacement,
+            })
         })
         .collect();
     apply_edits(text, edits, selection)
@@ -1052,14 +1321,22 @@ pub fn convert_indentation(text: &mut String, selection: Selection, tab_size: us
 
 /// Typing with several selections (Ctrl+D): each one is replaced by `insert`.
 /// `selections` are sorted by position; the carets come back in the same order.
-pub fn replace_selections(text: &mut String, selections: &[Selection], insert: &str) -> Vec<Selection> {
+pub fn replace_selections(
+    text: &mut String,
+    selections: &[Selection],
+    insert: &str,
+) -> Vec<Selection> {
     let ranges: Vec<(usize, usize)> = selections.iter().map(|s| (s.start(), s.end())).collect();
     replace_char_ranges(text, &ranges, insert)
 }
 
 /// Backspace (Delete when `forward`) at every selection: removes the selected text, or the
 /// character before (after) an empty selection.
-pub fn delete_at_selections(text: &mut String, selections: &[Selection], forward: bool) -> Vec<Selection> {
+pub fn delete_at_selections(
+    text: &mut String,
+    selections: &[Selection],
+    forward: bool,
+) -> Vec<Selection> {
     let len = text.chars().count();
     let ranges: Vec<(usize, usize)> = selections
         .iter()
@@ -1074,7 +1351,11 @@ pub fn delete_at_selections(text: &mut String, selections: &[Selection], forward
 
 /// `delete_word` at every selection: removes the selected text, or from the caret to the next
 /// (or previous) word boundary — the blanks before the caret go too when deleting backwards.
-pub fn delete_word_at_selections(text: &mut String, selections: &[Selection], forward: bool) -> Vec<Selection> {
+pub fn delete_word_at_selections(
+    text: &mut String,
+    selections: &[Selection],
+    forward: bool,
+) -> Vec<Selection> {
     let ranges: Vec<(usize, usize)> = selections
         .iter()
         .map(|s| {
@@ -1090,7 +1371,11 @@ pub fn delete_word_at_selections(text: &mut String, selections: &[Selection], fo
 }
 
 /// Replaces sorted char ranges with `insert`; a range overlapping the previous one is cut to fit.
-fn replace_char_ranges(text: &mut String, ranges: &[(usize, usize)], insert: &str) -> Vec<Selection> {
+fn replace_char_ranges(
+    text: &mut String,
+    ranges: &[(usize, usize)],
+    insert: &str,
+) -> Vec<Selection> {
     let inserted = insert.chars().count();
     let mut out = String::with_capacity(text.len() + insert.len() * ranges.len());
     let mut carets = Vec::with_capacity(ranges.len());
@@ -1102,7 +1387,9 @@ fn replace_char_ranges(text: &mut String, ranges: &[(usize, usize)], insert: &st
         let (start_byte, end_byte) = (char_to_byte(text, start), char_to_byte(text, end));
         out.push_str(&text[copied_byte..start_byte]);
         out.push_str(insert);
-        carets.push(Selection::caret((start as isize + shift) as usize + inserted));
+        carets.push(Selection::caret(
+            (start as isize + shift) as usize + inserted,
+        ));
         shift += inserted as isize - (end - start) as isize;
         (copied_char, copied_byte) = (end, end_byte);
     }
@@ -1123,9 +1410,16 @@ pub fn move_to(text: &str, selection: Selection, to: &str, extend: bool) -> Opti
         "eol" | "hardeol" => end,
         "bol" => {
             let first = start + text[start..end].len() - text[start..end].trim_start().len();
-            if head == first { start } else { first }
+            if head == first {
+                start
+            } else {
+                first
+            }
         }
-        "brackets" => return bracket_target(text, selection.head).map(|target| moved(selection, target, extend)),
+        "brackets" => {
+            return bracket_target(text, selection.head)
+                .map(|target| moved(selection, target, extend))
+        }
         _ => return None,
     };
     Some(moved(selection, byte_to_char(text, target), extend))
@@ -1190,7 +1484,9 @@ impl Stops {
         // Inside a word: "camelCase" and "snake_case" have sub-word boundaries.
         let sub_word = match (before, after) {
             (Some(x), Some(y)) if b == Some(CharClass::Word) && a == Some(CharClass::Word) => {
-                (x.is_lowercase() && y.is_uppercase()) || (x == '_') != (y == '_') || (x.is_alphabetic() != y.is_alphabetic() && x != '_' && y != '_')
+                (x.is_lowercase() && y.is_uppercase())
+                    || (x == '_') != (y == '_')
+                    || (x.is_alphabetic() != y.is_alphabetic() && x != '_' && y != '_')
             }
             _ => false,
         };
@@ -1198,7 +1494,8 @@ impl Stops {
             || (self.word_end && ends(CharClass::Word))
             || (self.punct_begin && begins(CharClass::Punctuation))
             || (self.punct_end && ends(CharClass::Punctuation))
-            || (self.sub_word_begin && (begins(CharClass::Word) || (sub_word && after != Some('_'))))
+            || (self.sub_word_begin
+                && (begins(CharClass::Word) || (sub_word && after != Some('_'))))
             || (self.sub_word_end && (ends(CharClass::Word) || (sub_word && before != Some('_'))))
             || (self.line_begin && line_begin)
             || (self.line_end && line_end)
@@ -1207,11 +1504,25 @@ impl Stops {
 }
 
 /// The first stop after (or before) `position`, or the end (or start) of the text.
-fn next_stop(text: &str, position: usize, forward: bool, stops: &Stops, separators: Option<&str>) -> usize {
+fn next_stop(
+    text: &str,
+    position: usize,
+    forward: bool,
+    stops: &Stops,
+    separators: Option<&str>,
+) -> usize {
     let chars: Vec<char> = text.chars().collect();
-    let boundary = |p: usize| stops.at(p.checked_sub(1).map(|i| chars[i]), chars.get(p).copied(), separators);
+    let boundary = |p: usize| {
+        stops.at(
+            p.checked_sub(1).map(|i| chars[i]),
+            chars.get(p).copied(),
+            separators,
+        )
+    };
     if forward {
-        (position + 1..=chars.len()).find(|&p| boundary(p)).unwrap_or(chars.len())
+        (position + 1..=chars.len())
+            .find(|&p| boundary(p))
+            .unwrap_or(chars.len())
     } else {
         (0..position).rev().find(|&p| boundary(p)).unwrap_or(0)
     }
@@ -1221,20 +1532,39 @@ fn next_stop(text: &str, position: usize, forward: bool, stops: &Stops, separato
 pub fn classify(text: &str, point: usize, separators: Option<&str>) -> u32 {
     let before = point.checked_sub(1).and_then(|i| text.chars().nth(i));
     let after = text.chars().nth(point);
-    (0..9).map(|bit| 1u32 << bit).filter(|&flag| Stops::from_classes(flag).at(before, after, separators)).sum()
+    (0..9)
+        .map(|bit| 1u32 << bit)
+        .filter(|&flag| Stops::from_classes(flag).at(before, after, separators))
+        .sum()
 }
 
 /// `view.find_by_class(point, forward, classes)`: the next point after (or before) `point` whose
 /// boundary has one of `classes`; the end (or start) of the text when none has.
-pub fn find_by_class(text: &str, point: usize, forward: bool, classes: u32, separators: Option<&str>) -> usize {
-    next_stop(text, point, forward, &Stops::from_classes(classes), separators)
+pub fn find_by_class(
+    text: &str,
+    point: usize,
+    forward: bool,
+    classes: u32,
+    separators: Option<&str>,
+) -> usize {
+    next_stop(
+        text,
+        point,
+        forward,
+        &Stops::from_classes(classes),
+        separators,
+    )
 }
 
 /// [`char_class`], with `separators` as the punctuation when given.
 fn class_with(c: char, separators: Option<&str>) -> CharClass {
     match separators {
         Some(separators) if !separators.is_empty() && c != '\n' && !c.is_whitespace() => {
-            if separators.contains(c) { CharClass::Punctuation } else { CharClass::Word }
+            if separators.contains(c) {
+                CharClass::Punctuation
+            } else {
+                CharClass::Word
+            }
         }
         _ => char_class(c),
     }
@@ -1245,11 +1575,19 @@ fn class_with(c: char, separators: Option<&str>) -> CharClass {
 pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selection> {
     let (forward, head) = (how.forward, selection.head);
     let target = match how.by.as_str() {
-        "characters" if !how.extend && !selection.is_empty() => return Some(Selection::caret(if forward { selection.end() } else { selection.start() })),
+        "characters" if !how.extend && !selection.is_empty() => {
+            return Some(Selection::caret(if forward {
+                selection.end()
+            } else {
+                selection.start()
+            }))
+        }
         "characters" if forward => (head + 1).min(text.chars().count()),
         "characters" => head.saturating_sub(1),
         "lines" => line_above_or_below(text, head, forward),
-        "pages" => (0..how.page_lines.max(1)).fold(head, |at, _| line_above_or_below(text, at, forward)),
+        "pages" => {
+            (0..how.page_lines.max(1)).fold(head, |at, _| line_above_or_below(text, at, forward))
+        }
         "words" => word_boundary(text, head, forward, !forward),
         "word_ends" => word_boundary(text, head, forward, forward),
         "subwords" | "subword_ends" => {
@@ -1273,7 +1611,11 @@ pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selecti
 }
 
 fn moved(selection: Selection, head: usize, extend: bool) -> Selection {
-    if extend { Selection::new(selection.anchor, head) } else { Selection::caret(head) }
+    if extend {
+        Selection::new(selection.anchor, head)
+    } else {
+        Selection::caret(head)
+    }
 }
 
 /// The same column of the next or previous line; the end or start of the text from the last or first.
@@ -1319,7 +1661,13 @@ fn char_class(c: char) -> CharClass {
 /// backward); otherwise after it (starts forward, ends backward). A line break is a stop.
 fn word_boundary(text: &str, position: usize, forward: bool, spaces_first: bool) -> usize {
     let chars: Vec<char> = text.chars().collect();
-    let step = |at: usize| if forward { (at < chars.len()).then(|| (chars[at], at + 1)) } else { (at > 0).then(|| (chars[at - 1], at - 1)) };
+    let step = |at: usize| {
+        if forward {
+            (at < chars.len()).then(|| (chars[at], at + 1))
+        } else {
+            (at > 0).then(|| (chars[at - 1], at - 1))
+        }
+    };
     let skip_spaces = |mut at: usize| {
         while let Some((c, next)) = step(at) {
             if char_class(c) != CharClass::Space {
@@ -1329,7 +1677,11 @@ fn word_boundary(text: &str, position: usize, forward: bool, spaces_first: bool)
         }
         at
     };
-    let mut at = if spaces_first { skip_spaces(position) } else { position };
+    let mut at = if spaces_first {
+        skip_spaces(position)
+    } else {
+        position
+    };
     let Some((first, next)) = step(at) else {
         return at;
     };
@@ -1344,7 +1696,11 @@ fn word_boundary(text: &str, position: usize, forward: bool, spaces_first: bool)
         }
         at = next;
     }
-    if spaces_first { at } else { skip_spaces(at) }
+    if spaces_first {
+        at
+    } else {
+        skip_spaces(at)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1425,14 +1781,24 @@ pub fn carets_on_next_line(text: &str, selections: &[Selection], forward: bool) 
         columns.into_iter().rev().collect()
     };
     for &(line, column) in &ordered {
-        let previous = if forward { line.checked_sub(1) } else { Some(line + 1) };
-        let column = previous.and_then(|p| goal.get(&p).copied()).unwrap_or(column);
+        let previous = if forward {
+            line.checked_sub(1)
+        } else {
+            Some(line + 1)
+        };
+        let column = previous
+            .and_then(|p| goal.get(&p).copied())
+            .unwrap_or(column);
         goal.insert(line, column);
     }
     ordered
         .iter()
         .filter_map(|&(line, _)| {
-            let next = if forward { line + 1 } else { line.checked_sub(1)? };
+            let next = if forward {
+                line + 1
+            } else {
+                line.checked_sub(1)?
+            };
             let &(first, chars) = lines.get(next)?;
             (!goal.contains_key(&next)).then(|| Selection::caret(first + goal[&line].min(chars)))
         })

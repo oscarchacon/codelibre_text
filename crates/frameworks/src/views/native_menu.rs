@@ -40,7 +40,12 @@ impl NativeMenu {
             let _ = sender.send((event.id, pressed_a_key()));
             ctx.request_repaint();
         }));
-        Self { shown: None, menu: None, items: Vec::new(), activations }
+        Self {
+            shown: None,
+            menu: None,
+            items: Vec::new(),
+            activations,
+        }
     }
 
     /// Puts `model` in the menu bar, unless it is already there.
@@ -94,12 +99,25 @@ impl NativeMenu {
         app.append(&PredefinedMenuItem::hide(Some(&model.hide)))?;
         app.append(&PredefinedMenuItem::hide_others(Some(&model.hide_others)))?;
         app.append(&PredefinedMenuItem::show_all(Some(&model.show_all)))?;
-        if let Some((quit, command)) = model.quit.as_ref().and_then(|quit| Some((quit, quit.command.as_ref()?))) {
+        if let Some((quit, command)) = model
+            .quit
+            .as_ref()
+            .and_then(|quit| Some((quit, quit.command.as_ref()?)))
+        {
             app.append(&PredefinedMenuItem::separator())?;
             // Cmd+Q, even when the keymap binds no key to `exit`.
-            let accelerator = quit.key.as_ref().and_then(accelerator).or_else(|| "cmd+q".parse().ok());
+            let accelerator = quit
+                .key
+                .as_ref()
+                .and_then(accelerator)
+                .or_else(|| "cmd+q".parse().ok());
             let id = self.add_item(command, &quit.key);
-            app.append(&MenuItem::with_id(id, &quit.caption, quit.enabled, accelerator))?;
+            app.append(&MenuItem::with_id(
+                id,
+                &quit.caption,
+                quit.enabled,
+                accelerator,
+            ))?;
         }
         menu.append(&app)?;
         let mut help = None;
@@ -133,8 +151,19 @@ impl NativeMenu {
         let accelerator = entry.key.as_ref().and_then(accelerator);
         let id = self.add_item(command, &entry.key);
         match entry.checked {
-            Some(checked) => parent.append(&CheckMenuItem::with_id(id, &entry.caption, entry.enabled, checked, accelerator)),
-            None => parent.append(&MenuItem::with_id(id, &entry.caption, entry.enabled, accelerator)),
+            Some(checked) => parent.append(&CheckMenuItem::with_id(
+                id,
+                &entry.caption,
+                entry.enabled,
+                checked,
+                accelerator,
+            )),
+            None => parent.append(&MenuItem::with_id(
+                id,
+                &entry.caption,
+                entry.enabled,
+                accelerator,
+            )),
         }
     }
 
@@ -148,12 +177,19 @@ impl NativeMenu {
 /// A key equivalent for `key`. Keys without Cmd or Ctrl (other than F1–F20) are left out: as key
 /// equivalents they would no longer type or move the caret.
 fn accelerator(key: &KeyCombo) -> Option<Accelerator> {
-    let function_key = key.key.len() > 1 && key.key.starts_with('f') && key.key[1..].chars().all(|c| c.is_ascii_digit());
+    let function_key = key.key.len() > 1
+        && key.key.starts_with('f')
+        && key.key[1..].chars().all(|c| c.is_ascii_digit());
     if !(key.ctrl || key.super_key || function_key) {
         return None;
     }
     let mut spec = String::new();
-    for (on, modifier) in [(key.ctrl, "ctrl+"), (key.alt, "alt+"), (key.shift, "shift+"), (key.super_key, "cmd+")] {
+    for (on, modifier) in [
+        (key.ctrl, "ctrl+"),
+        (key.alt, "alt+"),
+        (key.shift, "shift+"),
+        (key.super_key, "cmd+"),
+    ] {
         if on {
             spec.push_str(modifier);
         }

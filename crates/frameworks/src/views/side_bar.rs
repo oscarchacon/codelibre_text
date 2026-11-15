@@ -19,82 +19,113 @@ pub fn show(
     menu: Option<&ContextMenuViewModel>,
     events: &mut Vec<UiEvent>,
 ) {
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        ui.add_space(6.0);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.add_space(6.0);
 
-        if !side_bar.open_files.is_empty() {
-            section_header(ui, chrome, text.tr("OPEN FILES"));
-            let mut last_group = None;
-            for file in &side_bar.open_files {
-                // With several groups, the files of each one under its name, as in Sublime.
-                if side_bar.groups > 1 && last_group != Some(file.group) {
-                    ui.horizontal(|ui| {
-                        ui.add_space(14.0);
-                        let title = text.tr_args("GROUP {number}", &[("number", &(file.group + 1))]);
-                        ui.label(RichText::new(title).size(9.5).color(chrome.fg_dim));
-                    });
-                    last_group = Some(file.group);
-                }
-                let depth = if side_bar.groups > 1 { 1 } else { 0 };
-                let response = row(ui, chrome, depth, None, &file.name, file.active);
-                if file.dirty {
-                    let center = egui::pos2(response.rect.left() + 16.0 + depth as f32 * 14.0, response.rect.center().y);
-                    ui.painter().circle_filled(center, 3.0, chrome.fg_dim);
-                }
-                if response.clicked() {
-                    events.push(UiEvent::ActivateTab(file.index));
-                }
-                if response.middle_clicked() {
-                    events.push(UiEvent::CloseTab(file.index));
-                }
-                // An open file has its tab's menu, as in Sublime.
-                context_menu::attach(&response, ContextMenuTarget::Tab { group: file.group, index: file.tab }, menu, events);
-            }
-            ui.add_space(8.0);
-        }
-
-        if !side_bar.folders.is_empty() {
-            section_header(ui, chrome, text.tr("FOLDERS"));
-            for entry in &side_bar.folders {
-                let folder = match entry.kind {
-                    TreeRowKind::Folder { expanded, .. } => Some(expanded),
-                    TreeRowKind::File => None,
-                };
-                let response = row(ui, chrome, entry.depth, folder, &entry.name, entry.active);
-                // A file: one click previews it, two open it, as in Sublime.
-                if response.double_clicked() {
-                    if let TreeRowKind::File = entry.kind {
-                        events.push(UiEvent::OpenFile(entry.path.clone()));
+            if !side_bar.open_files.is_empty() {
+                section_header(ui, chrome, text.tr("OPEN FILES"));
+                let mut last_group = None;
+                for file in &side_bar.open_files {
+                    // With several groups, the files of each one under its name, as in Sublime.
+                    if side_bar.groups > 1 && last_group != Some(file.group) {
+                        ui.horizontal(|ui| {
+                            ui.add_space(14.0);
+                            let title =
+                                text.tr_args("GROUP {number}", &[("number", &(file.group + 1))]);
+                            ui.label(RichText::new(title).size(9.5).color(chrome.fg_dim));
+                        });
+                        last_group = Some(file.group);
                     }
-                } else if response.clicked() {
-                    events.push(match entry.kind {
-                        TreeRowKind::Folder { .. } => UiEvent::ToggleFolder(entry.path.clone()),
-                        TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
-                    });
+                    let depth = if side_bar.groups > 1 { 1 } else { 0 };
+                    let response = row(ui, chrome, depth, None, &file.name, file.active);
+                    if file.dirty {
+                        let center = egui::pos2(
+                            response.rect.left() + 16.0 + depth as f32 * 14.0,
+                            response.rect.center().y,
+                        );
+                        ui.painter().circle_filled(center, 3.0, chrome.fg_dim);
+                    }
+                    if response.clicked() {
+                        events.push(UiEvent::ActivateTab(file.index));
+                    }
+                    if response.middle_clicked() {
+                        events.push(UiEvent::CloseTab(file.index));
+                    }
+                    // An open file has its tab's menu, as in Sublime.
+                    context_menu::attach(
+                        &response,
+                        ContextMenuTarget::Tab {
+                            group: file.group,
+                            index: file.tab,
+                        },
+                        menu,
+                        events,
+                    );
                 }
-                let (is_dir, root) = match entry.kind {
-                    TreeRowKind::Folder { is_root, .. } => (true, is_root),
-                    TreeRowKind::File => (false, false),
-                };
-                let target = ContextMenuTarget::SideBar { path: entry.path.clone(), is_dir, root };
-                context_menu::attach(&response, target, menu, events);
+                ui.add_space(8.0);
             }
-        }
-    });
+
+            if !side_bar.folders.is_empty() {
+                section_header(ui, chrome, text.tr("FOLDERS"));
+                for entry in &side_bar.folders {
+                    let folder = match entry.kind {
+                        TreeRowKind::Folder { expanded, .. } => Some(expanded),
+                        TreeRowKind::File => None,
+                    };
+                    let response = row(ui, chrome, entry.depth, folder, &entry.name, entry.active);
+                    // A file: one click previews it, two open it, as in Sublime.
+                    if response.double_clicked() {
+                        if let TreeRowKind::File = entry.kind {
+                            events.push(UiEvent::OpenFile(entry.path.clone()));
+                        }
+                    } else if response.clicked() {
+                        events.push(match entry.kind {
+                            TreeRowKind::Folder { .. } => UiEvent::ToggleFolder(entry.path.clone()),
+                            TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
+                        });
+                    }
+                    let (is_dir, root) = match entry.kind {
+                        TreeRowKind::Folder { is_root, .. } => (true, is_root),
+                        TreeRowKind::File => (false, false),
+                    };
+                    let target = ContextMenuTarget::SideBar {
+                        path: entry.path.clone(),
+                        is_dir,
+                        root,
+                    };
+                    context_menu::attach(&response, target, menu, events);
+                }
+            }
+        });
 }
 
 fn section_header(ui: &mut Ui, chrome: &Chrome, title: &str) {
     ui.horizontal(|ui| {
         ui.add_space(10.0);
-        ui.label(RichText::new(title).size(10.5).color(chrome.fg_dim).strong());
+        ui.label(
+            RichText::new(title)
+                .size(10.5)
+                .color(chrome.fg_dim)
+                .strong(),
+        );
     });
     ui.add_space(4.0);
 }
 
 /// A full-width clickable row. `folder` is `Some(expanded)` for folders.
-fn row(ui: &mut Ui, chrome: &Chrome, depth: usize, folder: Option<bool>, label: &str, active: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::CLICK);
+fn row(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    depth: usize,
+    folder: Option<bool>,
+    label: &str,
+    active: bool,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::CLICK);
     let painter = ui.painter();
     if active {
         painter.rect_filled(rect, 0.0, chrome.hover_bg);
@@ -107,13 +138,29 @@ fn row(ui: &mut Ui, chrome: &Chrome, depth: usize, folder: Option<bool>, label: 
         // Disclosure triangle (the default fonts have no ▸/▾ glyphs).
         let c = egui::pos2(x + 4.0, rect.center().y);
         let points = if expanded {
-            vec![c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, -2.0), c + egui::vec2(0.0, 3.0)]
+            vec![
+                c + egui::vec2(-4.0, -2.0),
+                c + egui::vec2(4.0, -2.0),
+                c + egui::vec2(0.0, 3.0),
+            ]
         } else {
-            vec![c + egui::vec2(-2.0, -4.0), c + egui::vec2(3.0, 0.0), c + egui::vec2(-2.0, 4.0)]
+            vec![
+                c + egui::vec2(-2.0, -4.0),
+                c + egui::vec2(3.0, 0.0),
+                c + egui::vec2(-2.0, 4.0),
+            ]
         };
-        painter.add(egui::Shape::convex_polygon(points, chrome.fg_dim, egui::Stroke::NONE));
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            chrome.fg_dim,
+            egui::Stroke::NONE,
+        ));
     }
-    let color = if active { chrome.fg } else { mix(chrome.fg, chrome.fg_dim, 0.35) };
+    let color = if active {
+        chrome.fg
+    } else {
+        mix(chrome.fg, chrome.fg_dim, 0.35)
+    };
     painter.text(
         egui::pos2(x + 14.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

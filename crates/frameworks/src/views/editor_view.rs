@@ -12,21 +12,26 @@ use std::ops::Range;
 
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
-use egui::{Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, Shape, Stroke, TextEdit, Vec2};
+use egui::{
+    Align2, Color32, Event, FontId, Id, Key, Modifiers, Rect, RichText, Shape, Stroke, TextEdit,
+    Vec2,
+};
 use entities::document::DocumentId;
 use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte, line_col};
 use entities::text_commands::CaretMotion;
+use entities::view_geometry::ViewGeometry;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{
-    AutoCompleteViewModel, ContextMenuViewModel, CompletionViewModel, EditorViewModel, PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, Underline,
+    AutoCompleteViewModel, CompletionViewModel, ContextMenuViewModel, EditorViewModel,
+    PhantomLayout, PhantomViewModel, PopupViewModel, RegionViewModel, SheetViewModel, Underline,
 };
 use use_cases::plugin_popups::HoverZone;
 
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
-use crate::views::{context_menu, minimap};
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
+use crate::views::{context_menu, minimap};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
 const POINTS_TO_PIXELS: f32 = 4.0 / 3.0;
@@ -34,6 +39,25 @@ const POINTS_TO_PIXELS: f32 = 4.0 / 3.0;
 pub enum EditorText<'a> {
     Editable(&'a mut String),
     ReadOnly(&'a str),
+}
+
+/// Adds the state before an out-of-widget plugin edit as a hard undo boundary. egui owns the
+/// actual history, but use cases mutate the text before the next `TextEdit` frame.
+pub fn add_undo_boundary(
+    ctx: &egui::Context,
+    document: DocumentId,
+    text: String,
+    selection: Selection,
+) {
+    let id = widget_id(document);
+    let mut state = TextEditState::load(ctx, id).unwrap_or_default();
+    let mut undoer = state.undoer();
+    undoer.add_undo(&(
+        CCursorRange::two(CCursor::new(selection.anchor), CCursor::new(selection.head)),
+        text,
+    ));
+    state.set_undoer(undoer);
+    state.store(ctx, id);
 }
 
 /// Which command-made selection each document's widget has already applied.
@@ -64,7 +88,11 @@ pub fn show(
     let region_colors: Vec<Color32> = model
         .regions
         .iter()
-        .map(|r| engine.scope_color(&model.color_scheme, &r.scope).unwrap_or(colors.foreground))
+        .map(|r| {
+            engine
+                .scope_color(&model.color_scheme, &r.scope)
+                .unwrap_or(colors.foreground)
+        })
         .collect();
 
     // Like Sublime, the text of the focused group has the keyboard focus unless a panel, overlay
@@ -77,12 +105,22 @@ pub fn show(
     let mut reveal = false;
     if sync.applied_revision.get(&model.document) != Some(&model.selection_revision) {
         set_widget_selection(&ctx, id, model.selection);
-        sync.applied_revision.insert(model.document, model.selection_revision);
+        sync.applied_revision
+            .insert(model.document, model.selection_revision);
         reveal = true;
     }
     // And `view.show` from plugins.
-    let show = model.show.filter(|&(_, _, revision)| sync.applied_show.get(&model.document) != Some(&revision));
+    let show = model
+        .show
+        .filter(|&(_, _, revision)| sync.applied_show.get(&model.document) != Some(&revision));
     if let Some((_, _, revision)) = show {
+        sync.applied_show.insert(model.document, revision);
+    }
+    // And `view.set_viewport_position`.
+    let scroll_to = model
+        .scroll_to
+        .filter(|&(_, revision)| sync.applied_show.get(&model.document) != Some(&revision));
+    if let Some((_, revision)) = scroll_to {
         sync.applied_show.insert(model.document, revision);
     }
 
@@ -128,20 +166,38 @@ pub fn show(
         EditorText::Editable(text) => ("", Some(text)),
         EditorText::ReadOnly(text) => (text, None),
     };
-    let line_count = editable.as_ref().map_or(read_only_text, |t| t.as_str()).matches('\n').count() + 1;
+    let line_count = editable
+        .as_ref()
+        .map_or(read_only_text, |t| t.as_str())
+        .matches('\n')
+        .count()
+        + 1;
     let gutter_width = if model.line_numbers {
         (line_count.to_string().len().max(3) as f32 + 2.5) * char_width
     } else {
         char_width
-    };
+    } + fold_column(model, char_width);
     // A column for the regions' icons, left of the line numbers, while some region set has one.
-    let gutter_width = gutter_width + if has_icons(model) { icon_size(row_height) } else { 0.0 };
+    let gutter_width = gutter_width
+        + if has_icons(model) {
+            icon_size(row_height)
+        } else {
+            0.0
+        };
 
     // As in Sublime the minimap sits between the text and the vertical scroll bar: the scroll area
     // takes the whole width (so its bar stays at the window's edge, where it is seen, and the wheel
     // scrolls over the minimap too) and the text keeps out of the minimap's strip.
-    let minimap_width = if model.minimap.is_some() { minimap::width(ui.available_width()) } else { 0.0 };
-    let bar_lane = if minimap_width > 0.0 { minimap::bar_lane(&ui.spacing().scroll) } else { 0.0 };
+    let minimap_width = if model.minimap.is_some() {
+        minimap::width(ui.available_width())
+    } else {
+        0.0
+    };
+    let bar_lane = if minimap_width > 0.0 {
+        minimap::bar_lane(&ui.spacing().scroll)
+    } else {
+        0.0
+    };
     let reserved = minimap_width + bar_lane;
     let scroll = egui::ScrollArea::both()
         .id_salt(("editor_scroll", model.document))
@@ -164,12 +220,29 @@ pub fn show(
                 let phantom_sizes: Vec<Vec2> = model
                     .phantoms
                     .iter()
-                    .map(|p| ctx.memory(|m| m.area_rect(phantom_id(model.document, p.id))).map_or(Vec2::ZERO, |r| r.size()))
+                    .map(|p| {
+                        ctx.memory(|m| m.area_rect(phantom_id(model.document, p.id)))
+                            .map_or(Vec2::ZERO, |r| r.size())
+                    })
                     .collect();
                 let mut layouter = |ui: &egui::Ui, text: &str, _wrap_width: f32| {
-                    let mut job = engine.layout_job(model.document, text, &model.syntax, &model.color_scheme, font.clone());
+                    let mut job = engine.layout_job(
+                        model.document,
+                        text,
+                        &model.syntax,
+                        &model.color_scheme,
+                        font.clone(),
+                    );
                     job.wrap.max_width = wrap_width;
-                    make_room_for_phantoms(&mut job, text, model, &phantom_sizes, row_height, char_width);
+                    make_room_for_phantoms(
+                        &mut job,
+                        text,
+                        model,
+                        &phantom_sizes,
+                        row_height,
+                        char_width,
+                    );
+                    hide_folds(&mut job, text, &model.folds, char_width);
                     ui.fonts(|f| f.layout_job(job))
                 };
                 let min_height = if model.scroll_past_end {
@@ -187,7 +260,11 @@ pub fn show(
                     .code_editor()
                     .frame(false)
                     .margin(egui::Margin::symmetric(4, 0))
-                    .desired_width(if model.word_wrap { wrap_width + 8.0 } else { f32::INFINITY })
+                    .desired_width(if model.word_wrap {
+                        wrap_width + 8.0
+                    } else {
+                        f32::INFINITY
+                    })
                     .min_size(Vec2::new(viewport.width() - gutter_width, min_height))
                     .layouter(&mut layouter)
                     .show(ui);
@@ -211,7 +288,10 @@ pub fn show(
                     events.push(UiEvent::SelectionChanged(model.document, selection));
                 }
                 if output.response.changed() && !typed.is_empty() {
-                    events.push(UiEvent::TextTyped(model.document, std::mem::take(&mut typed)));
+                    events.push(UiEvent::TextTyped(
+                        model.document,
+                        std::mem::take(&mut typed),
+                    ));
                 }
 
                 let galley = &output.galley;
@@ -227,10 +307,17 @@ pub fn show(
                         ctx.data_mut(|d| d.insert_temp(menu_point, point));
                     }
                 }
-                let point = ctx.data(|d| d.get_temp::<usize>(menu_point)).unwrap_or(selection.head);
-                let target = ContextMenuTarget::Text { document: model.document, point };
+                let point = ctx
+                    .data(|d| d.get_temp::<usize>(menu_point))
+                    .unwrap_or(selection.head);
+                let target = ContextMenuTarget::Text {
+                    document: model.document,
+                    point,
+                };
                 context_menu::attach(&output.response, target, menu, events);
-                let caret = galley.pos_from_ccursor(CCursor::new(selection.head)).translate(origin.to_vec2());
+                let caret = galley
+                    .pos_from_ccursor(CCursor::new(selection.head))
+                    .translate(origin.to_vec2());
 
                 let mut shapes = Vec::new();
                 if model.highlight_line && selection.is_empty() {
@@ -246,30 +333,127 @@ pub fn show(
                 for &column in &model.rulers {
                     let x = origin.x + column as f32 * char_width;
                     shapes.push(Shape::line_segment(
-                        [egui::pos2(x, viewport.top()), egui::pos2(x, viewport.bottom())],
+                        [
+                            egui::pos2(x, viewport.top()),
+                            egui::pos2(x, viewport.bottom()),
+                        ],
                         Stroke::new(1.0_f32, colors.guide),
                     ));
                 }
-                shapes.extend(find_match_shapes(model, text, galley, origin, viewport, char_width, colors.find_highlight));
+                shapes.extend(find_match_shapes(
+                    model,
+                    text,
+                    galley,
+                    origin,
+                    viewport,
+                    char_width,
+                    colors.find_highlight,
+                ));
+                for &(start, _) in &model.folds {
+                    let at = galley
+                        .pos_from_ccursor(CCursor::new(start))
+                        .translate(origin.to_vec2());
+                    let marker = Rect::from_min_size(
+                        egui::pos2(at.left() + char_width * 0.5, at.top() + 1.0),
+                        Vec2::new(char_width * FOLD_MARKER_COLUMNS, row_height - 2.0),
+                    );
+                    if !viewport.intersects(marker) {
+                        continue;
+                    }
+                    let response =
+                        ui.interact(marker, id.with(("fold", start)), egui::Sense::CLICK);
+                    shapes.push(Shape::rect_filled(
+                        marker,
+                        3.0,
+                        if response.hovered() {
+                            colors.selection
+                        } else {
+                            colors.line_highlight
+                        },
+                    ));
+                    shapes.push(Shape::rect_stroke(
+                        marker,
+                        3.0,
+                        Stroke::new(1.0_f32, colors.guide),
+                        egui::StrokeKind::Inside,
+                    ));
+                    shapes.push(ctx.fonts(|f| {
+                        Shape::text(
+                            f,
+                            marker.center(),
+                            Align2::CENTER_CENTER,
+                            "...",
+                            font.clone(),
+                            colors.foreground,
+                        )
+                    }));
+                    if response.clicked() {
+                        events.push(UiEvent::Unfold(model.document, start));
+                    }
+                }
                 let visible = visible_chars(galley, origin, viewport);
-                events.push(UiEvent::VisibleRange(model.document, visible.start, visible.end));
+                events.push(UiEvent::VisibleRange(
+                    model.document,
+                    visible.start,
+                    visible.end,
+                ));
                 for (regions, &color) in model.regions.iter().zip(&region_colors) {
-                    shapes.extend(region_shapes(regions, color, galley, origin, visible.clone(), char_width));
+                    shapes.extend(region_shapes(
+                        regions,
+                        color,
+                        galley,
+                        origin,
+                        visible.clone(),
+                        char_width,
+                    ));
                 }
                 for extra in &model.extra_selections {
                     for rect in range_rects(galley, extra.start(), extra.end()) {
-                        shapes.push(Shape::rect_filled(rect.translate(origin.to_vec2()), 0.0, colors.selection));
+                        shapes.push(Shape::rect_filled(
+                            rect.translate(origin.to_vec2()),
+                            0.0,
+                            colors.selection,
+                        ));
                     }
                 }
                 ui.painter().set(background, Shape::Vec(shapes));
                 // The widget draws the primary caret; the extra ones are drawn here, over the text.
                 for extra in &model.extra_selections {
-                    let caret = galley.pos_from_ccursor(CCursor::new(extra.head)).translate(origin.to_vec2());
-                    ui.painter().line_segment([caret.left_top(), caret.left_bottom()], Stroke::new(2.0_f32, colors.caret));
+                    let caret = galley
+                        .pos_from_ccursor(CCursor::new(extra.head))
+                        .translate(origin.to_vec2());
+                    ui.painter().line_segment(
+                        [caret.left_top(), caret.left_bottom()],
+                        Stroke::new(2.0_f32, colors.caret),
+                    );
                 }
 
-                paint_gutter(ui, model, text, galley, origin, viewport, gutter_width, char_width, row_height, &font, &colors, selection);
-                paint_region_icons(ui, model, &region_colors, galley, origin, viewport, gutter_width, char_width, row_height);
+                paint_gutter(
+                    ui,
+                    model,
+                    text,
+                    galley,
+                    origin,
+                    viewport,
+                    gutter_width,
+                    char_width,
+                    row_height,
+                    &font,
+                    &colors,
+                    selection,
+                    events,
+                );
+                paint_region_icons(
+                    ui,
+                    model,
+                    &region_colors,
+                    galley,
+                    origin,
+                    viewport,
+                    gutter_width,
+                    char_width,
+                    row_height,
+                );
 
                 let html_colors = HtmlColors {
                     foreground: colors.foreground,
@@ -277,30 +461,99 @@ pub fn show(
                     link: colors.caret,
                 };
                 let html_size = font.size * 0.9;
-                show_phantoms(ui, model, text, galley, origin, viewport, &phantom_sizes, (char_width, row_height), html_size, &html_colors, &colors, events);
-                show_annotations(ui, model, &region_colors, galley, origin, viewport, char_width, html_size, &html_colors, &colors, events);
+                show_phantoms(
+                    ui,
+                    model,
+                    text,
+                    galley,
+                    origin,
+                    viewport,
+                    &phantom_sizes,
+                    (char_width, row_height),
+                    html_size,
+                    &html_colors,
+                    &colors,
+                    events,
+                );
+                show_annotations(
+                    ui,
+                    model,
+                    &region_colors,
+                    galley,
+                    origin,
+                    viewport,
+                    char_width,
+                    html_size,
+                    &html_colors,
+                    &colors,
+                    events,
+                );
                 if let Some(popup) = &model.popup {
-                    show_popup(ui, model.document, popup, galley, origin, viewport, html_size, &html_colors, &colors, events);
+                    show_popup(
+                        ui,
+                        model.document,
+                        popup,
+                        galley,
+                        origin,
+                        viewport,
+                        html_size,
+                        &html_colors,
+                        &colors,
+                        events,
+                    );
                 }
                 if let Some(list) = &model.auto_complete {
-                    show_auto_complete(ui, model.document, list, galley, origin, viewport, &font, row_height, &html_colors, &colors, events);
+                    show_auto_complete(
+                        ui,
+                        model.document,
+                        list,
+                        galley,
+                        origin,
+                        viewport,
+                        &font,
+                        row_height,
+                        &html_colors,
+                        &colors,
+                        events,
+                    );
                 }
                 if model.report_hover {
-                    report_hover(ui, model, &model.phantoms, galley, origin, viewport, gutter_width, events);
+                    report_hover(
+                        ui,
+                        model,
+                        &model.phantoms,
+                        galley,
+                        origin,
+                        viewport,
+                        gutter_width,
+                        events,
+                    );
                 }
 
                 if reveal {
-                    ui.scroll_to_rect(caret.expand2(egui::vec2(char_width * 4.0, row_height * 4.0)), None);
+                    ui.scroll_to_rect(
+                        caret.expand2(egui::vec2(char_width * 4.0, row_height * 4.0)),
+                        None,
+                    );
                 }
                 if let Some((point, center, _)) = show {
-                    let at = galley.pos_from_ccursor(CCursor::new(point)).translate(origin.to_vec2());
+                    let at = galley
+                        .pos_from_ccursor(CCursor::new(point))
+                        .translate(origin.to_vec2());
                     let align = center.then_some(egui::Align::Center);
-                    ui.scroll_to_rect(at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)), align);
+                    ui.scroll_to_rect(
+                        at.expand2(egui::vec2(char_width * 4.0, row_height * 2.0)),
+                        align,
+                    );
                 }
                 // Long lines must not show in the minimap's strip and the bar's lane (the bar is
                 // painted after the content, so over this).
                 if reserved > 0.0 {
-                    ui.painter().rect_filled(Rect::from_min_max(egui::pos2(viewport.right(), shown.top()), shown.max), 0.0, colors.background);
+                    ui.painter().rect_filled(
+                        Rect::from_min_max(egui::pos2(viewport.right(), shown.top()), shown.max),
+                        0.0,
+                        colors.background,
+                    );
                 }
                 (galley.clone(), selection)
             })
@@ -334,13 +587,52 @@ pub fn show(
             selection: colors.selection,
             border: colors.minimap_border,
         };
-        if let Some(offset) = minimap::show(ui, id.with("minimap"), area, settings, &text, geometry, &minimap_colors) {
+        if let Some(offset) = minimap::show(
+            ui,
+            id.with("minimap"),
+            area,
+            settings,
+            &text,
+            geometry,
+            &minimap_colors,
+        ) {
             let mut state = scroll.state;
             state.offset.y = offset;
             state.store(&ctx, scroll.id);
             ctx.request_repaint();
         }
     }
+
+    // The geometry plugins read (`view.text_to_layout`, `viewport_position`…), and where they
+    // asked to scroll to.
+    let mut offset = scroll.state.offset;
+    if let Some(((x, y), _)) = scroll_to {
+        let mut state = scroll.state;
+        state.offset = Vec2::new(x, y);
+        state.store(&ctx, scroll.id);
+        offset = state.offset;
+        ctx.request_repaint();
+        events.push(UiEvent::ViewportScrolled(model.document));
+    }
+    let text_width = (scroll.inner_rect.width() - reserved - gutter_width).max(0.0);
+    events.push(UiEvent::ViewGeometry(
+        model.document,
+        ViewGeometry {
+            line_height: row_height,
+            em_width: char_width,
+            viewport_position: (offset.x, offset.y),
+            viewport_extent: (text_width, scroll.inner_rect.height()),
+            // The text widget's margin is 4 points.
+            text_origin: (gutter_width + 4.0, 0.0),
+            tab_width: egui::epaint::text::TAB_SIZE,
+            wrap_columns: model.word_wrap.then(|| {
+                let wrap_width =
+                    (scroll.inner_rect.width() - reserved - gutter_width - char_width * 2.0)
+                        .max(char_width * 10.0);
+                (wrap_width / char_width).floor() as usize
+            }),
+        },
+    ));
 
     // After SelectionChanged, so the command sees the caret it was pressed at.
     events.extend(key_events);
@@ -351,8 +643,15 @@ fn take_multi_selection_keys(input: &mut egui::InputState) -> Vec<UiEvent> {
     let mut taken = Vec::new();
     input.events.retain(|event| {
         let ui_event = match event {
-            Event::Text(text) | Event::Paste(text) => Some(UiEvent::TypedAtSelections(text.clone())),
-            Event::Key { key, pressed: true, modifiers, .. } if modifiers.is_none() => match key {
+            Event::Text(text) | Event::Paste(text) => {
+                Some(UiEvent::TypedAtSelections(text.clone()))
+            }
+            Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.is_none() => match key {
                 Key::Backspace => Some(UiEvent::DeleteAtSelections { forward: false }),
                 Key::Delete => Some(UiEvent::DeleteAtSelections { forward: true }),
                 Key::Enter => Some(UiEvent::TypedAtSelections("\n".into())),
@@ -384,9 +683,20 @@ fn range_rects(galley: &egui::Galley, start: usize, end: usize) -> Vec<Rect> {
         .iter()
         .filter(|row| row.rect.bottom() > a.top() + 0.5 && row.rect.top() < b.bottom() - 0.5)
         .map(|row| {
-            let left = if (row.rect.top() - a.top()).abs() < 0.5 { a.left() } else { row.rect.left() };
-            let right = if (row.rect.top() - b.top()).abs() < 0.5 { b.left() } else { row.rect.right() };
-            Rect::from_min_max(egui::pos2(left, row.rect.top()), egui::pos2(right, row.rect.bottom()))
+            let left = if (row.rect.top() - a.top()).abs() < 0.5 {
+                a.left()
+            } else {
+                row.rect.left()
+            };
+            let right = if (row.rect.top() - b.top()).abs() < 0.5 {
+                b.left()
+            } else {
+                row.rect.right()
+            };
+            Rect::from_min_max(
+                egui::pos2(left, row.rect.top()),
+                egui::pos2(right, row.rect.bottom()),
+            )
         })
         .collect()
 }
@@ -414,11 +724,17 @@ fn find_match_shapes(
         return Vec::new();
     }
     let visible = visible_chars(galley, origin, viewport);
-    let (first_byte, last_byte) = (char_to_byte(text, visible.start), char_to_byte(text, visible.end));
+    let (first_byte, last_byte) = (
+        char_to_byte(text, visible.start),
+        char_to_byte(text, visible.end),
+    );
 
     let start = model.find_matches.partition_point(|m| m.end < first_byte);
     let mut shapes = Vec::new();
-    for m in model.find_matches[start..].iter().take_while(|m| m.start <= last_byte) {
+    for m in model.find_matches[start..]
+        .iter()
+        .take_while(|m| m.start <= last_byte)
+    {
         if m.end > text.len() {
             break;
         }
@@ -431,15 +747,25 @@ fn find_match_shapes(
         } else {
             Rect::from_min_size(a.min, egui::vec2(char_width, a.height()))
         };
-        shapes.push(Shape::rect_filled(rect.translate(origin.to_vec2()).expand(1.0), 2.0, color));
+        shapes.push(Shape::rect_filled(
+            rect.translate(origin.to_vec2()).expand(1.0),
+            2.0,
+            color,
+        ));
     }
     shapes
 }
 
 /// The chars on screen: from the first visible row's start to the last one's end.
 fn visible_chars(galley: &egui::Galley, origin: egui::Pos2, viewport: Rect) -> Range<usize> {
-    let first = galley.cursor_from_pos(egui::vec2(0.0, viewport.top() - origin.y)).ccursor.index;
-    let last = galley.cursor_from_pos(egui::vec2(f32::MAX, viewport.bottom() - origin.y)).ccursor.index;
+    let first = galley
+        .cursor_from_pos(egui::vec2(0.0, viewport.top() - origin.y))
+        .ccursor
+        .index;
+    let last = galley
+        .cursor_from_pos(egui::vec2(f32::MAX, viewport.bottom() - origin.y))
+        .ccursor
+        .index;
     first..last
 }
 
@@ -454,16 +780,30 @@ fn region_shapes(
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
     let stroke = Stroke::new(1.0_f32, color);
-    for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
+    for range in regions
+        .ranges
+        .iter()
+        .filter(|r| r.end >= visible.start && r.start <= visible.end)
+    {
         if range.is_empty() {
             if regions.overwrite_empty {
                 // `DRAW_EMPTY_AS_OVERWRITE`: a block where the next char would go.
-                let at = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2());
-                let block = Rect::from_min_max(at.left_top(), at.left_bottom() + egui::vec2(char_width, 0.0));
+                let at = galley
+                    .pos_from_ccursor(CCursor::new(range.start))
+                    .translate(origin.to_vec2());
+                let block = Rect::from_min_max(
+                    at.left_top(),
+                    at.left_bottom() + egui::vec2(char_width, 0.0),
+                );
                 shapes.push(Shape::rect_filled(block, 0.0, color.gamma_multiply(0.5)));
             } else if regions.draw_empty {
-                let at = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2());
-                shapes.push(Shape::line_segment([at.left_top(), at.left_bottom()], stroke));
+                let at = galley
+                    .pos_from_ccursor(CCursor::new(range.start))
+                    .translate(origin.to_vec2());
+                shapes.push(Shape::line_segment(
+                    [at.left_top(), at.left_bottom()],
+                    stroke,
+                ));
             }
             continue;
         }
@@ -473,7 +813,12 @@ fn region_shapes(
                 shapes.push(Shape::rect_filled(rect, 2.0, color.gamma_multiply(0.25)));
             }
             if regions.outline {
-                shapes.push(Shape::rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside));
+                shapes.push(Shape::rect_stroke(
+                    rect,
+                    2.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                ));
             }
             if let Some(underline) = regions.underline {
                 shapes.extend(underline_shapes(underline, rect, stroke));
@@ -486,12 +831,18 @@ fn region_shapes(
 fn underline_shapes(underline: Underline, rect: Rect, stroke: Stroke) -> Vec<Shape> {
     let y = rect.bottom() - 1.0;
     match underline {
-        Underline::Solid => vec![Shape::line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], stroke)],
+        Underline::Solid => vec![Shape::line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+            stroke,
+        )],
         Underline::Stippled => {
             let mut dashes = Vec::new();
             let mut x = rect.left();
             while x < rect.right() {
-                dashes.push(Shape::line_segment([egui::pos2(x, y), egui::pos2((x + 2.0).min(rect.right()), y)], stroke));
+                dashes.push(Shape::line_segment(
+                    [egui::pos2(x, y), egui::pos2((x + 2.0).min(rect.right()), y)],
+                    stroke,
+                ));
                 x += 4.0;
             }
             dashes
@@ -511,7 +862,10 @@ fn underline_shapes(underline: Underline, rect: Rect, stroke: Stroke) -> Vec<Sha
 }
 
 fn has_icons(model: &EditorViewModel) -> bool {
-    model.regions.iter().any(|r| !r.icon.is_empty() && !r.ranges.is_empty())
+    model
+        .regions
+        .iter()
+        .any(|r| !r.icon.is_empty() && !r.ranges.is_empty())
 }
 
 /// The side of a gutter icon: a bit less than a line, as Sublime's 16 px icons in 19 px lines.
@@ -533,7 +887,10 @@ fn paint_region_icons(
     char_width: f32,
     row_height: f32,
 ) {
-    let gutter = Rect::from_min_max(viewport.left_top(), egui::pos2(viewport.left() + gutter_width, viewport.bottom()));
+    let gutter = Rect::from_min_max(
+        viewport.left_top(),
+        egui::pos2(viewport.left() + gutter_width, viewport.bottom()),
+    );
     let painter = ui.painter().with_clip_rect(gutter);
     let visible = visible_chars(galley, origin, viewport);
     let size = icon_size(row_height);
@@ -544,9 +901,20 @@ fn paint_region_icons(
             continue;
         }
         // A picture is tinted with the region's color, as Sublime does (white icons take it).
-        let texture = regions.icon_image.as_ref().and_then(|bytes| minihtml_view::texture(ui.ctx(), &regions.icon, bytes));
-        for range in regions.ranges.iter().filter(|r| r.end >= visible.start && r.start <= visible.end) {
-            let y = galley.pos_from_ccursor(CCursor::new(range.start)).translate(origin.to_vec2()).center().y;
+        let texture = regions
+            .icon_image
+            .as_ref()
+            .and_then(|bytes| minihtml_view::texture(ui.ctx(), &regions.icon, bytes));
+        for range in regions
+            .ranges
+            .iter()
+            .filter(|r| r.end >= visible.start && r.start <= visible.end)
+        {
+            let y = galley
+                .pos_from_ccursor(CCursor::new(range.start))
+                .translate(origin.to_vec2())
+                .center()
+                .y;
             let center = egui::pos2(x, y);
             if let Some(texture) = &texture {
                 let rect = Rect::from_center_size(center, Vec2::splat(size));
@@ -559,7 +927,8 @@ fn paint_region_icons(
                     painter.circle_stroke(center, radius, Stroke::new(1.5_f32, color));
                 }
                 "bookmark" => {
-                    let rect = Rect::from_center_size(center, egui::vec2(radius * 1.4, radius * 2.2));
+                    let rect =
+                        Rect::from_center_size(center, egui::vec2(radius * 1.4, radius * 2.2));
                     painter.rect_filled(rect, 1.0, color);
                 }
                 _ => {
@@ -585,13 +954,17 @@ fn paint_gutter(
     font: &FontId,
     colors: &Colors,
     selection: Selection,
+    events: &mut Vec<UiEvent>,
 ) {
-    let gutter = Rect::from_min_max(viewport.left_top(), egui::pos2(viewport.left() + gutter_width, viewport.bottom()));
+    let gutter = Rect::from_min_max(
+        viewport.left_top(),
+        egui::pos2(viewport.left() + gutter_width, viewport.bottom()),
+    );
     let painter = ui.painter().with_clip_rect(gutter);
     painter.rect_filled(gutter, 0.0, colors.gutter);
-    if !model.line_numbers {
-        return;
-    }
+    let fold_column = fold_column(model, char_width);
+    let buttons = model.fold_buttons.as_deref().unwrap_or_default();
+    let gutter_hovered = ui.rect_contains_pointer(gutter);
     let caret_line = line_col(text, selection.head).0;
     let mut line = 0;
     let mut starts_line = true;
@@ -600,13 +973,45 @@ fn paint_gutter(
         if y > viewport.bottom() {
             break;
         }
-        if starts_line && y + row_height >= viewport.top() {
+        // A folded line's rows have no height (`hide_folds`): no number.
+        let shown = row.rect.height() > row_height * 0.5;
+        if starts_line && shown && y + row_height >= viewport.top() {
+            if let Ok(index) = buttons.binary_search_by_key(&line, |b| b.line) {
+                let button = buttons[index];
+                if button.folded || gutter_hovered || !model.fade_fold_buttons {
+                    let center = egui::pos2(
+                        gutter.right() - fold_column / 2.0 - char_width * 0.5,
+                        y + row_height / 2.0,
+                    );
+                    let hit = Rect::from_center_size(center, Vec2::new(fold_column, row_height));
+                    let response = ui.interact(
+                        hit,
+                        widget_id(model.document).with(("fold_button", line)),
+                        egui::Sense::CLICK,
+                    );
+                    let color = if response.hovered() {
+                        colors.foreground
+                    } else {
+                        colors.gutter_foreground
+                    };
+                    painter.add(fold_arrow(center, char_width * 0.4, button.folded, color));
+                    if response.clicked() {
+                        events.push(UiEvent::ToggleFold(model.document, line));
+                    }
+                }
+            }
+        }
+        if model.line_numbers && starts_line && shown && y + row_height >= viewport.top() {
             painter.text(
-                egui::pos2(gutter.right() - char_width * 1.5, y),
+                egui::pos2(gutter.right() - char_width * 1.5 - fold_column, y),
                 Align2::RIGHT_TOP,
                 (line + 1).to_string(),
                 font.clone(),
-                if line == caret_line { colors.foreground } else { colors.gutter_foreground },
+                if line == caret_line {
+                    colors.foreground
+                } else {
+                    colors.gutter_foreground
+                },
             );
         }
         starts_line = row.ends_with_newline;
@@ -614,6 +1019,34 @@ fn paint_gutter(
             line += 1;
         }
     }
+}
+
+/// The gutter's column for fold arrows, right of the line numbers (none without `fold_buttons`).
+fn fold_column(model: &EditorViewModel, char_width: f32) -> f32 {
+    if model.fold_buttons.is_some() {
+        char_width * 1.5
+    } else {
+        0.0
+    }
+}
+
+/// A fold arrow: pointing down (a block that can fold) or right (a folded one). The default
+/// fonts lack ▸ ▾, so it is a triangle.
+fn fold_arrow(center: egui::Pos2, size: f32, folded: bool, color: Color32) -> Shape {
+    let points = if folded {
+        vec![
+            center + Vec2::new(-size * 0.6, -size),
+            center + Vec2::new(size * 0.9, 0.0),
+            center + Vec2::new(-size * 0.6, size),
+        ]
+    } else {
+        vec![
+            center + Vec2::new(-size, -size * 0.6),
+            center + Vec2::new(size, -size * 0.6),
+            center + Vec2::new(0.0, size * 0.9),
+        ]
+    };
+    Shape::convex_polygon(points, color, Stroke::NONE)
 }
 
 /// How long the mouse rests before `on_hover`, in seconds (Sublime's is about this).
@@ -627,7 +1060,14 @@ fn phantom_id(document: DocumentId, phantom: u64) -> Id {
 /// after its point aside (`leading_space` before that char); those below a line (`LAYOUT_BELOW`,
 /// `LAYOUT_BLOCK`) make the line's last row taller (a char of it gets a taller `line_height`, and
 /// the text keeps to the top of rows), the phantoms drawn in the room left under the text.
-fn make_room_for_phantoms(job: &mut egui::text::LayoutJob, text: &str, model: &EditorViewModel, sizes: &[Vec2], row_height: f32, char_width: f32) {
+fn make_room_for_phantoms(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    model: &EditorViewModel,
+    sizes: &[Vec2],
+    row_height: f32,
+    char_width: f32,
+) {
     let mut below: Vec<(usize, f32)> = Vec::new();
     let mut inline: Vec<(usize, f32)> = Vec::new();
     for (phantom, size) in model.phantoms.iter().zip(sizes) {
@@ -636,7 +1076,9 @@ fn make_room_for_phantoms(job: &mut egui::text::LayoutJob, text: &str, model: &E
             continue;
         }
         match phantom.layout {
-            PhantomLayout::Inline if byte < text.len() && !text[byte..].starts_with('\n') => inline.push((byte, size.x + char_width)),
+            PhantomLayout::Inline if byte < text.len() && !text[byte..].starts_with('\n') => {
+                inline.push((byte, size.x + char_width))
+            }
             PhantomLayout::Inline => {}
             PhantomLayout::Below | PhantomLayout::Block => {
                 let line_end = text[byte..].find('\n').map_or(text.len(), |at| byte + at);
@@ -665,12 +1107,54 @@ fn make_room_for_phantoms(job: &mut egui::text::LayoutJob, text: &str, model: &E
         // The line's last char, or for an empty line the `\n` before it (the height of an empty
         // row is that of the line break that starts it).
         let target = if line_end > line_start {
-            text[..line_end].char_indices().next_back().map(|(at, _)| at)
+            text[..line_end]
+                .char_indices()
+                .next_back()
+                .map(|(at, _)| at)
         } else {
-            line_start.checked_sub(1).or((!text.is_empty()).then_some(0))
+            line_start
+                .checked_sub(1)
+                .or((!text.is_empty()).then_some(0))
         };
         if let Some(section) = target.and_then(|at| isolate(job, at, true)) {
             job.sections[section].format.line_height = Some(row_height + height);
+        }
+    }
+}
+
+/// Columns the "…" marker of a fold takes.
+const FOLD_MARKER_COLUMNS: f32 = 3.0;
+
+/// Folded text takes no room: its chars get no height (so its rows are 0 high: a line break does
+/// not count in its row's height, and an empty row takes the height of the section of the break
+/// that starts it) and a tiny transparent font. Room is left after a fold for its "…" marker.
+fn hide_folds(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    folds: &[(usize, usize)],
+    char_width: f32,
+) {
+    for &(start, end) in folds {
+        let (from, to) = (char_to_byte(text, start), char_to_byte(text, end));
+        if from >= to || to > text.len() {
+            continue;
+        }
+        let Some(first) = isolate(job, from, false) else {
+            continue;
+        };
+        // The section after the fold (if any) makes room for the marker.
+        let after = isolate(job, to, false);
+        let last = after.unwrap_or(job.sections.len());
+        for section in &mut job.sections[first..last] {
+            section.format.line_height = Some(0.0);
+            section.format.font_id.size = 1.0;
+            section.format.color = Color32::TRANSPARENT;
+            section.format.background = Color32::TRANSPARENT;
+            section.format.underline = Stroke::NONE;
+            section.leading_space = 0.0;
+        }
+        if let Some(after) = after {
+            job.sections[after].leading_space += char_width * (FOLD_MARKER_COLUMNS + 1.0);
         }
     }
 }
@@ -679,7 +1163,10 @@ fn make_room_for_phantoms(job: &mut egui::text::LayoutJob, text: &str, model: &E
 /// char); its index.
 fn isolate(job: &mut egui::text::LayoutJob, byte: usize, one_char: bool) -> Option<usize> {
     let split = |job: &mut egui::text::LayoutJob, at: usize| -> Option<usize> {
-        let index = job.sections.iter().position(|s| s.byte_range.start <= at && at < s.byte_range.end)?;
+        let index = job
+            .sections
+            .iter()
+            .position(|s| s.byte_range.start <= at && at < s.byte_range.end)?;
         if job.sections[index].byte_range.start == at {
             return Some(index);
         }
@@ -692,7 +1179,10 @@ fn isolate(job: &mut egui::text::LayoutJob, byte: usize, one_char: bool) -> Opti
     };
     let index = split(job, byte)?;
     if one_char {
-        let next = job.text[byte..].chars().next().map_or(byte, |c| byte + c.len_utf8());
+        let next = job.text[byte..]
+            .chars()
+            .next()
+            .map_or(byte, |c| byte + c.len_utf8());
         if next < job.text.len() {
             split(job, next);
         }
@@ -727,21 +1217,33 @@ fn show_phantoms(
         if phantom.point < visible.start.saturating_sub(1) || phantom.point > visible.end {
             continue;
         }
-        let at = galley.pos_from_ccursor(CCursor::new(phantom.point)).translate(origin.to_vec2());
+        let at = galley
+            .pos_from_ccursor(CCursor::new(phantom.point))
+            .translate(origin.to_vec2());
         let byte = char_to_byte(text, phantom.point);
         let position = match phantom.layout {
             PhantomLayout::Inline if byte < text.len() && !text[byte..].starts_with('\n') => {
-                let x = next_x_inline.entry(phantom.point).or_insert(at.left() - size.x - char_width * 0.5);
+                let x = next_x_inline
+                    .entry(phantom.point)
+                    .or_insert(at.left() - size.x - char_width * 0.5);
                 let position = egui::pos2(*x, at.top());
                 *x += size.x + char_width;
                 position
             }
             PhantomLayout::Inline => egui::pos2(at.left() + char_width, at.top()),
             PhantomLayout::Below | PhantomLayout::Block => {
-                let line_end = text[byte..].find('\n').map_or(text.len(), |offset| byte + offset);
-                let end = galley.pos_from_ccursor(CCursor::new(byte_to_char(text, line_end))).translate(origin.to_vec2());
+                let line_end = text[byte..]
+                    .find('\n')
+                    .map_or(text.len(), |offset| byte + offset);
+                let end = galley
+                    .pos_from_ccursor(CCursor::new(byte_to_char(text, line_end)))
+                    .translate(origin.to_vec2());
                 let used = used_below.entry(line_end).or_insert(0.0);
-                let x = if phantom.layout == PhantomLayout::Below { at.left() } else { origin.x };
+                let x = if phantom.layout == PhantomLayout::Below {
+                    at.left()
+                } else {
+                    origin.x
+                };
                 let position = egui::pos2(x, end.top() + row_height + *used);
                 *used += size.y + 2.0;
                 position
@@ -758,13 +1260,18 @@ fn show_phantoms(
                     .corner_radius(3.0)
                     .inner_margin(egui::Margin::symmetric(4, 0))
                     .show(ui, |ui| {
-                        ui.set_max_width((viewport.right() - position.x - 8.0).max(char_width * 20.0));
+                        ui.set_max_width(
+                            (viewport.right() - position.x - 8.0).max(char_width * 20.0),
+                        );
                         show_html(ui, &phantom.html, html_colors, font_size)
                     })
                     .inner
             });
         if let Some(href) = response.inner {
-            events.push(UiEvent::PhantomLinkClicked { phantom: phantom.id, href });
+            events.push(UiEvent::PhantomLinkClicked {
+                phantom: phantom.id,
+                href,
+            });
         }
         // Its room in the text follows its size from the next frame on.
         if (response.response.rect.size() - *size).length() > 0.5 {
@@ -793,17 +1300,35 @@ fn show_annotations(
     let visible = visible_chars(galley, origin, viewport);
     let mut next_right: HashMap<usize, f32> = HashMap::new();
     for (set, &scope_color) in model.regions.iter().zip(region_colors) {
-        let color = minihtml_view::parse_color(&set.annotation_color, html_colors).unwrap_or(scope_color);
-        for (index, annotation) in set.annotations.iter().enumerate().filter(|(_, a)| visible.contains(&a.point) || a.point == visible.end) {
+        let color =
+            minihtml_view::parse_color(&set.annotation_color, html_colors).unwrap_or(scope_color);
+        for (index, annotation) in set
+            .annotations
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| visible.contains(&a.point) || a.point == visible.end)
+        {
             let at = galley.pos_from_ccursor(CCursor::new(annotation.point));
-            let Some((row_index, row)) = galley.rows.iter().enumerate().find(|(_, r)| (r.rect.top() - at.top()).abs() < 0.5) else {
+            let Some((row_index, row)) = galley
+                .rows
+                .iter()
+                .enumerate()
+                .find(|(_, r)| (r.rect.top() - at.top()).abs() < 0.5)
+            else {
                 continue;
             };
-            let right = *next_right.entry(row_index).or_insert(viewport.right() - char_width);
+            let right = *next_right
+                .entry(row_index)
+                .or_insert(viewport.right() - char_width);
             let id = Id::new(("plugin_annotation", model.document, &set.key, index));
             // Its width is known after the first frame: right-aligned from then on.
-            let width = ui.ctx().memory(|m| m.area_rect(id)).map_or(char_width * 20.0, |r| r.width());
-            let left = (right - width).max(origin.x + row.rect.right() + char_width * 2.0).min(right - char_width * 4.0);
+            let width = ui
+                .ctx()
+                .memory(|m| m.area_rect(id))
+                .map_or(char_width * 20.0, |r| r.width());
+            let left = (right - width)
+                .max(origin.x + row.rect.right() + char_width * 2.0)
+                .min(right - char_width * 4.0);
             let response = egui::Area::new(id)
                 .order(egui::Order::Middle)
                 .fixed_pos(egui::pos2(left, origin.y + row.rect.top()))
@@ -822,7 +1347,11 @@ fn show_annotations(
                         .inner
                 });
             if let Some(href) = response.inner {
-                events.push(UiEvent::AnnotationLinkClicked { document: model.document, key: set.key.clone(), href });
+                events.push(UiEvent::AnnotationLinkClicked {
+                    document: model.document,
+                    key: set.key.clone(),
+                    href,
+                });
             }
             next_right.insert(row_index, left - char_width);
         }
@@ -843,7 +1372,9 @@ fn show_popup(
     colors: &Colors,
     events: &mut Vec<UiEvent>,
 ) {
-    let at = galley.pos_from_ccursor(CCursor::new(popup.location)).translate(origin.to_vec2());
+    let at = galley
+        .pos_from_ccursor(CCursor::new(popup.location))
+        .translate(origin.to_vec2());
     if !viewport.intersects(at) {
         return;
     }
@@ -851,7 +1382,8 @@ fn show_popup(
     let id = Id::new(("plugin_popup", document));
     // Its size last frame decides whether it fits below.
     let last_height = ctx.memory(|m| m.area_rect(id)).map_or(0.0, |r| r.height());
-    let below = at.bottom() + 2.0 + last_height <= viewport.bottom() || at.top() - last_height - 2.0 < viewport.top();
+    let below = at.bottom() + 2.0 + last_height <= viewport.bottom()
+        || at.top() - last_height - 2.0 < viewport.top();
     let (position, pivot) = if below {
         (egui::pos2(at.left(), at.bottom() + 2.0), Align2::LEFT_TOP)
     } else {
@@ -907,26 +1439,40 @@ fn show_auto_complete(
     colors: &Colors,
     events: &mut Vec<UiEvent>,
 ) {
-    let at = galley.pos_from_ccursor(CCursor::new(list.location)).translate(origin.to_vec2());
+    let at = galley
+        .pos_from_ccursor(CCursor::new(list.location))
+        .translate(origin.to_vec2());
     if !viewport.intersects(at) {
         return;
     }
     let ctx = ui.ctx();
     let id = Id::new(("auto_complete", document));
     let char_width = ui.fonts(|f| f.glyph_width(font, '0'));
-    let longest = list.items.iter().map(|i| i.trigger.chars().count() + i.annotation.chars().count() + 6).max().unwrap_or(10);
+    let longest = list
+        .items
+        .iter()
+        .map(|i| i.trigger.chars().count() + i.annotation.chars().count() + 6)
+        .max()
+        .unwrap_or(10);
     let width = (longest as f32 * char_width).clamp(char_width * 24.0, char_width * 70.0);
     let row = row_height + 2.0;
     let list_height = row * list.items.len().min(AUTO_COMPLETE_ROWS) as f32;
-    let last_height = ctx.memory(|m| m.area_rect(id)).map_or(list_height, |r| r.height());
-    let below = at.bottom() + 2.0 + last_height <= viewport.bottom() || at.top() - last_height - 2.0 < viewport.top();
+    let last_height = ctx
+        .memory(|m| m.area_rect(id))
+        .map_or(list_height, |r| r.height());
+    let below = at.bottom() + 2.0 + last_height <= viewport.bottom()
+        || at.top() - last_height - 2.0 < viewport.top();
     let (position, pivot) = if below {
         (egui::pos2(at.left(), at.bottom() + 2.0), Align2::LEFT_TOP)
     } else {
         (egui::pos2(at.left(), at.top() - 2.0), Align2::LEFT_BOTTOM)
     };
     let background = blend(colors.background, colors.foreground, 0.06);
-    let accent = if colors.background.r() as u16 + colors.background.g() as u16 + colors.background.b() as u16 > 384 {
+    let accent = if colors.background.r() as u16
+        + colors.background.g() as u16
+        + colors.background.b() as u16
+        > 384
+    {
         Color32::from_rgb(0, 102, 204)
     } else {
         Color32::from_rgb(102, 217, 239)
@@ -950,18 +1496,25 @@ fn show_auto_complete(
                 .show(ui, |ui| {
                     ui.set_width(width);
                     // Without a minimum, an area's scroll area keeps to egui's 64 px.
-                    let scroll = egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height);
+                    let scroll = egui::ScrollArea::vertical()
+                        .max_height(list_height)
+                        .min_scrolled_height(list_height);
                     scroll.auto_shrink([false, true]).show(ui, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for (index, item) in list.items.iter().enumerate() {
-                            let (rect, response) = ui.allocate_exact_size(egui::vec2(width, row), egui::Sense::CLICK);
+                            let (rect, response) =
+                                ui.allocate_exact_size(egui::vec2(width, row), egui::Sense::CLICK);
                             if index == list.selected {
                                 ui.painter().rect_filled(rect, 2.0, colors.selection);
                                 if scroll_to_selected {
                                     ui.scroll_to_rect(rect, None);
                                 }
                             } else if response.hovered() {
-                                ui.painter().rect_filled(rect, 2.0, blend(background, colors.foreground, 0.06));
+                                ui.painter().rect_filled(
+                                    rect,
+                                    2.0,
+                                    blend(background, colors.foreground, 0.06),
+                                );
                             }
                             if response.clicked() {
                                 clicked = Some(index);
@@ -980,12 +1533,29 @@ fn show_auto_complete(
     }
 }
 
-fn paint_completion_row(ui: &egui::Ui, rect: Rect, item: &CompletionViewModel, font: &FontId, char_width: f32, colors: &Colors, accent: Color32) {
+fn paint_completion_row(
+    ui: &egui::Ui,
+    rect: Rect,
+    item: &CompletionViewModel,
+    font: &FontId,
+    char_width: f32,
+    colors: &Colors,
+    accent: Color32,
+) {
     let painter = ui.painter().with_clip_rect(rect);
-    let badge = Rect::from_min_size(rect.left_top() + egui::vec2(3.0, 2.0), egui::vec2(char_width * 1.6, rect.height() - 4.0));
+    let badge = Rect::from_min_size(
+        rect.left_top() + egui::vec2(3.0, 2.0),
+        egui::vec2(char_width * 1.6, rect.height() - 4.0),
+    );
     if !item.kind_letter.is_empty() {
         painter.rect_filled(badge, 3.0, kind_color(item.kind_id).gamma_multiply(0.85));
-        painter.text(badge.center(), Align2::CENTER_CENTER, &item.kind_letter, font.clone(), Color32::BLACK);
+        painter.text(
+            badge.center(),
+            Align2::CENTER_CENTER,
+            &item.kind_letter,
+            font.clone(),
+            Color32::BLACK,
+        );
     }
     let mut job = egui::text::LayoutJob::default();
     for (index, c) in item.trigger.chars().enumerate() {
@@ -993,33 +1563,51 @@ fn paint_completion_row(ui: &egui::Ui, rect: Rect, item: &CompletionViewModel, f
         let format = egui::TextFormat {
             font_id: font.clone(),
             color: if matched { accent } else { colors.foreground },
-            underline: if matched { Stroke::new(1.0_f32, accent) } else { Stroke::NONE },
+            underline: if matched {
+                Stroke::new(1.0_f32, accent)
+            } else {
+                Stroke::NONE
+            },
             ..Default::default()
         };
         job.append(c.encode_utf8(&mut [0; 4]), 0.0, format);
     }
     let trigger = ui.fonts(|f| f.layout_job(job));
     let text_left = badge.right() + char_width * 0.8;
-    painter.galley(egui::pos2(text_left, rect.center().y - trigger.size().y / 2.0), trigger.clone(), colors.foreground);
+    painter.galley(
+        egui::pos2(text_left, rect.center().y - trigger.size().y / 2.0),
+        trigger.clone(),
+        colors.foreground,
+    );
     if !item.annotation.is_empty() {
         let left = text_left + trigger.size().x + char_width * 2.0;
-        let annotation = ui.fonts(|f| f.layout_no_wrap(item.annotation.clone(), font.clone(), colors.gutter_foreground));
+        let annotation = ui.fonts(|f| {
+            f.layout_no_wrap(
+                item.annotation.clone(),
+                font.clone(),
+                colors.gutter_foreground,
+            )
+        });
         let x = (rect.right() - annotation.size().x - char_width).max(left);
-        painter.galley(egui::pos2(x, rect.center().y - annotation.size().y / 2.0), annotation, colors.gutter_foreground);
+        painter.galley(
+            egui::pos2(x, rect.center().y - annotation.size().y / 2.0),
+            annotation,
+            colors.gutter_foreground,
+        );
     }
 }
 
 /// The badge color of Sublime's `KindId`s (and its `KIND_ID_COLOR_*`).
 fn kind_color(kind: u8) -> Color32 {
     match kind {
-        1 | 16 => Color32::from_rgb(249, 38, 114),  // keyword: pinkish
+        1 | 16 => Color32::from_rgb(249, 38, 114), // keyword: pinkish
         2 | 15 => Color32::from_rgb(174, 129, 255), // type: purplish
-        3 | 10 => Color32::from_rgb(253, 151, 31),  // function: orangish
+        3 | 10 => Color32::from_rgb(253, 151, 31), // function: orangish
         4 | 14 => Color32::from_rgb(102, 153, 255), // namespace: bluish
         5 | 11 => Color32::from_rgb(230, 219, 116), // navigation: yellowish
-        6 | 9 => Color32::from_rgb(240, 90, 80),    // markup: redish
+        6 | 9 => Color32::from_rgb(240, 90, 80),   // markup: redish
         7 | 13 => Color32::from_rgb(102, 217, 239), // variable: cyanish
-        8 | 12 => Color32::from_rgb(166, 226, 46),  // snippet: greenish
+        8 | 12 => Color32::from_rgb(166, 226, 46), // snippet: greenish
         _ => Color32::from_gray(170),
     }
 }
@@ -1047,26 +1635,48 @@ fn report_hover(
     // Over a phantom, the point is the phantom's (as over the text there).
     let phantom_point = phantoms
         .iter()
-        .find(|p| ctx.memory(|m| m.area_rect(phantom_id(document, p.id))).is_some_and(|r| r.contains(pointer)))
+        .find(|p| {
+            ctx.memory(|m| m.area_rect(phantom_id(document, p.id)))
+                .is_some_and(|r| r.contains(pointer))
+        })
         .map(|p| p.point);
     // Over an annotation, the point is its region's.
-    let annotation_point = model.regions.iter().flat_map(|set| set.annotations.iter().enumerate().map(move |(i, a)| (set, i, a))).find_map(|(set, index, annotation)| {
-        let id = Id::new(("plugin_annotation", document, &set.key, index));
-        ctx.memory(|m| m.area_rect(id)).is_some_and(|r| r.contains(pointer)).then_some(annotation.point)
-    });
-    if phantom_point.is_none() && annotation_point.is_none() && ctx.layer_id_at(pointer) != Some(ui.layer_id()) {
+    let annotation_point = model
+        .regions
+        .iter()
+        .flat_map(|set| {
+            set.annotations
+                .iter()
+                .enumerate()
+                .map(move |(i, a)| (set, i, a))
+        })
+        .find_map(|(set, index, annotation)| {
+            let id = Id::new(("plugin_annotation", document, &set.key, index));
+            ctx.memory(|m| m.area_rect(id))
+                .is_some_and(|r| r.contains(pointer))
+                .then_some(annotation.point)
+        });
+    if phantom_point.is_none()
+        && annotation_point.is_none()
+        && ctx.layer_id_at(pointer) != Some(ui.layer_id())
+    {
         return;
     }
     let still = ctx.input(|i| i.pointer.time_since_last_movement());
     if still < HOVER_DELAY {
         ctx.data_mut(|d| d.remove::<(usize, u8)>(key));
-        ctx.request_repaint_after(std::time::Duration::from_secs_f32(HOVER_DELAY - still + 0.02));
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(
+            HOVER_DELAY - still + 0.02,
+        ));
         return;
     }
     let point = phantom_point
         .or(annotation_point)
         .unwrap_or_else(|| galley.cursor_from_pos(pointer - origin).ccursor.index);
-    let row = galley.rows.iter().find(|r| pointer.y >= origin.y + r.rect.top() && pointer.y < origin.y + r.rect.bottom());
+    let row = galley
+        .rows
+        .iter()
+        .find(|r| pointer.y >= origin.y + r.rect.top() && pointer.y < origin.y + r.rect.bottom());
     let zone = if phantom_point.is_some() {
         HoverZone::Text
     } else if annotation_point.is_some() {
@@ -1081,7 +1691,11 @@ fn report_hover(
     let reported = (point, zone as u8);
     if ctx.data(|d| d.get_temp::<(usize, u8)>(key)) != Some(reported) {
         ctx.data_mut(|d| d.insert_temp(key, reported));
-        events.push(UiEvent::Hover { document, point, zone });
+        events.push(UiEvent::Hover {
+            document,
+            point,
+            zone,
+        });
     }
 }
 
@@ -1107,17 +1721,32 @@ struct Colors {
 
 impl Colors {
     fn from_scheme(s: &syntect::highlighting::ThemeSettings) -> Self {
-        let background = s.background.map(to_color32).unwrap_or(Color32::from_rgb(39, 40, 34));
+        let background = s
+            .background
+            .map(to_color32)
+            .unwrap_or(Color32::from_rgb(39, 40, 34));
         let foreground = s.foreground.map(to_color32).unwrap_or(Color32::LIGHT_GRAY);
         Self {
             background,
             foreground,
             caret: s.caret.map(to_color32).unwrap_or(foreground),
-            selection: s.selection.map(to_color32).unwrap_or_else(|| foreground.gamma_multiply(0.25)),
-            line_highlight: s.line_highlight.map(to_color32).unwrap_or_else(|| foreground.gamma_multiply(0.06)),
+            selection: s
+                .selection
+                .map(to_color32)
+                .unwrap_or_else(|| foreground.gamma_multiply(0.25)),
+            line_highlight: s
+                .line_highlight
+                .map(to_color32)
+                .unwrap_or_else(|| foreground.gamma_multiply(0.06)),
             gutter: s.gutter.map(to_color32).unwrap_or(background),
-            gutter_foreground: s.gutter_foreground.map(to_color32).unwrap_or_else(|| foreground.gamma_multiply(0.5)),
-            guide: s.guide.map(to_color32).unwrap_or_else(|| foreground.gamma_multiply(0.15)),
+            gutter_foreground: s
+                .gutter_foreground
+                .map(to_color32)
+                .unwrap_or_else(|| foreground.gamma_multiply(0.5)),
+            guide: s
+                .guide
+                .map(to_color32)
+                .unwrap_or_else(|| foreground.gamma_multiply(0.15)),
             find_highlight: s
                 .find_highlight
                 .map(to_color32)
@@ -1126,4 +1755,50 @@ impl Colors {
             minimap_border: s.minimap_border.map(to_color32),
         }
     }
+}
+
+/// An HTML sheet (the plugin's minihtml) or an image sheet (the picture, at its size, smaller to
+/// fit the tab), in the color scheme's colors, where a text sheet shows its text.
+pub fn show_sheet(
+    ui: &mut egui::Ui,
+    model: &EditorViewModel,
+    sheet: &SheetViewModel,
+    engine: &SharedSyntaxEngine,
+) {
+    let colors = Colors::from_scheme(&engine.borrow_mut().scheme(&model.color_scheme).settings);
+    ui.painter()
+        .rect_filled(ui.available_rect_before_wrap(), 0.0, colors.background);
+    egui::ScrollArea::both()
+        .id_salt(("sheet_scroll", model.document))
+        .auto_shrink([false, false])
+        .show(ui, |ui| match sheet {
+            SheetViewModel::Html(html) => {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        let html_colors = HtmlColors {
+                            foreground: colors.foreground,
+                            background: colors.background,
+                            link: colors.caret,
+                        };
+                        show_html(ui, html, &html_colors, model.font_size * POINTS_TO_PIXELS);
+                    });
+            }
+            SheetViewModel::Image { src, bytes } => {
+                let texture = bytes
+                    .as_ref()
+                    .and_then(|bytes| super::minihtml_view::texture(ui.ctx(), src, bytes));
+                ui.centered_and_justified(|ui| match texture {
+                    Some(texture) => {
+                        let natural = texture.size_vec2();
+                        let room = ui.available_size();
+                        let scale = (room.x / natural.x).min(room.y / natural.y).min(1.0);
+                        ui.add(egui::Image::new(&texture).fit_to_exact_size(natural * scale));
+                    }
+                    None => {
+                        ui.label(RichText::new("?").color(colors.foreground).size(32.0));
+                    }
+                });
+            }
+        });
 }

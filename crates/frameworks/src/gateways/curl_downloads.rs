@@ -37,8 +37,20 @@ impl DownloadGateway for CurlDownloads {
         // Next to the destination, so the rename at the end does not cross file systems.
         let partial = PathBuf::from(format!("{}.download", destination.display()));
         let mut command = Command::new("curl");
-        command.args(["--fail", "--location", "--silent", "--show-error", "--output"]).arg(&partial).arg(url);
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        command
+            .args([
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--output",
+            ])
+            .arg(&partial)
+            .arg(url);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
         hide_window(&mut command);
         let child = command.spawn().map_err(|e| format!("curl: {e}"))?;
 
@@ -46,9 +58,8 @@ impl DownloadGateway for CurlDownloads {
         let (destination, waker) = (destination.to_path_buf(), self.waker.clone());
         thread::spawn(move || {
             let result = match child.wait_with_output() {
-                Ok(output) if output.status.success() => {
-                    std::fs::rename(&partial, &destination).map_err(|e| format!("{}: {e}", destination.display()))
-                }
+                Ok(output) if output.status.success() => std::fs::rename(&partial, &destination)
+                    .map_err(|e| format!("{}: {e}", destination.display())),
                 Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
                 Err(e) => Err(format!("curl: {e}")),
             };

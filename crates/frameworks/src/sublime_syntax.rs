@@ -84,12 +84,21 @@ impl SyntaxFiles {
         let parents: Vec<String> = match definition.remove(&key("extends")) {
             None => Vec::new(),
             Some(Yaml::String(parent)) => vec![parent],
-            Some(Yaml::Array(parents)) => parents.into_iter().filter_map(|p| p.into_string()).collect(),
-            Some(_) => return Err(format!("{resource}: extends is neither a resource nor a list of them")),
+            Some(Yaml::Array(parents)) => parents
+                .into_iter()
+                .filter_map(|p| p.into_string())
+                .collect(),
+            Some(_) => {
+                return Err(format!(
+                    "{resource}: extends is neither a resource nor a list of them"
+                ))
+            }
         };
         let mut inherited: Option<Hash> = None;
         for parent in parents {
-            let parent = self.resolve(&parent_resource(resource, &parent), depth + 1).map_err(|e| format!("{resource}: extends {e}"))?;
+            let parent = self
+                .resolve(&parent_resource(resource, &parent), depth + 1)
+                .map_err(|e| format!("{resource}: extends {e}"))?;
             inherited = Some(match inherited {
                 Some(base) => merge(base, parent),
                 None => parent,
@@ -118,7 +127,15 @@ fn parent_resource(child: &str, parent: &str) -> String {
 
 /// A cheap look for the keys this module handles (a false positive only costs a rewrite).
 fn uses_version_2(text: &str) -> bool {
-    ["extends", "branch_point", "fail:", "meta_prepend", "meta_append"].iter().any(|k| text.contains(k))
+    [
+        "extends",
+        "branch_point",
+        "fail:",
+        "meta_prepend",
+        "meta_append",
+    ]
+    .iter()
+    .any(|k| text.contains(k))
 }
 
 fn key(name: &str) -> Yaml {
@@ -156,7 +173,8 @@ fn merge(base: Hash, mut child: Hash) -> Hash {
 }
 
 fn is_meta_key(name: &Yaml) -> bool {
-    name.as_str().is_some_and(|n| n.starts_with("meta_") || n == "clear_scopes")
+    name.as_str()
+        .is_some_and(|n| n.starts_with("meta_") || n == "clear_scopes")
 }
 
 fn is_meta(entry: &Yaml) -> bool {
@@ -164,7 +182,10 @@ fn is_meta(entry: &Yaml) -> bool {
 }
 
 fn flag(entries: &[Yaml], name: &str) -> bool {
-    entries.iter().filter(|e| is_meta(e)).any(|e| e[name].as_bool() == Some(true))
+    entries
+        .iter()
+        .filter(|e| is_meta(e))
+        .any(|e| e[name].as_bool() == Some(true))
 }
 
 /// A child's context over the parent's of the same name.
@@ -184,8 +205,18 @@ fn combine(inherited: &[Yaml], own: Vec<Yaml>) -> Yaml {
     }
     metas.remove(&key("meta_prepend"));
     metas.remove(&key("meta_append"));
-    let patterns = |entries: &[Yaml]| entries.iter().filter(|e| !is_meta(e)).cloned().collect::<Vec<_>>();
-    let (first, second) = if prepend { (patterns(&own), patterns(inherited)) } else { (patterns(inherited), patterns(&own)) };
+    let patterns = |entries: &[Yaml]| {
+        entries
+            .iter()
+            .filter(|e| !is_meta(e))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let (first, second) = if prepend {
+        (patterns(&own), patterns(inherited))
+    } else {
+        (patterns(inherited), patterns(&own))
+    };
     let mut merged = Vec::new();
     if !metas.is_empty() {
         merged.push(Yaml::Hash(metas));
@@ -223,7 +254,9 @@ fn strip_merge_keys(definition: &mut Hash) {
 /// Every pattern of a context (and of the anonymous contexts inside it): `branch` becomes a push
 /// of its first context, `fail` a pop.
 fn rewrite_patterns(context: &mut Yaml) {
-    let Yaml::Array(entries) = context else { return };
+    let Yaml::Array(entries) = context else {
+        return;
+    };
     for entry in entries {
         let Yaml::Hash(pattern) = entry else { continue };
         pattern.remove(&key("branch_point"));
@@ -240,7 +273,9 @@ fn rewrite_patterns(context: &mut Yaml) {
             pattern.insert(key("pop"), Yaml::Boolean(true));
         }
         for action in ["push", "set", "embed"] {
-            let Some(target) = pattern.get_mut(&key(action)) else { continue };
+            let Some(target) = pattern.get_mut(&key(action)) else {
+                continue;
+            };
             // An anonymous context (a list of patterns), or a list of contexts (names or anonymous).
             let anonymous = matches!(&*target, Yaml::Array(items) if items.iter().all(|i| matches!(i, Yaml::Hash(_))));
             if anonymous {

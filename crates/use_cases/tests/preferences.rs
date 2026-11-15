@@ -10,7 +10,10 @@ fn toggle_setting_changes_the_setting_for_this_session_only() {
     let mut editor = world.editor();
     editor.toggle_setting("word_wrap");
     assert!(editor.view_settings().bool("word_wrap", false));
-    assert!(world.resources.user_settings.borrow().is_empty(), "not saved");
+    assert!(
+        world.resources.user_settings.borrow().is_empty(),
+        "not saved"
+    );
 }
 
 #[test]
@@ -33,10 +36,18 @@ fn persist_setting_writes_the_user_settings_and_applies_them() {
 #[test]
 fn persisting_null_removes_the_user_setting() {
     let world = World::new();
-    world.resources.user_settings.borrow_mut().insert("tab_size".into(), json!(8));
+    world
+        .resources
+        .user_settings
+        .borrow_mut()
+        .insert("tab_size".into(), json!(8));
     let mut editor = world.editor();
     editor.persist_setting("tab_size", Value::Null);
-    assert!(!world.resources.user_settings.borrow().contains_key("tab_size"));
+    assert!(!world
+        .resources
+        .user_settings
+        .borrow()
+        .contains_key("tab_size"));
     assert_eq!(editor.global_settings().usize("tab_size", 0), 4);
 }
 
@@ -68,7 +79,10 @@ fn color_scheme_name_is_the_file_stem_of_the_setting() {
     let world = World::new();
     let mut editor = world.editor();
     assert_eq!(editor.color_scheme_name(), "Monokai");
-    editor.set_setting("color_scheme", json!("Packages/Color Scheme - Default/Mariana.sublime-color-scheme"));
+    editor.set_setting(
+        "color_scheme",
+        json!("Packages/Color Scheme - Default/Mariana.sublime-color-scheme"),
+    );
     assert_eq!(editor.color_scheme_name(), "Mariana");
 }
 
@@ -97,14 +111,23 @@ fn applying_a_color_scheme_saves_it() {
 fn edit_settings_opens_the_defaults_next_to_a_new_user_file() {
     let world = World::new();
     let mut editor = world.editor();
-    editor.edit_settings("${packages}/Default/Preferences.sublime-settings", "{\n\t$0\n}\n");
+    editor.edit_settings(
+        "${packages}/Default/Preferences.sublime-settings",
+        "{\n\t$0\n}\n",
+    );
 
     let docs = &editor.state().documents;
-    let defaults = docs.iter().find(|d| d.name() == "Preferences.sublime-settings — Default").unwrap();
+    let defaults = docs
+        .iter()
+        .find(|d| d.name() == "Preferences.sublime-settings — Default")
+        .unwrap();
     assert!(defaults.read_only);
     assert_eq!(defaults.syntax, "JSON");
 
-    assert_eq!(world.file_text("/packages/User/Preferences.sublime-settings"), "{\n\t\n}\n");
+    assert_eq!(
+        world.file_text("/packages/User/Preferences.sublime-settings"),
+        "{\n\t\n}\n"
+    );
     let user = editor.active_document().unwrap();
     assert_eq!(user.name(), "Preferences.sublime-settings");
     assert_eq!(user.syntax, "JSON");
@@ -112,10 +135,16 @@ fn edit_settings_opens_the_defaults_next_to_a_new_user_file() {
 
 #[test]
 fn edit_settings_keeps_an_existing_user_file() {
-    let world = World::new().with_file("/packages/User/Preferences.sublime-settings", "{ \"tab_size\": 2 }");
+    let world = World::new().with_file(
+        "/packages/User/Preferences.sublime-settings",
+        "{ \"tab_size\": 2 }",
+    );
     let mut editor = world.editor();
     editor.edit_settings("${packages}/Default/Preferences.sublime-settings", "{}");
-    assert_eq!(world.file_text("/packages/User/Preferences.sublime-settings"), "{ \"tab_size\": 2 }");
+    assert_eq!(
+        world.file_text("/packages/User/Preferences.sublime-settings"),
+        "{ \"tab_size\": 2 }"
+    );
 }
 
 #[test]
@@ -125,34 +154,74 @@ fn edit_settings_of_a_package_shows_that_packages_defaults() {
         "{\r\n\t\"debug\": false\r\n}\r\n",
     );
     let mut editor = world.editor();
-    editor.edit_settings("${packages}/Package Control/Package Control.sublime-settings", "{\n\t$0\n}\n");
+    editor.edit_settings(
+        "${packages}/Package Control/Package Control.sublime-settings",
+        "{\n\t$0\n}\n",
+    );
 
     let docs = &editor.state().documents;
-    let defaults = docs.iter().find(|d| d.name() == "Package Control.sublime-settings — Default").unwrap();
+    let defaults = docs
+        .iter()
+        .find(|d| d.name() == "Package Control.sublime-settings — Default")
+        .unwrap();
     assert_eq!(defaults.text, "{\n\t\"debug\": false\n}\n");
     assert!(defaults.read_only);
-    assert_eq!(world.file_text("/packages/User/Package Control.sublime-settings"), "{\n\t\n}\n");
-    assert_eq!(editor.active_document().unwrap().name(), "Package Control.sublime-settings");
+    assert_eq!(
+        world.file_text("/packages/User/Package Control.sublime-settings"),
+        "{\n\t\n}\n"
+    );
+    assert_eq!(
+        editor.active_document().unwrap().name(),
+        "Package Control.sublime-settings"
+    );
 }
 
 #[test]
 fn a_packages_key_bindings_are_not_ours() {
-    let world = World::new().with_resource(&format!("Packages/Linter/Default ({}).sublime-keymap", platform_name()), "[]");
+    let world = World::new().with_resource(
+        &format!(
+            "Packages/Linter/Default ({}).sublime-keymap",
+            platform_name()
+        ),
+        "[]",
+    );
     let mut editor = world.editor();
-    editor.edit_settings("$packages/Linter/Default ($platform).sublime-keymap", "[\n\t$0\n]\n");
-    let defaults = editor.state().documents.iter().find(|d| d.read_only).unwrap();
+    editor.edit_settings(
+        "$packages/Linter/Default ($platform).sublime-keymap",
+        "[\n\t$0\n]\n",
+    );
+    let defaults = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.read_only)
+        .unwrap();
     assert_eq!(defaults.text, "[]");
-    assert!(world.file_text(&format!("/packages/User/Default ({}).sublime-keymap", platform_name())).starts_with('['));
+    assert!(world
+        .file_text(&format!(
+            "/packages/User/Default ({}).sublime-keymap",
+            platform_name()
+        ))
+        .starts_with('['));
 }
 
 #[test]
 fn edit_key_bindings_uses_the_platform_file_name() {
     let world = World::new();
     let mut editor = world.editor();
-    editor.edit_settings("${packages}/Default/Default (${platform}).sublime-keymap", "[\n\t$0\n]\n");
-    let file = format!("/packages/User/Default ({}).sublime-keymap", platform_name());
+    editor.edit_settings(
+        "${packages}/Default/Default (${platform}).sublime-keymap",
+        "[\n\t$0\n]\n",
+    );
+    let file = format!(
+        "/packages/User/Default ({}).sublime-keymap",
+        platform_name()
+    );
     assert_eq!(world.file_text(&file), "[\n\t\n]\n");
-    assert!(editor.state().documents.iter().all(|d| !d.read_only), "no built-in keymap in the fake");
+    assert!(
+        editor.state().documents.iter().all(|d| !d.read_only),
+        "no built-in keymap in the fake"
+    );
 }
 
 #[test]

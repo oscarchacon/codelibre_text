@@ -22,7 +22,10 @@ fn insert_types_at_the_caret() {
     let mut editor = editor_with(&world, "ac", 1);
     editor.run_text_command(TextCommand::Insert("b".into()));
     assert_eq!(active_text(&editor), "abc");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(2));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(2)
+    );
 }
 
 #[test]
@@ -34,8 +37,18 @@ fn every_text_command_reaches_its_entity_function() {
         ("a\nb", 0, TextCommand::DeleteLine, "b"),
         ("x", 0, TextCommand::AddLine { before: true }, "\nx"),
         ("x", 0, TextCommand::AddLine { before: false }, "x\n"),
-        ("abc", 1, TextCommand::DeleteToLineEdge { to_end: true }, "a"),
-        ("abc", 2, TextCommand::DeleteToLineEdge { to_end: false }, "c"),
+        (
+            "abc",
+            1,
+            TextCommand::DeleteToLineEdge { to_end: true },
+            "a",
+        ),
+        (
+            "abc",
+            2,
+            TextCommand::DeleteToLineEdge { to_end: false },
+            "c",
+        ),
         ("a", 0, TextCommand::Indent, "\ta"),
         ("\ta", 0, TextCommand::Unindent, "a"),
         ("a", 1, TextCommand::InsertTab, "a\t"),
@@ -43,9 +56,29 @@ fn every_text_command_reaches_its_entity_function() {
         ("a\nb", 0, TextCommand::JoinLines, "a b"),
         ("abc", 1, TextCommand::ChangeCase(Case::Upper), "ABC"),
         ("ab", 1, TextCommand::Transpose, "ba"),
-        ("\tx", 0, TextCommand::ConvertIndentation { to_spaces: true }, "    x"),
-        ("a  ", 0, TextCommand::TrimTrailingWhitespace { only_modified: false, trim_on_caret: true }, "a"),
-        ("b\na", 0, TextCommand::ReorderLines(LineOrder::Sort { case_sensitive: true }), "a\nb"),
+        (
+            "\tx",
+            0,
+            TextCommand::ConvertIndentation { to_spaces: true },
+            "    x",
+        ),
+        (
+            "a  ",
+            0,
+            TextCommand::TrimTrailingWhitespace {
+                only_modified: false,
+                trim_on_caret: true,
+            },
+            "a",
+        ),
+        (
+            "b\na",
+            0,
+            TextCommand::ReorderLines(LineOrder::Sort {
+                case_sensitive: true,
+            }),
+            "a\nb",
+        ),
         ("x", 0, TextCommand::ToggleComment { block: false }, "x"),
     ];
     for (text, caret, command, expected) in cases {
@@ -61,9 +94,15 @@ fn selection_commands_only_move_the_selection() {
     let world = World::new();
     let mut editor = editor_with(&world, "a\nfoo bar", 4);
     editor.run_text_command(TextCommand::SelectWord);
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(2, 5));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(2, 5)
+    );
     editor.run_text_command(TextCommand::ExpandSelectionToLine);
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(2, 9));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(2, 9)
+    );
     assert_eq!(active_text(&editor), "a\nfoo bar");
 }
 
@@ -78,9 +117,10 @@ fn toggle_comment_uses_the_document_syntax() {
 
 #[test]
 fn indentation_follows_the_syntax_specific_settings() {
-    let world = World::new()
-        .with_file("/p/a.py", "x")
-        .with_syntax_settings("Python", json!({ "tab_size": 2, "translate_tabs_to_spaces": true }));
+    let world = World::new().with_file("/p/a.py", "x").with_syntax_settings(
+        "Python",
+        json!({ "tab_size": 2, "translate_tabs_to_spaces": true }),
+    );
     let mut editor = world.editor();
     open(&mut editor, "/p/a.py");
     editor.run_text_command(TextCommand::Indent);
@@ -113,7 +153,10 @@ fn go_to_line_moves_the_caret_to_the_line_start() {
     editor.go_to_line(2);
     let doc = editor.active_document().unwrap();
     assert_eq!(doc.selection(), Selection::caret(5));
-    assert!(doc.selection_revision() > revision, "the view must scroll there");
+    assert!(
+        doc.selection_revision() > revision,
+        "the view must scroll there"
+    );
 }
 
 #[test]
@@ -121,7 +164,10 @@ fn go_to_line_past_the_end_goes_to_the_end() {
     let world = World::new();
     let mut editor = editor_with(&world, "a\nb", 0);
     editor.go_to_line(99);
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(3));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(3)
+    );
 }
 
 #[test]
@@ -149,7 +195,14 @@ fn select_lines_adds_a_caret_below_and_makes_it_the_primary_one() {
     editor.add_carets_on_next_line(true);
     let doc = editor.active_document().unwrap();
     assert_eq!(doc.selection(), Selection::caret(9));
-    assert_eq!(doc.selections(), vec![Selection::caret(1), Selection::caret(5), Selection::caret(9)]);
+    assert_eq!(
+        doc.selections(),
+        vec![
+            Selection::caret(1),
+            Selection::caret(5),
+            Selection::caret(9)
+        ]
+    );
     editor.insert_at_selections("x");
     assert_eq!(active_text(&editor), "axbc\naxbc\naxbc");
 }
@@ -159,8 +212,15 @@ fn select_lines_upwards_on_the_first_line_does_nothing() {
     let world = World::new();
     let mut editor = editor_with(&world, "abc\nabc", 1);
     editor.add_carets_on_next_line(false);
-    assert!(editor.active_document().unwrap().extra_selections().is_empty());
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(1));
+    assert!(editor
+        .active_document()
+        .unwrap()
+        .extra_selections()
+        .is_empty());
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(1)
+    );
 }
 
 #[test]
@@ -172,11 +232,22 @@ fn split_selection_into_lines_keeps_the_caret_line_as_primary() {
     editor.split_selection_into_lines();
     let doc = editor.active_document().unwrap();
     assert_eq!(doc.selection(), Selection::new(6, 8));
-    assert_eq!(doc.selections(), vec![Selection::new(0, 2), Selection::new(3, 5), Selection::new(6, 8)]);
+    assert_eq!(
+        doc.selections(),
+        vec![
+            Selection::new(0, 2),
+            Selection::new(3, 5),
+            Selection::new(6, 8)
+        ]
+    );
 
     editor.sync_selection_from_view(id, Selection::new(8, 0));
     editor.split_selection_into_lines();
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::new(0, 2), "a backwards selection keeps the first line");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 2),
+        "a backwards selection keeps the first line"
+    );
 }
 
 #[test]
@@ -186,7 +257,10 @@ fn insert_command_types_at_every_selection() {
     editor.add_carets_on_next_line(true);
     editor.run_text_command(TextCommand::Insert("x".into()));
     assert_eq!(active_text(&editor), "axbc\naxbc");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(7));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(7)
+    );
 }
 
 #[test]
@@ -195,7 +269,10 @@ fn delete_word_removes_to_the_word_boundary_at_every_selection() {
     let mut editor = editor_with(&world, "one two  three", 7);
     editor.run_view_command_on_active(&entities::command::Command::new("delete_word"));
     assert_eq!(active_text(&editor), "one   three");
-    assert_eq!(editor.active_document().unwrap().selection(), Selection::caret(4));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(4)
+    );
 
     let mut editor = editor_with(&world, "one two three", 4);
     let forward = entities::command::Command::with_args("delete_word", json!({ "forward": true }));

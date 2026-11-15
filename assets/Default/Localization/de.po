@@ -270,6 +270,12 @@ msgstr "Statusleiste"
 msgid "Minimap"
 msgstr "Minimap"
 
+msgid "Tabs"
+msgstr "Tabs"
+
+msgid "Menu"
+msgstr "Menü"
+
 #: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Konsole anzeigen"
@@ -394,6 +400,10 @@ msgstr "Andere ausblenden"
 msgid "Show All"
 msgstr "Alle einblenden"
 
+#: crates/interface_adapters/src/presenters/output_panel.rs
+msgid "Console"
+msgstr "Konsole"
+
 #: assets/Default/Main.sublime-menu
 msgid "Help"
 msgstr "Hilfe"
@@ -507,6 +517,12 @@ msgstr "Ansicht: Statusleiste ein-/ausblenden"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
 msgstr "Ansicht: Minimap ein-/ausblenden"
+
+msgid "View: Toggle Tabs"
+msgstr "Ansicht: Tabs ein-/ausblenden"
+
+msgid "View: Toggle Menu"
+msgstr "Ansicht: Menü ein-/ausblenden"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"
@@ -1275,3 +1291,197 @@ msgstr "Löschen"
 
 msgid "Unable to delete {path}: {error}"
 msgstr "{path} konnte nicht gelöscht werden: {error}"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "0 matches"
+msgstr "0 Treffer"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "<skipped {count} character>"
+msgid_plural "<skipped {count} characters>"
+msgstr[0] "<{count} Zeichen ausgelassen>"
+msgstr[1] "<{count} Zeichen ausgelassen>"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Current File"
+msgstr "Aktuelle Datei hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Exclude Filter"
+msgstr "Ausschlussfilter hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Folder"
+msgstr "Ordner hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Include Filter"
+msgstr "Einschlussfilter hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Files"
+msgstr "Geöffnete Dateien hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Open Folders"
+msgstr "Geöffnete Ordner hinzufügen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Add Project Filters"
+msgstr "Projektfilter hinzufügen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Cancel Find in Files"
+msgstr "Suche in Dateien abbrechen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Clear"
+msgstr "Leeren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find Results"
+msgstr "Suchergebnisse"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Find in Files cancelled"
+msgstr "Suche in Dateien abgebrochen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Find in Files…"
+msgstr "In Dateien suchen…"
+
+#: assets/Default/Side Bar.sublime-menu
+msgid "Find in Folder…"
+msgstr "Im Ordner suchen…"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Cancel Find in Files"
+msgstr "Suchen: Suche in Dateien abbrechen"
+
+#: assets/Default/Default.sublime-commands
+msgid "Find: Find in Files…"
+msgstr "Suchen: In Dateien suchen…"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "No open folders or files to search"
+msgstr "Keine geöffneten Ordner oder Dateien zum Durchsuchen"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace in Files"
+msgstr "In Dateien ersetzen"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Replace {count} occurrence across {files} files?"
+msgid_plural "Replace {count} occurrences across {files} files?"
+msgstr[0] "{count} Treffer in {files} Dateien ersetzen?"
+msgstr[1] "{count} Treffer in {files} Dateien ersetzen?"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "Searching {count} file for \"{query}\""
+msgid_plural "Searching {count} files for \"{query}\""
+msgstr[0] "Suche in {count} Datei nach \"{query}\""
+msgstr[1] "Suche in {count} Dateien nach \"{query}\""
+
+#: crates/interface_adapters/src/presenters/find_panel.rs
+msgid "Searching…"
+msgstr "Suche läuft…"
+
+#: assets/Default/Main.sublime-menu
+msgid "Show Results Panel"
+msgstr "Ergebnisbereich anzeigen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where"
+msgstr "Wo"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Where to search"
+msgstr "Wo gesucht wird"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "case sensitive"
+msgstr "Groß-/Kleinschreibung"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "regex"
+msgstr "Regex"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "whole word"
+msgstr "ganzes Wort"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match across {files} files"
+msgid_plural "{count} matches across {files} files"
+msgstr[0] "{count} Treffer in {files} Dateien"
+msgstr[1] "{count} Treffer in {files} Dateien"
+
+#: crates/use_cases/src/find_in_files.rs
+msgid "{count} match in 1 file"
+msgid_plural "{count} matches in 1 file"
+msgstr[0] "{count} Treffer in 1 Datei"
+msgstr[1] "{count} Treffer in 1 Datei"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr "Zuletzt geöffnet"
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
+msgstr "Einträge löschen"
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
+msgstr "{path} ist kein Ordner mehr"
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr "Code-Faltung"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr "Falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr "Entfalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr "Alles entfalten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr "Alles falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr "Ebene 2 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr "Ebene 3 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr "Ebene 4 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr "Ebene 5 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr "Ebene 6 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr "Ebene 7 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr "Ebene 8 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
+msgstr "Ebene 9 falten"
