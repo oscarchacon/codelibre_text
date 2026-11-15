@@ -34,6 +34,11 @@
 	// Show line numbers in the gutter
 	"line_numbers": true,
 
+	// Arrows in the gutter to fold the blocks there; with fade_fold_buttons, only those of folded
+	// blocks show unless the mouse is over the gutter
+	"fold_buttons": true,
+	"fade_fold_buttons": true,
+
 	// Highlight the line the caret is on
 	"highlight_line": true,
 

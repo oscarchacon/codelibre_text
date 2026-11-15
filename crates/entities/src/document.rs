@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::folding::merge_folds;
 use crate::selection::Selection;
 use crate::text::char_to_byte;
+use crate::view_geometry::ViewGeometry;
 
 pub type DocumentId = u64;
 
@@ -67,6 +69,8 @@ pub struct Document {
     /// Never dirty, so closing it does not ask to save (a plugin's `view.set_scratch(True)`).
     pub scratch: bool,
     pub read_only: bool,
+    /// What its tab shows: the text, or a plugin's minihtml or a picture in its place.
+    pub sheet: SheetKind,
     /// The text, always with `\n` line endings in memory.
     pub text: String,
     saved_text: String,
@@ -109,6 +113,12 @@ pub struct Document {
     change_log: Option<Vec<TextChange>>,
     /// The chars on screen, as the view last reported them.
     visible_range: Option<(usize, usize)>,
+    /// Folded regions (code folding), sorted and apart; they move with edits like regions.
+    folds: Vec<(usize, usize)>,
+    /// The view's geometry, as it last reported it (`view.text_to_layout`…).
+    geometry: ViewGeometry,
+    /// A plugin's `set_viewport_position`, until the view scrolls there (with `show_revision`).
+    viewport_request: Option<(f32, f32)>,
     /// The fields of the snippet last inserted, while Tab / Shift+Tab visit them.
     snippet: Option<SnippetFields>,
 }
@@ -173,6 +183,39 @@ pub struct Phantom {
     pub layout: u64,
 }
 
+/// What a tab shows, as Sublime's sheets: `TextSheet`, `HtmlSheet` or `ImageSheet`. The last two
+/// are documents too (read-only, never dirty), so tabs, groups and the session treat them alike.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SheetKind {
+    #[default]
+    Text,
+    /// `window.new_html_sheet`: the minihtml shown (the text holds its plain text, for plugins).
+    Html(String),
+    /// An image file opened: its tab shows the picture (the text is empty).
+    Image,
+}
+
+impl SheetKind {
+    /// The name the plugin API gives it (`text`, `html`, `image`).
+    pub fn api_name(&self) -> &'static str {
+        match self {
+            SheetKind::Text => "text",
+            SheetKind::Html(_) => "html",
+            SheetKind::Image => "image",
+        }
+    }
+}
+
+/// The files an image sheet shows instead of their bytes as text (what the view can decode).
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif"];
+
+/// Whether `path` names an image the editor shows as a picture.
+pub fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
 /// A plugin's `view.show(point)` / `view.show_at_center(point)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShowRequest {
@@ -188,6 +231,7 @@ impl Document {
             scratch_name: None,
             scratch: false,
             read_only: false,
+            sheet: SheetKind::Text,
             text: String::new(),
             saved_text: String::new(),
             line_ending,
@@ -209,6 +253,9 @@ impl Document {
             tracked_text: None,
             change_log: None,
             visible_range: None,
+            folds: Vec::new(),
+            geometry: ViewGeometry::default(),
+            viewport_request: None,
             snippet: None,
         }
     }
@@ -221,6 +268,16 @@ impl Document {
         doc.saved_text = text.to_string();
         doc.syntax = syntax.to_string();
         doc.read_only = read_only;
+        doc
+    }
+
+    /// An image sheet for the picture at `path` (read-only, empty text).
+    pub fn image(id: DocumentId, path: &Path, modified_at: Option<SystemTime>) -> Self {
+        let mut doc = Self::new_untitled(id, LineEnding::Unix);
+        doc.path = Some(path.to_path_buf());
+        doc.modified_at = modified_at;
+        doc.read_only = true;
+        doc.sheet = SheetKind::Image;
         doc
     }
 
@@ -465,12 +522,18 @@ impl Document {
             .region_sets
             .iter_mut()
             .flat_map(|s| s.regions.iter_mut());
-        for region in regions.chain(self.phantoms.iter_mut().map(|p| &mut p.region)) {
+        let folds = self.folds.iter_mut();
+        for region in regions
+            .chain(self.phantoms.iter_mut().map(|p| &mut p.region))
+            .chain(folds)
+        {
             *region = (
                 moved_position(region.0, start_char, end_char, inserted),
                 moved_position(region.1, start_char, end_char, inserted),
             );
         }
+        // A fold whose text was deleted goes; folds an edit joined become one.
+        merge_folds(&mut self.folds);
         // The field being visited takes in what is typed at its start or end (typing over its
         // selected default); the others move like regions.
         if let Some(snippet) = &mut self.snippet {
@@ -755,11 +818,56 @@ impl Document {
     fn stop_tracking_if_unused(&mut self) {
         if self.region_sets.is_empty()
             && self.phantoms.is_empty()
+            && self.folds.is_empty()
             && self.change_log.is_none()
             && self.snippet.is_none()
         {
             self.tracked_text = None;
         }
+    }
+
+    /// The folded regions, sorted and apart (`view.folded_regions()`).
+    pub fn folds(&self) -> &[(usize, usize)] {
+        &self.folds
+    }
+
+    /// Folds `regions` (`view.fold`): true when something was not folded yet.
+    pub fn fold(&mut self, regions: &[(usize, usize)]) -> bool {
+        let len = self.char_count();
+        let before = self.folds.clone();
+        self.folds.extend(
+            regions
+                .iter()
+                .map(|&(a, b)| (a.min(b).min(len), a.max(b).min(len))),
+        );
+        merge_folds(&mut self.folds);
+        if self.folds.is_empty() {
+            return false;
+        }
+        self.tracked_text.get_or_insert_with(|| self.text.clone());
+        self.folds != before
+    }
+
+    /// Unfolds the folds that touch `regions` (`view.unfold`; an empty region unfolds the fold
+    /// around it); returns those unfolded.
+    pub fn unfold(&mut self, regions: &[(usize, usize)]) -> Vec<(usize, usize)> {
+        let touches = |fold: &(usize, usize)| {
+            regions.iter().any(|&(a, b)| {
+                let (a, b) = (a.min(b), a.max(b));
+                a <= fold.1 && b >= fold.0
+            })
+        };
+        let (gone, kept) = self.folds.iter().partition(|f| touches(f));
+        self.folds = kept;
+        self.stop_tracking_if_unused();
+        gone
+    }
+
+    /// Unfolds everything; returns what was folded.
+    pub fn unfold_all(&mut self) -> Vec<(usize, usize)> {
+        let gone = std::mem::take(&mut self.folds);
+        self.stop_tracking_if_unused();
+        gone
     }
 
     /// Adds a phantom (its `id` given by the caller).
@@ -803,8 +911,37 @@ impl Document {
             .map_or((0, len), |(start, end)| (start.min(len), end.min(len)))
     }
 
+    /// The view reports how it lays the text out and where it is scrolled.
+    pub fn set_geometry(&mut self, geometry: ViewGeometry) {
+        self.geometry = geometry;
+    }
+
+    pub fn geometry(&self) -> &ViewGeometry {
+        &self.geometry
+    }
+
+    /// Asks the view to scroll so that the layout point `position` is at its top left
+    /// (`set_viewport_position`); the geometry says so at once, as Sublime's does.
+    pub fn request_viewport_position(&mut self, position: (f32, f32)) {
+        let position = (position.0.max(0.0), position.1.max(0.0));
+        self.viewport_request = Some(position);
+        self.geometry.viewport_position = position;
+        self.show_request = None;
+        self.show_revision += 1;
+    }
+
+    pub fn viewport_request(&self) -> Option<(f32, f32)> {
+        self.viewport_request
+    }
+
+    /// The view scrolled where `request_viewport_position` asked: its own reports count again.
+    pub fn viewport_request_applied(&mut self) {
+        self.viewport_request = None;
+    }
+
     /// Asks the view to scroll so that `point` is visible (centered when `center`).
     pub fn request_show(&mut self, point: usize, center: bool) {
+        self.viewport_request = None;
         self.show_request = Some(ShowRequest {
             point: point.min(self.char_count()),
             center,

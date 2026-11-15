@@ -125,6 +125,49 @@ fn package_controls_settings_of_sublimes_profile_are_not_adopted() {
 }
 
 #[test]
+fn custom_channels_and_repositories_of_sublimes_package_control_are_adopted() {
+    let packages = Packages::new();
+    packages
+        .sublime_file(
+            "Package Control",
+            "Package Control.sublime-settings",
+            r#"{ "channels": ["default"], "repositories": [] }"#,
+        )
+        .sublime_file(
+            "User",
+            "Package Control.sublime-settings",
+            r#"{ "installed_packages": ["Emmet"], "channels": ["default", "mine"],
+                 "repositories": ["https://example.com/r.json"], "auto_upgrade": false }"#,
+        );
+    let gateway = packages.gateway();
+    let mut errors = Vec::new();
+    let settings =
+        gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    assert_eq!(settings.get("channels"), Some(&json!(["default", "mine"])));
+    assert_eq!(
+        settings.get("repositories"),
+        Some(&json!(["https://example.com/r.json"]))
+    );
+    assert_eq!(settings.get("installed_packages"), None);
+    assert_eq!(
+        settings.get("auto_upgrade"),
+        None,
+        "only where packages come from"
+    );
+
+    // Our own file wins.
+    packages.file(
+        "User",
+        "Package Control.sublime-settings",
+        r#"{ "channels": ["ours"] }"#,
+    );
+    let settings =
+        gateway.load_settings_file("Package Control.sublime-settings", true, &mut errors);
+    assert_eq!(settings.get("channels"), Some(&json!(["ours"])));
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn creating_the_gateway_creates_the_user_package() {
     let packages = Packages::new();
     packages.gateway();

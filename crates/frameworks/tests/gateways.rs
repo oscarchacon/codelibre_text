@@ -179,3 +179,15 @@ fn packages_live_in_a_folder_named_packages() {
         );
     }
 }
+
+// ----- file manager --------------------------------------------------------------------------------
+
+#[test]
+fn file_uris_percent_encode_what_is_not_a_plain_path_character() {
+    use codelibre_text::gateways::os_shell::file_uri;
+    assert_eq!(
+        file_uri(Path::new("/home/a b/Ñandú#1%.sublime-package")),
+        "file:///home/a%20b/%C3%91and%C3%BA%231%25.sublime-package"
+    );
+    assert_eq!(file_uri(Path::new("/x/it's")), "file:///x/it%27s");
+}

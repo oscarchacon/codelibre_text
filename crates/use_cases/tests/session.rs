@@ -112,6 +112,7 @@ fn session_document(
         selection,
         group: 0,
         regions: Vec::new(),
+        folds: Vec::new(),
     }
 }
 
@@ -177,6 +178,31 @@ fn persistent_regions_come_back_with_the_session() {
 }
 
 #[test]
+fn folds_are_saved_and_come_back_with_the_session() {
+    let world = World::new()
+        .with_dir("/p")
+        .with_file("/p/a.py", "if x:\n    y\n");
+    let mut editor = world.editor_opening(&["/p"]);
+    open(&mut editor, "/p/a.py");
+    let id = editor.active_document().unwrap().id;
+    editor.toggle_fold_at_line(id, 0);
+    editor.save_session(layout());
+    assert_eq!(saved(&world).documents[0].folds, vec![(5, 11)]);
+
+    // Restored; one past the end of the file (it got shorter meanwhile) is dropped.
+    let mut document = session_document(Some("/p/a.py"), None, Selection::caret(0));
+    document.folds = vec![(5, 11), (12, 40)];
+    let world = World::new()
+        .with_file("/p/a.py", "if x:\n    y\n")
+        .with_session(Session {
+            documents: vec![document],
+            ..Default::default()
+        });
+    let editor = world.editor();
+    assert_eq!(editor.active_document().unwrap().folds(), [(5, 11)]);
+}
+
+#[test]
 fn the_session_is_not_restored_without_hot_exit() {
     let world = World::new()
         .with_preferences(json!({ "hot_exit": false }))
@@ -215,6 +241,7 @@ fn listeners_hear_on_load_for_the_files_of_the_session() {
         selection: Selection::caret(0),
         group: 0,
         regions: Vec::new(),
+        folds: Vec::new(),
     };
     let session = Session {
         folders: vec![],

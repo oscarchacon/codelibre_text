@@ -12,6 +12,7 @@ use entities::localization::Translations;
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::project::Project;
+use entities::recent::RecentPaths;
 use entities::selection::Selection;
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
@@ -172,6 +173,9 @@ pub struct EditorState {
     /// Most recently used first (for Ctrl+Tab).
     pub(crate) recently_used: Vec<DocumentId>,
     pub(crate) closed_files: Vec<PathBuf>,
+    /// File > Open Recent, shared by every window (see [`crate::recent`]).
+    pub(crate) recent_files: RecentPaths,
+    pub(crate) recent_folders: RecentPaths,
     pub(crate) next_id: DocumentId,
     pub(crate) find_cache: Option<FindCache>,
     pub(crate) last_disk_check: Instant,
@@ -249,6 +253,8 @@ impl Editor {
                 menu_build_systems: Vec::new(),
                 recently_used: Vec::new(),
                 closed_files: Vec::new(),
+                recent_files: RecentPaths::default(),
+                recent_folders: RecentPaths::default(),
                 next_id: 0,
                 find_cache: None,
                 last_disk_check: Instant::now(),

@@ -29,6 +29,7 @@ fn sample() -> Session {
                     annotations: vec!["<b>x</b>".into()],
                     annotation_color: "#ff0000".into(),
                 }],
+                folds: vec![(4, 9)],
             },
             SessionDocument {
                 path: None,
@@ -37,6 +38,7 @@ fn sample() -> Session {
                 selection: Selection::caret(0),
                 group: 1,
                 regions: Vec::new(),
+                folds: Vec::new(),
             },
         ],
         active: 1,
@@ -53,9 +55,12 @@ fn sample() -> Session {
                 selection: Selection::caret(2),
                 group: 0,
                 regions: Vec::new(),
+                folds: Vec::new(),
             }],
             ..Session::default()
         }],
+        file_history: vec![PathBuf::from("/p/a.rs"), PathBuf::from("/q/b.py")],
+        folder_history: vec![PathBuf::from("/q"), PathBuf::from("/p")],
     }
 }
 

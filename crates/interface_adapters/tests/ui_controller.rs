@@ -857,7 +857,7 @@ fn a_text_input_handler_asks_in_the_palette_s_field_and_hears_how_it_ends() {
 }
 
 #[test]
-fn plugins_show_and_hide_the_minimap_side_bar_and_status_bar() {
+fn plugins_show_and_hide_the_minimap_side_bar_status_bar_tabs_and_menu() {
     use use_cases::gateways::PluginCommandKind::Window;
     let world = World::new().with_plugin_commands(&[("hide", Window)]);
     let mut editor = world.editor();
@@ -881,8 +881,18 @@ fn plugins_show_and_hide_the_minimap_side_bar_and_status_bar() {
         "window_set_ui_visible",
         json!(["side_bar", false, { "__window__": 1 }]),
     );
+    let hide_tabs = test_support::plugin_call(
+        "window_set_ui_visible",
+        json!(["tabs", false, { "__window__": 1 }]),
+    );
+    let hide_menu = test_support::plugin_call(
+        "window_set_ui_visible",
+        json!(["menu", false, { "__window__": 1 }]),
+    );
     interface_adapters::controllers::command_controller::poll_plugins(&mut editor, &mut view);
-    world.plugins.then([ask, show, hide, done()]);
+    world
+        .plugins
+        .then([ask, show, hide, hide_tabs, hide_menu, done()]);
     interface_adapters::controllers::command_controller::run(
         &mut editor,
         &mut view,
@@ -895,6 +905,7 @@ fn plugins_show_and_hide_the_minimap_side_bar_and_status_bar() {
     );
     interface_adapters::controllers::command_controller::poll_plugins(&mut editor, &mut view);
     assert!(view.show_minimap && !view.show_side_bar && view.show_status_bar);
+    assert!(!view.show_tabs && !view.show_menu);
 }
 
 #[test]

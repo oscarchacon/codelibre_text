@@ -541,7 +541,7 @@ impl App {
                 .show(presenters::menu::present_for_macos(&self.editor));
         }
         #[cfg(not(target_os = "macos"))]
-        {
+        if view.show_menu {
             let _ = root;
             let menu = presenters::menu::present(&self.editor);
             egui::TopBottomPanel::top("menu_bar")
@@ -666,6 +666,9 @@ impl App {
                 drag_layout_boundaries(ui, area, self.editor.layout(), &mut events);
             });
         context_menu::report_closed(&mut events);
+        if let Some(menu) = presenters::menu::present_popup_menu(&self.editor) {
+            context_menu::show_popup_menu(ctx, &menu, &mut events);
+        }
 
         let view = &mut window.view;
         if let Some(panel) = presenters::quick_panel::present(&self.editor, view) {
@@ -890,6 +893,9 @@ fn show_group(
         })
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
+            if !group.show_tabs {
+                return;
+            }
             tabs::show(
                 ui,
                 chrome,
@@ -918,6 +924,13 @@ fn show_group(
         });
         return;
     };
+    if let Some(sheet) = &model.sheet {
+        egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            editor_view::show_sheet(ui, model, sheet, engine);
+        });
+        return;
+    }
     let read_only_copy;
     let text = if editor.text_for_editing(model.document).is_some() {
         EditorText::Editable(

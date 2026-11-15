@@ -111,6 +111,10 @@ pub struct ViewState {
     pub show_status_bar: bool,
     /// The minimap right of the text (`toggle_minimap`), saved with the session.
     pub show_minimap: bool,
+    /// The groups' tab bars (`toggle_tabs`), saved with the session.
+    pub show_tabs: bool,
+    /// The menu bar in the window (`toggle_menu`; macOS's is the system's, always shown).
+    pub show_menu: bool,
     pub fullscreen: bool,
     pub quick_panel: Option<QuickPanel>,
     pub find_panel: FindPanelState,
@@ -157,6 +161,8 @@ impl Default for ViewState {
             show_side_bar: true,
             show_status_bar: true,
             show_minimap: true,
+            show_tabs: true,
+            show_menu: true,
             fullscreen: false,
             quick_panel: None,
             find_panel: FindPanelState::default(),
@@ -246,6 +252,8 @@ impl ViewState {
             ("side_bar".into(), self.show_side_bar),
             ("status_bar".into(), self.show_status_bar),
             ("minimap".into(), self.show_minimap),
+            ("tabs".into(), self.show_tabs),
+            ("menu".into(), self.show_menu),
         ]
     }
 
@@ -255,6 +263,8 @@ impl ViewState {
                 "side_bar" => self.show_side_bar = *value,
                 "status_bar" => self.show_status_bar = *value,
                 "minimap" => self.show_minimap = *value,
+                "tabs" => self.show_tabs = *value,
+                "menu" => self.show_menu = *value,
                 _ => {}
             }
         }

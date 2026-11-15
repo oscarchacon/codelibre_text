@@ -202,6 +202,19 @@ fn a_shifted_symbol_matches_a_binding_written_without_shift() {
 }
 
 #[test]
+fn the_physical_key_keeps_its_shift() {
+    // Shift+[ on a US keyboard: the character `{`, the physical key `[`.
+    let mut keymap = Keymap::default();
+    keymap.add(binding(&["ctrl+["], Command::new("unindent")));
+    keymap.add(binding(&["ctrl+shift+["], Command::new("fold")));
+    let result = keymap.press(
+        &[key("ctrl+shift+{"), key("ctrl+shift+[")],
+        &Context::default(),
+    );
+    assert_eq!(command_name(result), "fold");
+}
+
+#[test]
 fn any_alternative_reading_of_the_key_can_match() {
     let mut keymap = Keymap::default();
     keymap.add(binding(&["ctrl+z"], Command::new("undo")));

@@ -270,6 +270,12 @@ msgstr "Barra de estado"
 msgid "Minimap"
 msgstr "Minimapa"
 
+msgid "Tabs"
+msgstr "Pestañas"
+
+msgid "Menu"
+msgstr "Menú"
+
 #: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Mostrar consola"
@@ -511,6 +517,12 @@ msgstr "Ver: Mostrar u ocultar barra de estado"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
 msgstr "Ver: Mostrar u ocultar minimapa"
+
+msgid "View: Toggle Tabs"
+msgstr "Ver: Mostrar u ocultar pestañas"
+
+msgid "View: Toggle Menu"
+msgstr "Ver: Mostrar u ocultar menú"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"
@@ -1409,3 +1421,67 @@ msgid "{count} match in 1 file"
 msgid_plural "{count} matches in 1 file"
 msgstr[0] "{count} coincidencia en 1 archivo"
 msgstr[1] "{count} coincidencias en 1 archivo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr "Abrir reciente"
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
+msgstr "Borrar elementos"
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
+msgstr "{path} ya no es una carpeta"
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr "Plegado de código"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr "Plegar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr "Desplegar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr "Desplegar todo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr "Plegar todo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr "Plegar nivel 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr "Plegar nivel 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr "Plegar nivel 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr "Plegar nivel 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr "Plegar nivel 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr "Plegar nivel 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr "Plegar nivel 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
+msgstr "Plegar nivel 9"

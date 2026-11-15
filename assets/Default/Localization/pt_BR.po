@@ -270,6 +270,12 @@ msgstr "Barra de status"
 msgid "Minimap"
 msgstr "Minimapa"
 
+msgid "Tabs"
+msgstr "Abas"
+
+msgid "Menu"
+msgstr "Menu"
+
 #: assets/Default/Main.sublime-menu
 msgid "Show Console"
 msgstr "Mostrar console"
@@ -511,6 +517,12 @@ msgstr "Exibir: Mostrar/ocultar barra de status"
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Minimap"
 msgstr "Exibir: Mostrar/ocultar minimapa"
+
+msgid "View: Toggle Tabs"
+msgstr "Exibir: Mostrar/ocultar abas"
+
+msgid "View: Toggle Menu"
+msgstr "Exibir: Mostrar/ocultar menu"
 
 #: assets/Default/Default.sublime-commands
 msgid "View: Toggle Full Screen"
@@ -1409,3 +1421,67 @@ msgid "{count} match in 1 file"
 msgid_plural "{count} matches in 1 file"
 msgstr[0] "{count} ocorrência em 1 arquivo"
 msgstr[1] "{count} ocorrências em 1 arquivo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Open Recent"
+msgstr "Abrir recente"
+
+#: assets/Default/Main.sublime-menu
+msgid "Clear Items"
+msgstr "Limpar itens"
+
+#: crates/use_cases/src/recent.rs
+msgid "{path} is not a folder any more"
+msgstr "{path} não é mais uma pasta"
+
+#: assets/Default/Main.sublime-menu
+msgid "Code Folding"
+msgstr "Dobra de código"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold"
+msgstr "Dobrar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold"
+msgstr "Desdobrar"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unfold All"
+msgstr "Desdobrar tudo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold All"
+msgstr "Dobrar tudo"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 2"
+msgstr "Dobrar nível 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 3"
+msgstr "Dobrar nível 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 4"
+msgstr "Dobrar nível 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 5"
+msgstr "Dobrar nível 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 6"
+msgstr "Dobrar nível 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 7"
+msgstr "Dobrar nível 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 8"
+msgstr "Dobrar nível 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Level 9"
+msgstr "Dobrar nível 9"

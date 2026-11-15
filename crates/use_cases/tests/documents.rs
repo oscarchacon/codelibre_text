@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use entities::document::LineEnding;
+use entities::document::{LineEnding, SheetKind};
 use entities::selection::Selection;
 use test_support::{active_text, open, status, World};
 use use_cases::editing::TextCommand;
@@ -86,6 +86,54 @@ fn binary_files_are_not_opened() {
     assert!(!editor.open_file(Path::new("/p/app.exe")));
     assert!(status(&editor).contains("binary"));
     assert_eq!(names(&editor), vec!["untitled"]);
+}
+
+#[test]
+fn images_open_as_image_sheets_that_are_never_written() {
+    let png = vec![0x89, b'P', b'N', b'G', 0, 0, 0, 0];
+    let world = World::new()
+        .with_file("/p/logo.PNG", png.clone())
+        .with_file("/p/a.txt", "a");
+    let mut editor = world.editor();
+    assert!(editor.open_file(Path::new("/p/logo.PNG")));
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.sheet, SheetKind::Image);
+    assert!(doc.read_only && doc.text.is_empty() && !doc.is_dirty());
+    assert_eq!(names(&editor), vec!["logo.PNG"]);
+    assert_eq!(editor.file_history(), [PathBuf::from("/p/logo.PNG")]);
+    // Saving does nothing to the file.
+    editor.save_active(false);
+    assert_eq!(world.disk.bytes("/p/logo.PNG"), Some(png));
+    // The session keeps it as a picture.
+    open(&mut editor, "/p/a.txt");
+    editor.save_session(Vec::new());
+    let restored = World::new()
+        .with_file("/p/logo.PNG", vec![0x89, 0])
+        .with_session(world.session.borrow().clone().unwrap());
+    let editor = restored.editor();
+    assert_eq!(
+        editor.state().documents[0].sheet,
+        SheetKind::Image,
+        "{:?}",
+        names(&editor)
+    );
+}
+
+#[test]
+fn an_html_sheet_keeps_its_minihtml_and_the_plain_text() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let id = editor.new_html_sheet("Notes", "<b>Hi</b> there", None);
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        (doc.id, &doc.sheet, doc.text.as_str()),
+        (id, &SheetKind::Html("<b>Hi</b> there".into()), "Hi there")
+    );
+    editor.set_html_sheet(id, "<i>Bye</i>");
+    assert_eq!(
+        editor.active_document().unwrap().sheet,
+        SheetKind::Html("<i>Bye</i>".into())
+    );
 }
 
 #[test]

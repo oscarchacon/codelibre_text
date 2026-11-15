@@ -8,15 +8,10 @@
 
 use entities::command::Command;
 use entities::menu::{fill_menu, ContextMenuTarget, MenuItem};
-use entities::text::line_col;
 use serde_json::{json, Value};
 
 use crate::editor::Editor;
 use crate::plugin_commands::menu_commands;
-
-/// The layout size of a char in the plugin API (`view.em_width()`, `view.line_height()`).
-const EM_WIDTH: f64 = 8.0;
-const LINE_HEIGHT: f64 = 16.0;
 
 impl Editor {
     /// A context menu opened on `target`: asks the plugins about its commands.
@@ -56,23 +51,18 @@ impl Editor {
         }
     }
 
-    /// Where the text was clicked, in the plugin API's layout coordinates (a char's middle).
+    /// Where the text was clicked, in the plugin API's window coordinates (the middle of the char),
+    /// from the view's geometry, so `view.window_to_text(event)` finds the char again.
     fn context_menu_event(&self, target: &ContextMenuTarget) -> Option<Value> {
         let ContextMenuTarget::Text { document, point } = target else {
             return None;
         };
-        let text = &self
-            .state
-            .documents
-            .iter()
-            .find(|d| d.id == *document)?
-            .text;
-        let (row, col) = line_col(text, (*point).min(text.chars().count()));
-        Some(json!({
-            "x": (col as f64 + 0.5) * EM_WIDTH,
-            "y": (row as f64 + 0.5) * LINE_HEIGHT,
-            "modifier_keys": {},
-        }))
+        let doc = self.state.documents.iter().find(|d| d.id == *document)?;
+        let geometry = doc.geometry();
+        let (x, y) = geometry.text_to_layout(&doc.text, (*point).min(doc.char_count()));
+        let (x, y) = geometry
+            .layout_to_window((x + geometry.em_width / 2.0, y + geometry.line_height / 2.0));
+        Some(json!({ "x": x, "y": y, "modifier_keys": {} }))
     }
 
     /// `close_by_index`, `close_others_by_index`, `close_to_right_by_index` (a tab's menu): the tab

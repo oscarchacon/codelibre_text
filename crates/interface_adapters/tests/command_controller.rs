@@ -572,6 +572,18 @@ fn toggle_minimap_hides_and_shows_the_minimap() {
 }
 
 #[test]
+fn toggle_tabs_and_toggle_menu_hide_and_show_them() {
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    run(&mut editor, &mut view, &cmd("toggle_tabs"));
+    run(&mut editor, &mut view, &cmd("toggle_menu"));
+    assert!(!view.show_tabs && !view.show_menu);
+    run(&mut editor, &mut view, &cmd("toggle_tabs"));
+    assert!(view.show_tabs);
+}
+
+#[test]
 fn font_size_commands() {
     let world = World::new();
     let mut editor = world.editor();
@@ -1565,6 +1577,42 @@ fn a_listener_s_command_that_needs_the_view_waits_for_the_next_frame() {
     assert!(!view.find_panel.visible);
     poll_plugins(&mut editor, &mut view);
     assert!(view.find_panel.visible);
+}
+
+#[test]
+fn a_listener_s_output_panel_is_shown_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "find" })),
+    );
+    world.plugins.then([
+        plugin_call("window_create_output_panel", json!([1, "tool"])),
+        plugin_call(
+            "run_command",
+            json!(["window", id, "show_panel", { "panel": "output.tool" }]),
+        ),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(json!("output.tool"))),
+        "shown before the listener asks"
+    );
+    // The view's part: the find panel makes room, next frame.
+    assert!(view.find_panel.visible);
+    poll_plugins(&mut editor, &mut view);
+    assert!(!view.find_panel.visible);
+    assert_eq!(editor.shown_output_panel().unwrap().name, "tool");
 }
 
 #[test]

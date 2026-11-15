@@ -621,3 +621,23 @@ fn the_visible_range_is_the_whole_text_until_the_view_reports_it() {
     doc.text = "abc".into();
     assert_eq!(doc.visible_range(), (2, 3));
 }
+
+#[test]
+fn folds_merge_move_with_edits_and_unfold_where_touched() {
+    let mut doc = Document::new_untitled(1, LineEnding::Unix);
+    doc.text = "head\n  a\n  b\nnext\n  c\nend".into();
+    assert!(doc.fold(&[(4, 12), (17, 21)]));
+    assert!(!doc.fold(&[(5, 8)]), "already folded");
+    assert_eq!(doc.folds(), [(4, 12), (17, 21)]);
+    // Typing before them moves them.
+    doc.replace_range(0, 0, "XX");
+    assert_eq!(doc.folds(), [(6, 14), (19, 23)]);
+    // An empty region unfolds the fold around it (and says which).
+    assert_eq!(doc.unfold(&[(20, 20)]), vec![(19, 23)]);
+    assert_eq!(doc.folds(), [(6, 14)]);
+    // Deleting the folded text drops the fold.
+    doc.replace_range(6, 14, "");
+    assert!(doc.folds().is_empty());
+    assert!(doc.fold(&[(0, 2)]));
+    assert_eq!(doc.unfold_all(), vec![(0, 2)]);
+}

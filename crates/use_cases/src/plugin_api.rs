@@ -7,7 +7,7 @@
 
 use entities::build::expand_variables;
 use entities::command::Command;
-use entities::document::{Document, DocumentId, LineEnding, RegionSet};
+use entities::document::{Document, DocumentId, LineEnding, RegionSet, SheetKind};
 use entities::find::{self, FindOptions};
 use entities::layout::Layout;
 use entities::selection::Selection;
@@ -108,6 +108,23 @@ fn file_filters(value: &Value) -> Vec<FileFilter> {
 
 fn region(a: usize, b: usize) -> Value {
     json!([a, b])
+}
+
+/// A plugin's list of regions (`[[a, b], …]`; anything else is left out).
+fn regions_arg(a: &Args, i: usize) -> Vec<(usize, usize)> {
+    a.value(i)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| Some((r.get(0)?.as_u64()? as usize, r.get(1)?.as_u64()? as usize)))
+        .collect()
+}
+
+/// A plugin's `(x, y)` vector (a list of two numbers; missing ones are 0).
+fn xy(a: &Args, i: usize) -> (f32, f32) {
+    let value = a.value(i);
+    let n = |j: usize| value.get(j).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    (n(0), n(1))
 }
 
 impl Editor {
@@ -399,12 +416,28 @@ impl Editor {
             )),
             "save_settings" => self.plugin_save_settings(a.str(0)?),
             "window_active_view" => Ok(self.active_document().map_or(Value::Null, |d| json!(d.id))),
+            // Views are the text sheets; `window_sheets` lists every tab.
             "window_views" => Ok(json!(self
+                .state
+                .documents
+                .iter()
+                .filter(|d| d.sheet == SheetKind::Text)
+                .map(|d| d.id)
+                .collect::<Vec<_>>())),
+            "window_sheets" => Ok(json!(self
                 .state
                 .documents
                 .iter()
                 .map(|d| d.id)
                 .collect::<Vec<_>>())),
+            "window_sheets_in_group" => {
+                let ids: Vec<_> = self
+                    .group_indexes(a.usize(0)?)
+                    .into_iter()
+                    .map(|i| self.state.documents[i].id)
+                    .collect();
+                Ok(json!(ids))
+            }
             "window_new_file" => {
                 self.new_file();
                 Ok(self.active_document().map_or(Value::Null, |d| json!(d.id)))
@@ -477,7 +510,9 @@ impl Editor {
                 let ids: Vec<_> = self
                     .group_indexes(a.usize(0)?)
                     .into_iter()
-                    .map(|i| self.state.documents[i].id)
+                    .map(|i| &self.state.documents[i])
+                    .filter(|d| d.sheet == SheetKind::Text)
+                    .map(|d| d.id)
                     .collect();
                 Ok(json!(ids))
             }
@@ -496,6 +531,16 @@ impl Editor {
                 self.set_window_chrome_visible(a.str(0)?, a.value(1).as_bool().unwrap_or(true));
                 Ok(Value::Null)
             }
+            "window_file_history" => Ok(json!(self
+                .file_history()
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect::<Vec<_>>())),
+            "folder_history" => Ok(json!(self
+                .folder_history()
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect::<Vec<_>>())),
             "window_folders" => Ok(json!(self
                 .state
                 .folders
@@ -633,6 +678,17 @@ impl Editor {
             "view_scope_name" => Ok(json!(self
                 .scope_name(a.u64(0)?, a.usize(1)?)
                 .ok_or("the view is closed")?)),
+            "view_show_popup_menu" => {
+                let items = a
+                    .value(1)
+                    .as_array()
+                    .ok_or("items must be a list of strings")?
+                    .iter()
+                    .map(|item| item.as_str().unwrap_or_default().to_string())
+                    .collect();
+                self.show_plugin_popup_menu(a.u64(0)?, items, a.value(2).as_u64())?;
+                Ok(Value::Null)
+            }
             "view_show_popup" => {
                 let location = a.value(3).as_i64().unwrap_or(-1);
                 let size = |i: usize| a.value(i).as_f64().unwrap_or(0.0) as f32;
@@ -861,6 +917,16 @@ impl Editor {
                 doc.modified_at = None;
                 Value::Null
             }
+            "view_sheet_kind" => json!(doc.sheet.api_name()),
+            "view_fold" => json!(doc.fold(&regions_arg(a, 1))),
+            "view_unfold" => json!(doc
+                .unfold(&regions_arg(a, 1))
+                .into_iter()
+                .map(|(a, b)| [a, b])
+                .collect::<Vec<_>>()),
+            "view_folded_regions" => {
+                json!(doc.folds().iter().map(|&(a, b)| [a, b]).collect::<Vec<_>>())
+            }
             "view_is_dirty" => json!(doc.is_dirty()),
             "view_is_scratch" => json!(doc.scratch),
             "view_is_transient" => json!(doc.transient),
@@ -890,6 +956,20 @@ impl Editor {
             "view_visible_region" => {
                 let (start, end) = doc.visible_range();
                 region(start, end)
+            }
+            // The view's geometry (`entities::view_geometry`), as the view last reported it.
+            "view_line_height" => json!(doc.geometry().line_height),
+            "view_em_width" => json!(doc.geometry().em_width),
+            "view_viewport_position" => json!(doc.geometry().viewport_position),
+            "view_viewport_extent" => json!(doc.geometry().viewport_extent),
+            "view_layout_extent" => json!(doc.geometry().layout_extent(&doc.text)),
+            "view_text_to_layout" => json!(doc.geometry().text_to_layout(&doc.text, point(1)?)),
+            "view_layout_to_text" => json!(doc.geometry().layout_to_text(&doc.text, xy(a, 1))),
+            "view_window_to_layout" => json!(doc.geometry().window_to_layout(xy(a, 1))),
+            "view_layout_to_window" => json!(doc.geometry().layout_to_window(xy(a, 1))),
+            "view_set_viewport_position" => {
+                doc.request_viewport_position(xy(a, 1));
+                Value::Null
             }
             "view_add_regions" => {
                 let regions = a

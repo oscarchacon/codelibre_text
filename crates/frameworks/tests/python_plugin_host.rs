@@ -3005,3 +3005,84 @@ class TypingListener(sublime_plugin.EventListener):
         "after insert"
     );
 }
+
+/// Phase A's stand-ins, now real: sheets of each kind, the view's geometry, `show_popup_menu`.
+#[test]
+fn sheets_geometry_and_popup_menus_reach_the_editor() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("logo.png");
+    fs::write(&image, [0x89, b'P', b'N', b'G', 0]).unwrap();
+    let plugin = r#"
+import json
+import sublime
+import sublime_plugin
+
+class ProbeSheetsCommand(sublime_plugin.WindowCommand):
+    def run(self, image):
+        w = self.window
+        w.active_view().run_command("insert", {"characters": "ab\tc\nd"})
+        w.open_file(image)
+        html = w.new_html_sheet("Notes", "<b>x</b>")
+        sheets = w.sheets()
+        text = sheets[0].view()
+        out = {
+            "kinds": [type(s).__name__ for s in sheets],
+            "views": len(w.views()),
+            "image_view": sheets[1].view() is None,
+            "image_name": sheets[1].file_name().endswith("logo.png"),
+            "html": html == sheets[2] and html.view() is None,
+            "index": w.get_sheet_index(sheets[1]),
+            "layout": list(text.text_to_layout(3)),
+            "back": text.layout_to_text(text.text_to_layout(3)),
+            "window": text.window_to_text(text.text_to_window(5)),
+        }
+        text.set_viewport_position((0, 32))
+        out["viewport"] = list(text.viewport_position())
+        text.show_popup_menu(["One", "Two"], lambda i: sublime.status_message("chosen %d" % i))
+        sublime.status_message(json.dumps(out))
+"#;
+    let Some(mut editor) = editor_with(dir.path(), plugin) else {
+        return;
+    };
+    let mut view = ViewState::default();
+    command_controller::run(
+        &mut editor,
+        &mut view,
+        &Command::with_args(
+            "probe_sheets",
+            serde_json::json!({ "image": image.display().to_string() }),
+        ),
+    );
+    let status = |editor: &Editor| {
+        editor
+            .state()
+            .status
+            .as_ref()
+            .map(|s| s.text.clone())
+            .unwrap_or_default()
+    };
+    let out: serde_json::Value = serde_json::from_str(&status(&editor))
+        .unwrap_or_else(|_| panic!("{}\nconsole:\n{}", status(&editor), editor.state().console));
+    assert_eq!(
+        out,
+        serde_json::json!({
+            "kinds": ["TextSheet", "ImageSheet", "HtmlSheet"],
+            "views": 1,
+            "image_view": true,
+            "image_name": true,
+            "html": true,
+            "index": [0, 1],
+            // A tab is four columns, in the 8 × 16 the view has before it draws.
+            "layout": [48.0, 0.0],
+            "back": 3,
+            "window": 5,
+            "viewport": [0.0, 32.0],
+        })
+    );
+    assert_eq!(
+        editor.plugin_popup_menu().map(|m| m.items.clone()),
+        Some(vec!["One".to_string(), "Two".to_string()])
+    );
+    command_controller::choose_plugin_popup_menu(&mut editor, &mut view, Some(1));
+    assert_eq!(status(&editor), "chosen 1", "{}", editor.state().console);
+}

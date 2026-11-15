@@ -55,6 +55,11 @@ impl Editor {
         bytes
     }
 
+    /// Reads `src` again the next time it shows (an image sheet's file changed).
+    pub(crate) fn forget_html_image(&self, src: &str) {
+        self.state.html_images.borrow_mut().remove(src);
+    }
+
     /// The picture of a region set's gutter icon (`add_regions(icon=…)`): a resource,
     /// `Packages/<package>/<path>`, with or without its `.png`; its `@2x` version first, as on a
     /// high-density screen (it is drawn at the line's height either way). `None` for the built-in
@@ -96,6 +101,76 @@ pub enum HoverZone {
     Text = 1,
     Gutter = 2,
     Margin = 3,
+}
+
+/// A menu a plugin shows (`view.show_popup_menu`): Sublime draws it at the mouse, as a context
+/// menu, and calls `on_select(index)`, or `on_select(-1)` when it is dismissed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginPopupMenu {
+    /// Changes with every menu shown, so the view places a new one at the mouse again.
+    pub serial: u64,
+    pub view: DocumentId,
+    pub items: Vec<String>,
+    callback: Option<u64>,
+}
+
+impl Editor {
+    pub fn plugin_popup_menu(&self) -> Option<&PluginPopupMenu> {
+        self.state.plugins.popup_menu.as_ref()
+    }
+
+    /// `view.show_popup_menu`: replaces a menu already shown (which hears -1).
+    pub(crate) fn show_plugin_popup_menu(
+        &mut self,
+        view: DocumentId,
+        items: Vec<String>,
+        callback: Option<u64>,
+    ) -> Result<(), String> {
+        self.any_document(view).ok_or("the view is closed")?;
+        self.dismiss_plugin_popup_menu();
+        self.state.plugins.next_popup_menu += 1;
+        self.state.plugins.popup_menu = Some(PluginPopupMenu {
+            serial: self.state.plugins.next_popup_menu,
+            view,
+            items,
+            callback,
+        });
+        Ok(())
+    }
+
+    /// An item of the menu was chosen (`None`: the menu was dismissed): its `on_select`.
+    pub fn choose_plugin_popup_menu(
+        &mut self,
+        index: Option<usize>,
+        run_command: &mut CommandRunner,
+    ) {
+        let Some(menu) = self.state.plugins.popup_menu.take() else {
+            return;
+        };
+        let index = index
+            .filter(|&i| i < menu.items.len())
+            .map_or(-1, |i| i as i64);
+        if let Some(callback) = menu.callback {
+            self.plugin_callback(callback, "select", json!([index]), run_command);
+        }
+    }
+
+    /// The menu goes without a choice in the middle of a plugin's call (another menu replaces
+    /// it): its `on_select(-1)` runs at the next [`Editor::poll_plugins`].
+    fn dismiss_plugin_popup_menu(&mut self) {
+        if let Some(callback) = self
+            .state
+            .plugins
+            .popup_menu
+            .take()
+            .and_then(|menu| menu.callback)
+        {
+            self.state
+                .plugins
+                .pending_callbacks
+                .push((callback, "select".into(), json!([-1])));
+        }
+    }
 }
 
 /// A popup a plugin shows (`view.show_popup`).

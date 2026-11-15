@@ -42,19 +42,23 @@ fn the_layout_round_trips_through_the_session() {
     let mut view = ViewState::default();
     view.show_side_bar = false;
     view.show_minimap = false;
+    view.show_tabs = false;
     let layout = view.layout();
     assert_eq!(
         layout,
         vec![
             ("side_bar".to_string(), false),
             ("status_bar".to_string(), true),
-            ("minimap".to_string(), false)
+            ("minimap".to_string(), false),
+            ("tabs".to_string(), false),
+            ("menu".to_string(), true)
         ]
     );
 
     let mut restored = ViewState::default();
     restored.apply_layout(&layout);
     assert!(!restored.show_side_bar && restored.show_status_bar && !restored.show_minimap);
+    assert!(!restored.show_tabs && restored.show_menu);
 }
 
 #[test]

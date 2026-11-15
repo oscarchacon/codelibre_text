@@ -3,7 +3,9 @@ use entities::menu::MenuItem;
 use entities::settings::Settings;
 use use_cases::Editor;
 
-use crate::view_models::{ContextMenuViewModel, MacMenuViewModel, MenuEntryViewModel};
+use crate::view_models::{
+    ContextMenuViewModel, MacMenuViewModel, MenuEntryViewModel, PopupMenuViewModel,
+};
 use crate::view_state::ViewState;
 
 /// The main menu, in the interface language, with key bindings next to each command and check
@@ -31,6 +33,18 @@ pub fn present_context_menu(editor: &Editor, view: &ViewState) -> Option<Context
         &editor.global_settings(),
     );
     Some(ContextMenuViewModel { target, entries })
+}
+
+/// The menu a plugin shows (`view.show_popup_menu`), if its view is in this window.
+pub fn present_popup_menu(editor: &Editor) -> Option<PopupMenuViewModel> {
+    let window = editor.current_window();
+    editor
+        .plugin_popup_menu()
+        .filter(|menu| editor.window_of_view(menu.view) == Some(window))
+        .map(|menu| PopupMenuViewModel {
+            serial: menu.serial,
+            items: menu.items.clone(),
+        })
 }
 
 /// A menu's entries; `{"command": "$build_systems"}` becomes one entry per build system.
@@ -79,8 +93,32 @@ fn build_system_entries(editor: &Editor) -> Vec<MenuEntryViewModel> {
         .collect()
 }
 
+/// File > Open Recent: an `open_recent_file` / `open_recent_folder` entry is named after the
+/// path at its `index`, and left out when the history is shorter, as in Sublime.
+fn recent_caption(editor: &Editor, command: &Command) -> Option<Option<String>> {
+    let history = match command.name.as_str() {
+        "open_recent_file" => editor.file_history(),
+        "open_recent_folder" => editor.folder_history(),
+        _ => return None,
+    };
+    Some(
+        history
+            .get(command.usize_arg("index", 0))
+            .map(|path| path.display().to_string()),
+    )
+}
+
 fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEntryViewModel> {
     let state = editor.state();
+    let recent = match item
+        .command
+        .as_ref()
+        .and_then(|c| recent_caption(editor, c))
+    {
+        Some(None) => return None,
+        Some(Some(path)) => Some(path),
+        None => None,
+    };
     let plugin = item
         .command
         .as_ref()
@@ -118,7 +156,9 @@ fn entry(item: &MenuItem, editor: &Editor, settings: &Settings) -> Option<MenuEn
         return None;
     }
     Some(MenuEntryViewModel {
-        caption: caption.unwrap_or_else(|| state.translations.tr(&item.caption).to_string()),
+        caption: recent
+            .or(caption)
+            .unwrap_or_else(|| state.translations.tr(&item.caption).to_string()),
         id: item.id.clone(),
         separator: item.is_separator(),
         shortcut: item
