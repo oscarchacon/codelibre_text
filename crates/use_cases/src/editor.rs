@@ -127,6 +127,8 @@ pub struct EditorState {
     pub(crate) saving: Vec<entities::document::DocumentId>,
     /// What copy and cut put on the clipboard, newest first (see `clipboard_history`).
     pub(crate) clipboard_history: Vec<String>,
+    /// The current window's jump history (see `jump_history`).
+    pub(crate) jumps: crate::jump_history::JumpState,
     pub(crate) plugins: PluginState,
     /// The quick / input panels plugins opened.
     pub(crate) plugin_panels: PluginPanels,
@@ -229,6 +231,7 @@ impl Editor {
                 line_clipboard: None,
                 saving: Vec::new(),
                 clipboard_history: Vec::new(),
+                jumps: Default::default(),
                 plugins: PluginState::default(),
                 plugin_panels: PluginPanels::default(),
                 output_panels: OutputPanels::default(),

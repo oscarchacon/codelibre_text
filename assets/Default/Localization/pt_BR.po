@@ -1485,3 +1485,19 @@ msgstr "Dobrar nível 8"
 #: assets/Default/Main.sublime-menu
 msgid "Fold Level 9"
 msgstr "Dobrar nível 9"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Back"
+msgstr "Voltar posição"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Forward"
+msgstr "Avançar posição"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the newest position"
+msgstr "Já está na posição mais recente"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the earliest position"
+msgstr "Já está na posição mais antiga"

@@ -17,7 +17,7 @@ use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
 use super::command_controller;
-use crate::view_state::{ViewRequest, ViewState};
+use crate::view_state::{ViewRequest, ViewState, WidgetEdit};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiEvent {
@@ -127,6 +127,8 @@ pub enum UiEvent {
 
     /// The text widget changed the document's text (typing, its own undo, paste…).
     TextEdited(DocumentId),
+    /// A click, or the start of a drag, in the text widget (before its `SelectionChanged`).
+    TextClicked(DocumentId),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
     /// The text widget typed these characters (after `TextEdited` and `SelectionChanged`): they
@@ -160,9 +162,31 @@ pub enum UiEvent {
     LoadErrorsClosed,
 }
 
+/// What a clipboard entry of a field's context menu does to the field (`paste` reads the
+/// clipboard here); None for another command, which runs as usual.
+fn field_edit(editor: &mut Editor, command: &Command) -> Option<WidgetEdit> {
+    match command.name.as_str() {
+        "cut" => Some(WidgetEdit::Cut),
+        "copy" => Some(WidgetEdit::Copy),
+        "paste" => editor.clipboard_text().map(WidgetEdit::Paste),
+        "select_all" => Some(WidgetEdit::SelectAll),
+        _ => None,
+    }
+}
+
 pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
     match event {
-        UiEvent::RunCommand(command) => view.queue_command(command),
+        UiEvent::RunCommand(command) => match view.context_menu.clone() {
+            // An entry of the context menu of an output panel runs on the panel's view.
+            Some(ContextMenuTarget::Text { document, .. })
+                if command_controller::run_in_panel_view(editor, view, document, &command) => {}
+            // The clipboard entries of a field's menu are the field's own.
+            Some(ContextMenuTarget::Widget { field }) => match field_edit(editor, &command) {
+                Some(edit) => view.request(ViewRequest::FieldEdit { field, edit }),
+                None => view.queue_command(command),
+            },
+            _ => view.queue_command(command),
+        },
         UiEvent::MenuOpen(open) => {
             if open && !view.menu_open {
                 editor.refresh_plugin_command_states();
@@ -402,6 +426,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         }
 
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
+        UiEvent::TextClicked(_) => editor.note_text_clicked(),
         UiEvent::SelectionChanged(document, selection) => {
             editor.blur_output_panel();
             view.focused_output_panel = None;

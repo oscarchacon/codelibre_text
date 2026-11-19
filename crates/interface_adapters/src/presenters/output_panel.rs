@@ -63,6 +63,7 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<OutputPanelViewM
         font_size: settings.f32("font_size", 11.0),
         word_wrap: settings.bool("word_wrap", true),
         first_line,
+        first_char: text[..start].chars().count(),
         current_line: panel
             .current_result
             .and_then(|line| line.checked_sub(first_line)),

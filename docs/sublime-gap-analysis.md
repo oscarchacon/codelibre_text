@@ -33,7 +33,7 @@ cannot be told apart by the string scan and are listed under native.
 | Code folding | ~~`fold`, `unfold`, `fold_by_level`, `unfold_all`~~ (done), `fold_tag_attributes`, `fold_unfold` | native / py |
 | Bookmarks | `toggle_bookmark`, `next_bookmark`, `prev_bookmark`, `clear_bookmarks`, `select_all_bookmarks`, `select_bookmark` | native |
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |
-| Navigation history | `jump_back`, `jump_forward`, `_jump`, `add_jump_record` | native / py |
+| Navigation history | ~~`jump_back`, `jump_forward`, `add_jump_record`~~ (done, 2026-11-19), `_jump` | native / py |
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
 | Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, ~~`toggle_tabs`~~ (done), `toggle_show_open_files` | native |

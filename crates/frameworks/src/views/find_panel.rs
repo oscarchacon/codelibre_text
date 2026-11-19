@@ -5,8 +5,9 @@ use entities::command::Command;
 use entities::find::FindOptions;
 use entities::localization::Translations;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::FindPanelViewModel;
+use interface_adapters::view_models::{ContextMenuViewModel, FindPanelViewModel};
 
+use super::context_menu;
 use super::theme::Chrome;
 
 pub fn show(
@@ -14,6 +15,7 @@ pub fn show(
     chrome: &Chrome,
     text: &Translations,
     panel: &FindPanelViewModel,
+    menu: Option<&ContextMenuViewModel>,
     events: &mut Vec<UiEvent>,
 ) {
     let mut options = FindOptions {
@@ -62,6 +64,8 @@ pub fn show(
         toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
         ui.add_space(6.0);
 
+        let before_right_press =
+            context_menu::state_before_right_press(ui.ctx(), Id::new("find_input"));
         let query = ui.add(
             egui::TextEdit::singleline(&mut options.query)
                 .id(Id::new("find_input"))
@@ -72,6 +76,8 @@ pub fn show(
         if panel.focus_requested {
             query.request_focus();
         }
+        context_menu::attach_to_field(&query, "find_input", menu, events);
+        context_menu::keep_selection(ui.ctx(), Id::new("find_input"), &query, before_right_press);
         if query.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             let backwards = ui.input(|i| i.modifiers.shift);
             events.push(enter_event(backwards));
@@ -111,12 +117,21 @@ pub fn show(
     if panel.in_files {
         ui.horizontal(|ui| {
             ui.add_space(4.0 * 32.0 + 6.0);
+            let before_right_press =
+                context_menu::state_before_right_press(ui.ctx(), Id::new("where_input"));
             let field = ui.add(
                 egui::TextEdit::singleline(&mut where_text)
                     .id(Id::new("where_input"))
                     .hint_text(text.tr("Where"))
                     .desired_width((ui.available_width() - 260.0).max(160.0))
                     .font(egui::TextStyle::Monospace),
+            );
+            context_menu::attach_to_field(&field, "where_input", menu, events);
+            context_menu::keep_selection(
+                ui.ctx(),
+                Id::new("where_input"),
+                &field,
+                before_right_press,
             );
             if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 events.push(UiEvent::FindAll);
@@ -131,12 +146,21 @@ pub fn show(
     if panel.replace_mode || panel.in_files {
         ui.horizontal(|ui| {
             ui.add_space(4.0 * 32.0 + 6.0);
+            let before_right_press =
+                context_menu::state_before_right_press(ui.ctx(), Id::new("replace_input"));
             let field = ui.add(
                 egui::TextEdit::singleline(&mut replacement)
                     .id(Id::new("replace_input"))
                     .hint_text(text.tr("Replace"))
                     .desired_width((ui.available_width() - 260.0).max(160.0))
                     .font(egui::TextStyle::Monospace),
+            );
+            context_menu::attach_to_field(&field, "replace_input", menu, events);
+            context_menu::keep_selection(
+                ui.ctx(),
+                Id::new("replace_input"),
+                &field,
+                before_right_press,
             );
             if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 events.push(if panel.in_files {

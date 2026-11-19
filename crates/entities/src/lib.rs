@@ -13,6 +13,7 @@ pub mod document;
 pub mod find;
 pub mod find_in_files;
 pub mod folding;
+pub mod jump_history;
 pub mod keymap;
 pub mod layout;
 pub mod localization;

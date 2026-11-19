@@ -679,8 +679,9 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       `find_io_panel` answer the output panel and, with an `on_input` callback, the field that types into its process
       (Enter calls `on_input(text)` and keeps the field open, Esc closes it; the field shares the panel, focused through
       `window.focus_view`). `indentation` (`line_and_normed_pt`, `pt_from_line_and_normed_pt`,
-      `normed_indentation_pt`: Alignment), `history_list` (`get_jump_history_for_view` and its `JumpHistory`:
-      Anaconda's Find Usages pushes selections there; we have no Jump Back / Forward commands yet) and `side_bar`
+      `normed_indentation_pt`: Alignment), `history_list` (`get_jump_history_for_view` and its `JumpHistory`, whose
+      `push_selection` runs the editor's `add_jump_record`: Anaconda's Find Usages pushes selections there, and Goto >
+      Jump Back / Jump Forward go back to them; see "Jump history" below) and `side_bar`
       (`RenamePathCommand`, which FileManager subclasses). The `paste_from_history` command is the editor's
       (`use_cases/src/clipboard_history.rs`, Ctrl+K Ctrl+V, Edit > Paste from History). Missing: the other modules of
       Sublime's `Default` until a package imports them.
@@ -721,13 +722,39 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       them (`EditorState::folders_revision`), and a plugin that defines one of these names (SideBarEnhancements,
       FileManager) runs instead. Tests: `use_cases/tests/side_bar.rs`, the side bar ones of
       `interface_adapters/tests/command_controller.rs` and `presenters.rs`, `frameworks/tests/std_file_system.rs`
-      (not the trash: it would fill the tester's). Missing: `Widget Context`, the menus of the find / output panels and
-      the gutter, `modifier_keys` (always empty), several selected side bar entries. `find_in_folder {"dirs"}` (since
+      (not the trash: it would fill the tester's). Missing: several selected side bar entries. `find_in_folder {"dirs"}` (since
       2026-11-14) opens Find in Files on the folders, as Sublime's `side_bar.py`; SideBarEnhancements' runs instead.
+- [x] **More context menus** (2026-11-19): the text's menu also opens on its gutter (at the first char of the row
+      clicked) and on an output panel (the console too), whose entries then run on the panel's view
+      (`Editor::run_in_panel_view`: plugin commands get it as their view, `copy` copies its selections, `select_all`
+      and the other built-ins that work in a panel act on it). `Widget Context.sublime-menu` (built-in: cut, copy, paste,
+      select all; merged across packages) opens on the find, replace and where fields and on the input panel's field
+      (`ContextMenuTarget::Widget`); its clipboard entries are the field's own (`ViewRequest::FieldEdit`: the field
+      takes the focus back and gets them as input), the others run as usual. `event` carries the modifier keys held at
+      the right click (`modifier_keys`, as `input::modifier_names` names them). A right click no longer moves the caret
+      or drops the selection (egui's text fields put the caret at any button's press; `context_menu::keep_selection`
+      puts the selection back), so the menu's Copy has something to copy. Missing: `Console Input Widget Context`,
+      `Image Context` and `Tab Sidebar Context` (the side bar's open files use `Tab Context`). Tests:
+      `the_entries_of_an_output_panel_s_context_menu_run_on_the_panel`,
+      `the_clipboard_entries_of_a_field_s_context_menu_go_to_the_field` (`ui_controller.rs`), and
+      `jump_history_and_context_menus_as_drawn` (`frameworks/tests/app.rs`).
 - [x] `$packages` / `$platform` without braces (Package Control's `open_file` of `$packages/User/Package
       Control.user-ca-bundle`): `PackagePaths::expand`, `gateways::expand_variable`. `semi_transient` is ignored.
 - [x] `window.set_view_index` / `set_sheet_index` move the tab to a group and an index (`Editor::move_document`).
       Package Control moves its message view with them.
+- [x] **Jump history** (2026-11-19): `jump_back` / `jump_forward` (Goto menu, Alt+- / Alt+Shift+-, Ctrl+- /
+      Ctrl+Shift+- on macOS) and `add_jump_record {"selection"}`, with the rules of Sublime 4215's
+      `Default/history_list.py` (`entities/src/jump_history.rs`): one history per window, a record when the active
+      view changes or its selections move, a command repeated within a second (or a change 0.1 s after an
+      activation) updating its record, every click a record of its own, nothing recorded for undo / redo or the jumps.
+      The records' selections are hidden region sets `jump_key_*` of their views (as in Sublime), so they move with the
+      edits; a closed view's records go. `Editor::poll_jump_history` looks at the active view every frame (what that
+      module's listener hears as `on_activated`, `on_modified`, `on_selection_modified`); the commands come from
+      `note_command` (the command controller, the keys the widget does itself, `TextClicked` for a click), the
+      widget's own caret keys count as `move`. Unlike Sublime, an `add_jump_record` is never merged into the last
+      record. Shift+- no longer finds `alt+-` (`Keymap::press` drops Shift from a symbol only when its physical key is
+      another one, as `/` from Shift+7 on a Spanish keyboard). Tests: `entities/tests/jump_history.rs`,
+      `use_cases/tests/jump_history.rs`, `shift_is_kept_when_the_physical_key_is_the_symbol_itself` (`keymap.rs`).
 - [x] **What Package Control still missed** (2026-11-11, from reading 4.2.8 against our API):
   - A view's `default_dir` setting is where its first save dialog starts (`Editor::save_active`): New Channel /
     Repository JSON set it to `Packages/User`, PackageDev to the package being edited.
