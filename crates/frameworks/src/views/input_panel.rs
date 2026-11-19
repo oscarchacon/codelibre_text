@@ -5,17 +5,26 @@
 use egui::text::{CCursor, CCursorRange};
 use egui::{Event, Id, Key, Modifiers, RichText, Ui};
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::InputPanelViewModel;
+use interface_adapters::view_models::{ContextMenuViewModel, InputPanelViewModel};
 
-use super::quick_panel;
 use super::theme::Chrome;
+use super::{context_menu, quick_panel};
 
-pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &mut Vec<UiEvent>) {
+/// The widget id of the input panel's field.
+const INPUT_FIELD: &str = "input_panel_input";
+
+pub fn show(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    panel: &InputPanelViewModel,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
     let event_modifiers = crate::input::current_modifiers(ui.ctx());
     let mut text = panel.text.clone();
     let mut selected = None;
     let mut done = false;
-    let id = Id::new("input_panel_input");
+    let id = Id::new(INPUT_FIELD);
     ui.add_space(6.0);
     // An input handler's panel: its breadcrumb, and Backspace in the empty field goes back.
     if let Some(input) = &panel.input {
@@ -33,6 +42,7 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &
         if !panel.caption.is_empty() {
             ui.label(RichText::new(&panel.caption).color(chrome.fg_dim));
         }
+        let before_right_press = context_menu::state_before_right_press(ui.ctx(), id);
         let mut field = egui::TextEdit::singleline(&mut text)
             .id(id)
             .desired_width(f32::INFINITY)
@@ -40,6 +50,13 @@ pub fn show(ui: &mut Ui, chrome: &Chrome, panel: &InputPanelViewModel, events: &
             .show(ui);
         if panel.take_focus {
             field.response.request_focus();
+        }
+        context_menu::attach_to_field(&field.response, INPUT_FIELD, menu, events);
+        if let Some(kept) =
+            context_menu::keep_selection(ui.ctx(), id, &field.response, before_right_press)
+        {
+            field.state.cursor.set_char_range(Some(kept));
+            field.cursor_range = None;
         }
         if field.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             done = true;

@@ -1485,3 +1485,19 @@ msgstr "Replier le niveau 8"
 #: assets/Default/Main.sublime-menu
 msgid "Fold Level 9"
 msgstr "Replier le niveau 9"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Back"
+msgstr "Revenir en arrière"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Forward"
+msgstr "Aller en avant"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the newest position"
+msgstr "Déjà à la position la plus récente"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the earliest position"
+msgstr "Déjà à la position la plus ancienne"

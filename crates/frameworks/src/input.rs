@@ -4,21 +4,29 @@ use egui::{Key, Modifiers};
 use entities::keymap::KeyCombo;
 use serde_json::{json, Value};
 
-/// Sublime's event object for quick-panel selections and command input handlers.
-pub fn plugin_event(modifiers: Modifiers) -> Value {
+/// The names Sublime gives the modifier keys held (`ctrl`, `alt`, `shift`, `super`): Cmd is `super`
+/// on macOS, and egui's `command` is Ctrl elsewhere.
+pub fn modifier_names(modifiers: Modifiers) -> Vec<String> {
     let ctrl = modifiers.ctrl || (modifiers.command && !cfg!(target_os = "macos"));
     let super_key = modifiers.mac_cmd || (modifiers.command && cfg!(target_os = "macos"));
-    let mut keys = serde_json::Map::new();
-    for (name, pressed) in [
+    [
         ("ctrl", ctrl),
         ("alt", modifiers.alt),
         ("shift", modifiers.shift),
         ("super", super_key),
-    ] {
-        if pressed {
-            keys.insert(name.into(), Value::Bool(true));
-        }
-    }
+    ]
+    .into_iter()
+    .filter(|(_, pressed)| *pressed)
+    .map(|(name, _)| name.to_string())
+    .collect()
+}
+
+/// Sublime's event object for quick-panel selections and command input handlers.
+pub fn plugin_event(modifiers: Modifiers) -> Value {
+    let keys: serde_json::Map<String, Value> = modifier_names(modifiers)
+        .into_iter()
+        .map(|name| (name, Value::Bool(true)))
+        .collect();
     json!({ "modifier_keys": keys })
 }
 

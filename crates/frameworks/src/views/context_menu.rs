@@ -1,7 +1,10 @@
-//! Right-click menus (`Context`, `Side Bar`, `Tab Context.sublime-menu`), drawn as egui context
-//! menus. While one is open its view reports what it was opened on every frame; the entries come a
-//! frame later, once the plugins were asked about them (until then the menu is empty).
+//! Right-click menus (`Context`, `Side Bar`, `Tab Context`, `Widget Context.sublime-menu`), drawn
+//! as egui context menus. While one is open its view reports what it was opened on every frame; the
+//! entries come a frame later, once the plugins were asked about them (until then the menu is
+//! empty).
 
+use egui::text::CCursorRange;
+use egui::text_edit::TextEditState;
 use entities::menu::ContextMenuTarget;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{ContextMenuViewModel, PopupMenuViewModel};
@@ -26,6 +29,41 @@ pub fn attach(
         ui.set_min_width(200.0);
         menu_bar::entries(ui, &menu.entries, events);
     });
+}
+
+/// The context menu of a one-line field (`Widget Context.sublime-menu`), `field` being its widget id.
+pub fn attach_to_field(
+    response: &egui::Response,
+    field: &str,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
+    let target = ContextMenuTarget::Widget {
+        field: field.to_string(),
+    };
+    attach(response, target, menu, events);
+}
+
+/// egui's text fields put the caret where any mouse button goes down, the right one's too, which
+/// would lose the selection a context menu's Copy or Cut is about. Sublime keeps it. Before a
+/// field is shown: its state, when the right button goes down this frame.
+pub fn state_before_right_press(ctx: &egui::Context, id: egui::Id) -> Option<TextEditState> {
+    let pressed = ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary));
+    pressed.then(|| TextEditState::load(ctx, id)).flatten()
+}
+
+/// After the field is shown: when the right button went down on it, its selection comes back (also
+/// in the stored state); the selection to go on with.
+pub fn keep_selection(
+    ctx: &egui::Context,
+    id: egui::Id,
+    response: &egui::Response,
+    kept: Option<TextEditState>,
+) -> Option<CCursorRange> {
+    let state = kept.filter(|_| response.hovered())?;
+    let range = state.cursor.char_range();
+    state.store(ctx, id);
+    range
 }
 
 /// After the views: no context menu is open when none said so this frame.

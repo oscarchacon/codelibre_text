@@ -1485,3 +1485,19 @@ msgstr "Ebene 8 falten"
 #: assets/Default/Main.sublime-menu
 msgid "Fold Level 9"
 msgstr "Ebene 9 falten"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Back"
+msgstr "Zurückspringen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Forward"
+msgstr "Vorwärtsspringen"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the newest position"
+msgstr "Bereits an der neuesten Position"
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the earliest position"
+msgstr "Bereits an der ältesten Position"

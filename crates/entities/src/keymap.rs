@@ -234,7 +234,10 @@ impl Keymap {
             // A symbol typed with shift (`?`, `/` on a Spanish keyboard) may be written without
             // it in the keymap. Only the character: the physical key's shift is a real modifier
             // (Shift+[ types `{`, and its physical `[` must find `ctrl+shift+[`, not `ctrl+[`).
-            if index == 0 && combo.shift && combo.is_symbol() {
+            // Nor when the physical key is that same symbol: egui names Shift+- `-` (it has no key
+            // for `_`), and `alt+shift+-` (Jump Forward) must not find `alt+-` (Jump Back).
+            let same_physical_key = alternatives.get(1).is_some_and(|p| p.key == combo.key);
+            if index == 0 && combo.shift && combo.is_symbol() && !same_physical_key {
                 candidates.push(KeyCombo {
                     shift: false,
                     ..combo.clone()

@@ -29,6 +29,7 @@ use interface_adapters::view_models::{
 };
 use use_cases::plugin_popups::HoverZone;
 
+use crate::input;
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
 use crate::views::{context_menu, minimap};
@@ -254,6 +255,7 @@ pub fn show(
                     Some(text) => text,
                     None => &mut read_only_text,
                 };
+                let before_right_press = context_menu::state_before_right_press(&ctx, id);
                 let output = TextEdit::multiline(buffer)
                     .id(id)
                     .font(font.clone())
@@ -274,13 +276,20 @@ pub fn show(
                     events.push(UiEvent::FocusGroup(model.group));
                 }
                 let text = output.galley.text();
-                let selection = output
-                    .cursor_range
-                    .map(|r| {
-                        let r = r.as_ccursor_range();
-                        Selection::new(r.secondary.index, r.primary.index)
-                    })
+                // A right click keeps the selection (its menu's Copy is about it), as in Sublime.
+                let kept =
+                    context_menu::keep_selection(&ctx, id, &output.response, before_right_press);
+                let selection = kept
+                    .or(output.cursor_range.map(|r| r.as_ccursor_range()))
+                    .map(|r| Selection::new(r.secondary.index, r.primary.index))
                     .unwrap_or(model.selection);
+                if output.response.clicked()
+                    || output
+                        .response
+                        .drag_started_by(egui::PointerButton::Primary)
+                {
+                    events.push(UiEvent::TextClicked(model.document));
+                }
                 if output.response.changed() {
                     events.push(UiEvent::TextEdited(model.document));
                 }
@@ -298,23 +307,44 @@ pub fn show(
                 let origin = output.galley_pos;
                 // A right click: the menu of the char clicked (its view takes the focus first).
                 let menu_point = Id::new(("context_menu_point", model.document));
-                if output.response.secondary_clicked() {
+                // The gutter opens the same menu, at the first char of the row clicked (the fold
+                // buttons, interacted later, stay on top of it).
+                let gutter = ui.interact(
+                    Rect::from_min_max(
+                        viewport.left_top(),
+                        egui::pos2(viewport.left() + gutter_width, viewport.bottom()),
+                    ),
+                    widget_id(model.document).with("gutter"),
+                    egui::Sense::CLICK,
+                );
+                for (response, in_gutter) in [(&output.response, false), (&gutter, true)] {
+                    if !response.secondary_clicked() {
+                        continue;
+                    }
                     if !model.active {
                         events.push(UiEvent::FocusGroup(model.group));
                     }
-                    if let Some(pointer) = output.response.interact_pointer_pos() {
-                        let point = galley.cursor_from_pos(pointer - origin).ccursor.index;
-                        ctx.data_mut(|d| d.insert_temp(menu_point, point));
+                    if let Some(pointer) = response.interact_pointer_pos() {
+                        let at = if in_gutter {
+                            egui::vec2(0.0, pointer.y - origin.y)
+                        } else {
+                            pointer - origin
+                        };
+                        let point = galley.cursor_from_pos(at).ccursor.index;
+                        let keys = input::modifier_names(ctx.input(|i| i.modifiers));
+                        ctx.data_mut(|d| d.insert_temp(menu_point, (point, keys)));
                     }
                 }
-                let point = ctx
-                    .data(|d| d.get_temp::<usize>(menu_point))
-                    .unwrap_or(selection.head);
+                let (point, modifier_keys) = ctx
+                    .data(|d| d.get_temp::<(usize, Vec<String>)>(menu_point))
+                    .unwrap_or((selection.head, Vec::new()));
                 let target = ContextMenuTarget::Text {
                     document: model.document,
                     point,
+                    modifier_keys,
                 };
-                context_menu::attach(&output.response, target, menu, events);
+                context_menu::attach(&output.response, target.clone(), menu, events);
+                context_menu::attach(&gutter, target, menu, events);
                 let caret = galley
                     .pos_from_ccursor(CCursor::new(selection.head))
                     .translate(origin.to_vec2());

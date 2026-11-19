@@ -17,6 +17,10 @@ const PLUGIN: &str = r#"import sublime
 import sublime_plugin
 
 
+def plugin_loaded():
+    print("gui check plugin loaded")
+
+
 class GuiCheckMenuCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         def chosen(index):
@@ -48,9 +52,19 @@ impl Checks {
         println!("saved {}", path.display());
     }
 
+    /// A frame, with the input the app adds before eframe runs it (`raw_input_hook`: the widget
+    /// edits it replays), which the harness does not call.
+    fn step(&mut self) {
+        let ctx = self.harness.ctx.clone();
+        let mut input = std::mem::take(self.harness.input_mut());
+        eframe::App::raw_input_hook(self.harness.state_mut(), &ctx, &mut input);
+        *self.harness.input_mut() = input;
+        self.harness.step();
+    }
+
     fn settle(&mut self, frames: usize) {
         for _ in 0..frames {
-            self.harness.step();
+            self.step();
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
@@ -71,7 +85,7 @@ impl Checks {
                 repeat: false,
                 modifiers,
             });
-            self.harness.step();
+            self.step();
         }
         self.settle(3);
     }
@@ -80,7 +94,7 @@ impl Checks {
         let pos = Pos2::new(x, y);
         let input = self.harness.input_mut();
         input.events.push(Event::PointerMoved(pos));
-        self.harness.step();
+        self.step();
         for pressed in [true, false] {
             self.harness.input_mut().events.push(Event::PointerButton {
                 pos,
@@ -88,7 +102,26 @@ impl Checks {
                 pressed,
                 modifiers: Modifiers::NONE,
             });
-            self.harness.step();
+            self.step();
+        }
+        self.settle(3);
+    }
+
+    fn right_click(&mut self, x: f32, y: f32) {
+        let pos = Pos2::new(x, y);
+        self.harness
+            .input_mut()
+            .events
+            .push(Event::PointerMoved(pos));
+        self.step();
+        for pressed in [true, false] {
+            self.harness.input_mut().events.push(Event::PointerButton {
+                pos,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            self.step();
         }
         self.settle(3);
     }
@@ -197,4 +230,71 @@ fn todays_features_as_drawn() {
     checks.hover(60.0, 164.0);
     checks.hover(120.0, 164.0);
     checks.shot("10_open_recent");
+}
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn jump_history_and_context_menus_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let code = files.path().join("code.py");
+    std::fs::write(&code, SOURCE).unwrap();
+    let other = files.path().join("other.txt");
+    std::fs::write(&other, "first line\nsecond line\nthird line\n").unwrap();
+    let mut checks = start(data.path(), vec![other, code]);
+    checks.shot("j01_start");
+    // Two places in code.py, one in other.txt; then back twice and forward once.
+    checks.click(400.0, 87.0);
+    checks.settle(60);
+    checks.click(400.0, 171.0);
+    checks.settle(60);
+    checks.key(Modifiers::COMMAND, Key::PageUp);
+    checks.click(330.0, 104.0);
+    checks.settle(60);
+    checks.shot("j02_other_file");
+    checks.typed_key(Modifiers::ALT, Key::Minus, Key::Minus);
+    checks.shot("j03_jumped_back_to_code_line_7");
+    checks.typed_key(Modifiers::ALT, Key::Minus, Key::Minus);
+    checks.shot("j04_jumped_back_to_code_line_2");
+    checks.typed_key(Modifiers::ALT | Modifiers::SHIFT, Key::Minus, Key::Minus);
+    checks.shot("j05_jumped_forward_to_code_line_7");
+
+    // Line 7 selected (Shift+End), then a right click on it: the selection stays for Copy.
+    checks.click(298.0, 171.0);
+    checks.key(Modifiers::SHIFT, Key::End);
+    checks.right_click(340.0, 171.0);
+    checks.shot("j05b_right_click_keeps_the_selection");
+    checks.key(Modifiers::NONE, Key::Escape);
+
+    // The text's menu on the gutter, at line 5.
+    checks.right_click(250.0, 137.0);
+    checks.shot("j06_gutter_menu");
+    checks.key(Modifiers::NONE, Key::Escape);
+
+    // The console (an output panel): its menu, Select All in it.
+    checks.key(Modifiers::COMMAND, Key::Backtick);
+    checks.shot("j07_console");
+    checks.right_click(60.0, 688.0);
+    checks.shot("j08_console_menu");
+    checks.click(110.0, 775.0);
+    checks.shot("j08b_console_all_selected");
+    checks.key(Modifiers::NONE, Key::Escape);
+
+    // The find field's menu (Widget Context): Select All, then Cut empties the field.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.key(Modifiers::COMMAND, Key::F);
+    checks
+        .harness
+        .input_mut()
+        .events
+        .push(Event::Text("needle".into()));
+    checks.settle(3);
+    checks.right_click(600.0, 814.0);
+    checks.shot("j09_find_field_menu");
+    checks.click(655.0, 843.0);
+    checks.shot("j10_find_field_all_selected");
+    checks.right_click(600.0, 814.0);
+    checks.click(627.0, 771.0);
+    checks.shot("j11_find_field_cut");
 }

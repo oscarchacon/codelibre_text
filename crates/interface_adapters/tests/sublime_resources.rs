@@ -478,6 +478,11 @@ fn context_menus_come_after_the_built_in_ones() {
         "Tab Context.sublime-menu",
         r#"[{ "caption": "Pin", "command": "pin" }]"#,
     );
+    packages.file(
+        "MyPackage",
+        "Widget Context.sublime-menu",
+        r#"[{ "caption": "Upper", "command": "upper_field" }]"#,
+    );
     let (resources, _) = ui(&packages.gateway(), false);
     let menus = &resources.context_menus;
     let commands = |items: &[entities::menu::MenuItem]| -> Vec<String> {
@@ -493,6 +498,10 @@ fn context_menus_come_after_the_built_in_ones() {
     assert_eq!(commands(&menus.side_bar).last().unwrap(), "delete");
     assert_eq!(commands(&menus.mount_point), ["remove_folder"]);
     assert_eq!(commands(&menus.tab).last().unwrap(), "pin");
+    assert_eq!(
+        commands(&menus.widget),
+        ["cut", "copy", "paste", "select_all", "upper_field"]
+    );
 }
 
 #[test]
