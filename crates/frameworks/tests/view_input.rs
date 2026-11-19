@@ -67,6 +67,7 @@ fn panel() -> OutputPanelViewModel {
         font_size: 13.0,
         word_wrap: true,
         first_line: 10,
+        first_char: 0,
         current_line: None,
         result_revision: 0,
         highlight: None,
@@ -161,7 +162,7 @@ fn opened_at(y: f32, clicks: usize) -> Vec<UiEvent> {
     let chrome = chrome();
     let panel = panel();
     let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-        output_panel::show(ui, &chrome, &panel, None, events)
+        output_panel::show(ui, &chrome, &panel, None, None, events)
     };
     let at = Pos2::new(40.0, y);
     frame(&ctx, Vec::new(), &mut show);
@@ -217,7 +218,7 @@ fn clicking_an_output_panel_focuses_its_view() {
     let chrome = chrome();
     let panel = panel();
     let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-        output_panel::show(ui, &chrome, &panel, None, events)
+        output_panel::show(ui, &chrome, &panel, None, None, events)
     };
     let at = Pos2::new(40.0, 40.0);
     frame(&ctx, Vec::new(), &mut show);
@@ -238,7 +239,7 @@ fn a_focused_output_panel_requests_widget_focus() {
     panel.take_focus = true;
     let _ = ctx.run(input(Vec::new()), |ctx| {
         CentralPanel::default().show(ctx, |ui| {
-            output_panel::show(ui, &chrome, &panel, None, &mut Vec::new())
+            output_panel::show(ui, &chrome, &panel, None, None, &mut Vec::new())
         });
     });
     assert!(ctx.memory(|memory| memory.focused()).is_some());
@@ -415,14 +416,14 @@ fn enter_in_the_input_panel_leaves_nothing_for_the_text_area() {
     };
     let mut left_over = Vec::new();
     let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-        input_panel::show(ui, &chrome, &panel, events);
+        input_panel::show(ui, &chrome, &panel, None, events);
         left_over = ui.input(|i| i.events.clone());
     };
     frame(&ctx, Vec::new(), &mut show);
     drop(show);
     panel.take_focus = false;
     let mut show = |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-        input_panel::show(ui, &chrome, &panel, events);
+        input_panel::show(ui, &chrome, &panel, None, events);
         left_over = ui.input(|i| i.events.clone());
     };
     frame(&ctx, Vec::new(), &mut show);
@@ -524,7 +525,7 @@ fn input_panel_back(text: &str, can_go_back: bool) -> Vec<UiEvent> {
         &ctx,
         Vec::new(),
         &mut |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-            input_panel::show(ui, &chrome, &panel, events)
+            input_panel::show(ui, &chrome, &panel, None, events)
         },
     );
     panel.take_focus = false;
@@ -532,7 +533,7 @@ fn input_panel_back(text: &str, can_go_back: bool) -> Vec<UiEvent> {
         &ctx,
         backspace(),
         &mut |ui: &mut egui::Ui, events: &mut Vec<UiEvent>| {
-            input_panel::show(ui, &chrome, &panel, events)
+            input_panel::show(ui, &chrome, &panel, None, events)
         },
     )
 }

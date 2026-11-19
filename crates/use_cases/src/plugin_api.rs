@@ -1187,7 +1187,7 @@ impl Editor {
 
     /// `view.run_command`, `window.run_command` or `sublime.run_command`. A view's command runs
     /// with that view active; the previously active view comes back afterwards.
-    fn plugin_run_command(
+    pub(crate) fn plugin_run_command(
         &mut self,
         kind: &str,
         target: DocumentId,

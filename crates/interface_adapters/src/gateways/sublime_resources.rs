@@ -182,6 +182,10 @@ impl ResourceGateway for SublimeResourceGateway {
                 builtin_resources::TAB_CONTEXT_MENU,
                 "Tab Context.sublime-menu",
             ),
+            widget: menu(
+                builtin_resources::WIDGET_CONTEXT_MENU,
+                "Widget Context.sublime-menu",
+            ),
         };
 
         let mut palette = Vec::new();

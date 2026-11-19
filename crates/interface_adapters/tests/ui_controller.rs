@@ -951,3 +951,79 @@ fn backspace_goes_back_only_in_an_input_handler_s_panel() {
     );
     assert!(view.input_panel.is_none() && editor.plugin_input_panel().is_none());
 }
+
+#[test]
+fn the_entries_of_an_output_panel_s_context_menu_run_on_the_panel() {
+    use entities::menu::ContextMenuTarget;
+    let world = World::new();
+    let mut editor = editor_with_text(&world, "the file");
+    let mut view = ViewState::default();
+    editor.log("panel text\n");
+    editor.show_console();
+    let panel = editor.shown_output_panel().unwrap().document.id;
+    let target = ContextMenuTarget::Text {
+        document: panel,
+        point: 2,
+        modifier_keys: Vec::new(),
+    };
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(Some(target)));
+    for name in ["select_all", "copy"] {
+        handle(
+            &mut editor,
+            &mut view,
+            UiEvent::RunCommand(Command::new(name)),
+        );
+    }
+    assert!(
+        queued(&mut view).is_empty(),
+        "they ran on the panel at once"
+    );
+    assert_eq!(world.clipboard.borrow().as_deref(), Ok("panel text\n"));
+    assert_eq!(active_text(&editor), "the file", "the file is untouched");
+    // Outside the panel's menu they are the active view's, as usual.
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(None));
+    handle(
+        &mut editor,
+        &mut view,
+        UiEvent::RunCommand(Command::new("copy")),
+    );
+    assert_eq!(queued(&mut view), vec![Command::new("copy")]);
+}
+
+#[test]
+fn the_clipboard_entries_of_a_field_s_context_menu_go_to_the_field() {
+    use entities::menu::ContextMenuTarget;
+    use interface_adapters::view_state::WidgetEdit;
+    let world = World::new();
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    *world.clipboard.borrow_mut() = Ok("pasted".into());
+    let target = ContextMenuTarget::Widget {
+        field: "find_input".into(),
+    };
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(Some(target)));
+    for name in ["copy", "paste", "select_all", "mine"] {
+        handle(
+            &mut editor,
+            &mut view,
+            UiEvent::RunCommand(Command::new(name)),
+        );
+    }
+    let field = |edit| ViewRequest::FieldEdit {
+        field: "find_input".into(),
+        edit,
+    };
+    assert_eq!(
+        view.take_requests(),
+        [
+            field(WidgetEdit::Copy),
+            field(WidgetEdit::Paste("pasted".into())),
+            field(WidgetEdit::SelectAll)
+        ]
+    );
+    assert_eq!(
+        queued(&mut view),
+        vec![Command::new("mine")],
+        "a package's entry runs"
+    );
+}

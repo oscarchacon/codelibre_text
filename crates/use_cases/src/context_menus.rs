@@ -3,15 +3,20 @@
 //!
 //! When one opens, the plugins are asked about its commands with the arguments it fills in
 //! (`files`, `dirs`, `paths`; `group`, `index`), so `is_visible(paths)` can hide an entry. A text
-//! command whose `want_event()` is true gets the click as `event` (`{"x", "y", "modifier_keys"}`,
-//! where `view.window_to_text` finds the char again).
+//! command whose `want_event()` is true gets the click as `event` (`{"x", "y", "modifier_keys"}`:
+//! the keys held at the right click, and a point where `view.window_to_text` finds the char
+//! again). The text's menu opens on the text, on its gutter (at the line's first char) and on an
+//! output panel, whose commands then run on the panel's view.
 
 use entities::command::Command;
+use entities::document::DocumentId;
 use entities::menu::{fill_menu, ContextMenuTarget, MenuItem};
+use entities::text::selected_text;
 use serde_json::{json, Value};
 
 use crate::editor::Editor;
 use crate::plugin_commands::menu_commands;
+use crate::plugins::CommandRunner;
 
 impl Editor {
     /// A context menu opened on `target`: asks the plugins about its commands.
@@ -54,7 +59,12 @@ impl Editor {
     /// Where the text was clicked, in the plugin API's window coordinates (the middle of the char),
     /// from the view's geometry, so `view.window_to_text(event)` finds the char again.
     fn context_menu_event(&self, target: &ContextMenuTarget) -> Option<Value> {
-        let ContextMenuTarget::Text { document, point } = target else {
+        let ContextMenuTarget::Text {
+            document,
+            point,
+            modifier_keys,
+        } = target
+        else {
             return None;
         };
         let doc = self.state.documents.iter().find(|d| d.id == *document)?;
@@ -62,7 +72,57 @@ impl Editor {
         let (x, y) = geometry.text_to_layout(&doc.text, (*point).min(doc.char_count()));
         let (x, y) = geometry
             .layout_to_window((x + geometry.em_width / 2.0, y + geometry.line_height / 2.0));
-        Some(json!({ "x": x, "y": y, "modifier_keys": {} }))
+        let keys: serde_json::Map<String, Value> = modifier_keys
+            .iter()
+            .map(|key| (key.clone(), Value::Bool(true)))
+            .collect();
+        Some(json!({ "x": x, "y": y, "modifier_keys": keys }))
+    }
+
+    /// A command chosen in the context menu of an output panel's view: it runs on that view, as
+    /// Sublime runs a menu's command on the view clicked. Plugin commands get the panel as their
+    /// view, `copy` copies its selections, and the built-in commands that work in a panel act on
+    /// it; the others (`cut`, `paste`: the panel is read-only) say why they cannot. False when
+    /// `view` is not a panel's (the command then runs as usual).
+    pub fn run_in_panel_view(
+        &mut self,
+        view: DocumentId,
+        command: &Command,
+        run_command: &mut CommandRunner,
+    ) -> bool {
+        if !self.is_panel_view(view) {
+            return false;
+        }
+        if command.name == "copy" {
+            self.copy_view_selections(view);
+            return true;
+        }
+        if let Err(e) = self.plugin_run_command("view", view, command, run_command) {
+            self.notify(e);
+        }
+        true
+    }
+
+    /// The selections of any view (a panel's too), one per line, to the clipboard and its history.
+    fn copy_view_selections(&mut self, view: DocumentId) {
+        let Some(doc) = self.any_document(view) else {
+            return;
+        };
+        let text = doc
+            .selections()
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| selected_text(&doc.text, s))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.is_empty() {
+            return;
+        }
+        if let Err(e) = self.gateways.clipboard.write_text(&text) {
+            self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
+            return;
+        }
+        self.push_clipboard_history(&text);
     }
 
     /// `close_by_index`, `close_others_by_index`, `close_to_right_by_index` (a tab's menu): the tab

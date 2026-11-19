@@ -240,7 +240,10 @@
 			{ "command": "show_overlay", "args": { "overlay": "goto", "text": ":" }, "caption": "Goto Line…" },
 			{ "caption": "-" },
 			{ "command": "next_view", "caption": "Next File" },
-			{ "command": "prev_view", "caption": "Previous File" }
+			{ "command": "prev_view", "caption": "Previous File" },
+			{ "caption": "-" },
+			{ "command": "jump_back", "caption": "Jump Back" },
+			{ "command": "jump_forward", "caption": "Jump Forward" }
 		]
 	},
 	{

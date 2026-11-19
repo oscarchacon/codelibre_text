@@ -1,67 +1,79 @@
-"""The jump history of ``Default.history_list``: selections a plugin pushes before it moves the
-caret far away (Anaconda's Find Usages, Goto Definition), so it can go back to them. The editor
-has no Jump Back / Jump Forward commands yet; plugins can call ``back`` / ``forward`` themselves."""
+"""The jump history of ``Default.history_list``. The editor keeps it, one per window, as Sublime
+Text 4 does (Goto > Jump Back / Jump Forward, ``jump_back``, ``jump_forward``,
+``add_jump_record``); this module is what plugins import to add to it (Anaconda's Find Usages,
+Goto Definition push the place they leave)."""
 
 import sublime
 
 LIST_LIMIT = 120
 
 
+def _regions(selection):
+    regions = []
+    for region in selection:
+        if isinstance(region, sublime.Region):
+            regions.append([region.a, region.b])
+        elif isinstance(region, int):
+            regions.append([region, region])
+        else:
+            regions.append([int(region[0]), int(region[1])])
+    return regions
+
+
+def _place(view):
+    window = view.window()
+    active = window.active_view() if window else None
+    if active is None:
+        return None
+    return active.id(), [(r.a, r.b) for r in active.sel()]
+
+
 class JumpHistory:
-    """The selections pushed for one view, oldest first, and where the last jump left it."""
+    """The jump history of a window: the editor's, reached through its commands."""
 
-    def __init__(self):
-        self.history_list = []
-        self.current_item = -1
+    LIST_LIMIT = LIST_LIMIT
 
-    def push_selection(self, view):
-        """Keeps the view's selection as the newest entry (forward entries are dropped)."""
-        regions = [(r.a, r.b) for r in view.sel()]
-        if not regions:
-            return
-        del self.history_list[self.current_item + 1:]
-        if not self.history_list or self.history_list[-1] != regions:
-            self.history_list.append(regions)
-        del self.history_list[:-LIST_LIMIT]
-        self.current_item = len(self.history_list) - 1
+    def __init__(self, window=None):
+        self.window = window
 
-    def _restore(self, view, regions):
-        view.sel().clear()
-        view.sel().add_all([sublime.Region(a, b) for a, b in regions])
-        view.show(view.sel()[0])
+    def push_selection(self, view, selection=None, is_activation=False):
+        """Records the view's selection (or ``selection``: regions, points or pairs) as a place
+        to jump back to."""
+        regions = _regions(view.sel() if selection is None else selection)
+        if regions:
+            view.run_command("add_jump_record", {"selection": regions})
+
+    def _jump(self, view, command):
+        window = view.window()
+        if window is None:
+            return False
+        before = _place(view)
+        window.run_command(command)
+        return _place(view) != before
 
     def back(self, view):
-        """Selects the entry before the current one (keeping where the caret is now, when it moved
-        since the newest entry, to come forward to); False when there is none."""
-        if self.history_list and self.current_item == len(self.history_list) - 1:
-            here = [(r.a, r.b) for r in view.sel()]
-            if here and here != self.history_list[-1]:
-                self.history_list.append(here)
-                self.current_item += 1
-        if self.current_item <= 0:
-            return False
-        self.current_item -= 1
-        self._restore(view, self.history_list[self.current_item])
-        return True
+        """Goes to the place before the current one, keeping where the caret is now to come
+        forward to; False when there is none."""
+        self.push_selection(view)
+        return self._jump(view, "jump_back")
 
     def forward(self, view):
-        """Selects the entry after the current one; False when there is none."""
-        if self.current_item + 1 >= len(self.history_list):
-            return False
-        self.current_item += 1
-        self._restore(view, self.history_list[self.current_item])
-        return True
-
-    def len(self):
-        return len(self.history_list)
+        """Goes to the place after the current one; False when there is none."""
+        return self._jump(view, "jump_forward")
 
 
-_histories = {}
+def _history_for_window(window):
+    return JumpHistory(window)
 
 
-def get_jump_history(view_id):
-    return _histories.setdefault(view_id, JumpHistory())
+def _history_for_view(view):
+    return _history_for_window(view.window())
 
 
-def get_jump_history_for_view(view):
-    return get_jump_history(view.id())
+def get_jump_history(window_id):
+    """Sublime 3's: the history of the window with this id."""
+    return JumpHistory(sublime.Window(window_id))
+
+
+# Sublime 3's name, which Anaconda and others still use.
+get_jump_history_for_view = _history_for_view

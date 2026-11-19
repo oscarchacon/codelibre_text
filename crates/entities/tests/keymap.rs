@@ -215,6 +215,28 @@ fn the_physical_key_keeps_its_shift() {
 }
 
 #[test]
+fn shift_is_kept_when_the_physical_key_is_the_symbol_itself() {
+    // Shift+- on a US keyboard: egui names both readings `-`.
+    let mut keymap = Keymap::default();
+    keymap.add(binding(&["alt+-"], Command::new("jump_back")));
+    keymap.add(binding(&["alt+shift+-"], Command::new("jump_forward")));
+    let shifted = keymap.press(
+        &[key("alt+shift+-"), key("alt+shift+-")],
+        &Context::default(),
+    );
+    assert_eq!(command_name(shifted), "jump_forward");
+    let plain = keymap.press(&[key("alt+-"), key("alt+-")], &Context::default());
+    assert_eq!(command_name(plain), "jump_back");
+    // `/` typed with Shift+7 (Spanish keyboard) still finds `ctrl+/`.
+    keymap.add(binding(&["ctrl+/"], Command::new("toggle_comment")));
+    let spanish = keymap.press(
+        &[key("ctrl+shift+/"), key("ctrl+shift+7")],
+        &Context::default(),
+    );
+    assert_eq!(command_name(spanish), "toggle_comment");
+}
+
+#[test]
 fn any_alternative_reading_of_the_key_can_match() {
     let mut keymap = Keymap::default();
     keymap.add(binding(&["ctrl+z"], Command::new("undo")));

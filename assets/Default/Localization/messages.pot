@@ -105,16 +105,19 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
+#: assets/Default/Widget Context.sublime-menu
 msgid "Cut"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
+#: assets/Default/Widget Context.sublime-menu
 msgid "Copy"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
+#: assets/Default/Widget Context.sublime-menu
 msgid "Paste"
 msgstr ""
 
@@ -283,6 +286,7 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
+#: assets/Default/Widget Context.sublime-menu
 msgid "Select All"
 msgstr ""
 
@@ -558,6 +562,14 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 msgid "Previous File"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Back"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
+msgid "Jump Forward"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
@@ -1024,6 +1036,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: crates/use_cases/src/clipboard_history.rs
+#: crates/use_cases/src/context_menus.rs
 #: crates/use_cases/src/editing.rs
 msgid "Clipboard unavailable: {error}"
 msgstr ""
@@ -1143,6 +1156,14 @@ msgstr ""
 
 #: crates/use_cases/src/help.rs
 msgid "No errors have been logged"
+msgstr ""
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the newest position"
+msgstr ""
+
+#: crates/use_cases/src/jump_history.rs
+msgid "Already at the earliest position"
 msgstr ""
 
 #: crates/use_cases/src/localization.rs

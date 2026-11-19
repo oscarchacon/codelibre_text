@@ -317,6 +317,22 @@ impl App {
             repeat: false,
             modifiers,
         };
+        let input = |edit: WidgetEdit| match edit {
+            WidgetEdit::Undo => key(Key::Z, ctrl),
+            WidgetEdit::Redo => key(
+                Key::Z,
+                Modifiers {
+                    shift: true,
+                    ..ctrl
+                },
+            ),
+            WidgetEdit::SelectAll => key(Key::A, ctrl),
+            WidgetEdit::Copy => Event::Copy,
+            WidgetEdit::Cut => Event::Cut,
+            WidgetEdit::Paste(text) => Event::Paste(text),
+            WidgetEdit::Insert(text) => Event::Text(text),
+            WidgetEdit::Key { key, shift } => widget_key_event(key, shift),
+        };
         for request in window.view.take_requests() {
             match request {
                 ViewRequest::SetFullscreen(on) => {
@@ -330,24 +346,16 @@ impl App {
                     ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close)
                 }
                 ViewRequest::WidgetEdit(edit) => {
-                    window.pending_widget_events.push(match edit {
-                        WidgetEdit::Undo => key(Key::Z, ctrl),
-                        WidgetEdit::Redo => key(
-                            Key::Z,
-                            Modifiers {
-                                shift: true,
-                                ..ctrl
-                            },
-                        ),
-                        WidgetEdit::SelectAll => key(Key::A, ctrl),
-                        WidgetEdit::Copy => Event::Copy,
-                        WidgetEdit::Cut => Event::Cut,
-                        WidgetEdit::Paste(text) => Event::Paste(text),
-                        WidgetEdit::Insert(text) => Event::Text(text),
-                        WidgetEdit::Key { key, shift } => widget_key_event(key, shift),
-                    });
+                    window.pending_widget_events.push(input(edit));
                     window.view.focus_editor = true;
                     // The widget gets it in the next frame, which must come even with no input.
+                    ctx.request_repaint();
+                }
+                // The field has the focus again before the next frame, which gives it the input
+                // (its selection was kept while the menu had the pointer).
+                ViewRequest::FieldEdit { field, edit } => {
+                    ctx.memory_mut(|m| m.request_focus(egui::Id::new(field.as_str())));
+                    window.pending_widget_events.push(input(edit));
                     ctx.request_repaint();
                 }
                 ViewRequest::WidgetUndoBoundary {
@@ -563,6 +571,7 @@ impl App {
                 });
         }
 
+        let open_menu = presenters::menu::present_context_menu(&self.editor, view);
         if let Some(input) = presenters::quick_panel::present_input_panel(&self.editor, view) {
             egui::TopBottomPanel::bottom("input_panel")
                 .frame(
@@ -571,7 +580,9 @@ impl App {
                         .inner_margin(egui::Margin::symmetric(8, 0))
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
-                .show(ctx, |ui| input_panel::show(ui, chrome, &input, &mut events));
+                .show(ctx, |ui| {
+                    input_panel::show(ui, chrome, &input, open_menu.as_ref(), &mut events)
+                });
         }
 
         if let Some(output) = presenters::output_panel::present(&self.editor, view) {
@@ -587,7 +598,14 @@ impl App {
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
                 .show(ctx, |ui| {
-                    output_panel::show(ui, chrome, &output, highlighted.as_ref(), &mut events)
+                    output_panel::show(
+                        ui,
+                        chrome,
+                        &output,
+                        highlighted.as_ref(),
+                        open_menu.as_ref(),
+                        &mut events,
+                    )
                 });
         }
 
@@ -600,11 +618,17 @@ impl App {
                         .stroke(egui::Stroke::new(1.0_f32, chrome.border)),
                 )
                 .show(ctx, |ui| {
-                    find_panel::show(ui, chrome, &translations, &find, &mut events)
+                    find_panel::show(
+                        ui,
+                        chrome,
+                        &translations,
+                        &find,
+                        open_menu.as_ref(),
+                        &mut events,
+                    )
                 });
         }
 
-        let open_menu = presenters::menu::present_context_menu(&self.editor, view);
         if view.show_side_bar {
             let side = presenters::side_bar::present(&self.editor, view);
             let menu = open_menu.as_ref();

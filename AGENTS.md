@@ -87,6 +87,15 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
+- Right clicks: egui's text fields put the caret at any button's press, so each field is shown between
+  `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output
+  panel's menu runs its entries on the panel (`Editor::run_in_panel_view`); a field's (`Widget Context.sublime-menu`)
+  gives its clipboard entries to the field as `ViewRequest::FieldEdit`, injected by `App::raw_input_hook` like the
+  widget's replays (egui_kittest does not call that hook: `frameworks/tests/app.rs` calls it in `Checks::step`).
+- Jump history (`entities/src/jump_history.rs`, `use_cases/src/jump_history.rs`): `Editor::poll_jump_history` (every
+  frame, from `command_controller::poll_plugins`) records the active view's places, the commands that ran
+  (`note_command`, also for keys the widget does itself and `UiEvent::TextClicked`) decide whether a change merges;
+  records are hidden `jump_key_*` region sets, so they move with the text.
 - Default fonts lack ▸ ▾ ● ✕; draw shapes or use `×`. On macOS shortcuts show as ⇧+⌘+P (`KeyCombo::display`); `app.rs` adds the
   system's San Francisco (and Apple Symbols) font for ⌘ ⇧ ⌥ ⌃ ⎋ ⌫, which egui's fonts lack or draw thin.
 - `persist_setting` re-serializes the user's `Preferences.sublime-settings` (comments are lost), as Sublime does.

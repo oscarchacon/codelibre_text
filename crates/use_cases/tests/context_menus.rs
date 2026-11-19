@@ -131,7 +131,11 @@ fn the_plugins_are_asked_with_the_filled_arguments_and_commands_that_want_it_get
     let side_command = editor.context_menu_items(&side)[0].command.clone().unwrap();
     assert!(!editor.plugin_command_state(&side_command).unwrap().visible);
 
-    let text = ContextMenuTarget::Text { document, point: 5 };
+    let text = ContextMenuTarget::Text {
+        document,
+        point: 5,
+        modifier_keys: vec!["ctrl".into(), "shift".into()],
+    };
     world
         .plugins
         .then([PluginMessage::Answer(json!([{ "want_event": true }, {}]))]);
@@ -144,7 +148,7 @@ fn the_plugins_are_asked_with_the_filled_arguments_and_commands_that_want_it_get
     // "two" is line 1; char 5 is its column 1: the middle of that char, 8×16 per char.
     assert_eq!(
         args[0],
-        json!({ "event": { "x": 12.0, "y": 24.0, "modifier_keys": {} } })
+        json!({ "event": { "x": 12.0, "y": 24.0, "modifier_keys": { "ctrl": true, "shift": true } } })
     );
     assert_eq!(args[1], json!({}));
     assert_eq!(

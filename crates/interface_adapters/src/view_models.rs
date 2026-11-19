@@ -186,6 +186,8 @@ pub struct OutputPanelViewModel {
     pub word_wrap: bool,
     /// The line of the panel's text that `text` starts with.
     pub first_line: usize,
+    /// The char of the panel's text that `text` starts with.
+    pub first_char: usize,
     /// The line of `text` of the result visited last.
     pub current_line: Option<usize>,
     /// Changes when a result is visited: the view scrolls to it.
