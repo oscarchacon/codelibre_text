@@ -1,6 +1,7 @@
 //! The output panel at the bottom (`show_panel {"panel": "output.<name>"}`): a build's or a
 //! plugin's output, read-only, following its end as text arrives. Esc or × closes it (`hide_panel`).
-//! Double-clicking a result opens its file; the result visited last is highlighted.
+//! Double-clicking a result opens its file; the result visited last is highlighted. A right click
+//! opens the text's context menu (`Context.sublime-menu`), whose commands run on the panel's view.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -8,10 +9,13 @@ use std::sync::Arc;
 use egui::text::{CCursor, LayoutJob};
 use egui::{Align, Color32, FontId, Galley, Id, RichText, Sense, TextFormat, Ui};
 use entities::command::Command;
+use entities::menu::ContextMenuTarget;
 use interface_adapters::controllers::ui_controller::UiEvent;
-use interface_adapters::view_models::OutputPanelViewModel;
+use interface_adapters::view_models::{ContextMenuViewModel, OutputPanelViewModel};
 
+use super::context_menu;
 use super::theme::Chrome;
+use crate::input;
 use crate::syntax_engine::SharedSyntaxEngine;
 
 /// The panel's text in its syntax's colors (see [`OutputPanelViewModel::highlight`]), from where
@@ -51,6 +55,7 @@ pub fn show(
     chrome: &Chrome,
     panel: &OutputPanelViewModel,
     highlighted: Option<&LayoutJob>,
+    menu: Option<&ContextMenuViewModel>,
     events: &mut Vec<UiEvent>,
 ) {
     ui.horizontal(|ui| {
@@ -94,6 +99,27 @@ pub fn show(
                     egui::Stroke::new(1.0_f32, chrome.fg),
                 );
             }
+            // A right click: the context menu of the char clicked, in the whole text.
+            let menu_point = Id::new(("output_panel_menu_point", panel.id));
+            if text.secondary_clicked() {
+                if let Some(pointer) = text.interact_pointer_pos() {
+                    let at = galley
+                        .cursor_from_pos(pointer - text.rect.min)
+                        .ccursor
+                        .index;
+                    let keys = input::modifier_names(ui.input(|i| i.modifiers));
+                    ui.data_mut(|d| d.insert_temp(menu_point, (panel.first_char + at, keys)));
+                }
+            }
+            let (point, modifier_keys) = ui
+                .data(|d| d.get_temp::<(usize, Vec<String>)>(menu_point))
+                .unwrap_or((panel.first_char, Vec::new()));
+            let target = ContextMenuTarget::Text {
+                document: panel.id,
+                point,
+                modifier_keys,
+            };
+            context_menu::attach(&text, target, menu, events);
             if text.double_clicked() {
                 if let Some(pointer) = text.interact_pointer_pos() {
                     let cursor = galley.cursor_from_pos(pointer - text.rect.min);

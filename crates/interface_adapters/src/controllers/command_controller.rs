@@ -46,6 +46,8 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
             view.focus_editor = false;
         }
     }
+    // After the commands and edits of the frame, as Sublime's listener hears them.
+    editor.poll_jump_history();
     show_plugin_panels(editor, view);
     let current_window = editor.current_window();
     for boundary in editor.take_plugin_edit_undo_boundaries(current_window) {
@@ -144,6 +146,21 @@ fn show_build_picker(editor: &mut Editor, view: &mut ViewState) {
     cancel_quick_panel(editor, view);
     editor.refresh_build_options();
     view.quick_panel = Some(QuickPanel::new(SearchKind::BuildSystems, String::new()));
+}
+
+/// An entry of a context menu opened on an output panel: it runs on the panel's view (see
+/// `Editor::run_in_panel_view`). False when `document` is not a panel's.
+pub fn run_in_panel_view(
+    editor: &mut Editor,
+    view: &mut ViewState,
+    document: DocumentId,
+    command: &Command,
+) -> bool {
+    editor.run_in_panel_view(
+        document,
+        command,
+        &mut |editor: &mut Editor, command: &Command| run(editor, view, command),
+    )
 }
 
 /// The answers to a plugin's panels go back to it; the commands its callbacks run come back here.
@@ -452,6 +469,7 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 /// widget is about to do on its own. It is not asked about again.
 fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
+    editor.note_command(&command.name);
     let undo_before = plugin_edit_undo_snapshot(editor, &command);
     run_command(editor, view, &command);
     editor.record_plugin_edit_undo(undo_before);
@@ -518,6 +536,7 @@ pub fn hooked_widget_input(
         } else {
             WidgetEdit::Insert(characters.to_string())
         };
+        editor.note_command(&rewritten.name);
         view.request(ViewRequest::WidgetEdit(replay));
         view.widget_edits_in_progress.push(WidgetEditInProgress {
             command: rewritten,
@@ -526,6 +545,7 @@ pub fn hooked_widget_input(
         });
     } else if rewritten.same_as(&command) {
         // What the widget was going to do: give it back the same input, one frame later.
+        editor.note_command(&command.name);
         view.request(ViewRequest::WidgetEdit(replay));
         view.widget_edits_in_progress.push(WidgetEditInProgress {
             command,
@@ -1047,6 +1067,9 @@ const EDITOR_COMMANDS: &[&str] = &[
     "prev_field",
     "clear_fields",
     "replace_completion_with_next_completion",
+    "jump_back",
+    "jump_forward",
+    "add_jump_record",
 ];
 
 fn run_editor_command(editor: &mut Editor, command: &Command) {
@@ -1075,6 +1098,13 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "prev_field" => editor.move_to_snippet_field(false),
         "clear_fields" => editor.clear_snippet_fields(),
         "replace_completion_with_next_completion" => editor.replace_completion_with_next(),
+        "jump_back" => editor.jump_back(),
+        "jump_forward" => editor.jump_forward(),
+        "add_jump_record" => {
+            if let Err(e) = editor.add_jump_record(command.args.get("selection")) {
+                editor.log(&format!("add_jump_record: {e}\n"));
+            }
+        }
         "set_line_ending" => {
             let system = if cfg!(windows) {
                 LineEnding::Windows

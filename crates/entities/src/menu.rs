@@ -50,13 +50,21 @@ pub struct ContextMenus {
     pub mount_point: Vec<MenuItem>,
     /// `Tab Context.sublime-menu`: a tab (also an open file of the side bar).
     pub tab: Vec<MenuItem>,
+    /// `Widget Context.sublime-menu`: a one-line field (the find, replace and where fields, the
+    /// input panel).
+    pub widget: Vec<MenuItem>,
 }
 
 /// What a context menu was opened on: it picks the menu and fills its commands' arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContextMenuTarget {
-    /// The text of a view, at a char.
-    Text { document: DocumentId, point: usize },
+    /// The text of a view, at a char (the first of the line for a click in its gutter), with the
+    /// modifier keys held at the click (`ctrl`, `alt`, `shift`, `super`) for its `event`.
+    Text {
+        document: DocumentId,
+        point: usize,
+        modifier_keys: Vec<String>,
+    },
     /// A file or folder of the side bar; `root` for a folder of the window (a mount point).
     SideBar {
         path: PathBuf,
@@ -65,6 +73,8 @@ pub enum ContextMenuTarget {
     },
     /// A tab: its group and its index among the group's tabs.
     Tab { group: usize, index: usize },
+    /// A one-line field, named by its widget id (`find_input`, `replace_input`…).
+    Widget { field: String },
 }
 
 impl ContextMenuTarget {
@@ -80,6 +90,7 @@ impl ContextMenuTarget {
                 items
             }
             Self::Tab { .. } => menus.tab.clone(),
+            Self::Widget { .. } => menus.widget.clone(),
         }
     }
 
@@ -92,7 +103,7 @@ impl ContextMenuTarget {
         };
         let mut args = args.clone();
         match self {
-            Self::Text { .. } => {}
+            Self::Text { .. } | Self::Widget { .. } => {}
             Self::SideBar { path, is_dir, .. } => {
                 let path = Value::String(path.display().to_string());
                 for (key, wanted) in [("files", !is_dir), ("dirs", *is_dir), ("paths", true)] {

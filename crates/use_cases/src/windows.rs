@@ -29,6 +29,7 @@ pub(crate) struct WindowSlot {
     project: Option<Project>,
     recently_used: Vec<DocumentId>,
     closed_files: Vec<PathBuf>,
+    jumps: crate::jump_history::JumpState,
     output_panels: OutputPanels,
     settings: Map<String, Value>,
     /// The user asked to close it (its unsaved files may still be asked about).
@@ -123,6 +124,7 @@ impl Editor {
         std::mem::swap(&mut state.recently_used, &mut slot.recently_used);
         std::mem::swap(&mut state.closed_files, &mut slot.closed_files);
         std::mem::swap(&mut state.output_panels, &mut slot.output_panels);
+        std::mem::swap(&mut state.jumps, &mut slot.jumps);
         std::mem::swap(&mut state.plugins.window_settings, &mut slot.settings);
         std::mem::swap(&mut state.window_closing, &mut slot.closing);
         std::mem::swap(&mut state.window_chrome, &mut slot.chrome);

@@ -16,6 +16,7 @@
 //! | [`saving`] | save, save as, save all |
 //! | [`editing`] | text commands, go to line, paste |
 //! | [`clipboard_history`] | what was copied, for Paste from History |
+//! | [`jump_history`] | Jump Back / Jump Forward: where the selections were (`add_jump_record`) |
 //! | [`snippets`] | `insert_snippet` and visiting its fields with Tab |
 //! | [`completions`] | auto-complete: the list, its sources (plugins, completions files, snippets, words), Tab completion |
 //! | [`find_replace`] | find next/previous, find under caret, replace |
@@ -50,6 +51,7 @@ pub mod gateways;
 pub mod groups;
 pub mod help;
 pub mod html_export;
+pub mod jump_history;
 pub mod localization;
 pub mod output_panels;
 pub mod packages;

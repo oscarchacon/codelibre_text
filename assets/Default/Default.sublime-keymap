@@ -59,6 +59,9 @@
 	{ "keys": ["ctrl+0"], "command": "reset_font_size" },
 	{ "keys": ["alt+z"], "command": "toggle_setting", "args": { "setting": "word_wrap" } },
 
+	{ "keys": ["alt+-"], "command": "jump_back" },
+	{ "keys": ["alt+shift+-"], "command": "jump_forward" },
+
 	{ "keys": ["ctrl+pagedown"], "command": "next_view" },
 	{ "keys": ["ctrl+pageup"], "command": "prev_view" },
 	{ "keys": ["ctrl+tab"], "command": "next_view_in_stack" },

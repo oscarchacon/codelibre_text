@@ -93,6 +93,12 @@ pub enum WidgetKey {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewRequest {
     WidgetEdit(WidgetEdit),
+    /// An edit of a one-line field (its widget id), from its context menu: the field takes the
+    /// focus back and gets it as input.
+    FieldEdit {
+        field: String,
+        edit: WidgetEdit,
+    },
     /// Commit the pre-plugin text state to egui's undo history before the next widget frame.
     WidgetUndoBoundary {
         document: DocumentId,

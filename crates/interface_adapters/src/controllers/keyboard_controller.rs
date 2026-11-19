@@ -178,6 +178,7 @@ fn bound_command(
             KeyHandling::Consumed
         }
         Some(replay) if in_widget && !own_key => {
+            editor.note_command(&command.name);
             view.request(ViewRequest::WidgetEdit(replay));
             view.last_command = Some(command.name);
             KeyHandling::Consumed
@@ -191,6 +192,7 @@ fn bound_command(
             && widget_does(&command)
             && !typed_character(alternatives) =>
         {
+            editor.note_command(&command.name);
             KeyHandling::PassThrough
         }
         _ => {

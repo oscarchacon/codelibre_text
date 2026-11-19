@@ -29,11 +29,12 @@ pub const KEYMAPS: &[(&str, &str)] = &[
 pub const PALETTE_COMMANDS: &str = asset!("Default.sublime-commands");
 pub const MAIN_MENU: &str = asset!("Main.sublime-menu");
 /// Right-click menus: the text, a side bar entry, a top folder of the side bar (added after the
-/// side bar's), a tab.
+/// side bar's), a tab, a one-line field (the find and input panels).
 pub const CONTEXT_MENU: &str = asset!("Context.sublime-menu");
 pub const SIDE_BAR_MENU: &str = asset!("Side Bar.sublime-menu");
 pub const MOUNT_POINT_MENU: &str = asset!("Side Bar Mount Point.sublime-menu");
 pub const TAB_CONTEXT_MENU: &str = asset!("Tab Context.sublime-menu");
+pub const WIDGET_CONTEXT_MENU: &str = asset!("Widget Context.sublime-menu");
 /// Every built-in menu with its file name.
 pub const MENUS: &[(&str, &str)] = &[
     ("Main.sublime-menu", MAIN_MENU),
@@ -41,6 +42,7 @@ pub const MENUS: &[(&str, &str)] = &[
     ("Side Bar.sublime-menu", SIDE_BAR_MENU),
     ("Side Bar Mount Point.sublime-menu", MOUNT_POINT_MENU),
     ("Tab Context.sublime-menu", TAB_CONTEXT_MENU),
+    ("Widget Context.sublime-menu", WIDGET_CONTEXT_MENU),
 ];
 pub const PREFERENCES: &str = asset!("Preferences.sublime-settings");
 
