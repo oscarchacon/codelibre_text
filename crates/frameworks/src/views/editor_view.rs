@@ -42,25 +42,6 @@ pub enum EditorText<'a> {
     ReadOnly(&'a str),
 }
 
-/// Adds the state before an out-of-widget plugin edit as a hard undo boundary. egui owns the
-/// actual history, but use cases mutate the text before the next `TextEdit` frame.
-pub fn add_undo_boundary(
-    ctx: &egui::Context,
-    document: DocumentId,
-    text: String,
-    selection: Selection,
-) {
-    let id = widget_id(document);
-    let mut state = TextEditState::load(ctx, id).unwrap_or_default();
-    let mut undoer = state.undoer();
-    undoer.add_undo(&(
-        CCursorRange::two(CCursor::new(selection.anchor), CCursor::new(selection.head)),
-        text,
-    ));
-    state.set_undoer(undoer);
-    state.store(ctx, id);
-}
-
 /// Which command-made selection each document's widget has already applied.
 #[derive(Default)]
 pub struct SelectionSync {
@@ -901,7 +882,7 @@ fn has_icons(model: &EditorViewModel) -> bool {
     model
         .regions
         .iter()
-        .any(|r| !r.icon.is_empty() && !r.ranges.is_empty())
+        .any(|r| !r.icon.is_empty() && !r.scope.is_empty() && !r.ranges.is_empty())
 }
 
 /// The side of a gutter icon: a bit less than a line, as Sublime's 16 px icons in 19 px lines.
@@ -933,10 +914,12 @@ fn paint_region_icons(
     let x = gutter.left() + char_width * 0.3 + size / 2.0;
     let radius = (row_height * 0.22).max(2.0);
     for (regions, &color) in model.regions.iter().zip(region_colors) {
-        if regions.icon.is_empty() {
+        // Sublime 4215 draws no icon for a region set without a scope (checked by running it).
+        if regions.icon.is_empty() || regions.scope.is_empty() {
             continue;
         }
-        // A picture is tinted with the region's color, as Sublime does (white icons take it).
+        // A picture is tinted with its scope's foreground (the scheme's when the scope has no
+        // rule; `invalid` takes its foreground, not its background), as Sublime does.
         let texture = regions
             .icon_image
             .as_ref()

@@ -42,35 +42,51 @@ fn text_after(command: Command, text: &str, selection: Selection) -> String {
 }
 
 #[test]
-fn editing_commands_add_the_pre_edit_text_to_the_widget_undo_history() {
+fn each_command_is_one_undo_step_and_undo_runs_at_once() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
-    let id = editor.active_document().unwrap().id;
 
     run(&mut editor, &mut view, &cmd("left_delete"));
-    poll_plugins(&mut editor, &mut view);
+    run(&mut editor, &mut view, &cmd("left_delete"));
+    assert_eq!(active_text(&editor), "hel");
 
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "hell", "one command taken back");
+    assert!(view.take_requests().is_empty(), "nothing left for the widget");
+    run(&mut editor, &mut view, &cmd("soft_undo"));
+    assert_eq!(active_text(&editor), "hello");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(5)
+    );
+    run(&mut editor, &mut view, &cmd("redo"));
     assert_eq!(active_text(&editor), "hell");
-    assert!(matches!(
-        view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "hello" && *selection == Selection::caret(5)
-    ));
 }
 
 #[test]
-fn editing_commands_run_during_plugin_events_add_undo_boundaries_too() {
+fn undo_runs_during_plugin_events_too() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
-    let id = editor.active_document().unwrap().id;
+    run(&mut editor, &mut view, &cmd("left_delete"));
 
-    assert!(run_during_event(&mut editor, &cmd("left_delete")));
-    poll_plugins(&mut editor, &mut view);
+    assert!(run_during_event(&mut editor, &cmd("undo")));
+    assert_eq!(active_text(&editor), "hello", "at once, not a frame later");
+    assert!(run_during_event(&mut editor, &cmd("redo_or_repeat")));
+    assert_eq!(active_text(&editor), "hell");
+}
 
+#[test]
+fn a_focused_field_undoes_its_own_typing() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
+    run(&mut editor, &mut view, &cmd("left_delete"));
+    view.field_has_focus = true;
+
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "hell", "the text keeps its edit");
     assert!(matches!(
         view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "hello" && *selection == Selection::caret(5)
+        [ViewRequest::WidgetEdit(WidgetEdit::Undo)]
     ));
 }
 
@@ -1059,17 +1075,12 @@ fn goto_line_is_one_based() {
 // ----- widget edits --------------------------------------------------------------------------------
 
 #[test]
-fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
+fn select_all_and_clipboard_commands_are_left_to_the_text_widget() {
     let world = World::new().with_preferences(json!({ "copy_with_empty_selection": false }));
     *world.clipboard.borrow_mut() = Ok("clip".into());
     let mut editor = world.editor();
     let mut view = ViewState::default();
     for name in [
-        "undo",
-        "soft_undo",
-        "redo",
-        "redo_or_repeat",
-        "soft_redo",
         "select_all",
         "copy",
         "cut",
@@ -1090,11 +1101,6 @@ fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
     assert_eq!(
         edits,
         vec![
-            Undo,
-            Undo,
-            Redo,
-            Redo,
-            Redo,
             SelectAll,
             Copy,
             Cut,
@@ -1306,10 +1312,9 @@ fn listeners_rewrite_commands_before_they_run_and_hear_about_them_after() {
 }
 
 #[test]
-fn listener_replacements_keep_the_original_state_in_widget_undo_history() {
+fn a_listener_s_replacement_is_undone_to_the_original_text() {
     let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
     let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
-    let id = editor.active_document().unwrap().id;
     world.plugins.then([
         PluginMessage::Answer(json!(["upper_case", null])),
         PluginMessage::Answer(Value::Null),
@@ -1319,11 +1324,13 @@ fn listener_replacements_keep_the_original_state_in_widget_undo_history() {
     poll_plugins(&mut editor, &mut view);
 
     assert_eq!(active_text(&editor), "ABC");
-    assert!(matches!(
-        view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "abc" && *selection == Selection::new(0, 3)
-    ));
+    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "abc");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 3)
+    );
 }
 
 #[test]

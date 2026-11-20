@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use crate::folding::merge_folds;
 use crate::selection::Selection;
 use crate::text::char_to_byte;
+use crate::undo::{EditKind, UndoEdit, UndoHistory};
 use crate::view_geometry::ViewGeometry;
 
 pub type DocumentId = u64;
@@ -121,6 +122,10 @@ pub struct Document {
     viewport_request: Option<(f32, f32)>,
     /// The fields of the snippet last inserted, while Tab / Shift+Tab visit them.
     snippet: Option<SnippetFields>,
+    /// The buffer's undo history (shared by its clones: each takes it when it follows the buffer).
+    undo: UndoHistory,
+    /// Who makes the next change [`note_text_changed`](Self::note_text_changed) hears about.
+    edit_kind: EditKind,
 }
 
 /// A snippet's fields (see `text_commands::insert_snippet_fields`): each field's regions, in
@@ -257,6 +262,8 @@ impl Document {
             geometry: ViewGeometry::default(),
             viewport_request: None,
             snippet: None,
+            undo: UndoHistory::default(),
+            edit_kind: EditKind::Command,
         }
     }
 
@@ -348,6 +355,7 @@ impl Document {
         view.modified_at = self.modified_at;
         view.group = self.group;
         view.change_count = self.change_count;
+        view.undo = self.undo.clone();
         view.set_selections(self.selection, self.extra_selections.clone());
         view
     }
@@ -356,6 +364,8 @@ impl Document {
     /// selections and regions move over the change as over an edit), file, saved text and
     /// settings. Its own change count goes up by one change.
     pub fn follow_buffer(&mut self, source: &Document) {
+        // Clones share the buffer's history: an undo in either takes back the same steps.
+        self.undo = source.undo.clone();
         if self.text != source.text {
             let before = std::mem::replace(&mut self.text, source.text.clone());
             let prefix = common_prefix(&before, &self.text);
@@ -405,6 +415,8 @@ impl Document {
     /// Takes the contents of a freshly read copy of the same file, keeping the caret.
     pub fn reload_from(&mut self, fresh: Document) {
         let caret = self.selection.head.min(fresh.text.chars().count());
+        // Undoable, as in Sublime.
+        self.ensure_tracked();
         self.text = fresh.text;
         self.note_text_changed();
         self.saved_text = fresh.saved_text;
@@ -419,6 +431,8 @@ impl Document {
     pub fn restore_unsaved_text(&mut self, text: String) {
         self.text = text;
         self.note_text_changed();
+        // What the session brings back is where the history starts.
+        self.undo = UndoHistory::default();
     }
 
     /// The text as it was last read from or written to disk.
@@ -493,8 +507,110 @@ impl Document {
                 before.len() - suffix,
                 self.text[prefix..self.text.len() - suffix].to_string(),
             );
+            let removed = before[prefix..end].to_string();
+            let caret_after = before[..prefix].chars().count() + inserted.chars().count();
+            self.record_undo(
+                UndoEdit {
+                    start: prefix,
+                    removed,
+                    inserted: inserted.clone(),
+                },
+                Selection::caret(caret_after),
+            );
             self.record_change(prefix, end, &inserted);
         }
+    }
+
+    /// The text widget changed the text (typing, deleting, pasting): as
+    /// [`note_text_changed`](Self::note_text_changed), and typing joins the undo step it continues.
+    pub fn note_typed_change(&mut self) {
+        self.edit_kind = EditKind::Typing;
+        self.note_text_changed();
+        self.edit_kind = EditKind::Command;
+    }
+
+    /// The text for the text widget to edit in place; what it changes is then told with
+    /// [`note_typed_change`](Self::note_typed_change), compared with a copy kept from here on.
+    pub fn text_for_widget(&mut self) -> &mut String {
+        self.ensure_tracked();
+        &mut self.text
+    }
+
+    /// Keeps a copy of the text from now on, to tell what the next in-place edit changed.
+    fn ensure_tracked(&mut self) {
+        self.tracked_text.get_or_insert_with(|| self.text.clone());
+    }
+
+    /// Adds an edit to the undo history, made with the current selections (`after`: those it
+    /// leaves, until the command that made it sets them).
+    fn record_undo(&mut self, edit: UndoEdit, after: Selection) {
+        let before = self.selections_for_undo();
+        self.undo.record(edit, self.edit_kind, before, vec![after]);
+    }
+
+    /// The selections, primary first, as the undo history keeps them.
+    fn selections_for_undo(&self) -> Vec<Selection> {
+        let mut all = vec![self.selection];
+        all.extend(self.extra_selections.iter().copied());
+        all
+    }
+
+    pub fn undo_history(&self) -> &UndoHistory {
+        &self.undo
+    }
+
+    /// No further edit joins the last undo step (a command ended, the caret moved away).
+    pub fn close_undo_step(&mut self) {
+        self.undo.close();
+    }
+
+    /// A command ended: its edits are one undo step, the next command's another.
+    pub fn close_command_undo_step(&mut self) {
+        self.undo.close_command();
+    }
+
+    /// `undo`: takes back the last step, and puts back the selections it had. False when there is
+    /// nothing to undo (or the document is read-only).
+    pub fn undo(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
+        match self.undo.undo() {
+            Some((edits, selections)) => self.apply_history(&edits, &selections),
+            None => false,
+        }
+    }
+
+    /// `redo`: does again the last step undone.
+    pub fn redo(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
+        match self.undo.redo() {
+            Some((edits, selections)) => self.apply_history(&edits, &selections),
+            None => false,
+        }
+    }
+
+    /// Applies edits of the history (not recorded again) and sets the selections. A history that
+    /// no longer matches the text (changed behind its back) is dropped.
+    fn apply_history(&mut self, edits: &[UndoEdit], selections: &[Selection]) -> bool {
+        self.ensure_tracked();
+        for edit in edits {
+            let end = edit.start + edit.removed.len();
+            if self.text.get(edit.start..end) != Some(edit.removed.as_str()) {
+                self.undo = UndoHistory::default();
+                return false;
+            }
+            self.text.replace_range(edit.start..end, &edit.inserted);
+            self.change_count += 1;
+            self.record_change(edit.start, end, &edit.inserted);
+        }
+        self.transient = false;
+        let mut selections = selections.iter().copied();
+        let primary = selections.next().unwrap_or(self.selection);
+        self.set_selections(primary, selections);
+        true
     }
 
     /// Moves the regions over a change of the bytes `start..end` of the tracked text (the text
@@ -714,6 +830,10 @@ impl Document {
         let selection = selection.clamped(self.char_count());
         if selection != self.selection {
             self.extra_selections.clear();
+            // The caret moved away from what was being typed: typing there is another undo step.
+            if !self.undo.leaves(selection) {
+                self.undo.close();
+            }
         }
         self.selection = selection;
     }
@@ -728,10 +848,12 @@ impl Document {
             return false;
         }
         let selection = self.selection.clamped(self.char_count());
+        self.ensure_tracked();
         match command(&mut self.text, selection) {
             Some(new_selection) => {
                 self.note_text_changed();
                 self.set_selection(new_selection);
+                self.undo.set_after(vec![self.selection]);
                 true
             }
             None => false,
@@ -753,6 +875,16 @@ impl Document {
             char_to_byte(&self.text, start),
             char_to_byte(&self.text, end),
         );
+        let removed = self.text[start_byte..end_byte].to_string();
+        let after = Selection::caret(start + insert.chars().count());
+        self.record_undo(
+            UndoEdit {
+                start: start_byte,
+                removed,
+                inserted: insert.to_string(),
+            },
+            after,
+        );
         self.text.replace_range(start_byte..end_byte, insert);
         self.change_count += 1;
         self.transient = false;
@@ -764,6 +896,7 @@ impl Document {
         let primary = moved(&self.selection);
         let extra: Vec<Selection> = self.extra_selections.iter().map(moved).collect();
         self.set_selections(primary, extra);
+        self.undo.set_after(self.selections_for_undo());
         true
     }
 
@@ -821,6 +954,7 @@ impl Document {
             && self.folds.is_empty()
             && self.change_log.is_none()
             && self.snippet.is_none()
+            && self.undo.is_empty()
         {
             self.tracked_text = None;
         }
@@ -971,6 +1105,7 @@ impl Document {
         let selections: Vec<Selection> = self.selections().iter().map(|s| s.clamped(len)).collect();
         let primary = self.selection.clamped(len);
         let primary_index = selections.iter().position(|s| *s == primary).unwrap_or(0);
+        self.ensure_tracked();
         let mut new = command(&mut self.text, &selections);
         if new.len() != selections.len() {
             return false;
@@ -982,6 +1117,7 @@ impl Document {
         new.dedup();
         new.retain(|s| *s != self.selection);
         self.extra_selections = new;
+        self.undo.set_after(self.selections_for_undo());
         true
     }
 }

@@ -73,13 +73,17 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   there are key equivalents AppKit takes before the window: `app.rs` gives them back to the keymap the next frame.
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
-- Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
+- Copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
   them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
   next bullet); a binding of another key to deleting, typing or moving the caret is replayed as the widget's own key
   (`bound_command` / `widget_replay`), so its undo keeps it. egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
   (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
-- Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
+- Undo is ours, not the widget's: each `Document` keeps a history of what each edit changed (`entities::undo`;
+  the widget's in-place edits are diffed against a kept copy, `Document::note_typed_change`). `undo` / `redo` are use
+  cases (`use_cases/src/undo.rs`), at once; `command_controller` closes a step before and after every command, and
+  `poll_plugins` after a frame's plugin edits. A focused find / input field undoes its own typing
+  (`ViewState::field_has_focus`).- Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
 - `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1"), and asks the keymap about
   a typed symbol (`*`, `"`: egui has no key for most, `input::typed_combo`), as Sublime binds them by character.
@@ -105,11 +109,11 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Every `command_controller::run` asks the plugins' `on_text_command` / `on_window_command` (when some listener has them)
   and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); with the fake host, script
-  one `PluginMessage::Answer` per query. With the text focused those listeners also take undo / redo / select all /
+  one `PluginMessage::Answer` per query. With the text focused those listeners also take select all /
   clipboard keys, typing (`Event::Text`) and the widget's own keys (`app.rs::widget_key_input`: Backspace/Delete,
   Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
-  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
-  IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
+  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so IME
+  stays its own. With several selections the use cases edit instead, since the widget only knows the primary one.
 - Find in Files (`use_cases/src/find_in_files.rs`, rules in `entities/src/find_in_files.rs`): `FileSearchGateway`
   (`gateways/folder_search.rs`) lists and searches on threads; `Editor::poll_find_in_files` (every frame) writes
   Find Results to the output panel `find_results` in Sublime 4215's exact format (checked by running it), so
@@ -144,7 +148,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
   completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done;
-  since 2026-11-14 also plugins' edits in the widget's undo, text input handlers in the palette's field, modifier keys,
+  since 2026-11-14 also plugins' edits in the undo history (our own since 2026-11-20), text input handlers in the palette's field, modifier keys,
   the console as a panel, the window's `is_*_visible`, `extract_scope` and `score_selector` as Sublime 4215 answers
   them, and the API 4215 has that ours lacked (checked by running Sublime with a throwaway profile and with Ghidra:
   "Checking against Sublime itself" there). Phase C has no unticked item left, and since 2026-11-15 neither has phase A

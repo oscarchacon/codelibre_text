@@ -1,10 +1,10 @@
-//! Use cases: code folding (Sublime's `fold`, `unfold`, `unfold_all`, `fold_by_level` and the
+//! Use cases: code folding (Sublime's `fold`, `unfold`, `unfold_all`, `fold_by_level`, `fold_tag_attributes` and the
 //! plugin API's `view.fold` / `unfold`). The folds live in the `Document` (`Document::fold`),
 //! the rules of what to fold in `entities::folding`. A caret that lands inside a fold unfolds it,
 //! so what it edits is never hidden.
 
 use entities::document::{Document, DocumentId};
-use entities::folding::{fold_region_at, folds_at_level};
+use entities::folding::{fold_region_at, folds_at_level, tag_attribute_folds};
 use entities::selection::Selection;
 
 use crate::editor::Editor;
@@ -93,6 +93,22 @@ impl Editor {
         let head = doc.selection().head;
         if let Some(&(a, _)) = doc.folds().iter().find(|&&(a, b)| head > a && head <= b) {
             doc.set_selection(Selection::caret(a));
+        }
+    }
+
+    /// `fold_tag_attributes`: the attributes of every tag (HTML, XML: found by their scopes).
+    pub fn fold_tag_attributes(&mut self) {
+        let Some(doc) = self.active_document() else {
+            return;
+        };
+        let tokens = self.line_tokens(doc, 0..usize::MAX);
+        let pieces: Vec<(usize, usize, &str)> = tokens
+            .iter()
+            .map(|t| (t.start, t.end, t.scope.as_str()))
+            .collect();
+        let folds = tag_attribute_folds(&doc.text, &pieces);
+        if let Some(doc) = self.active_document_mut() {
+            fold_moving_carets(doc, &folds);
         }
     }
 

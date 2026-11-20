@@ -30,7 +30,7 @@ cannot be told apart by the string scan and are listed under native.
 |---|---|---|
 | Multiple cursors | ~~`select_lines`, `split_selection_into_lines`, `find_all_under`~~ (done), `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `find_all` | native |
 | Selection | `expand_selection_to_paragraph`, `expand_selection` with `to: scope/tag` (brackets, indentation, smart: done) | native |
-| Code folding | ~~`fold`, `unfold`, `fold_by_level`, `unfold_all`~~ (done), `fold_tag_attributes`, `fold_unfold` | native / py |
+| Code folding | ~~`fold`, `unfold`, `fold_by_level`, `unfold_all`~~ (done), ~~`fold_tag_attributes`~~ (done, 2026-11-20), `fold_unfold` | native / py |
 | Bookmarks | `toggle_bookmark`, `next_bookmark`, `prev_bookmark`, `clear_bookmarks`, `select_all_bookmarks`, `select_bookmark` | native |
 | Mark & kill ring | `set_mark`, `select_to_mark`, `delete_to_mark`, `swap_with_mark`, `yank`, `add_to_kill_ring` | py |
 | Navigation history | ~~`jump_back`, `jump_forward`, `add_jump_record`~~ (done, 2026-11-19), `_jump` | native / py |

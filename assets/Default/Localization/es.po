@@ -1505,3 +1505,7 @@ msgstr "Ya está en la posición más antigua"
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Use Buffer: show the results in a tab"
 msgstr "Usar búfer: mostrar los resultados en una pestaña"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr "Plegar atributos de etiquetas"

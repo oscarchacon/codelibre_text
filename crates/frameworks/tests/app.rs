@@ -415,3 +415,41 @@ fn annotations_minimap_and_find_results_tab_as_drawn() {
     checks.key(Modifiers::NONE, Key::F4);
     checks.shot("k12_next_result");
 }
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn undo_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let code = files.path().join("code.py");
+    std::fs::write(&code, SOURCE).unwrap();
+    let mut checks = start(data.path(), vec![code]);
+    // Typing at the end of line 1, then a new line and more typing: two steps (a line break
+    // starts one).
+    checks.click(500.0, 70.0);
+    checks.key(Modifiers::NONE, Key::End);
+    for text in [" # one", "\n", "two"] {
+        if text == "\n" {
+            checks.key(Modifiers::NONE, Key::Enter);
+        } else {
+            // One char a frame, as a keyboard types.
+            for c in text.chars() {
+                checks.harness.input_mut().events.push(Event::Text(c.to_string()));
+                checks.settle(1);
+            }
+        }
+    }
+    checks.shot("u01_typed");
+    checks.key(Modifiers::COMMAND, Key::Z);
+    checks.shot("u02_undo_once");
+    checks.key(Modifiers::COMMAND, Key::Z);
+    checks.shot("u03_undo_twice");
+    checks.key(Modifiers::COMMAND, Key::Y);
+    checks.shot("u04_redo");
+    // A command (Ctrl+Shift+K deletes the line) is a step of its own.
+    checks.key(Modifiers::COMMAND | Modifiers::SHIFT, Key::K);
+    checks.shot("u05_line_deleted");
+    checks.key(Modifiers::COMMAND, Key::Z);
+    checks.shot("u06_line_back");
+}

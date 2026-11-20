@@ -13,7 +13,6 @@ use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
 use entities::project::Project;
 use entities::recent::RecentPaths;
-use entities::selection::Selection;
 use entities::settings::{Settings, SettingsLayers};
 use serde_json::Value;
 
@@ -55,16 +54,6 @@ pub struct Gateways {
 pub struct StatusMessage {
     pub text: String,
     pub shown_at: Instant,
-}
-
-/// The state immediately before a plugin changed a text widget's document. The UI adds this to
-/// egui's undo history before the next frame draws the widget.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginEditUndoBoundary {
-    pub window: crate::windows::WindowId,
-    pub document: DocumentId,
-    pub text: String,
-    pub selection: Selection,
 }
 
 /// Something waiting for the user to decide about unsaved changes.
@@ -193,9 +182,9 @@ pub struct EditorState {
     pub(crate) unpacking: bool,
     /// The packages were loaded during that unpacking: they are loaded again when it ends.
     pub(crate) loaded_while_unpacking: bool,
-    /// Previous states of documents changed by plugins, waiting for the UI to add them to the
-    /// corresponding text widgets' undo histories.
-    pub(crate) plugin_edit_undo_boundaries: Vec<PluginEditUndoBoundary>,
+    /// Views a plugin edited outside a command since the last frame: their edits are one undo
+    /// step (see [`Editor::close_plugin_undo_steps`]).
+    pub(crate) plugin_edited_views: Vec<DocumentId>,
 }
 
 pub struct Editor {
@@ -263,7 +252,7 @@ impl Editor {
                 last_disk_check: Instant::now(),
                 installed_packages: Vec::new(),
                 installed_packages_changed: None,
-                plugin_edit_undo_boundaries: Vec::new(),
+                plugin_edited_views: Vec::new(),
                 ignored_packages: None,
                 unpacking: false,
                 loaded_while_unpacking: false,
@@ -327,93 +316,6 @@ impl Editor {
         self.state.documents.get(self.state.active)
     }
 
-    /// Captures a tab and its clones before a plugin edit. Panels have no editable text widget
-    /// and therefore do not participate in the widget's undo history.
-    pub fn plugin_edit_undo_snapshot(&mut self, id: DocumentId) -> Vec<PluginEditUndoBoundary> {
-        let Some(window) = self.window_of_view(id) else {
-            return Vec::new();
-        };
-        let previous_window = self.current_window();
-        if window != previous_window && !self.switch_to_window(window) {
-            return Vec::new();
-        }
-        let snapshot = if self.is_panel_view(id) || self.index_of(id).is_none() {
-            Vec::new()
-        } else {
-            // A document that already waits for a boundary keeps the oldest state: every edit
-            // until the widget draws again is one undo step, as a command is in Sublime (and the
-            // text is not copied again for each `view.insert` of a plugin that makes many).
-            let pending = |document: DocumentId| {
-                self.state
-                    .plugin_edit_undo_boundaries
-                    .iter()
-                    .any(|b| b.window == window && b.document == document)
-            };
-            let ids = std::iter::once(id)
-                .chain(self.clones_of(id))
-                .filter(|&document| !pending(document))
-                .collect::<Vec<_>>();
-            ids.into_iter()
-                .filter_map(|document| {
-                    self.any_document(document)
-                        .map(|doc| PluginEditUndoBoundary {
-                            window,
-                            document,
-                            text: doc.text.clone(),
-                            selection: doc.selection(),
-                        })
-                })
-                .collect()
-        };
-        if window != previous_window {
-            self.switch_to_window(previous_window);
-        }
-        snapshot
-    }
-
-    /// Records changed snapshots for the framework UI. Clones are synchronized first so each
-    /// widget can receive a matching undo boundary.
-    pub fn record_plugin_edit_undo(&mut self, before: Vec<PluginEditUndoBoundary>) {
-        if before.is_empty() {
-            return;
-        }
-        for previous in before {
-            let current_window = self.current_window();
-            if previous.window != current_window && !self.switch_to_window(previous.window) {
-                continue;
-            }
-            self.sync_clones();
-            let pending = self
-                .state
-                .plugin_edit_undo_boundaries
-                .iter()
-                .any(|b| b.window == previous.window && b.document == previous.document);
-            if !pending
-                && self
-                    .any_document(previous.document)
-                    .is_some_and(|doc| doc.text != previous.text)
-            {
-                self.state.plugin_edit_undo_boundaries.push(previous);
-            }
-            if current_window != self.current_window() {
-                self.switch_to_window(current_window);
-            }
-        }
-    }
-
-    /// Drains plugin edits whose prior states should be added to text widget undo history.
-    pub fn take_plugin_edit_undo_boundaries(
-        &mut self,
-        window: crate::windows::WindowId,
-    ) -> Vec<PluginEditUndoBoundary> {
-        let (ready, pending): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.state.plugin_edit_undo_boundaries)
-                .into_iter()
-                .partition(|boundary| boundary.window == window);
-        self.state.plugin_edit_undo_boundaries = pending;
-        ready
-    }
-
     pub(crate) fn active_document_mut(&mut self) -> Option<&mut Document> {
         self.state.documents.get_mut(self.state.active)
     }
@@ -461,11 +363,11 @@ impl Editor {
         self.state.settings.global()
     }
 
-    /// The text of a document, for the editor widget to edit in place.
-    /// (The text widget owns typing, caret movement and undo; see `docs/architecture.md`.)
+    /// The text of a document, for the editor widget to edit in place (the widget owns typing and
+    /// caret movement; the undo history is the document's, see `entities::undo`).
     pub fn text_for_editing(&mut self, id: DocumentId) -> Option<&mut String> {
         let index = self.index_of(id)?;
         let doc = &mut self.state.documents[index];
-        (!doc.read_only).then_some(&mut doc.text)
+        (!doc.read_only).then(|| doc.text_for_widget())
     }
 }

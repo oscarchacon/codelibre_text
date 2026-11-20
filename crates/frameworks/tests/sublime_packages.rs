@@ -1629,3 +1629,131 @@ fn package_control_loads_in_a_scratch_profile() {
         "Package Control.sublime-settings"
     );
 }
+
+/// Sublime's own syntax tests (`syntax_test_*` files, shipped inside its packages), run on our
+/// highlighting: how many of their scope assertions hold, file by file. A measure, not a
+/// pass/fail check (syntect is not Sublime's parser). `CODELIBRE_SYNTAX_TESTS` is a folder of
+/// loose packages (Sublime's `.sublime-package` files unzipped); `CODELIBRE_SYNTAX_TEST_FILTER`
+/// keeps the test files whose path contains it.
+#[test]
+#[ignore = "reads the folder named by CODELIBRE_SYNTAX_TESTS"]
+fn sublime_syntax_tests_pass_rate() {
+    let Some(dir) = std::env::var_os("CODELIBRE_SYNTAX_TESTS").map(PathBuf::from) else {
+        eprintln!("skipped: no CODELIBRE_SYNTAX_TESTS");
+        return;
+    };
+    let filter = std::env::var("CODELIBRE_SYNTAX_TEST_FILTER").unwrap_or_default();
+    let paths = PackagePaths {
+        packages: dir.clone(),
+        sublime_packages: None,
+        archive_folders: Vec::new(),
+    };
+    let mut engine = SyntaxEngine::new(paths);
+    let mut errors = Vec::new();
+    engine.reload(false, &mut errors);
+    let names = engine.syntax_names();
+    let mut files: Vec<PathBuf> = ignore::WalkBuilder::new(&dir)
+        .standard_filters(false)
+        .build()
+        .filter_map(Result::ok)
+        .map(|e| e.into_path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("syntax_test"))
+                && p.to_string_lossy().contains(&filter)
+        })
+        .collect();
+    files.sort();
+    let (mut all_passed, mut all_total) = (0, 0);
+    for (index, file) in files.iter().enumerate() {
+        let Ok(text) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        let text = text.replace("\r\n", "\n");
+        let header = text.lines().next().unwrap_or_default();
+        let Some(at) = header.find("SYNTAX TEST") else {
+            continue;
+        };
+        if header.contains("reindent") || header.contains("partial-symbols") {
+            continue;
+        }
+        let token = header[..at].trim().to_string();
+        let Some(syntax_path) = header[at..].split('"').nth(1) else {
+            continue;
+        };
+        // `Packages/JavaScript/JavaScript.sublime-syntax`: the syntax whose file is that one.
+        let wanted = syntax_path.trim_start_matches("Packages/");
+        let Some(syntax) = names
+            .iter()
+            .find(|n| {
+                engine
+                    .syntax_path(n)
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+                    .ends_with(wanted)
+            })
+            .cloned()
+        else {
+            println!("{}: no syntax {syntax_path}", file.display());
+            continue;
+        };
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
+        let document = 1000 + index as u64;
+        let (mut passed, mut total) = (0, 0);
+        let mut failures = Vec::new();
+        let mut code_line = 0;
+        for (number, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            let indent = line.len() - trimmed.len();
+            let assertion = trimmed
+                .strip_prefix(token.as_str())
+                .map(|rest| (rest, rest.trim_start()))
+                .filter(|(_, r)| r.starts_with('^') || r.starts_with("<-"));
+            let Some((after_token, rest)) = assertion.filter(|_| number > 0) else {
+                code_line = number;
+                continue;
+            };
+            let (columns, selector) = if let Some(selector) = rest.strip_prefix("<-") {
+                (indent..indent + 1, selector)
+            } else {
+                let start = indent + token.len() + (after_token.len() - rest.len());
+                let carets = rest.chars().take_while(|c| *c == '^').count();
+                (start..start + carets, &rest[carets..])
+            };
+            let selector = selector.trim();
+            if selector.is_empty() {
+                continue;
+            }
+            let spans = engine.line_scopes(document, &text, &syntax, code_line);
+            for column in columns {
+                total += 1;
+                let scope = spans
+                    .iter()
+                    .find(|s| s.range.contains(&column))
+                    .map(|s| s.scope.as_str())
+                    .unwrap_or_default();
+                if entities::selector::matches_selector(scope, selector) {
+                    passed += 1;
+                } else if failures.len() < 3 {
+                    failures.push(format!("    line {}: {selector} at {column}: {scope}", code_line + 1));
+                }
+            }
+        }
+        println!(
+            "{:>6}/{:<6} {:5.1}%  {}",
+            passed,
+            total,
+            100.0 * passed as f64 / total.max(1) as f64,
+            file.strip_prefix(&dir).unwrap_or(file).display()
+        );
+        for failure in failures {
+            println!("{failure}");
+        }
+        all_passed += passed;
+        all_total += total;
+    }
+    println!(
+        "total {all_passed}/{all_total} ({:.1}%)",
+        100.0 * all_passed as f64 / all_total.max(1) as f64
+    );
+}

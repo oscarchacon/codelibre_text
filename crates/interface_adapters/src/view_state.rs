@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::menu::ContextMenuTarget;
-use entities::selection::Selection;
 use use_cases::plugin_hooks::CommandTarget;
 use use_cases::search::{Candidate, SearchKind};
 
@@ -99,12 +98,6 @@ pub enum ViewRequest {
         field: String,
         edit: WidgetEdit,
     },
-    /// Commit the pre-plugin text state to egui's undo history before the next widget frame.
-    WidgetUndoBoundary {
-        document: DocumentId,
-        text: String,
-        selection: Selection,
-    },
     SetFullscreen(bool),
     /// Close this window (the application, when it is the last one).
     CloseWindow,
@@ -136,6 +129,8 @@ pub struct ViewState {
     pub focus_editor: bool,
     /// The text area had the keyboard focus last frame (set by the framework before keys are handled).
     pub text_has_focus: bool,
+    /// Another text field had it (find, replace, the input panel): undo and redo are its own.
+    pub field_has_focus: bool,
     /// The user already agreed to quit with unsaved changes.
     pub exit_confirmed: bool,
     /// A menu of the main menu is open (plugin commands are asked about when it opens).
@@ -180,6 +175,7 @@ impl Default for ViewState {
             expanded_folders: HashSet::new(),
             focus_editor: true,
             text_has_focus: false,
+            field_has_focus: false,
             exit_confirmed: false,
             menu_open: false,
             context_menu: None,

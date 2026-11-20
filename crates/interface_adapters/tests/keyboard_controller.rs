@@ -326,12 +326,11 @@ fn bindings_to_text_widget_commands_let_the_key_through() {
         .with_binding(bind(&["ctrl+v"], Command::new("paste"), vec![]));
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    assert!(!press(&mut editor, &mut view, "ctrl+z"));
     assert!(!press(&mut editor, &mut view, "ctrl+v"));
-    assert!(
-        queued(&mut view).is_empty(),
-        "the widget undoes/pastes itself"
-    );
+    assert!(queued(&mut view).is_empty(), "the widget pastes itself");
+    // Undo is the documents' own history: the key runs the command.
+    assert!(press(&mut editor, &mut view, "ctrl+z"));
+    assert_eq!(queued(&mut view), ["undo"]);
 }
 
 #[test]
@@ -623,13 +622,13 @@ fn widget_keys_become_commands_when_plugins_listen_to_text_commands() {
 #[test]
 fn widget_keys_stay_with_the_widget_without_listeners_or_focus() {
     let (_world, mut editor, mut view) = hooked_editor(&["on_modified"]);
-    assert!(!press(&mut editor, &mut view, "ctrl+z"));
+    assert!(!press(&mut editor, &mut view, "ctrl+left"));
 
     let (_world, mut editor, mut view) = hooked_editor(&["on_post_text_command"]);
     view.text_has_focus = false;
     assert!(
-        !press(&mut editor, &mut view, "ctrl+z"),
-        "it undoes in the find field"
+        !press(&mut editor, &mut view, "ctrl+left"),
+        "it moves in the find field"
     );
     assert!(queued(&mut view).is_empty());
 }

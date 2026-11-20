@@ -231,6 +231,10 @@ msgid "Fold Level 9"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Convert Case"
 msgstr ""
 

@@ -49,14 +49,8 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
     // After the commands and edits of the frame, as Sublime's listener hears them.
     editor.poll_jump_history();
     show_plugin_panels(editor, view);
-    let current_window = editor.current_window();
-    for boundary in editor.take_plugin_edit_undo_boundaries(current_window) {
-        view.request(ViewRequest::WidgetUndoBoundary {
-            document: boundary.document,
-            text: boundary.text,
-            selection: boundary.selection,
-        });
-    }
+    // What plugins edited outside a command this frame is one undo step.
+    editor.close_plugin_undo_steps();
 }
 
 /// Shows the quick / input panels plugins asked for. A plugin's quick panel replaces whatever
@@ -470,9 +464,10 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
     editor.note_command(&command.name);
-    let undo_before = plugin_edit_undo_snapshot(editor, &command);
+    // The command's edits are one undo step: what came before is closed, and so is it.
+    editor.close_undo_steps();
     run_command(editor, view, &command);
-    editor.record_plugin_edit_undo(undo_before);
+    editor.close_undo_steps();
     view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;
@@ -486,22 +481,6 @@ fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
         });
     } else {
         editor.plugin_command_ran(&command, target);
-    }
-}
-
-/// Built-in editing commands bypass the text widget, so preserve their old text in its history.
-/// Direct `sublime_api` edits are tracked inside the use case API boundary.
-fn plugin_edit_undo_snapshot(
-    editor: &mut Editor,
-    command: &Command,
-) -> Vec<use_cases::editor::PluginEditUndoBoundary> {
-    if EDITING_COMMANDS.contains(&command.name.as_str()) {
-        let document = editor.active_document().map(|document| document.id);
-        document.map_or_else(Vec::new, |document| {
-            editor.plugin_edit_undo_snapshot(document)
-        })
-    } else {
-        Vec::new()
     }
 }
 
@@ -885,10 +864,17 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "set_max_columns" => editor.set_max_columns(command.usize_arg("columns", 4)),
         // ----- done by the text widget itself --------------------------------------------------
-        "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
-        "redo" | "redo_or_repeat" | "soft_redo" => {
-            view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo))
+        // A one-line field (find, replace, the input panel) undoes its own typing; the text, its
+        // history (`Editor::undo`).
+        name if UNDO_COMMANDS.contains(&name) && view.field_has_focus => {
+            let undo = matches!(name, "undo" | "soft_undo");
+            view.request(ViewRequest::WidgetEdit(if undo {
+                WidgetEdit::Undo
+            } else {
+                WidgetEdit::Redo
+            }))
         }
+        name if UNDO_COMMANDS.contains(&name) => run_undo_command(editor, command),
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
         // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
         "copy" | "cut" if editor.copies_whole_line() => {
@@ -1055,6 +1041,7 @@ const EDITOR_COMMANDS: &[&str] = &[
     "unfold",
     "unfold_all",
     "fold_by_level",
+    "fold_tag_attributes",
     "fold_all",
     "increase_font_size",
     "decrease_font_size",
@@ -1085,6 +1072,7 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "unfold_all" => editor.unfold_all(),
         "fold_by_level" => editor.fold_by_level(command.usize_arg("level", 1)),
         "fold_all" => editor.fold_by_level(1),
+        "fold_tag_attributes" => editor.fold_tag_attributes(),
         "increase_font_size" => editor.change_font_size(1.0),
         "decrease_font_size" => editor.change_font_size(-1.0),
         "reset_font_size" => editor.reset_font_size(),
@@ -1166,6 +1154,7 @@ fn run_document_command(editor: &mut Editor, command: &Command) {
 /// Whether a built-in command can run in the middle of a use case (it needs no view state).
 fn runs_during_event(name: &str) -> bool {
     EDITING_COMMANDS.contains(&name)
+        || UNDO_COMMANDS.contains(&name)
         || EDITOR_COMMANDS.contains(&name)
         || DOCUMENT_COMMANDS.contains(&name)
 }
@@ -1173,7 +1162,7 @@ fn runs_during_event(name: &str) -> bool {
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
 /// state: a formatter's command in `on_pre_save` must reach the file being saved. Output panels,
 /// the console and `exec` do their editor's part at once ([`panel_part_during_event`]). The
-/// others (the find and input panels, `build`, the widget's undo and redo) answer false and wait
+/// others (the find and input panels, `build`, answer false and wait
 /// for the next frame, which runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     let at_once = |name: &str| runs_during_event(name) || PANEL_COMMANDS.contains(&name);
@@ -1192,20 +1181,32 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
         }
         return true;
     }
-    let undo_before = plugin_edit_undo_snapshot(editor, &rewritten);
+    editor.close_undo_steps();
     if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
         run_editing_command(editor, &rewritten);
+    } else if UNDO_COMMANDS.contains(&rewritten.name.as_str()) {
+        run_undo_command(editor, &rewritten);
     } else if DOCUMENT_COMMANDS.contains(&rewritten.name.as_str()) {
         run_document_command(editor, &rewritten);
     } else {
         run_editor_command(editor, &rewritten);
     }
-    editor.record_plugin_edit_undo(undo_before);
+    editor.close_undo_steps();
     editor.plugin_command_ran(
         &rewritten,
         hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View),
     );
     true
+}
+
+/// Undo and redo, on the documents' own history: at once, also during an event.
+const UNDO_COMMANDS: &[&str] = &["undo", "soft_undo", "redo", "redo_or_repeat", "soft_redo"];
+
+fn run_undo_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "undo" | "soft_undo" => editor.undo(),
+        _ => editor.redo(),
+    };
 }
 
 /// The panel and build commands whose part in the editor runs during an event.

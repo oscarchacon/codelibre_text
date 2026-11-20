@@ -133,12 +133,14 @@ requests (fullscreen, close, widget edits) → present + draw → handle `UiEven
 ## Deliberate, documented exceptions
 
 - **Typing edits the text in place.** egui's `TextEdit` needs `&mut String` and owns typing, caret
-  movement, IME and undo; copying the whole buffer every frame would be too slow. So the editor view
+  movement and IME; copying the whole buffer every frame would be too slow. So the editor view
   gets the text through `Editor::text_for_editing` and reports the caret back with
   `UiEvent::SelectionChanged`. Selections made by commands flow the other way: when
   `Document::selection_revision` changes, the view moves the widget's caret.
-- **Undo, copy, cut, paste and select all** belong to the text widget, so the controllers turn
-  those commands into `ViewRequest::WidgetEdit`, which `app.rs` replays as widget input.
+- **Copy, cut, paste and select all** belong to the text widget, so the controllers turn
+  those commands into `ViewRequest::WidgetEdit`, which `app.rs` replays as widget input. Undo is not
+  the widget's: each `Document` keeps its own history (`entities::undo`), recorded from what each
+  in-place edit changed (`Document::note_typed_change`).
 - **`serde_json` and `regex` in Entities.** They are data utilities, not frameworks: settings and
   command arguments are JSON values in Sublime, and find is defined by regular expressions.
 - **File-format gateways read files with `std::fs`.** The standard library is not a framework;

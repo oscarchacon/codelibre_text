@@ -137,17 +137,13 @@ impl Editor {
     ) -> Result<Value, String> {
         // Every view of a buffer shows the same text when a plugin looks.
         self.sync_clones();
-        let undo_before = if matches!(function, "view_insert" | "view_erase" | "view_replace") {
-            args.first()
-                .and_then(Value::as_u64)
-                .map(|id| self.plugin_edit_undo_snapshot(id))
-        } else {
-            None
-        };
         let result = self.plugin_call_in_window(function, args, run_command);
         self.sync_clones();
-        if let Some(before) = undo_before {
-            self.record_plugin_edit_undo(before);
+        // Its edits outside a command are one undo step a frame (inside one, the command's).
+        if matches!(function, "view_insert" | "view_erase" | "view_replace") {
+            if let Some(id) = args.first().and_then(Value::as_u64) {
+                self.note_plugin_edit(id);
+            }
         }
         result
     }

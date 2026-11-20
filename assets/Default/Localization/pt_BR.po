@@ -1505,3 +1505,7 @@ msgstr "Já está na posição mais antiga"
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Use Buffer: show the results in a tab"
 msgstr "Usar buffer: mostrar os resultados em uma aba"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr "Recolher atributos de tags"

@@ -332,6 +332,7 @@ impl Editor {
     /// Arrow keys, Home and End while there are several selections: every caret moves.
     pub fn move_carets(&mut self, motion: CaretMotion) {
         if let Some(doc) = self.active_document_mut() {
+            doc.close_undo_step();
             doc.edit_all(|text, selections| tc::move_carets(text, selections, motion));
         }
     }

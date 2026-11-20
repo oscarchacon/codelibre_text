@@ -28,4 +28,5 @@ pub mod settings;
 pub mod symbol;
 pub mod text;
 pub mod text_commands;
+pub mod undo;
 pub mod view_geometry;

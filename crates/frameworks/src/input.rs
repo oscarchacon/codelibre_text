@@ -192,3 +192,44 @@ fn key_name(key: Key) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Break (Ctrl+Break: `cancel_build`), which egui has no key for. On Windows the system is asked
+/// each frame whether it went down (with Ctrl it is `VK_CANCEL`), while the window has the focus;
+/// elsewhere it is never seen (macOS binds Ctrl+C instead, as Sublime does).
+#[derive(Default)]
+pub struct BreakKey {
+    down: bool,
+}
+
+impl BreakKey {
+    /// The combo of a Break press this frame (`ctrl+break`), once per press.
+    pub fn poll(&mut self, ctx: &egui::Context) -> Option<KeyCombo> {
+        let (focused, modifiers) = ctx.input(|i| (i.focused, i.modifiers));
+        let down = focused && break_is_down();
+        let pressed = down && !self.down;
+        self.down = down;
+        pressed.then(|| KeyCombo {
+            ctrl: true,
+            alt: modifiers.alt,
+            shift: modifiers.shift,
+            super_key: false,
+            key: "break".to_string(),
+        })
+    }
+}
+
+#[cfg(windows)]
+fn break_is_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CANCEL, VK_CONTROL, VK_PAUSE,
+    };
+    // The high bit: down now; the low bit: pressed since the last call (a short press between
+    // two frames).
+    let pressed = |key: u16| unsafe { GetAsyncKeyState(i32::from(key)) } as u16 & 0x8001 != 0;
+    pressed(VK_CANCEL) || (pressed(VK_PAUSE) && pressed(VK_CONTROL))
+}
+
+#[cfg(not(windows))]
+fn break_is_down() -> bool {
+    false
+}

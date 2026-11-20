@@ -14,11 +14,6 @@ use crate::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 /// Commands the text widget already does when it receives the key itself.
 /// Bindings to them let the key through instead of running the command.
 const WIDGET_COMMANDS: &[&str] = &[
-    "undo",
-    "redo",
-    "redo_or_repeat",
-    "soft_undo",
-    "soft_redo",
     "copy",
     "cut",
     "paste",
