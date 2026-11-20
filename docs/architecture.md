@@ -67,7 +67,7 @@ each module adds the use cases of one area as methods:
 | `saving.rs` | save, save as, save all |
 | `editing.rs` | `run_text_command(TextCommand)`, go to line, clipboard text |
 | `find_replace.rs` | find next/previous, find under caret, find all, replace, cached matches |
-| `find_in_files.rs` | Find in Files: the "Where" field, the background search, Find Results in the `find_results` panel, replace in files |
+| `find_in_files.rs` | Find in Files: the "Where" field, the background search, Find Results in the `find_results` panel or a "Find Results" tab ("Use Buffer"), replace in files |
 | `preferences.rs` | settings, font size, color scheme, edit settings files |
 | `packages.rs` | load and reload Sublime resources |
 | `project.rs` | folders, folder listing, file index |

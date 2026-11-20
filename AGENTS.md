@@ -91,7 +91,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output
   panel's menu runs its entries on the panel (`Editor::run_in_panel_view`); a field's (`Widget Context.sublime-menu`)
   gives its clipboard entries to the field as `ViewRequest::FieldEdit`, injected by `App::raw_input_hook` like the
-  widget's replays (egui_kittest does not call that hook: `frameworks/tests/app.rs` calls it in `Checks::step`).
+  widget's replays (egui_kittest does not call that hook: `frameworks/tests/app.rs` calls it in `Checks::step`). Its harness moves time on 0.25 s a frame, so
+  a double click there sends each click in one frame (`Checks::double_click`).
 - Jump history (`entities/src/jump_history.rs`, `use_cases/src/jump_history.rs`): `Editor::poll_jump_history` (every
   frame, from `command_controller::poll_plugins`) records the active view's places, the commands that ran
   (`note_command`, also for keys the widget does itself and `UiEvent::TextClicked`) decide whether a change merges;
@@ -112,7 +113,9 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Find in Files (`use_cases/src/find_in_files.rs`, rules in `entities/src/find_in_files.rs`): `FileSearchGateway`
   (`gateways/folder_search.rs`) lists and searches on threads; `Editor::poll_find_in_files` (every frame) writes
   Find Results to the output panel `find_results` in Sublime 4215's exact format (checked by running it), so
-  `next_result` / double click work through `result_file_regex` / `result_line_regex`.
+  `next_result` / double click work through `result_file_regex` / `result_line_regex`. "Use Buffer" sends them to a "Find Results"
+  tab instead (`Editor::find_results_tab`); a double click in any tab with those settings opens a result
+  (`UiEvent::TextDoubleClicked`).
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
@@ -155,5 +158,5 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 ## Not implemented
 Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
 phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
-on the bundled 3.13), `fold_tag_attributes`, Find Results in a tab (`use_buffer`: they go to the `find_results` panel).
+on the bundled 3.13), `fold_tag_attributes`, `find_in_files_side_by_side`.
 Highlighting is skipped above 4 MB.

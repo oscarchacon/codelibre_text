@@ -296,6 +296,12 @@ pub fn show(
                 if selection != model.selection || output.response.changed() {
                     events.push(UiEvent::SelectionChanged(model.document, selection));
                 }
+                if output.response.double_clicked() {
+                    if let Some(pointer) = output.response.interact_pointer_pos() {
+                        let at = output.galley.cursor_from_pos(pointer - output.galley_pos);
+                        events.push(UiEvent::TextDoubleClicked(model.document, at.ccursor.index));
+                    }
+                }
                 if output.response.changed() && !typed.is_empty() {
                     events.push(UiEvent::TextTyped(
                         model.document,

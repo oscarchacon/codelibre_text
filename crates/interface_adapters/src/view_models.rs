@@ -228,6 +228,8 @@ pub struct FindPanelViewModel {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub wrap: bool,
+    /// Find in Files' "Use Buffer": the results go to a tab.
+    pub use_buffer: bool,
     /// e.g. `4 matches`, or the regex error.
     pub status: String,
     pub has_error: bool,

@@ -38,7 +38,7 @@ cannot be told apart by the string scan and are listed under native.
 | Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | `close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `focus_by_index`, `select_last_tab`, ~~`toggle_tabs`~~ (done), `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
-| Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), results in a tab (`use_buffer`), `find_in_files_side_by_side` | native / py |
+| Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), ~~results in a tab (`use_buffer`)~~ (done, 2026-11-20), `find_in_files_side_by_side` | native / py |
 | Snippets | `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
 | Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |

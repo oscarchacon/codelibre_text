@@ -378,8 +378,11 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       file as `~/path:` with its lines (`    2: match`, `    3  context`, `    .` between runs, `find_in_files_context_lines`),
       long lines cut to `find_in_files_context_characters` (`<skipped N characters>`), and `4 matches across 2 files`.
       Its `result_file_regex` / `result_line_regex` are Sublime's, so F4 and a double click go to each match (selected,
-      as in Sublime). `window.active_panel()` answers `find`, `replace` or `find_in_files` while one shows. Missing:
-      the results in a tab (Sublime's "Use Buffer"), with the matches outlined.
+      as in Sublime). `window.active_panel()` answers `find`, `replace` or `find_in_files` while one shows.
+      "Use Buffer" (2026-11-20; the find panel's toggle in Find in Files, `show_panel`'s `use_buffer`) writes them
+      to a "Find Results" scratch tab instead, each search added at its end, the matches outlined (`find_results_matches`, `DRAW_NO_FILL`); F4 and a
+      double click in the tab go through it too (`Editor::open_result_in_tab`, `UiEvent::TextDoubleClicked`, which also
+      opens the results of any tab with `result_file_regex`).
 - [x] **Command input handlers**: a command chosen in the palette (or `show_overlay` with `command`) asks
       `command_input`; when `input()` returns a handler, `sublime_plugin._CommandInput` asks in the existing panels
       (`ListInputHandler` in the quick panel, `TextInputHandler` in the input panel, with `validate`, `confirm`,
@@ -436,7 +439,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       the right edge of the view on its first line (several on a row stack leftwards), with the region's color (or
       `annotation_color`) as frame (`RegionSet::annotations`, `editor_view.rs::show_annotations`); a link calls
       `on_navigate(href)` (`PluginState::region_callbacks`, `UiEvent::AnnotationLinkClicked`). Drawn over the text of long
-      lines; `on_close` is never called (they cannot be closed). The link click was checked in tests, not yet by hand.
+      lines; `on_close` is never called (they cannot be closed). The link click was checked in tests and, on 2026-11-20, in the drawn window
+      (`frameworks/tests/app.rs::annotations_minimap_and_find_results_tab_as_drawn`).
 - [x] **Minimap** (`views/minimap.rs`, drawn by `editor_view.rs` between the text and the vertical scroll bar, as in
       Sublime: the scroll area takes the whole width, so its bar stays at the window's edge and the wheel scrolls over
       the minimap too; the text keeps out of the minimap's strip and the bar's lane, `minimap::bar_lane`): the text as a bar per
@@ -446,7 +450,8 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       a drag scrolls the text there. A text taller than the minimap scrolls it in step (`minimap::Geometry`).
       `toggle_minimap` (View menu, palette) hides it, saved with the session (`ViewState::show_minimap`). Text areas
       under 320 px have none. Tests: `frameworks/tests/minimap.rs`, `the_minimap_follows_toggle_minimap_and_its_settings`.
-      Not yet tried by hand.
+      Tried in the drawn window on 2026-11-20 (the same script): the hover box, a click and a drag scrolling the text,
+      a plugin's region on it, `toggle_minimap`.
 - [x] **What the window shows** (2026-11-14): `window.is_sidebar_visible` / `is_status_bar_visible` /
       `is_minimap_visible` and their `set_*_visible` (`window_is_ui_visible` / `window_set_ui_visible`). Those flags
       are the view's (`ViewState::layout`): `poll_plugins` reports them to the editor every frame

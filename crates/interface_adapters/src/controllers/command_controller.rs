@@ -1319,14 +1319,17 @@ fn find_in_files(editor: &mut Editor, view: &mut ViewState, replace: bool) {
     }
 }
 
-/// `show_panel`'s `where` (Find in Files) and the options `regex`, `case_sensitive` and
-/// `whole_word`, when given.
+/// `show_panel`'s `where` and `use_buffer` (Find in Files) and the options `regex`,
+/// `case_sensitive` and `whole_word`, when given.
 fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
     if let Some(place) = command.args.get("where").and_then(|v| v.as_str()) {
         editor.set_find_where(place.to_string());
     }
-    let mut options = editor.state().find.clone();
     let flag = |key: &str| command.args.get(key).and_then(|v| v.as_bool());
+    if let Some(on) = flag("use_buffer") {
+        editor.set_find_use_buffer(on);
+    }
+    let mut options = editor.state().find.clone();
     options.regex = flag("regex").unwrap_or(options.regex);
     options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
     options.whole_word = flag("whole_word").unwrap_or(options.whole_word);

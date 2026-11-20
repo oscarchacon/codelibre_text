@@ -31,8 +31,19 @@ pub struct OutputPanels {
     panels: Vec<OutputPanel>,
     shown: Option<String>,
     focused: Option<String>,
-    /// The panel `next_result` goes through: the last one shown that has results.
-    results: Option<String>,
+    /// The view `next_result` goes through: the last panel shown that has results, or a tab with
+    /// results (Find Results with "Use Buffer", one double-clicked).
+    results: Option<ResultsView>,
+}
+
+#[derive(Clone)]
+enum ResultsView {
+    Panel(String),
+    /// A tab, and the line of the result `next_result` went to last in it.
+    Tab {
+        id: DocumentId,
+        current: Option<usize>,
+    },
 }
 
 impl OutputPanels {
@@ -101,7 +112,7 @@ impl Editor {
         if self.state.output_panels.focused.as_deref() == Some(name) {
             self.state.output_panels.focused = None;
         }
-        if self.state.output_panels.results.as_deref() == Some(name) {
+        if matches!(&self.state.output_panels.results, Some(ResultsView::Panel(p)) if p == name) {
             self.state.output_panels.results = None;
         }
     }
@@ -181,15 +192,25 @@ impl Editor {
 
     /// `next_result` / `prev_result` go through this panel from now on, if it has results.
     pub(crate) fn remember_results_panel(&mut self, name: &str) {
-        let has_results = self.find_output_panel(name).is_some_and(|id| {
-            let settings = self.settings_of(id);
-            ["result_file_regex", "result_line_regex"]
-                .iter()
-                .any(|key| settings.str(key).is_some_and(|r| !r.is_empty()))
-        });
-        if has_results {
-            self.state.output_panels.results = Some(name.to_string());
+        if self
+            .find_output_panel(name)
+            .is_some_and(|id| self.has_result_settings(id))
+        {
+            self.state.output_panels.results = Some(ResultsView::Panel(name.to_string()));
         }
+    }
+
+    /// `next_result` / `prev_result` go through this tab from now on, from its first result.
+    pub(crate) fn remember_results_tab(&mut self, id: DocumentId) {
+        self.state.output_panels.results = Some(ResultsView::Tab { id, current: None });
+    }
+
+    /// Whether the view has `result_file_regex` or `result_line_regex`.
+    fn has_result_settings(&self, id: DocumentId) -> bool {
+        let settings = self.settings_of(id);
+        ["result_file_regex", "result_line_regex"]
+            .iter()
+            .any(|key| settings.str(key).is_some_and(|r| !r.is_empty()))
     }
 
     /// The results in a view, by its `result_*` settings.
@@ -207,17 +228,27 @@ impl Editor {
         .unwrap_or_default()
     }
 
-    /// `next_result` / `prev_result`: goes to the next result of the last panel that had them,
-    /// and shows that panel. False when there are none.
+    /// `next_result` / `prev_result`: goes to the next result of the last panel (shown) or tab
+    /// that had them. False when there are none.
     pub fn next_result(&mut self, forward: bool) -> bool {
-        let Some(panel) = self.state.output_panels.results.clone() else {
+        let Some(source) = self.state.output_panels.results.clone() else {
             return false;
         };
-        let Some(id) = self.find_output_panel(&panel) else {
-            return false;
+        let (id, current) = match &source {
+            ResultsView::Panel(name) => {
+                let Some(id) = self.find_output_panel(name) else {
+                    return false;
+                };
+                (id, self.panel_mut(name).and_then(|p| p.current_result))
+            }
+            ResultsView::Tab { id, current } => {
+                if !self.state.documents.iter().any(|d| d.id == *id) {
+                    return false;
+                }
+                (*id, *current)
+            }
         };
         let results = self.output_results(id);
-        let current = self.panel_mut(&panel).and_then(|p| p.current_result);
         // Past the last one it starts again.
         let result = if forward {
             results
@@ -234,8 +265,10 @@ impl Editor {
         let Some(result) = result.cloned() else {
             return false;
         };
-        self.state.output_panels.shown = Some(panel.clone());
-        self.visit_result(&panel, &result);
+        if let ResultsView::Panel(name) = &source {
+            self.state.output_panels.shown = Some(name.clone());
+        }
+        self.visit_result(id, &result);
         true
     }
 
@@ -251,20 +284,53 @@ impl Editor {
             return false;
         };
         self.remember_results_panel(&name);
-        self.visit_result(&name, &result);
+        self.visit_result(id, &result);
         true
     }
 
-    fn visit_result(&mut self, panel: &str, result: &ResultLocation) {
-        let base = self.find_output_panel(panel).and_then(|id| {
-            self.settings_of(id)
-                .str("result_base_dir")
-                .map(String::from)
-        });
-        if let Some(panel) = self.panel_mut(panel) {
+    /// The user double-clicked the char `point` of a tab: when the tab has results (Find Results
+    /// with "Use Buffer", a plugin's view with `result_file_regex`) and that line is one, goes to
+    /// it, and `next_result` goes on from there. False otherwise.
+    pub fn open_result_in_tab(&mut self, id: DocumentId, point: usize) -> bool {
+        if self.is_panel_view(id) || !self.has_result_settings(id) {
+            return false;
+        }
+        let Some(line) = self.any_document(id).map(|d| {
+            let byte = entities::text::char_to_byte(&d.text, point.min(d.char_count()));
+            d.text[..byte].matches('\n').count()
+        }) else {
+            return false;
+        };
+        let Some(result) = self.output_results(id).into_iter().find(|r| r.line == line) else {
+            return false;
+        };
+        self.remember_results_tab(id);
+        self.visit_result(id, &result);
+        true
+    }
+
+    /// Opens the file of a result of the view `id`, at its place.
+    fn visit_result(&mut self, id: DocumentId, result: &ResultLocation) {
+        let base = self
+            .settings_of(id)
+            .str("result_base_dir")
+            .map(String::from);
+        if let Some(panel) = self
+            .state
+            .output_panels
+            .panels
+            .iter_mut()
+            .find(|p| p.document.id == id)
+        {
             panel.current_result = Some(result.line);
             panel.result_revision += 1;
         }
+        if let Some(ResultsView::Tab { id: tab, current }) = &mut self.state.output_panels.results {
+            if *tab == id {
+                *current = Some(result.line);
+            }
+        }
+        let find_results = self.is_find_results_view(id);
         // Find Results writes the home folder as `~`.
         let file = match (
             result.file.strip_prefix("~/"),
@@ -281,7 +347,7 @@ impl Editor {
         }
         if self.open_file(&path) {
             self.go_to_position(result.row - 1, result.column - 1);
-            if panel == crate::find_in_files::FIND_RESULTS_PANEL {
+            if find_results {
                 self.select_find_result_match();
             }
         }

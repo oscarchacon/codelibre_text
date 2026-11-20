@@ -1501,3 +1501,7 @@ msgstr "Ya está en la posición más reciente"
 #: crates/use_cases/src/jump_history.rs
 msgid "Already at the earliest position"
 msgstr "Ya está en la posición más antigua"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Use Buffer: show the results in a tab"
+msgstr "Usar búfer: mostrar los resultados en una pestaña"

@@ -304,6 +304,37 @@ fn closing_a_normal_quick_panel_changes_no_setting() {
 // ----- find panel ----------------------------------------------------------------------------------
 
 #[test]
+fn show_panel_use_buffer_sends_the_results_to_a_tab() {
+    let world = World::new();
+    world.disk.put("/p/a.txt", "a foo\n");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "find_in_files", "use_buffer": true }),
+        ),
+    );
+    assert!(editor.find_use_buffer());
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    editor.poll_find_in_files();
+    assert!(editor.shown_output_panel().is_none());
+    assert_eq!(
+        editor.active_document().map(|d| d.id),
+        editor.find_results_tab()
+    );
+    assert!(active_text(&editor).contains("/p/a.txt:\n    1: a foo\n"));
+    run(&mut editor, &mut view, &cmd("next_result"));
+    assert_eq!(active_text(&editor), "a foo\n");
+}
+
+#[test]
 fn find_in_files_searches_into_the_results_panel() {
     let world = World::new();
     world.disk.put("/p/a.txt", "a foo\n");

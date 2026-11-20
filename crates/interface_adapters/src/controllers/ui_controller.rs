@@ -113,6 +113,8 @@ pub enum UiEvent {
     ReplacementChanged(String),
     /// Find in Files' "Where" field changed.
     FindWhereChanged(String),
+    /// Find in Files' "Use Buffer" toggle: its results in a tab.
+    FindUseBufferChanged(bool),
     /// Find in Files' Find button (or Enter in its fields).
     FindAll,
     FindNext,
@@ -129,6 +131,9 @@ pub enum UiEvent {
     TextEdited(DocumentId),
     /// A click, or the start of a drag, in the text widget (before its `SelectionChanged`).
     TextClicked(DocumentId),
+    /// A double click on the char at this point of a tab's text (a result opens, in a view
+    /// with results).
+    TextDoubleClicked(DocumentId, usize),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
     /// The text widget typed these characters (after `TextEdited` and `SelectionChanged`): they
@@ -399,6 +404,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
         UiEvent::FindWhereChanged(text) => editor.set_find_where(text),
+        UiEvent::FindUseBufferChanged(on) => editor.set_find_use_buffer(on),
         UiEvent::FindAll => view.queue_command(Command::new("find_all")),
         UiEvent::FindNext => view.queue_command(Command::new("find_next")),
         UiEvent::FindPrevious => view.queue_command(Command::new("find_prev")),
@@ -427,6 +433,11 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
 
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
         UiEvent::TextClicked(_) => editor.note_text_clicked(),
+        UiEvent::TextDoubleClicked(document, point) => {
+            if editor.open_result_in_tab(document, point) {
+                view.focus_editor = true;
+            }
+        }
         UiEvent::SelectionChanged(document, selection) => {
             editor.blur_output_panel();
             view.focused_output_panel = None;

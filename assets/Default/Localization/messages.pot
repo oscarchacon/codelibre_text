@@ -357,6 +357,7 @@ msgid "Find in Files…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: crates/use_cases/src/find_in_files.rs
 msgid "Find Results"
 msgstr ""
 
@@ -1501,6 +1502,10 @@ msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Whole word"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Use Buffer: show the results in a tab"
 msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs

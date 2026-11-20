@@ -13,7 +13,7 @@ use egui_kittest::Harness;
 
 const SOURCE: &str = "def outer():\n    if True:\n        a = 1\n        b = 2\n    return 3\n\nclass Thing:\n    def method(self):\n        pass\n\nprint('end')\n";
 
-const PLUGIN: &str = r#"import sublime
+const PLUGIN: &str = r##"import sublime
 import sublime_plugin
 
 
@@ -31,11 +31,26 @@ class GuiCheckMenuCommand(sublime_plugin.TextCommand):
 class GuiCheckHtmlCommand(sublime_plugin.WindowCommand):
     def run(self):
         self.window.new_html_sheet("Html sheet", "<h1>Heading</h1><p>Some <b>bold</b> text and <a href='x'>a link</a>.</p>")
-"#;
+
+
+class GuiCheckAnnotateCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        def navigate(href):
+            self.view.window().status_message("annotation link %s" % href)
+        line = self.view.line(self.view.text_point(4, 0))
+        far = self.view.line(self.view.text_point(150, 0))
+        self.view.add_regions(
+            "gui_check", [line, far], "invalid", "dot",
+            annotations=["<a href='first'>Go to first</a>", "far away"],
+            annotation_color="#e05050", on_navigate=navigate)
+"##;
 
 const KEYMAP: &str = r#"[
     { "keys": ["f9"], "command": "gui_check_menu" },
     { "keys": ["f8"], "command": "gui_check_html" },
+    { "keys": ["f7"], "command": "gui_check_annotate" },
+    { "keys": ["f6"], "command": "toggle_minimap" },
+    { "keys": ["f5"], "command": "show_panel", "args": { "panel": "find_in_files", "where": "<open files>" } },
 ]"#;
 
 struct Checks {
@@ -123,6 +138,56 @@ impl Checks {
             });
             self.step();
         }
+        self.settle(3);
+    }
+
+    /// Each click in one frame: the harness moves time on 0.25 s a frame, and egui takes two
+    /// clicks 0.3 s apart at most as a double click.
+    fn double_click(&mut self, x: f32, y: f32) {
+        let pos = Pos2::new(x, y);
+        self.harness
+            .input_mut()
+            .events
+            .push(Event::PointerMoved(pos));
+        self.step();
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                self.harness.input_mut().events.push(Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            self.step();
+        }
+        self.settle(3);
+    }
+
+    fn drag(&mut self, from: (f32, f32), to: (f32, f32)) {
+        let (from, to) = (Pos2::new(from.0, from.1), Pos2::new(to.0, to.1));
+        self.harness
+            .input_mut()
+            .events
+            .push(Event::PointerMoved(from));
+        self.step();
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        self.harness.input_mut().events.push(button(from, true));
+        self.step();
+        for step in 1..=8 {
+            let pos = from + (to - from) * (step as f32 / 8.0);
+            self.harness
+                .input_mut()
+                .events
+                .push(Event::PointerMoved(pos));
+            self.step();
+        }
+        self.harness.input_mut().events.push(button(to, false));
         self.settle(3);
     }
 
@@ -297,4 +362,56 @@ fn jump_history_and_context_menus_as_drawn() {
     checks.right_click(600.0, 814.0);
     checks.click(627.0, 771.0);
     checks.shot("j11_find_field_cut");
+}
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn annotations_minimap_and_find_results_tab_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let code = files.path().join("code.py");
+    std::fs::write(&code, SOURCE).unwrap();
+    let long = files.path().join("long.rs");
+    std::fs::write(&long, include_str!("../src/views/minimap.rs")).unwrap();
+    let mut checks = start(data.path(), vec![code, long]);
+    checks.shot("k01_long_file");
+    // A plugin's annotations (line 5 and line 151), their regions on the minimap too.
+    checks.key(Modifiers::NONE, Key::F7);
+    checks.shot("k02_annotations");
+    checks.hover(1180.0, 400.0);
+    checks.shot("k03_minimap_hovered");
+    // The annotation's link: the plugin's on_navigate says which in the status bar.
+    checks.click(1118.0, 139.0);
+    checks.shot("k04_annotation_link_clicked");
+    // A click low on the minimap scrolls the text there; a drag back up scrolls it back.
+    checks.click(1200.0, 780.0);
+    checks.shot("k05_minimap_clicked");
+    checks.drag((1200.0, 780.0), (1200.0, 300.0));
+    checks.shot("k06_minimap_dragged");
+    // toggle_minimap hides it.
+    checks.key(Modifiers::NONE, Key::F6);
+    checks.shot("k07_minimap_hidden");
+    checks.key(Modifiers::NONE, Key::F6);
+
+    // Find in Files with "Use Buffer": the results in a tab, the matches outlined.
+    checks.key(Modifiers::NONE, Key::F5);
+    checks
+        .harness
+        .input_mut()
+        .events
+        .push(Event::Text("Geometry".into()));
+    checks.settle(3);
+    checks.shot("k08_find_in_files_panel");
+    checks.click(131.0, 773.0);
+    checks.shot("k09_use_buffer_on");
+    checks.click(600.0, 773.0);
+    checks.key(Modifiers::NONE, Key::Enter);
+    checks.settle(20);
+    checks.shot("k10_find_results_tab");
+    // A double click on `54: impl Geometry` opens long.rs there; F4 goes on to the next match.
+    checks.double_click(380.0, 332.0);
+    checks.shot("k11_result_double_clicked");
+    checks.key(Modifiers::NONE, Key::F4);
+    checks.shot("k12_next_result");
 }
