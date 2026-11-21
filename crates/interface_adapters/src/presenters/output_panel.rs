@@ -52,8 +52,17 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> Option<OutputPanelViewM
         })
         .filter(|range| !range.is_empty())
         .collect();
+    // The console's keyboard focus is its field's: its text (a label) cannot keep it, and the text
+    // area would take it back.
+    let is_console = panel.name == "console";
+    let console_input = is_console.then(|| {
+        let focus = std::mem::take(&mut view.console_focus_requested) || take_focus;
+        (view.console_input.clone(), focus)
+    });
+    let take_focus = take_focus && !is_console;
     Some(OutputPanelViewModel {
         id: document.id,
+        console_input,
         name: if panel.name == "console" {
             editor.tr("Console").to_string()
         } else {

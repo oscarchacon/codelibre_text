@@ -1,6 +1,6 @@
 # Python plugins (Sublime Text API)
 
-Status: **phase A done** (2026-10-26); **phase B in progress** (core done 2026-10-28: request ids, calls
+Status: **phase A done** (2026-10-26); **phase B done** (2026-11-21; core done 2026-10-28: request ids, calls
 outside commands, real timers, view events; then quick and input panels; 2026-10-29 dialogs, resources,
 scratch views, `add_on_change`, output panels, statuses and regions drawn, `view.show`, `on_query_context`, command hooks;
 2026-10-30 output panel results, build systems, the input panel's view; 2026-11-02 stand-ins for the rest of the API,
@@ -29,8 +29,11 @@ its Find Results panel (below, with output panels).
 2026-11-15: phase A's last stand-ins made real (popup menus, the view's geometry, image and HTML sheets, folding
 with the gutter's arrows); in phase B the minimap's glyphs, `toggle_tabs` / `toggle_menu`, and output panels, the
 console and `exec` at once during events. 2026-11-20: our own undo history (undo / redo at once), Ctrl+Break, the
-tint of region icons as Sublime draws it, and `fold_tag_attributes`. What is left of B: the find and input panels and
-`build` at once during events.
+tint of region icons as Sublime draws it, and `fold_tag_attributes`. 2026-11-21: the find and input panels and
+`build` at once during events, the last unticked item of phase B; then the "Missing:" notes closed: `bol` / `eol` of
+wrapped rows, `word_separators` / `sub_word_separators`, `move_to_limit_on_up_down`, several side bar entries
+selected, `reveal_in_side_bar`, the `Tab Sidebar Context`, `Image Context` and `Console Input Widget Context` menus
+(with the console's Python input and the tab menus' other close commands), and `find_in_files_side_by_side`.
 
 Any agent (Claude Code, opencode, …) continuing this should read this file first, then `CLAUDE.md`.
 
@@ -197,7 +200,7 @@ passing its handler to a helper (`case 0x5e` → `FUN_006623f8` → `FUN_0057bb8
   popups and phantoms were stand-ins too; phase C made them real.)
   (`set_timeout*`, the dialogs, `is_scratch`, `add_regions`, `set_status` and `show` were stand-ins too; phase B made them real.)
 
-## Phase B — events, panels, async (in progress)
+## Phase B — events, panels, async (done)
 
 Goal: plugins that react to the editor and show UI (linters, formatters on save, quick-panel pickers).
 
@@ -223,7 +226,7 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
 - [x] Built-in commands that change only selections, the find string or settings (`EDITOR_COMMANDS` in
       `command_controller.rs`: `split_selection_into_lines`, `find_all_under`, `set_setting`, `set_file_type`…) also run at once,
       and so do saving, closing, select all and the clipboard (below).
-      The others (panels, builds, the widget's undo / redo…) wait for the next frame, and then run on the view
+      The others (clones, the quick panel, the build picker…) wait for the next frame, and then run on the view
       that asked (`queue_plugin_command` keeps it; the active view comes back afterwards).
 - [x] **Saving, closing, select all and the clipboard at once** (2026-11-13, `DOCUMENT_COMMANDS` in
       `command_controller.rs`): `save`, `prompt_save_as`, `save_all`, `revert`, `close` / `close_file`, `select_all`,
@@ -240,8 +243,18 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       `exec` do their editor's part during the event (a listener that shows `output.exec` and asks
       `window.active_panel()` gets it); the view's part (the find or input panel closed, the focus) follows next frame
       as the same command. Test: `a_listener_s_output_panel_is_shown_during_the_event`.
-- [ ] Still not at once: the find and input panels and `build` (its picker), so they wait for the next frame
-      (`runs_during_event`). Undo / redo run at once since 2026-11-20 (our own history, below).
+- [x] **The find and input panels and `build` at once** (2026-11-21, `panel_part_during_event` in
+      `command_controller.rs`): `show_panel` of `find` / `incremental_find` / `replace` / `find_in_files` (with
+      `toggle` and its find arguments) is shown for `window.active_panel()` during the event
+      (`Editor::show_find_panel_ahead`: the view's report, a frame behind, is not taken until the queued command runs in
+      `poll_plugins`); it, an output panel and `hide_panel` close the plugin's input panel at once, its `on_cancel`
+      running at the next `poll_plugins` (`Editor::cancel_plugin_input_panel_later`, outside the event; an input
+      handler's field is the palette's and closes next frame). `build` runs its target as a listener's own (`exec` at
+      once, a plugin's target next frame); its picker (`select`, or several builds that apply) is a quick panel, the
+      view's, and waits for the next frame. Undo / redo run at once since 2026-11-20 (our own history, below). Tests:
+      `a_listener_s_find_panel_is_shown_during_the_event`,
+      `a_listener_s_hide_panel_closes_the_input_panel_during_the_event`, `a_listener_s_build_runs_during_the_event`,
+      `a_listener_s_build_picker_waits_for_the_next_frame`.
 - [x] **`on_query_context`**: a key binding condition the keyboard controller's context does not know goes to the
       listeners (`Editor::press_key` wraps the context; the keymap is set aside while they answer). The operator
       becomes `sublime.OP_*`; the first `True` / `False` wins, `None` from everyone means the binding does not apply.
@@ -327,8 +340,16 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       selection, in tabs, panels and events (`entities::text_commands::{move_by, move_to}`). Key bindings to what the widget
       does itself (characters, lines, words, pages, line and text ends) go to it; the others run as commands
       (`keyboard_controller::widget_does`): Ctrl+M (`move_to brackets`), Alt+Left / Alt+Right (sub-words; Ctrl on macOS).
-      Missing: `bol` / `eol` of wrapped lines (they go to the logical line's), `separators` / `sub_word_separators`,
-      `move_to_limit_on_up_down`.
+      Since 2026-11-21: with word wrap, `bol` / `eol` (and Home / End at several carets) go to the ends of the row
+      drawn (`move_to_in_view`, `ViewGeometry::wrapped_row`; `eol` of a wrapped row stops before the space it broke
+      after); words and sub-words follow the `word_separators` / `sub_word_separators` settings, or the command's
+      `separators` / `sub_word_separators` (`text_commands::Separators`; also `view.classify` / `find_by_class`); and
+      `move_to_limit_on_up_down` (false, true on macOS: `Preferences (OSX).sublime-settings`): off, Up on the first row
+      (Down on the last) leaves the caret where it is (`Editor::caret_stays_on_up_down`, before the widget, which would
+      go to the start or end of the text). Tests: `bol_and_eol_go_to_the_ends_of_the_row_drawn_when_lines_wrap`,
+      `up_and_down_at_the_first_and_last_lines_follow_move_to_limit_on_up_down`,
+      `sub_words_are_separated_by_the_sub_word_separators` (`entities/tests/text_commands.rs`),
+      `up_and_down_on_the_first_and_last_rows_keep_the_caret_unless_move_to_limit_on_up_down` (`keyboard_controller.rs`).
 - [x] **Build systems**: every `*.sublime-build` in the packages, with the platform's overrides and `variants`. `build`
       (Ctrl+B, F7) uses the build set by `set_build_system` or picked before, else the one that applies by `selector` (the
       syntax's base scope), `file_patterns` or `keyfiles` (next to the file or above it, or in an open folder); several
@@ -371,6 +392,14 @@ Goal: plugins that react to the editor and show UI (linters, formatters on save,
       show an unlisted output panel named `console` (`Editor::show_console`), not a tab: the active tab stays, what is
       logged later is appended (`Editor::log`) and `window.active_panel()` answers `"console"`. Tests:
       `show_panel_console_opens_the_console`, `show_panel_toggle_hides_an_open_panel_and_the_console`.
+- [x] **The console's Python input** (2026-11-21): a field under the console (`output_panel.rs`, focused when the
+      console is shown) runs a line as Python in the plugin host, as Sublime's console does (`Editor::run_console_line`,
+      `{"op": "console", "code"}`, `plugin_host.py::console`): echoed as `>>> line`, run in one namespace kept from line to
+      line (`sublime`, `sublime_plugin` imported, `_` the last value), an expression's `repr` printed, a traceback without
+      the host's frame; the commands it runs go through the command controller. Up / Down go through the lines run
+      before (`ViewState::console_history`). Tests: `the_console_runs_python_lines_in_one_namespace`
+      (`python_plugin_host.rs`), `a_console_line_is_echoed_and_runs_in_the_plugin_host` (`use_cases/tests/context_menus.rs`),
+      `the_console_s_field_runs_its_line_and_keeps_a_history` (`ui_controller.rs`).
 - [x] **A focused panel's caret** (2026-11-14): `window.focus_view(panel)` or a click in the panel gives its view the
       focus (`Editor::focus_output_panel`, `UiEvent::OutputPanelFocused`); its caret is drawn while it has it, and a
       tab, a group or a click in the text takes it back (`blur_output_panel`).
@@ -737,7 +766,14 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       them (`EditorState::folders_revision`), and a plugin that defines one of these names (SideBarEnhancements,
       FileManager) runs instead. Tests: `use_cases/tests/side_bar.rs`, the side bar ones of
       `interface_adapters/tests/command_controller.rs` and `presenters.rs`, `frameworks/tests/std_file_system.rs`
-      (not the trash: it would fill the tester's). Missing: several selected side bar entries. `find_in_folder {"dirs"}` (since
+      (not the trash: it would fill the tester's). Several entries (2026-11-21): Ctrl (Cmd) + click adds a row to the
+      side bar's selection or takes it away, Shift + click selects the rows from the last one clicked
+      (`UiEvent::SideBarSelect`, `ViewState::side_bar_selection`); a right click on one of several selected opens the
+      menu for all of them (`ContextMenuTarget::SideBarSelection`: `files`, `dirs`, `paths`), and `reveal_in_side_bar`
+      shows the side bar with the folders down to the active file open, that file selected and scrolled to. Tests:
+      `clicks_in_the_side_bar_select_one_row_ctrl_adds_and_shift_selects_a_range` (`ui_controller.rs`),
+      `reveal_in_side_bar_opens_the_folders_down_to_the_file_and_selects_it` (`command_controller.rs`),
+      `a_selection_in_the_side_bar_fills_all_its_files_and_folders` (`entities/tests/menu.rs`). `find_in_folder {"dirs"}` (since
       2026-11-14) opens Find in Files on the folders, as Sublime's `side_bar.py`; SideBarEnhancements' runs instead.
 - [x] **More context menus** (2026-11-19): the text's menu also opens on its gutter (at the first char of the row
       clicked) and on an output panel (the console too), whose entries then run on the panel's view
@@ -748,8 +784,18 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       takes the focus back and gets them as input), the others run as usual. `event` carries the modifier keys held at
       the right click (`modifier_keys`, as `input::modifier_names` names them). A right click no longer moves the caret
       or drops the selection (egui's text fields put the caret at any button's press; `context_menu::keep_selection`
-      puts the selection back), so the menu's Copy has something to copy. Missing: `Console Input Widget Context`,
-      `Image Context` and `Tab Sidebar Context` (the side bar's open files use `Tab Context`). Tests:
+      puts the selection back), so the menu's Copy has something to copy. Since 2026-11-21 also `Tab Sidebar Context`
+      (the side bar's open files, `ContextMenuTarget::SideBarTab`), `Image Context` (an image sheet: Open Containing
+      Folder with `$file_path` / `$file_name`, `copy_path`, `reveal_in_side_bar`, `force_reopen_as {"type": "text"}`,
+      which reopens it as text in its place unless it is binary; its entries run with the image active; Sublime
+      Merge's are left out) and `Console Input Widget Context` (the console's field, `CONSOLE_INPUT`: cut, copy, paste,
+      select all; there is one host, so no `console_python_version`). The tab menus have Sublime's other entries:
+      `close_selected` / `close_unselected` (tabs are not multi-selected: the tab clicked, the others),
+      `close_unmodified`, `close_unmodified_to_right_by_index`, `close_deleted_files` (`Editor::close_by_index`). Tests:
+      `open_files_images_and_the_console_s_field_have_their_own_menus` (`entities/tests/menu.rs`),
+      `a_tab_closes_the_unmodified_tabs_and_those_of_deleted_files`,
+      `an_image_s_menu_copies_its_path_opens_its_folder_and_reopens_it_as_text` (`use_cases/tests/context_menus.rs`),
+      `an_image_s_menu_runs_its_entries_with_the_image_active` (`ui_controller.rs`), and the older ones:
       `the_entries_of_an_output_panel_s_context_menu_run_on_the_panel`,
       `the_clipboard_entries_of_a_field_s_context_menu_go_to_the_field` (`ui_controller.rs`), and
       `jump_history_and_context_menus_as_drawn` (`frameworks/tests/app.rs`).
@@ -951,3 +997,22 @@ syntect in that run was the Markdown item above, fixed.)
 `package_control_installs_from_local_repositories_and_channels` (no network) checks `add_repository`, `add_channel`,
 unpacked packages and `revert_package`. `package_control_migrates_package_control_3_dependencies` (no network) checks the migration of a Package Control 3 profile,
 `package_control_removes_a_locked_package_at_the_next_start` (Windows, no network) a removal deferred to the next start.
+
+## Known limits (pending, with the project's general work)
+
+Package Control needs nothing more from phases A, B and C. These limits stay, on purpose or until a package needs
+them, and are taken up with the rest of the project's pending work (`docs/sublime-gap-analysis.md`):
+
+- [ ] **Packages of Sublime's profile are not Package Control's**: they load (`import_sublime_packages`), but it neither
+      lists, upgrades nor removes them, since Sublime's `User/Package Control*.sublime-settings` are not adopted (else
+      it would download all of Sublime's packages again; see "What Package Control still missed").
+- [ ] **One Python, the bundled 3.13**: no 3.3 or 3.8 host, `.python-version` not read. Packages that use `async` /
+      `await` as names or methods of C types later Pythons dropped (`Element.getchildren`, `array.tostring`…) need an
+      updated release.
+- [ ] **Modules Python 3.13 removed with no shim yet**: `telnetlib`, `mailcap`, `cgitb`, `smtpd`, `nntplib`, `xdrlib`,
+      `chunk`, `sndhdr`, `crypt`, `lib2to3`… (`assets/python/shims/`), each when a package imports it.
+- [ ] **The other modules of Sublime's `Default`** (`assets/python/Default/`), each when a package imports it.
+- [ ] As in Sublime: the timers of an unloaded package go on, and a kept package that imported a changed one's modules
+      is not reloaded.
+- [ ] The network runs of `sublime_packages.rs` (`-- --ignored`) were last made on 2026-11-04: run them again before
+      a release.

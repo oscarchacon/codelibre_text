@@ -1777,16 +1777,20 @@ impl Colors {
 }
 
 /// An HTML sheet (the plugin's minihtml) or an image sheet (the picture, at its size, smaller to
-/// fit the tab), in the color scheme's colors, where a text sheet shows its text.
+/// fit the tab), in the color scheme's colors, where a text sheet shows its text. An image sheet
+/// has its menu (`Image Context.sublime-menu`).
 pub fn show_sheet(
     ui: &mut egui::Ui,
     model: &EditorViewModel,
     sheet: &SheetViewModel,
     engine: &SharedSyntaxEngine,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
 ) {
     let colors = Colors::from_scheme(&engine.borrow_mut().scheme(&model.color_scheme).settings);
     ui.painter()
         .rect_filled(ui.available_rect_before_wrap(), 0.0, colors.background);
+    let whole = ui.available_rect_before_wrap();
     egui::ScrollArea::both()
         .id_salt(("sheet_scroll", model.document))
         .auto_shrink([false, false])
@@ -1820,4 +1824,16 @@ pub fn show_sheet(
                 });
             }
         });
+    // Over the picture, after it, so its right click reaches the menu.
+    if let SheetViewModel::Image { .. } = sheet {
+        let area = ui.interact(
+            whole,
+            ui.id().with(("image_sheet", model.document)),
+            egui::Sense::CLICK,
+        );
+        let target = ContextMenuTarget::Image {
+            document: model.document,
+        };
+        context_menu::attach(&area, target, menu, events);
+    }
 }

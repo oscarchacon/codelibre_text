@@ -425,3 +425,43 @@ fn closing_the_tab_ends_its_results() {
     assert_eq!(editor.find_results_tab(), None);
     assert!(!editor.next_result(true));
 }
+
+#[test]
+fn find_in_files_side_by_side_opens_a_result_beside_the_tab() {
+    let world = World::new().with_preferences(json!({ "find_in_files_side_by_side": true }));
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    let text = tab_text(&editor);
+    let line = text.find("    1: foo").unwrap();
+    let point = text[..line].chars().count() + 3;
+    assert!(editor.open_result_in_tab(tab, point));
+    assert_eq!(editor.group_count(), 2, "a second column");
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        doc.path.as_deref(),
+        Some(Path::new("/home/user/data/sub/b.txt"))
+    );
+    assert_eq!(doc.group, 1, "beside the Find Results tab");
+    let results = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.id == tab)
+        .unwrap();
+    assert_eq!(results.group, 0, "which stays where it was");
+
+    // Without the setting, the result opens in the tab's group.
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    assert!(editor.open_result_in_tab(tab, point));
+    assert_eq!(editor.group_count(), 1);
+}

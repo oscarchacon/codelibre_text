@@ -950,7 +950,7 @@ fn show_group(
     if let Some(sheet) = &model.sheet {
         egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            editor_view::show_sheet(ui, model, sheet, engine);
+            editor_view::show_sheet(ui, model, sheet, engine, menu, events);
         });
         return;
     }

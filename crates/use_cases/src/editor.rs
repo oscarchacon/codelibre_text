@@ -146,6 +146,9 @@ pub struct EditorState {
     pub(crate) window_chrome: Vec<(String, bool)>,
     /// The find panel the current window's view shows (`Editor::sync_find_panel`).
     pub(crate) find_panel_shown: Option<String>,
+    /// A listener showed or hid the find panel during an event: `find_panel_shown` is ahead of
+    /// the view until the queued commands run (`Editor::show_find_panel_ahead`).
+    pub(crate) find_panel_ahead: bool,
     /// What plugins asked the current window to show or hide (`window.set_*_visible`).
     pub(crate) window_chrome_requests: Vec<(String, bool)>,
     /// What each view of a buffer with clones looked like when they last followed each other.
@@ -238,6 +241,7 @@ impl Editor {
                 window_closing: false,
                 window_chrome: Vec::new(),
                 find_panel_shown: None,
+                find_panel_ahead: false,
                 window_chrome_requests: Vec::new(),
                 meta_preferences: Vec::new(),
                 completion_sets: None,

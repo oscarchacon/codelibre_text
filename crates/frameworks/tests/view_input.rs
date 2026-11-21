@@ -60,6 +60,7 @@ fn button(pos: Pos2, pressed: bool) -> Event {
 
 fn panel() -> OutputPanelViewModel {
     OutputPanelViewModel {
+        console_input: None,
         id: 42,
         name: "exec".into(),
         text: "compiling\na.py:2:5 boom\na.py:3:1 second\n".into(),

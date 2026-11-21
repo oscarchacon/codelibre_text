@@ -52,7 +52,10 @@ fn each_command_is_one_undo_step_and_undo_runs_at_once() {
 
     run(&mut editor, &mut view, &cmd("undo"));
     assert_eq!(active_text(&editor), "hell", "one command taken back");
-    assert!(view.take_requests().is_empty(), "nothing left for the widget");
+    assert!(
+        view.take_requests().is_empty(),
+        "nothing left for the widget"
+    );
     run(&mut editor, &mut view, &cmd("soft_undo"));
     assert_eq!(active_text(&editor), "hello");
     assert_eq!(
@@ -1080,13 +1083,7 @@ fn select_all_and_clipboard_commands_are_left_to_the_text_widget() {
     *world.clipboard.borrow_mut() = Ok("clip".into());
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    for name in [
-        "select_all",
-        "copy",
-        "cut",
-        "paste",
-        "paste_and_indent",
-    ] {
+    for name in ["select_all", "copy", "cut", "paste", "paste_and_indent"] {
         run(&mut editor, &mut view, &cmd(name));
     }
     let edits: Vec<WidgetEdit> = view
@@ -1324,7 +1321,10 @@ fn a_listener_s_replacement_is_undone_to_the_original_text() {
     poll_plugins(&mut editor, &mut view);
 
     assert_eq!(active_text(&editor), "ABC");
-    world.plugins.then([PluginMessage::Answer(Value::Null), PluginMessage::Answer(Value::Null)]);
+    world.plugins.then([
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+    ]);
     run(&mut editor, &mut view, &cmd("undo"));
     assert_eq!(active_text(&editor), "abc");
     assert_eq!(
@@ -1651,6 +1651,148 @@ fn a_listener_s_output_panel_is_shown_during_the_event() {
     poll_plugins(&mut editor, &mut view);
     assert!(!view.find_panel.visible);
     assert_eq!(editor.shown_output_panel().unwrap().name, "tool");
+}
+
+#[test]
+fn a_listener_s_find_panel_is_shown_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "output.exec" })),
+    );
+    world.plugins.then([
+        plugin_call(
+            "run_command",
+            json!(["window", id, "show_panel", { "panel": "replace", "regex": true }]),
+        ),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(json!("replace"))),
+        "shown before the listener asks"
+    );
+    assert!(editor.state().find.regex, "its arguments are taken at once");
+    assert!(
+        editor.shown_output_panel().is_none(),
+        "it takes the output panel's place"
+    );
+    // The view's part, next frame: what the view reports before it does is not taken.
+    assert!(!view.find_panel.visible);
+    editor.sync_find_panel(None);
+    assert_eq!(editor.find_panel_shown(), Some("replace"));
+    poll_plugins(&mut editor, &mut view);
+    assert!(view.find_panel.visible && view.find_panel.replace_mode);
+    assert_eq!(editor.find_panel_shown(), Some("replace"));
+    // From then on the view's report counts again.
+    view.find_panel.visible = false;
+    editor.sync_find_panel(view.find_panel_name());
+    assert_eq!(editor.find_panel_shown(), None);
+}
+
+#[test]
+fn a_listener_s_hide_panel_closes_the_input_panel_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.meanwhile([plugin_call(
+        "window_show_input_panel",
+        json!([1, "Name:", "x", 7, false]),
+    )]);
+    poll_plugins(&mut editor, &mut view);
+    assert!(view.input_panel.is_some());
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "hide_panel", null])),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(Value::Null)),
+        "closed before the listener asks"
+    );
+    assert!(editor.plugin_input_panel().is_none());
+    assert!(
+        world.plugins.callbacks.borrow().is_empty(),
+        "its on_cancel waits until the event is over"
+    );
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        *world.plugins.callbacks.borrow(),
+        vec![(7, "cancel".to_string(), json!([]))]
+    );
+    assert!(view.input_panel.is_none());
+}
+
+#[test]
+fn a_listener_s_build_runs_during_the_event() {
+    let world = build_world().with_plugins(&[], &["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.py");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "build", null])),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(world.processes.started.borrow().len(), 1, "started at once");
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(json!("output.exec")))
+    );
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        world.processes.started.borrow().len(),
+        1,
+        "not started again"
+    );
+}
+
+#[test]
+fn a_listener_s_build_picker_waits_for_the_next_frame() {
+    let world = build_world()
+        .with_resource(
+            "Packages/U/Other.sublime-build",
+            r#"{ "selector": "source.python", "cmd": ["other"] }"#,
+        )
+        .with_plugins(&[], &["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.py");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "build", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert!(view.quick_panel.is_none());
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        view.quick_panel.as_ref().map(|p| p.kind),
+        Some(SearchKind::BuildSystems)
+    );
+    assert!(world.processes.started.borrow().is_empty());
 }
 
 #[test]
@@ -2288,4 +2430,43 @@ fn a_plugin_side_bar_command_replaces_the_built_in_one() {
     );
     assert!(world.disk.trashed.borrow().is_empty());
     assert_eq!(world.plugins.runs.borrow()[0].1, "delete_file");
+}
+
+#[test]
+fn reveal_in_side_bar_opens_the_folders_down_to_the_file_and_selects_it() {
+    let world = World::new();
+    world.disk.put("/p/sub/deep/a.txt", "a");
+    world.disk.put("/elsewhere/b.txt", "b");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    view.show_side_bar = false;
+    open(&mut editor, "/p/sub/deep/a.txt");
+    run(&mut editor, &mut view, &cmd("reveal_in_side_bar"));
+    assert!(view.show_side_bar);
+    for folder in ["/p", "/p/sub", "/p/sub/deep"] {
+        assert!(
+            view.expanded_folders.contains(&PathBuf::from(folder)),
+            "{folder}"
+        );
+    }
+    let file = PathBuf::from("/p/sub/deep/a.txt");
+    assert_eq!(view.side_bar_selection, std::slice::from_ref(&file));
+    let presented = interface_adapters::presenters::side_bar::present(&editor, &mut view);
+    let row = presented
+        .folders
+        .iter()
+        .find(|row| row.path == file)
+        .unwrap();
+    assert!(row.reveal && row.selected, "scrolled to, once");
+    let again = interface_adapters::presenters::side_bar::present(&editor, &mut view);
+    assert!(!again.folders.iter().any(|row| row.reveal));
+
+    open(&mut editor, "/elsewhere/b.txt");
+    run(&mut editor, &mut view, &cmd("reveal_in_side_bar"));
+    assert_eq!(
+        view.side_bar_selection,
+        [file],
+        "not in the window's folders"
+    );
 }

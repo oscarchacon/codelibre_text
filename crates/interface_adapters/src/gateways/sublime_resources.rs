@@ -118,6 +118,14 @@ impl ResourceGateway for SublimeResourceGateway {
             &mut layers,
             "Preferences.sublime-settings",
         );
+        if platform_name() == "OSX" {
+            add(
+                "Default",
+                builtin_resources::OSX_PREFERENCES,
+                &mut layers,
+                "Preferences (OSX).sublime-settings",
+            );
+        }
 
         // The user decides whether Sublime Text's own packages are read too.
         let include_sublime = self
@@ -185,6 +193,18 @@ impl ResourceGateway for SublimeResourceGateway {
             widget: menu(
                 builtin_resources::WIDGET_CONTEXT_MENU,
                 "Widget Context.sublime-menu",
+            ),
+            tab_side_bar: menu(
+                builtin_resources::TAB_SIDEBAR_CONTEXT_MENU,
+                "Tab Sidebar Context.sublime-menu",
+            ),
+            console_input: menu(
+                builtin_resources::CONSOLE_INPUT_CONTEXT_MENU,
+                "Console Input Widget Context.sublime-menu",
+            ),
+            image: menu(
+                builtin_resources::IMAGE_CONTEXT_MENU,
+                "Image Context.sublime-menu",
             ),
         };
 

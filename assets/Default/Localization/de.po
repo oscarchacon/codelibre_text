@@ -1509,3 +1509,47 @@ msgstr "Puffer verwenden: Ergebnisse in einem Tab anzeigen"
 #: assets/Default/Main.sublime-menu
 msgid "Fold Tag Attributes"
 msgstr "Tag-Attribute einklappen"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Selected Tabs"
+msgstr "Ausgewählte Tabs schließen"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unselected Tabs"
+msgstr "Nicht ausgewählte Tabs schließen"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs"
+msgstr "Unveränderte Tabs schließen"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Unmodified Tabs to the Right"
+msgstr "Unveränderte Tabs rechts schließen"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs With Deleted Files"
+msgstr "Tabs gelöschter Dateien schließen"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs Below"
+msgstr "Tabs darunter schließen"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs Below"
+msgstr "Unveränderte Tabs darunter schließen"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Copy File Path"
+msgstr "Dateipfad kopieren"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reveal in Side Bar"
+msgstr "In der Seitenleiste zeigen"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reopen File as Text"
+msgstr "Datei als Text erneut öffnen"

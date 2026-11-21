@@ -2,9 +2,11 @@
 //! what the views draw without a person at the keyboard. Run by hand (it needs a GPU, or a
 //! software Vulkan such as lavapipe):
 //! `cargo test -p codelibre_text --test app -- --ignored --nocapture`; the pictures land in
-//! `target/tmp/gui-checks`.
+//! `target/tmp/gui-checks`. The tests take turns (`TURN`): each points `CODELIBRE_TEXT_DATA`, which
+//! the whole process shares, at its own profile.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use codelibre_text::app::App;
 use codelibre_text::compose;
@@ -53,9 +55,13 @@ const KEYMAP: &str = r#"[
     { "keys": ["f5"], "command": "show_panel", "args": { "panel": "find_in_files", "where": "<open files>" } },
 ]"#;
 
+/// Held by a test's window from its start to its end, so the tests run one at a time.
+static TURN: Mutex<()> = Mutex::new(());
+
 struct Checks {
     harness: Harness<'static, App>,
     out: PathBuf,
+    _turn: MutexGuard<'static, ()>,
 }
 
 impl Checks {
@@ -102,6 +108,15 @@ impl Checks {
             });
             self.step();
         }
+        self.settle(3);
+    }
+
+    /// Text typed into the widget that has the focus.
+    fn type_text(&mut self, text: &str) {
+        self.harness
+            .input_mut()
+            .events
+            .push(Event::Text(text.to_string()));
         self.settle(3);
     }
 
@@ -201,6 +216,8 @@ impl Checks {
 }
 
 fn start(data: &Path, files: Vec<PathBuf>) -> Checks {
+    // A test that failed holding it leaves it poisoned; the next one still runs.
+    let turn = TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("CODELIBRE_TEXT_DATA", data);
     let harness = Harness::builder()
         .with_size(egui::Vec2::new(1300.0, 860.0))
@@ -211,7 +228,11 @@ fn start(data: &Path, files: Vec<PathBuf>) -> Checks {
         });
     let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gui-checks");
     std::fs::create_dir_all(&out).unwrap();
-    let mut checks = Checks { harness, out };
+    let mut checks = Checks {
+        harness,
+        out,
+        _turn: turn,
+    };
     // The plugins load in the background.
     for _ in 0..40 {
         checks.settle(5);
@@ -340,6 +361,12 @@ fn jump_history_and_context_menus_as_drawn() {
     // The console (an output panel): its menu, Select All in it.
     checks.key(Modifiers::COMMAND, Key::Backtick);
     checks.shot("j07_console");
+    // Its field (focused when it shows) runs Python in the plugin host, one namespace.
+    checks.type_text("x = 6 * 7");
+    checks.key(Modifiers::NONE, Key::Enter);
+    checks.type_text("x");
+    checks.key(Modifiers::NONE, Key::Enter);
+    checks.shot("j07b_console_python");
     checks.right_click(60.0, 688.0);
     checks.shot("j08_console_menu");
     checks.click(110.0, 775.0);
@@ -435,7 +462,11 @@ fn undo_as_drawn() {
         } else {
             // One char a frame, as a keyboard types.
             for c in text.chars() {
-                checks.harness.input_mut().events.push(Event::Text(c.to_string()));
+                checks
+                    .harness
+                    .input_mut()
+                    .events
+                    .push(Event::Text(c.to_string()));
                 checks.settle(1);
             }
         }

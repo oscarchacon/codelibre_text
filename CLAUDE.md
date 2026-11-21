@@ -29,7 +29,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
   `cargo test -p codelibre_text --test app -- --ignored --nocapture` (`frameworks/tests/app.rs`, egui_kittest with wgpu,
   needs a GPU or lavapipe) drives the whole window off screen (keys, clicks, a test plugin) and saves pictures to
-  `target/tmp/gui-checks` to look at: extend its script when a change is visual.
+  `target/tmp/gui-checks` to look at: extend its script when a change is visual. Its tests take turns (a lock in
+  `start`, as each points the process's `CODELIBRE_TEXT_DATA` at its own profile), so no `--test-threads=1` is needed.
 - CI (`.github/workflows/ci.yml`) builds and runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
   and pull requests into them or a `release/**` branch (SonarQube is a TODO job there). macOS joins them when the commit has a tag `macos-test*` (pushed
   with it: `git push --atomic -f origin develop macos-test`; the tag starts no run of its own), a manual run with
@@ -144,7 +145,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
-- `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
+- `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
   completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done;
@@ -153,14 +154,18 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   them, and the API 4215 has that ours lacked (checked by running Sublime with a throwaway profile and with Ghidra:
   "Checking against Sublime itself" there). Phase C has no unticked item left, and since 2026-11-15 neither has phase A
   (`show_popup_menu`, folding, the view's geometry, `TextSheet` / `ImageSheet`); phase B then got the minimap's glyphs,
-  `toggle_tabs` / `toggle_menu` and output panels at once during events. The items still unticked there are what
-  remains, with the files to touch.
+  `toggle_tabs` / `toggle_menu` and output panels at once during events, and since 2026-11-21 the find and input panels
+  and `build` (its last unticked item). Its "Missing:" notes were closed on 2026-11-21 (wrapped `bol` / `eol`, word
+  separators, `move_to_limit_on_up_down`, side bar multi-selection, the image / open-file / console-input menus,
+  the console's Python input). What Package Control still lacks are known limits, pending with the project's general
+  work: "Known limits" at the end of `docs/plugins.md` (Sublime's profile packages, one Python, modules without a shim,
+  the other modules of Sublime's `Default`).
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
-phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
-on the bundled 3.13), `fold_tag_attributes`, `find_in_files_side_by_side`.
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, multi-selected
+tabs (`close_selected` closes the tab clicked), and by design no Python 3.3 or 3.8 host: every plugin runs on the
+bundled 3.13 (the console runs Python there too).
 Highlighting is skipped above 4 MB.

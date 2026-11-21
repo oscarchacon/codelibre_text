@@ -891,6 +891,18 @@ impl Editor {
             "view_assign_syntax" => Some(self.gateways.syntaxes.resolve(a.str(1)?)),
             _ => None,
         };
+        // The view's `word_separators` / `sub_word_separators`, unless the plugin gives its own.
+        let separators = match function {
+            "view_classify" | "view_find_by_class" => {
+                let settings = self.settings_of(a.u64(0)?);
+                Some(crate::editing::separators_of(&settings, |key| match key {
+                    "separators" => a.str(4).ok(),
+                    _ => a.str(5).ok(),
+                }))
+            }
+            _ => None,
+        };
+        let separators = separators.unwrap_or_default();
         let doc = self
             .any_document_mut(a.u64(0)?)
             .ok_or("the view is closed")?;
@@ -1098,17 +1110,14 @@ impl Editor {
                 word_at(&doc.text, point(1)?).start(),
                 word_at(&doc.text, point(2)?).end(),
             ),
-            "view_classify" => json!(classify(&doc.text, point(1)?, None)),
-            "view_find_by_class" => {
-                let separators = a.str(4).ok().filter(|s| !s.is_empty());
-                json!(find_by_class(
-                    &doc.text,
-                    point(1)?,
-                    a.bool(2),
-                    a.u64(3)? as u32,
-                    separators
-                ))
-            }
+            "view_classify" => json!(classify(&doc.text, point(1)?, &separators)),
+            "view_find_by_class" => json!(find_by_class(
+                &doc.text,
+                point(1)?,
+                a.bool(2),
+                a.u64(3)? as u32,
+                &separators
+            )),
             "view_rowcol" => {
                 let (row, col) = line_col(&doc.text, point(1)?);
                 json!([row, col])

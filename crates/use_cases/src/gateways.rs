@@ -500,6 +500,9 @@ pub trait PluginHostGateway {
     fn event(&mut self, name: &str, view: DocumentId) -> Result<(), String>;
     /// Answers a panel a plugin opened: callback `id`, which answer (`select`, `highlight`, `done`,
     /// `change`, `cancel`) and its arguments.
+    /// A line typed in the console's input, run as Python (`{"op": "console"}`); what it prints
+    /// arrives as `Log` before `Done`.
+    fn console(&mut self, code: &str) -> Result<(), String>;
     fn callback(&mut self, id: u64, name: &str, args: &Value) -> Result<(), String>;
     /// Asks the listeners something they answer (`on_query_context`, `on_text_command`,
     /// `on_window_command`; also `on_post_*_command`, which answer nothing): the event, its view

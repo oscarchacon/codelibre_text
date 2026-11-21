@@ -318,6 +318,8 @@ impl Editor {
                 }
             }
         }
+        // The view runs the panel commands queued during events now: its report counts again.
+        self.state.find_panel_ahead = false;
         for (command, view) in std::mem::take(&mut self.state.plugins.queued_commands) {
             self.run_queued_command(&command, view, run_command);
         }
@@ -354,6 +356,31 @@ impl Editor {
             Ok(_) => {}
             Err(e) => self.plugin_host_failed(&e),
         }
+    }
+
+    /// A line typed in the console's input, as Sublime's Python console runs it: echoed as
+    /// `>>> code`, then run by the plugin host, whose output (a value, a traceback) follows. The
+    /// commands it runs come back through `run_command`. Without a host the console says so.
+    pub fn run_console_line(&mut self, code: &str, run_command: &mut CommandRunner) {
+        self.log(&format!(">>> {code}\n"));
+        if code.trim().is_empty() || !self.enter_plugin("console") {
+            return;
+        }
+        let result = self
+            .gateways
+            .plugins
+            .console(code)
+            .and_then(|()| self.converse(run_command));
+        self.leave_plugin();
+        match result {
+            Ok(PluginMessage::Done {
+                error: Some(traceback),
+            }) => self.log(&format!("{traceback}\n")),
+            Ok(_) => {}
+            Err(e) => self.log(&format!("{e}\n")),
+        }
+        // What it changed reaches the listeners and the undo history as a plugin's edits do.
+        self.close_plugin_undo_steps();
     }
 
     /// Runs a panel's callback in the plugin (see `plugin_panels`).

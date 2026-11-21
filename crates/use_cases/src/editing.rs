@@ -3,6 +3,7 @@
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::selection::Selection;
+use entities::settings::Settings;
 use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
 use entities::text::{line_to_char, selected_text, word_at};
 use entities::text_commands::{self as tc, CaretMotion, Case, LineOrder, TrimOptions};
@@ -195,15 +196,15 @@ impl Editor {
                     },
                     // A page leaves one line of the last one in sight, as Page Down does.
                     page_lines: shown.saturating_sub(1).max(1),
-                    separators: command
-                        .args
-                        .get("separators")
-                        .and_then(|v| v.as_str())
-                        .map(String::from),
+                    separators: separators_of(&settings, |key| {
+                        command.args.get(key).and_then(|v| v.as_str())
+                    }),
+                    limit_on_up_down: settings.bool("move_to_limit_on_up_down", false),
                 };
+                let geometry = *doc.geometry();
                 let motion = |text: &str, selection: Selection| match name {
                     "move" => tc::move_by(text, selection, &how),
-                    _ => tc::move_to(text, selection, &target, extend),
+                    _ => tc::move_to_in_view(text, selection, &target, extend, &geometry),
                 };
                 let primary = motion(&doc.text, doc.selection());
                 let others: Option<Vec<Selection>> = doc
@@ -329,11 +330,41 @@ impl Editor {
         }
     }
 
+    /// Up (or Down, `forward`) from the first row drawn (or the last) with
+    /// `move_to_limit_on_up_down` off: the caret stays, as in Sublime. (The text widget would go
+    /// to the start or end of the text, which is what the setting turned on does.)
+    pub fn caret_stays_on_up_down(&self, forward: bool) -> bool {
+        let Some(doc) = self.active_document() else {
+            return false;
+        };
+        if self
+            .settings_of(doc.id)
+            .bool("move_to_limit_on_up_down", false)
+        {
+            return false;
+        }
+        let text = &doc.text;
+        let head = doc.selection().head;
+        let (start, end) = doc.geometry().wrapped_row(text, head).unwrap_or_else(|| {
+            let at = char_to_byte(text, head);
+            (
+                byte_to_char(text, line_start(text, at)),
+                byte_to_char(text, line_end(text, at)),
+            )
+        });
+        if forward {
+            end == doc.char_count()
+        } else {
+            start == 0
+        }
+    }
+
     /// Arrow keys, Home and End while there are several selections: every caret moves.
     pub fn move_carets(&mut self, motion: CaretMotion) {
         if let Some(doc) = self.active_document_mut() {
             doc.close_undo_step();
-            doc.edit_all(|text, selections| tc::move_carets(text, selections, motion));
+            let geometry = *doc.geometry();
+            doc.edit_all(|text, selections| tc::move_carets(text, selections, motion, &geometry));
         }
     }
 
@@ -503,5 +534,24 @@ impl Editor {
                 None
             }
         }
+    }
+}
+
+/// What separates words and sub-words: `given("separators")` / `given("sub_word_separators")`
+/// (a command's or `find_by_class`'s arguments) when not empty, else the view's
+/// `word_separators` / `sub_word_separators` settings, as in Sublime.
+pub(crate) fn separators_of<'a>(
+    settings: &Settings,
+    given: impl Fn(&str) -> Option<&'a str>,
+) -> tc::Separators {
+    let pick = |argument: &str, setting: &str| {
+        given(argument)
+            .filter(|s| !s.is_empty())
+            .or_else(|| settings.str(setting))
+            .map(String::from)
+    };
+    tc::Separators {
+        word: pick("separators", "word_separators"),
+        sub_word: pick("sub_word_separators", "sub_word_separators"),
     }
 }

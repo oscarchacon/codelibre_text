@@ -53,8 +53,27 @@ impl Editor {
 
     /// The find panel the view shows (`find`, `replace`, `find_in_files`), for
     /// `window.active_panel()`. The controller reports it every frame, like the chrome.
+    /// While a listener's panel command waits for the view ([`show_find_panel_ahead`]), what the
+    /// view reports is the frame before it and is not taken.
+    ///
+    /// [`show_find_panel_ahead`]: Self::show_find_panel_ahead
     pub fn sync_find_panel(&mut self, name: Option<&str>) {
+        if !self.state.find_panel_ahead {
+            self.state.find_panel_shown = name.map(String::from);
+        }
+    }
+
+    /// The find panel a listener showed (or hid, `None`) during an event, answered at once to
+    /// `window.active_panel()`; the view shows it next frame, when the queued command runs
+    /// ([`poll_plugins`](Self::poll_plugins) takes the view's report again from then on).
+    pub fn show_find_panel_ahead(&mut self, name: Option<&str>) {
         self.state.find_panel_shown = name.map(String::from);
+        self.state.find_panel_ahead = true;
+    }
+
+    /// The find panel shown, as `window.active_panel()` names it (`find`, `replace`, `find_in_files`).
+    pub fn find_panel_shown(&self) -> Option<&str> {
+        self.state.find_panel_shown.as_deref()
     }
 
     /// What plugins asked the current window to show or hide since the last call, in order.

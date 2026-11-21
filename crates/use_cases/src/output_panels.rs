@@ -305,8 +305,33 @@ impl Editor {
             return false;
         };
         self.remember_results_tab(id);
+        if self.is_find_results_view(id)
+            && self
+                .settings_of(id)
+                .bool("find_in_files_side_by_side", false)
+        {
+            self.focus_group_beside(id);
+        }
         self.visit_result(id, &result);
         true
+    }
+
+    /// `find_in_files_side_by_side`: a result of the Find Results tab opens beside it, so both
+    /// show: in the group after the tab's (before it, for the last group), in a second column
+    /// when the window has one group.
+    fn focus_group_beside(&mut self, id: DocumentId) {
+        let Some(group) = self.any_document(id).map(|d| d.group) else {
+            return;
+        };
+        if self.group_count() == 1 {
+            self.set_layout(entities::layout::Layout::columns(2));
+        }
+        let beside = if group + 1 < self.group_count() {
+            group + 1
+        } else {
+            group.saturating_sub(1)
+        };
+        self.focus_group(beside);
     }
 
     /// Opens the file of a result of the view `id`, at its place.

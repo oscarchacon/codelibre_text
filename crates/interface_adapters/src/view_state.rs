@@ -125,6 +125,20 @@ pub struct ViewState {
     pub show_about: bool,
     pub show_load_errors: bool,
     pub expanded_folders: HashSet<PathBuf>,
+    /// The files and folders selected in the side bar, in the order they were selected.
+    pub side_bar_selection: Vec<PathBuf>,
+    /// Where a Shift + click in the side bar selects from: the last row clicked without Shift.
+    pub side_bar_anchor: Option<PathBuf>,
+    /// The file `reveal_in_side_bar` showed: the side bar scrolls to it next frame.
+    pub side_bar_reveal: Option<PathBuf>,
+    /// What is typed in the console's input field (Python, run on Enter).
+    pub console_input: String,
+    /// The lines run in the console, oldest first (Up / Down in its field go through them).
+    pub console_history: Vec<String>,
+    /// The line of `console_history` the field shows, while going through it.
+    pub console_history_at: Option<usize>,
+    /// The console's field should take the keyboard focus on the next draw.
+    pub console_focus_requested: bool,
     /// The text area should take keyboard focus on the next frame.
     pub focus_editor: bool,
     /// The text area had the keyboard focus last frame (set by the framework before keys are handled).
@@ -173,6 +187,13 @@ impl Default for ViewState {
             show_about: false,
             show_load_errors: false,
             expanded_folders: HashSet::new(),
+            side_bar_selection: Vec::new(),
+            side_bar_anchor: None,
+            side_bar_reveal: None,
+            console_input: String::new(),
+            console_history: Vec::new(),
+            console_history_at: None,
+            console_focus_requested: false,
             focus_editor: true,
             text_has_focus: false,
             field_has_focus: false,

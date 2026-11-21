@@ -634,8 +634,10 @@ fn widget_keys_stay_with_the_widget_without_listeners_or_focus() {
 }
 
 /// Bindings of other keys to what the widget does itself (deleting, typing, moving the caret).
+/// Down goes on past the last line (the text is empty), as the widget does it.
 fn rebound_world(events: &[&str]) -> World {
     World::new()
+        .with_preferences(json!({ "move_to_limit_on_up_down": true }))
         .with_binding(bind(&["ctrl+h"], Command::new("left_delete"), vec![]))
         .with_binding(bind(
             &["alt+j"],
@@ -871,4 +873,44 @@ fn the_auto_complete_list_takes_the_arrows_and_its_bindings_apply_while_it_shows
 {chosen}"
     )));
     assert!(!editor.auto_complete_visible());
+}
+
+#[test]
+fn up_and_down_on_the_first_and_last_rows_keep_the_caret_unless_move_to_limit_on_up_down() {
+    let arrows = |world: World| {
+        world
+            .with_file("/p/a.txt", "one\ntwo")
+            .with_binding(bind(
+                &["up"],
+                Command::with_args("move", json!({ "by": "lines", "forward": false })),
+                vec![],
+            ))
+            .with_binding(bind(
+                &["down"],
+                Command::with_args("move", json!({ "by": "lines", "forward": true })),
+                vec![],
+            ))
+    };
+    let world = arrows(World::new());
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.text_has_focus = true;
+    editor.open_file(std::path::Path::new("/p/a.txt"));
+    assert!(
+        press(&mut editor, &mut view, "up"),
+        "on the first line: nothing happens"
+    );
+    assert!(view.take_requests().is_empty());
+    assert!(
+        !press(&mut editor, &mut view, "down"),
+        "to the next line: the widget's"
+    );
+
+    let world = arrows(World::new()).with_preferences(json!({ "move_to_limit_on_up_down": true }));
+    let mut editor = world.editor();
+    editor.open_file(std::path::Path::new("/p/a.txt"));
+    assert!(
+        !press(&mut editor, &mut view, "up"),
+        "the widget goes to the start"
+    );
 }

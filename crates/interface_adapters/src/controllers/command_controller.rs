@@ -407,6 +407,11 @@ const WINDOW_COMMANDS: &[&str] = &[
     "close_by_index",
     "close_others_by_index",
     "close_to_right_by_index",
+    "close_selected",
+    "close_unselected",
+    "close_unmodified",
+    "close_unmodified_to_right_by_index",
+    "close_deleted_files",
     "remove_folder",
     "open_containing_folder",
     "new_file_at",
@@ -567,10 +572,18 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             command.bool_arg("encoded_position", false),
         ),
         "open_dir" => editor.open_package_folder(command.str_arg("dir"), command.str_arg("file")),
-        "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => {
-            editor.close_by_index(command)
-        }
+        "close_by_index"
+        | "close_others_by_index"
+        | "close_to_right_by_index"
+        | "close_selected"
+        | "close_unselected"
+        | "close_unmodified"
+        | "close_unmodified_to_right_by_index"
+        | "close_deleted_files" => editor.close_by_index(command),
         "remove_folder" => editor.remove_folders(command),
+        "copy_path" => editor.copy_file_path(),
+        "force_reopen_as" if command.str_arg("type") == "text" => editor.reopen_as_text(),
+        "reveal_in_side_bar" => reveal_in_side_bar(editor, view),
         "open_containing_folder" => editor.open_containing_folder(command),
         // Sublime's side bar commands, unless a plugin (SideBarEnhancements, FileManager) defines them.
         name if side_bar::SIDE_BAR_COMMANDS.contains(&name)
@@ -717,8 +730,14 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     editor.use_selection_as_query_if_single_line();
                     apply_find_panel_args(editor, command);
                 }
-                "console" if toggle => editor.toggle_console(),
-                "console" => editor.show_console(),
+                "console" if toggle => {
+                    editor.toggle_console();
+                    view.console_focus_requested = true;
+                }
+                "console" => {
+                    editor.show_console();
+                    view.console_focus_requested = true;
+                }
                 other => editor
                     .notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
             }
@@ -1160,10 +1179,10 @@ fn runs_during_event(name: &str) -> bool {
 }
 
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
-/// state: a formatter's command in `on_pre_save` must reach the file being saved. Output panels,
-/// the console and `exec` do their editor's part at once ([`panel_part_during_event`]). The
-/// others (the find and input panels, `build`, answer false and wait
-/// for the next frame, which runs them on the view that asked.
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. The panels
+/// (find, output, the console, the input panel they replace), `exec` and `build` do their
+/// editor's part at once ([`panel_part_during_event`]). The others answer false and wait for the
+/// next frame, which runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     let at_once = |name: &str| runs_during_event(name) || PANEL_COMMANDS.contains(&name);
     if !at_once(&command.name) {
@@ -1210,18 +1229,43 @@ fn run_undo_command(editor: &mut Editor, command: &Command) {
 }
 
 /// The panel and build commands whose part in the editor runs during an event.
-const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec"];
+const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec", "build"];
+
+/// The find panels `show_panel` opens, and the name `window.active_panel()` gives each.
+fn find_panel_name(panel: &str) -> Option<&'static str> {
+    match panel {
+        "find" | "incremental_find" => Some("find"),
+        "replace" => Some("replace"),
+        "find_in_files" => Some("find_in_files"),
+        _ => None,
+    }
+}
 
 /// The editor's part of a panel command run during an event, at once: a plugin that shows
-/// `output.exec` in `on_post_save` and writes to it, or asks `window.active_panel()`, finds it
-/// shown. The view's part (the find or input panel closed, the focus) follows next frame as the
-/// same command, which shows again what is already shown. False when it must all wait (the find
-/// panel, an unknown panel, a plugin's own `exec`).
+/// `output.exec` or the find panel in `on_post_save`, or hides them, and then asks
+/// `window.active_panel()` or writes to the panel finds it done; the input panel they replace is
+/// gone (its `on_cancel` runs next frame). The view's part (which panel it draws, the focus)
+/// follows next frame as the same command, which shows again what is already shown. `build`
+/// runs its target the same way (`exec` at once); its picker (a quick panel, the view's) waits.
+/// False when it must all wait (an unknown panel, a plugin's own `exec`, the build picker).
 fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
     match command.name.as_str() {
         "show_panel" => {
             let panel = command.str_arg("panel");
             let toggle = command.bool_arg("toggle", false);
+            if let Some(name) = find_panel_name(panel) {
+                if toggle && editor.find_panel_shown() == Some(name) {
+                    editor.show_find_panel_ahead(None);
+                } else {
+                    editor.cancel_plugin_input_panel_later();
+                    editor.hide_output_panel();
+                    editor.show_find_panel_ahead(Some(name));
+                    editor.use_selection_as_query_if_single_line();
+                    apply_find_panel_args(editor, command);
+                }
+                editor.queue_plugin_command(command.clone());
+                return true;
+            }
             if panel == "console" {
                 if toggle {
                     editor.toggle_console();
@@ -1240,28 +1284,74 @@ fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
             if !editor.show_output_panel(name) {
                 return false;
             }
-            // It takes the find panel's place (closed next frame).
-            editor.sync_find_panel(None);
+            // It takes the place of the find and input panels (closed next frame).
+            editor.show_find_panel_ahead(None);
+            editor.cancel_plugin_input_panel_later();
             let show = serde_json::json!({ "panel": panel });
             editor.queue_plugin_command(Command::with_args("show_panel", show));
             true
         }
         "hide_panel" => {
             editor.hide_output_panel();
-            editor.sync_find_panel(None);
+            editor.show_find_panel_ahead(None);
+            editor.cancel_plugin_input_panel_later();
             editor.queue_plugin_command(Command::new("hide_panel"));
             true
         }
         "exec" if editor.plugin_command_kind("exec").is_none() => {
             if editor.exec(&command.args) && editor.show_output_panel("exec") {
-                editor.sync_find_panel(None);
+                editor.show_find_panel_ahead(None);
+                editor.cancel_plugin_input_panel_later();
                 let show = serde_json::json!({ "panel": "output.exec" });
                 editor.queue_plugin_command(Command::with_args("show_panel", show));
             }
             true
         }
+        "build" if command.bool_arg("select", false) => false,
+        "build" => {
+            match editor.plan_build(command.str_arg("file"), command.str_arg("variant")) {
+                // Its target (`exec`, or a plugin's command, which waits) as a listener's own.
+                BuildPlan::Run(target) => {
+                    if !run_during_event(editor, &target) {
+                        editor.queue_plugin_command(target);
+                    }
+                }
+                // Several builds apply: the picker, next frame.
+                BuildPlan::Choose => editor.queue_plugin_command(command.clone()),
+                BuildPlan::Nothing => {}
+            }
+            true
+        }
         _ => false,
     }
+}
+
+/// `reveal_in_side_bar`: the side bar shows, with the folders down to the active file open,
+/// that file selected and scrolled to. A file outside the window's folders is not in the side bar.
+fn reveal_in_side_bar(editor: &Editor, view: &mut ViewState) {
+    let Some(path) = editor.active_document().and_then(|d| d.path.clone()) else {
+        return;
+    };
+    let Some(root) = editor
+        .state()
+        .folders
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned()
+    else {
+        return;
+    };
+    view.show_side_bar = true;
+    for folder in path.ancestors().skip(1) {
+        if !folder.starts_with(&root) {
+            break;
+        }
+        view.expanded_folders.insert(folder.to_path_buf());
+    }
+    view.side_bar_selection = vec![path.clone()];
+    view.side_bar_anchor = Some(path.clone());
+    view.side_bar_reveal = Some(path);
 }
 
 /// What Tab does in the text: a tab (or spaces, or indentation) at every selection.
