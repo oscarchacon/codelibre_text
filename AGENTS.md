@@ -92,6 +92,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
+  `set_selections` merges overlapping ones as Sublime does (`selection::add_region` / `subtract_region`; mouse
+  drags' selections: `entities::drag_select`).
 - Right clicks: egui's text fields put the caret at any button's press, so each field is shown between
   `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output
   panel's menu runs its entries on the panel (`Editor::run_in_panel_view`); a field's (`Widget Context.sublime-menu`)
@@ -145,6 +147,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
+- `docs/roadmap.md` — what to do next, in order (multiple cursors first, phase by phase; phase 1 done).
 - `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,

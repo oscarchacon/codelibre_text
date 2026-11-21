@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::folding::merge_folds;
-use crate::selection::Selection;
+use crate::selection::{self, Selection};
 use crate::text::char_to_byte;
 use crate::undo::{EditKind, UndoEdit, UndoHistory};
 use crate::view_geometry::ViewGeometry;
@@ -387,9 +387,7 @@ impl Document {
                 self.record_change(prefix, end_byte, &inserted_text);
             }
             self.change_count += 1;
-            self.selection = primary.clamped(self.char_count());
-            self.extra_selections = extra;
-            self.selection_revision += 1;
+            self.set_selections(primary, extra);
         }
         self.path = source.path.clone();
         self.saved_text = source.saved_text.clone();
@@ -807,15 +805,13 @@ impl Document {
         primary: Selection,
         others: impl IntoIterator<Item = Selection>,
     ) {
-        self.set_selection(primary);
         let len = self.char_count();
-        let mut extra: Vec<Selection> = others
-            .into_iter()
-            .map(|s| s.clamped(len))
-            .filter(|s| *s != self.selection)
-            .collect();
-        extra.sort_by_key(|s| (s.start(), s.end()));
-        extra.dedup();
+        // Selections that overlap become one, as in Sublime (`selection::merged`).
+        let (primary, extra) = selection::merged(
+            primary.clamped(len),
+            others.into_iter().map(|s| s.clamped(len)),
+        );
+        self.set_selection(primary);
         self.extra_selections = extra;
     }
 
@@ -1112,11 +1108,8 @@ impl Document {
         }
         self.note_text_changed();
         let new_primary = new.remove(primary_index);
-        self.set_selection(new_primary);
         // Carets that met (e.g. deleting the text between them) become one.
-        new.dedup();
-        new.retain(|s| *s != self.selection);
-        self.extra_selections = new;
+        self.set_selections(new_primary, new);
         self.undo.set_after(self.selections_for_undo());
         true
     }

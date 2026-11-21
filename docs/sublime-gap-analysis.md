@@ -33,7 +33,7 @@ the rest of Sublime's `Default`) are pending in `docs/plugins.md`, "Known limits
 
 | Feature | Missing commands | Origin |
 |---|---|---|
-| Multiple cursors | ~~`select_lines`, `split_selection_into_lines`, `find_all_under`~~ (done), `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `find_all` | native |
+| Multiple cursors | ~~`select_lines`, `split_selection_into_lines`, `find_all_under`~~ (done), the mouse's `drag_select` (`additive`, `subtractive`, `by: columns`; rules done 2026-11-21, `docs/roadmap.md`), `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `find_all` | native |
 | Selection | `expand_selection_to_paragraph`, `expand_selection` with `to: scope/tag` (brackets, indentation, smart: done) | native |
 | Code folding | ~~`fold`, `unfold`, `fold_by_level`, `unfold_all`~~ (done), ~~`fold_tag_attributes`~~ (done, 2026-11-20), `fold_unfold` | native / py |
 | Bookmarks | `toggle_bookmark`, `next_bookmark`, `prev_bookmark`, `clear_bookmarks`, `select_all_bookmarks`, `select_bookmark` | native |
@@ -44,8 +44,8 @@ the rest of Sublime's `Default`) are pending in `docs/plugins.md`, "Known limits
 | Tabs | ~~`close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `close_selected`, `close_unselected`~~ (done, 2026-11-21), `focus_by_index`, `select_last_tab`, ~~`toggle_tabs`~~ (done), `toggle_show_open_files` | native |
 | Find panel | `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find` | native |
 | Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), ~~results in a tab (`use_buffer`)~~ (done, 2026-11-20), ~~`find_in_files_side_by_side`~~ (done, 2026-11-21) | native / py |
-| Snippets | `expand_snippet`, `next_field`, `prev_field`, `clear_fields` (real snippet fields, not stripped) | native |
-| Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, `paste_from_history`, `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
+| Snippets | `expand_snippet` (~~`next_field`, `prev_field`, `clear_fields`~~ done) | native |
+| Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, ~~`paste_from_history`~~ (done), `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
 | Macros | `toggle_record_macro`, `run_macro`, `save_macro` (only `run_macro_file` exists) | native |
 | Git / modifications | `next_modification`, `prev_modification`, `revert_modification`, `revert_hunk`, `toggle_inline_diff` (needs `mini_diff`) | native |
 | Encoding | `set_encoding`, `reopen` with `encoding`, `detect_indentation` | native |
@@ -74,8 +74,4 @@ the rest of Sublime's `Default`) are pending in `docs/plugins.md`, "Known limits
 
 ## Suggested order
 
-1. Multiple cursors (`select_lines`, `split_selection_into_lines`, `find_all_under`) — builds on `Document::edit_all`.
-2. Find panel toggles (`find_all` and Find in Files: done).
-3. `wrap_lines`, `expand_selection_to_paragraph`, `toggle_bookmark`/`next_bookmark`, `switch_file` — small entity-level work.
-4. Status-bar and display settings (`draw_white_space`, `match_brackets`, `font_face`, `show_encoding`…).
-5. Folding, auto-complete, split layouts, `mini_diff` — larger view work.
+See `docs/roadmap.md` (2026-11-21), which keeps the priorities and the multiple cursors plan.

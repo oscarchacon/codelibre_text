@@ -10,6 +10,7 @@ pub mod build;
 pub mod command;
 pub mod completion;
 pub mod document;
+pub mod drag_select;
 pub mod find;
 pub mod find_in_files;
 pub mod folding;
