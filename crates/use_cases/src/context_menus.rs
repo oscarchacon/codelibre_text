@@ -9,7 +9,7 @@
 //! output panel, whose commands then run on the panel's view.
 
 use entities::command::Command;
-use entities::document::DocumentId;
+use entities::document::{Document, DocumentError, DocumentId, SheetKind};
 use entities::menu::{fill_menu, ContextMenuTarget, MenuItem};
 use entities::text::selected_text;
 use serde_json::{json, Value};
@@ -125,15 +125,37 @@ impl Editor {
         self.push_clipboard_history(&text);
     }
 
-    /// `close_by_index`, `close_others_by_index`, `close_to_right_by_index` (a tab's menu): the tab
-    /// at `index` of `group`, the others of the group, or those after it.
+    /// The commands of a tab's menu (`Tab Context` and `Tab Sidebar Context.sublime-menu`) that
+    /// close tabs of `group`: `close_by_index` the tab at `index`, `close_others_by_index` the
+    /// others, `close_to_right_by_index` those after it, `close_unmodified` the unmodified ones,
+    /// `close_unmodified_to_right_by_index` the unmodified ones after it, `close_deleted_files`
+    /// those whose file is no longer on disk. With one tab selected at a time (tabs are not
+    /// multi-selected), `close_selected` is the tab clicked and `close_unselected` the others.
     pub fn close_by_index(&mut self, command: &Command) {
         let group = command.usize_arg("group", self.state.active_group);
         let index = command.usize_arg("index", usize::MAX);
         let tabs = self.group_indexes(group);
+        let unmodified = |&i: &usize| !self.state.documents[i].is_dirty();
         let chosen: Vec<usize> = match command.name.as_str() {
-            "close_by_index" => tabs.get(index).copied().into_iter().collect(),
-            "close_others_by_index" if index < tabs.len() => tabs
+            "close_by_index" | "close_selected" => tabs.get(index).copied().into_iter().collect(),
+            "close_unmodified" => tabs.iter().copied().filter(unmodified).collect(),
+            "close_unmodified_to_right_by_index" => tabs
+                .iter()
+                .skip(index.saturating_add(1))
+                .copied()
+                .filter(unmodified)
+                .collect(),
+            "close_deleted_files" => tabs
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let doc = &self.state.documents[i];
+                    doc.path
+                        .as_deref()
+                        .is_some_and(|path| !self.gateways.file_system.exists(path))
+                })
+                .collect(),
+            "close_others_by_index" | "close_unselected" if index < tabs.len() => tabs
                 .iter()
                 .enumerate()
                 .filter(|&(i, _)| i != index)
@@ -152,6 +174,60 @@ impl Editor {
         if !ids.is_empty() {
             self.close_documents(ids);
         }
+    }
+
+    /// `copy_path` (Sublime's `Default/copy_path.py`, in the image's menu): the active view's file
+    /// path to the clipboard. A view without a file has nothing to copy.
+    pub fn copy_file_path(&mut self) {
+        let Some(path) = self.active_document().and_then(|d| d.path.clone()) else {
+            return;
+        };
+        let text = path.display().to_string();
+        if let Err(e) = self.gateways.clipboard.write_text(&text) {
+            self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
+            return;
+        }
+        self.push_clipboard_history(&text);
+    }
+
+    /// `force_reopen_as {"type": "text"}` (the image's menu, "Reopen File as Text"): the active
+    /// image sheet becomes a view of the file's text in its place (an SVG's XML); a binary file
+    /// stays a picture and the status bar says why.
+    pub fn reopen_as_text(&mut self) {
+        let Some(doc) = self.active_document() else {
+            return;
+        };
+        let (Some(path), true) = (doc.path.clone(), doc.sheet == SheetKind::Image) else {
+            return;
+        };
+        let (old, group) = (doc.id, doc.group);
+        let bytes = match self.gateways.file_system.read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.notify(format!("{}: {e}", path.display()));
+                return;
+            }
+        };
+        let id = self.next_document_id();
+        let modified = self.gateways.file_system.modified(&path);
+        let mut text = match Document::from_bytes(id, &path, bytes, modified) {
+            Ok(doc) => doc,
+            Err(DocumentError::Binary) => {
+                self.notify(self.tr_args(
+                    "{path} looks like a binary file",
+                    &[("path", &path.display())],
+                ));
+                return;
+            }
+        };
+        text.syntax = self.gateways.syntaxes.detect(&path, text.first_line());
+        text.group = group;
+        let index = self.state.active;
+        self.state.documents[index] = text;
+        self.gateways.syntaxes.forget(old);
+        self.state.recently_used.retain(|used| *used != old);
+        self.activate_document(id);
+        self.plugin_event("on_load", id);
     }
 
     /// `remove_folder {"dirs"}`: the folders leave the window (a top folder's menu).

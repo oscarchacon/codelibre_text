@@ -40,6 +40,54 @@ pub fn fold_headers(text: &str, first: usize, last: usize, tab_size: usize) -> V
         .collect()
 }
 
+/// The folds of `fold_tag_attributes`: in each tag, from the end of its name to the `>` (or `/>`)
+/// that closes it, as Sublime 4215 folds them (checked by running it). Found by scope, so only
+/// syntaxes with tags (HTML, XML) have any: `tokens` are the text's pieces (chars) and their
+/// scopes, in order. Tags without attributes, `<?xml …?>` and comments have none; a fold keeps
+/// the spaces and line breaks around the attributes.
+pub fn tag_attribute_folds(text: &str, tokens: &[(usize, usize, &str)]) -> Vec<(usize, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    let has = |scope: &str, part: &str| scope.split_whitespace().any(|s| s == part || s.starts_with(&format!("{part}.")));
+    let mut folds = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let (_, _, scope) = tokens[index];
+        index += 1;
+        if !has(scope, "entity.name.tag") || !has(scope, "meta.tag") || has(scope, "meta.tag.preprocessor") {
+            continue;
+        }
+        // The name may be in pieces (`x:y`): the fold starts after its last one.
+        while index < tokens.len() && has(tokens[index].2, "entity.name.tag") {
+            index += 1;
+        }
+        let start = tokens[index - 1].1;
+        let Some(close) = tokens[index..]
+            .iter()
+            .position(|t| !has(t.2, "meta.tag") || has(t.2, "punctuation.definition.tag.end"))
+            .map(|at| index + at)
+        else {
+            break;
+        };
+        index = close;
+        if !has(tokens[close].2, "punctuation.definition.tag.end") {
+            continue;
+        }
+        // Older HTML syntaxes (syntect's own) scope the space before `/>` as part of it; Sublime
+        // 4's does not, and the fold keeps that space.
+        let (close_start, close_end) = (tokens[close].0, tokens[close].1.min(chars.len()));
+        let end = close_start
+            + chars[close_start.min(close_end)..close_end]
+                .iter()
+                .take_while(|c| c.is_whitespace())
+                .count();
+        let inside = chars.get(start..end.min(chars.len())).unwrap_or_default();
+        if inside.iter().any(|c| !c.is_whitespace()) {
+            folds.push((start, end));
+        }
+    }
+    folds
+}
+
 /// Folds sorted, without empty ones, those that overlap or touch merged into one.
 pub fn merge_folds(folds: &mut Vec<(usize, usize)>) {
     folds.retain(|&(a, b)| a < b);

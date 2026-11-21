@@ -27,6 +27,7 @@ pub fn show(
     };
     let mut replacement = panel.replacement.clone();
     let mut where_text = panel.where_text.clone();
+    let mut use_buffer = panel.use_buffer;
     // Enter searches the files in Find in Files, else goes to the next match.
     let enter_event = |backwards: bool| {
         if panel.in_files {
@@ -61,7 +62,17 @@ pub fn show(
             "“ ”",
             text.tr("Whole word"),
         );
-        toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
+        if panel.in_files {
+            toggle(
+                ui,
+                chrome,
+                &mut use_buffer,
+                "▤",
+                text.tr("Use Buffer: show the results in a tab"),
+            );
+        } else {
+            toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
+        }
         ui.add_space(6.0);
 
         let before_right_press =
@@ -204,6 +215,9 @@ pub fn show(
     }
     if where_text != panel.where_text {
         events.insert(0, UiEvent::FindWhereChanged(where_text));
+    }
+    if use_buffer != panel.use_buffer {
+        events.insert(0, UiEvent::FindUseBufferChanged(use_buffer));
     }
 }
 

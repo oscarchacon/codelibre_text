@@ -3,6 +3,7 @@
 use entities::selection::Selection;
 use entities::text::selected_text;
 use entities::text_commands::*;
+use entities::view_geometry::ViewGeometry;
 
 /// Runs a command on `text` with `selection` and returns the new text and selection.
 fn run(
@@ -547,19 +548,39 @@ fn move_carets_collapses_and_moves_every_selection() {
     let text = "ab\ncd";
     let selections = [sel(0, 2), caret(4)];
     assert_eq!(
-        move_carets(text, &selections, CaretMotion::Left),
+        move_carets(
+            text,
+            &selections,
+            CaretMotion::Left,
+            &ViewGeometry::default()
+        ),
         vec![caret(0), caret(3)]
     );
     assert_eq!(
-        move_carets(text, &selections, CaretMotion::Right),
+        move_carets(
+            text,
+            &selections,
+            CaretMotion::Right,
+            &ViewGeometry::default()
+        ),
         vec![caret(2), caret(5)]
     );
     assert_eq!(
-        move_carets(text, &selections, CaretMotion::LineStart),
+        move_carets(
+            text,
+            &selections,
+            CaretMotion::LineStart,
+            &ViewGeometry::default()
+        ),
         vec![caret(0), caret(3)]
     );
     assert_eq!(
-        move_carets(text, &selections, CaretMotion::LineEnd),
+        move_carets(
+            text,
+            &selections,
+            CaretMotion::LineEnd,
+            &ViewGeometry::default()
+        ),
         vec![caret(2), caret(5)]
     );
 }
@@ -1077,13 +1098,13 @@ fn moving_by_lines_keeps_the_column_when_it_can() {
     );
     assert_eq!(
         move_by(text, Selection::caret(14), "lines", true, false),
-        Some(Selection::caret(20)),
-        "from the last line, the end"
+        Some(Selection::caret(14)),
+        "from the last line it stays (`move_to_limit_on_up_down` off)"
     );
     assert_eq!(
         move_by(text, Selection::caret(3), "lines", false, false),
-        Some(Selection::caret(0)),
-        "from the first, the start"
+        Some(Selection::caret(3)),
+        "and from the first"
     );
 }
 
@@ -1113,5 +1134,133 @@ fn moving_by_an_unknown_unit_is_refused() {
     assert_eq!(
         move_by("a", Selection::caret(0), "paragraphs", true, false),
         None
+    );
+}
+
+/// A view that wraps after `columns` columns.
+fn wrapping(columns: usize) -> ViewGeometry {
+    ViewGeometry {
+        wrap_columns: Some(columns),
+        ..ViewGeometry::default()
+    }
+}
+
+#[test]
+fn bol_and_eol_go_to_the_ends_of_the_row_drawn_when_lines_wrap() {
+    // Rows of 10 columns: "  one two " | "three four" | "\n" | "x".
+    let text = "  one two three four\nx";
+    let geometry = wrapping(10);
+    let to = |at: usize, to: &str| {
+        move_to_in_view(text, Selection::caret(at), to, false, &geometry)
+            .unwrap()
+            .head
+    };
+    assert_eq!(to(12, "bol"), 10, "a wrapped row's start");
+    assert_eq!(to(12, "eol"), 20, "the line's last row ends with it");
+    assert_eq!(to(3, "eol"), 9, "before the space the row broke after");
+    assert_eq!(to(5, "bol"), 2, "the first row: as a line, its first char");
+    assert_eq!(to(2, "bol"), 0, "and then its start");
+    assert_eq!(to(22, "eol"), 22);
+    assert_eq!(
+        move_to_in_view(text, Selection::caret(12), "bol", true, &geometry),
+        Some(Selection::new(12, 10))
+    );
+    assert_eq!(
+        move_to_in_view(
+            text,
+            Selection::caret(12),
+            "eol",
+            false,
+            &ViewGeometry::default()
+        )
+        .map(|s| s.head),
+        Some(20),
+        "without wrap, the line's end"
+    );
+    assert_eq!(
+        move_carets(
+            text,
+            &[Selection::caret(12)],
+            CaretMotion::LineStart,
+            &geometry
+        ),
+        vec![Selection::caret(10)]
+    );
+    assert_eq!(
+        move_carets(
+            text,
+            &[Selection::caret(3)],
+            CaretMotion::LineEnd,
+            &geometry
+        ),
+        vec![Selection::caret(9)]
+    );
+}
+
+#[test]
+fn up_and_down_at_the_first_and_last_lines_follow_move_to_limit_on_up_down() {
+    let text = "abc\ndef";
+    let go = |at: usize, forward: bool, limit: bool| {
+        let how = MoveBy {
+            by: "lines".into(),
+            forward,
+            limit_on_up_down: limit,
+            ..MoveBy::default()
+        };
+        entities::text_commands::move_by(text, Selection::caret(at), &how)
+            .unwrap()
+            .head
+    };
+    assert_eq!(go(1, false, false), 1, "the caret stays");
+    assert_eq!(go(5, true, false), 5);
+    assert_eq!(go(1, false, true), 0, "the start of the text");
+    assert_eq!(go(5, true, true), 7, "the end of the text");
+    assert_eq!(go(1, true, false), 5, "other lines as always");
+}
+
+#[test]
+fn sub_words_are_separated_by_the_sub_word_separators() {
+    let text = "foo-bar_baz";
+    let go = |at: usize, separators: Separators| {
+        let how = MoveBy {
+            by: "subwords".into(),
+            forward: true,
+            separators,
+            ..MoveBy::default()
+        };
+        entities::text_commands::move_by(text, Selection::caret(at), &how)
+            .unwrap()
+            .head
+    };
+    let sublime = Separators {
+        word: Some("./\\()\"'-:,.;<>~!@#$%^&*|+=[]{}`~?".into()),
+        sub_word: Some("_".into()),
+    };
+    assert_eq!(
+        go(4, sublime.clone()),
+        8,
+        "after the `_`, where `baz` begins"
+    );
+    let dashes = Separators {
+        word: Some(" ".into()),
+        sub_word: Some("-".into()),
+    };
+    assert_eq!(
+        go(0, dashes.clone()),
+        4,
+        "`-` inside a word separates sub-words"
+    );
+    assert_eq!(go(4, dashes), 11, "`_` no longer does");
+    assert_eq!(
+        classify(
+            "foo-bar",
+            4,
+            &Separators {
+                word: Some(" ".into()),
+                sub_word: Some("-".into())
+            }
+        ) & 16,
+        16,
+        "a sub-word begins after the `-`"
     );
 }

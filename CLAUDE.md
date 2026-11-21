@@ -29,7 +29,8 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets`, plus a manual GUI run for views.
   `cargo test -p codelibre_text --test app -- --ignored --nocapture` (`frameworks/tests/app.rs`, egui_kittest with wgpu,
   needs a GPU or lavapipe) drives the whole window off screen (keys, clicks, a test plugin) and saves pictures to
-  `target/tmp/gui-checks` to look at: extend its script when a change is visual.
+  `target/tmp/gui-checks` to look at: extend its script when a change is visual. Its tests take turns (a lock in
+  `start`, as each points the process's `CODELIBRE_TEXT_DATA` at its own profile), so no `--test-threads=1` is needed.
 - CI (`.github/workflows/ci.yml`) builds and runs both on Linux and Windows (clippy with `-D warnings`) for pushes to `main` / `develop`
   and pull requests into them or a `release/**` branch (SonarQube is a TODO job there). macOS joins them when the commit has a tag `macos-test*` (pushed
   with it: `git push --atomic -f origin develop macos-test`; the tag starts no run of its own), a manual run with
@@ -73,13 +74,17 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   there are key equivalents AppKit takes before the window: `app.rs` gives them back to the keymap the next frame.
 - The editor view edits `Document::text` in place via `Editor::text_for_editing` (egui `TextEdit` needs `&mut String`).
   Command-made selections reach the widget through `Document::selection_revision`; the view reports carets with `UiEvent::SelectionChanged`.
-- Undo/copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
+- Copy/cut/paste/select all are `ViewRequest::WidgetEdit`s replayed as egui input next frame; key bindings to
   them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
   next bullet); a binding of another key to deleting, typing or moving the caret is replayed as the widget's own key
   (`bound_command` / `widget_replay`), so its undo keeps it. egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
   (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
   whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
-- Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
+- Undo is ours, not the widget's: each `Document` keeps a history of what each edit changed (`entities::undo`;
+  the widget's in-place edits are diffed against a kept copy, `Document::note_typed_change`). `undo` / `redo` are use
+  cases (`use_cases/src/undo.rs`), at once; `command_controller` closes a step before and after every command, and
+  `poll_plugins` after a frame's plugin edits. A focused find / input field undoes its own typing
+  (`ViewState::field_has_focus`).- Selections are char indices; edit with byte offsets (`entities::text::char_to_byte` / `byte_to_char`).
 - Chrome widgets must use `Sense::CLICK`, not `Sense::click()` (focusable widgets steal arrow keys/Enter).
 - `app.rs::dispatch_keys` drops the `Text` event after a consumed key (Alt+1 would type "1"), and asks the keymap about
   a typed symbol (`*`, `"`: egui has no key for most, `input::typed_combo`), as Sublime binds them by character.
@@ -87,11 +92,14 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
   → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
+  `set_selections` merges overlapping ones as Sublime does (`selection::add_region` / `subtract_region`; mouse
+  drags' selections: `entities::drag_select`).
 - Right clicks: egui's text fields put the caret at any button's press, so each field is shown between
   `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output
   panel's menu runs its entries on the panel (`Editor::run_in_panel_view`); a field's (`Widget Context.sublime-menu`)
   gives its clipboard entries to the field as `ViewRequest::FieldEdit`, injected by `App::raw_input_hook` like the
-  widget's replays (egui_kittest does not call that hook: `frameworks/tests/app.rs` calls it in `Checks::step`).
+  widget's replays (egui_kittest does not call that hook: `frameworks/tests/app.rs` calls it in `Checks::step`). Its harness moves time on 0.25 s a frame, so
+  a double click there sends each click in one frame (`Checks::double_click`).
 - Jump history (`entities/src/jump_history.rs`, `use_cases/src/jump_history.rs`): `Editor::poll_jump_history` (every
   frame, from `command_controller::poll_plugins`) records the active view's places, the commands that ran
   (`note_command`, also for keys the widget does itself and `UiEvent::TextClicked`) decide whether a change merges;
@@ -104,15 +112,17 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   host's real stdout (it is the protocol); `codelibre_rpc.setup()` redirects `print` to the console.
 - Every `command_controller::run` asks the plugins' `on_text_command` / `on_window_command` (when some listener has them)
   and tells `on_post_*_command` after (a widget edit: once the widget did it, a frame later); with the fake host, script
-  one `PluginMessage::Answer` per query. With the text focused those listeners also take undo / redo / select all /
+  one `PluginMessage::Answer` per query. With the text focused those listeners also take select all /
   clipboard keys, typing (`Event::Text`) and the widget's own keys (`app.rs::widget_key_input`: Backspace/Delete,
   Enter/Tab, arrows/Home/End/Page Up/Down): `command_controller::hooked_widget_input` asks, and unless a listener replaces
-  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so undo and
-  IME stay its own. With several selections the use cases edit instead, since the widget only knows the primary one.
+  them the input goes back to the widget (`WidgetEdit::Insert` / `WidgetEdit::Key`, injected before it draws) so IME
+  stays its own. With several selections the use cases edit instead, since the widget only knows the primary one.
 - Find in Files (`use_cases/src/find_in_files.rs`, rules in `entities/src/find_in_files.rs`): `FileSearchGateway`
   (`gateways/folder_search.rs`) lists and searches on threads; `Editor::poll_find_in_files` (every frame) writes
   Find Results to the output panel `find_results` in Sublime 4215's exact format (checked by running it), so
-  `next_result` / double click work through `result_file_regex` / `result_line_regex`.
+  `next_result` / double click work through `result_file_regex` / `result_line_regex`. "Use Buffer" sends them to a "Find Results"
+  tab instead (`Editor::find_results_tab`); a double click in any tab with those settings opens a result
+  (`UiEvent::TextDoubleClicked`).
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
 
 ## Runtime state (Windows)
@@ -137,23 +147,28 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
-- `docs/plugins.md` — Python plugins: phase A done; phase B core done (call ids, timers, view events, quick / input panels,
+- `docs/roadmap.md` — what to do next, in order (multiple cursors first, phase by phase; phase 1 done).
+- `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
   completions, phantoms, groups, `create_io_panel`, `symbol_locations`, `export_to_html` and `reload_plugin` are done;
-  since 2026-11-14 also plugins' edits in the widget's undo, text input handlers in the palette's field, modifier keys,
+  since 2026-11-14 also plugins' edits in the undo history (our own since 2026-11-20), text input handlers in the palette's field, modifier keys,
   the console as a panel, the window's `is_*_visible`, `extract_scope` and `score_selector` as Sublime 4215 answers
   them, and the API 4215 has that ours lacked (checked by running Sublime with a throwaway profile and with Ghidra:
   "Checking against Sublime itself" there). Phase C has no unticked item left, and since 2026-11-15 neither has phase A
   (`show_popup_menu`, folding, the view's geometry, `TextSheet` / `ImageSheet`); phase B then got the minimap's glyphs,
-  `toggle_tabs` / `toggle_menu` and output panels at once during events. The items still unticked there are what
-  remains, with the files to touch.
+  `toggle_tabs` / `toggle_menu` and output panels at once during events, and since 2026-11-21 the find and input panels
+  and `build` (its last unticked item). Its "Missing:" notes were closed on 2026-11-21 (wrapped `bol` / `eol`, word
+  separators, `move_to_limit_on_up_down`, side bar multi-selection, the image / open-file / console-input menus,
+  the console's Python input). What Package Control still lacks are known limits, pending with the project's general
+  work: "Known limits" at the end of `docs/plugins.md` (Sublime's profile packages, one Python, modules without a shim,
+  the other modules of Sublime's `Default`).
 - `docs/sublime-gap-analysis.md` — every Sublime command / setting not implemented yet, by feature.
 - `docs/sublime-native-commands.md` — Sublime's native commands (from its binary, via Ghidra) with the arguments and
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, the rest of plugin
-phase B and C (the unticked items of `docs/plugins.md`; by design there is no Python 3.3 or 3.8 host: every plugin runs
-on the bundled 3.13), `fold_tag_attributes`, Find Results in a tab (`use_buffer`: they go to the `find_results` panel).
+Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, multi-selected
+tabs (`close_selected` closes the tab clicked), and by design no Python 3.3 or 3.8 host: every plugin runs on the
+bundled 3.13 (the console runs Python there too).
 Highlighting is skipped above 4 MB.

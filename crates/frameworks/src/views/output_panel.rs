@@ -9,7 +9,7 @@ use std::sync::Arc;
 use egui::text::{CCursor, LayoutJob};
 use egui::{Align, Color32, FontId, Galley, Id, RichText, Sense, TextFormat, Ui};
 use entities::command::Command;
-use entities::menu::ContextMenuTarget;
+use entities::menu::{ContextMenuTarget, CONSOLE_INPUT};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{ContextMenuViewModel, OutputPanelViewModel};
 
@@ -70,6 +70,12 @@ pub fn show(
             }
         });
     });
+    if let Some((input, _)) = &panel.console_input {
+        egui::TopBottomPanel::bottom(Id::new(("console_input_row", panel.id)))
+            .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 2)))
+            .show_separator_line(false)
+            .show_inside(ui, |ui| console_input(ui, chrome, input, menu, events));
+    }
     let scroll = if panel.word_wrap {
         egui::ScrollArea::vertical()
     } else {
@@ -130,6 +136,55 @@ pub fn show(
             }
             scroll_to_new_result(ui, panel, &galley, text.rect.min);
         });
+    // The console's field takes the focus when the console shows: asked after the panel's text,
+    // which asks for it too, so the field's request is the one kept.
+    if let Some((_, true)) = &panel.console_input {
+        ui.ctx()
+            .memory_mut(|m| m.request_focus(Id::new(CONSOLE_INPUT)));
+    }
+}
+
+/// The console's input field: Python, run on Enter; Up / Down go through the lines run before.
+/// Its right click opens `Console Input Widget Context.sublime-menu`.
+fn console_input(
+    ui: &mut Ui,
+    chrome: &Chrome,
+    input: &str,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
+    let id = Id::new(CONSOLE_INPUT);
+    let before_right_press = context_menu::state_before_right_press(ui.ctx(), id);
+    let mut text = input.to_string();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .desired_width(f32::INFINITY)
+            .text_color(chrome.fg)
+            .background_color(chrome.panel_bg)
+            .hint_text(">>>")
+            .font(egui::TextStyle::Monospace),
+    );
+    context_menu::attach_to_field(&field, CONSOLE_INPUT, menu, events);
+    context_menu::keep_selection(ui.ctx(), id, &field, before_right_press);
+    if text != input {
+        events.push(UiEvent::ConsoleInputChanged(text));
+    }
+    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        events.push(UiEvent::ConsoleInputEntered);
+        // At once: the text area, drawn after, would take the focus and this Enter.
+        field.request_focus();
+    } else if field.has_focus() {
+        let (up, down) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+            )
+        });
+        if up || down {
+            events.push(UiEvent::ConsoleHistory(up));
+        }
+    }
 }
 
 fn lay_out(

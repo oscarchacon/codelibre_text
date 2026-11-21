@@ -309,3 +309,159 @@ fn where_snippets_folders_and_find_in_folder() {
     editor.find_in_folder(&command);
     assert_eq!(editor.find_where(), "/a,/b,<project filters>");
 }
+
+fn tab_text(editor: &Editor) -> String {
+    let id = editor
+        .find_results_tab()
+        .expect("the Find Results tab is open");
+    editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.id == id)
+        .unwrap()
+        .text
+        .clone()
+}
+
+#[test]
+fn use_buffer_writes_the_results_to_a_tab_with_the_matches_outlined() {
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    assert!(editor.find_in_files(false));
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.id, tab, "the tab is active");
+    assert_eq!(doc.name(), "Find Results");
+    assert!(doc.scratch, "closing it does not ask to save");
+    assert!(editor.shown_output_panel().is_none(), "no panel shows");
+    let text = tab_text(&editor);
+    assert!(text.starts_with("Searching 3 files for \"foo\"\n\n"));
+    assert!(text.ends_with("4 matches across 2 files\n"));
+    let outlined: Vec<String> = doc
+        .regions(use_cases::find_in_files::FIND_RESULTS_MATCHES)
+        .iter()
+        .map(|&(a, b)| text.chars().skip(a).take(b - a).collect())
+        .collect();
+    assert_eq!(outlined, ["foo", "foo", "foo", "foo"], "one per match");
+    let settings = editor.settings_of(tab);
+    assert_eq!(settings.str("result_file_regex"), Some(RESULT_FILE_REGEX));
+}
+
+#[test]
+fn a_second_search_is_added_to_the_same_tab() {
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    editor.new_file();
+    search(&mut editor, "nine");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    assert_eq!(editor.find_results_tab(), Some(tab));
+    assert_eq!(editor.active_document().unwrap().id, tab);
+    let text = tab_text(&editor);
+    assert!(text.contains("4 matches across 2 files\n\nSearching 3 files for \"nine\""));
+    assert!(text.ends_with("1 match in 1 file\n"));
+}
+
+#[test]
+fn next_result_and_a_double_click_go_through_the_tab() {
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    assert!(editor.next_result(true));
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        doc.path.as_deref(),
+        Some(Path::new("/home/user/data/a.txt"))
+    );
+    assert_eq!(doc.selection(), Selection::new(8, 11));
+    assert!(editor.next_result(true));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(44, 47)
+    );
+
+    // A double click on `    1: foo` (b.txt), then F4 goes on from there: back to a.txt.
+    let text = tab_text(&editor);
+    let line = text.find("    1: foo").unwrap();
+    let point = text[..line].chars().count() + 3;
+    assert!(editor.open_result_in_tab(tab, point));
+    assert_eq!(
+        editor.active_document().unwrap().path.as_deref(),
+        Some(Path::new("/home/user/data/sub/b.txt"))
+    );
+    assert!(editor.next_result(true));
+    assert_eq!(
+        editor.active_document().unwrap().path.as_deref(),
+        Some(Path::new("/home/user/data/a.txt")),
+        "past the last result it starts again"
+    );
+    // The header is not a result.
+    assert!(!editor.open_result_in_tab(tab, 0));
+}
+
+#[test]
+fn closing_the_tab_ends_its_results() {
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    editor.close_documents(vec![tab]);
+    assert_eq!(editor.find_results_tab(), None);
+    assert!(!editor.next_result(true));
+}
+
+#[test]
+fn find_in_files_side_by_side_opens_a_result_beside_the_tab() {
+    let world = World::new().with_preferences(json!({ "find_in_files_side_by_side": true }));
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    let text = tab_text(&editor);
+    let line = text.find("    1: foo").unwrap();
+    let point = text[..line].chars().count() + 3;
+    assert!(editor.open_result_in_tab(tab, point));
+    assert_eq!(editor.group_count(), 2, "a second column");
+    let doc = editor.active_document().unwrap();
+    assert_eq!(
+        doc.path.as_deref(),
+        Some(Path::new("/home/user/data/sub/b.txt"))
+    );
+    assert_eq!(doc.group, 1, "beside the Find Results tab");
+    let results = editor
+        .state()
+        .documents
+        .iter()
+        .find(|d| d.id == tab)
+        .unwrap();
+    assert_eq!(results.group, 0, "which stays where it was");
+
+    // Without the setting, the result opens in the tab's group.
+    let world = World::new();
+    let mut editor = editor_with_data(&world);
+    editor.set_find_use_buffer(true);
+    search(&mut editor, "foo");
+    editor.find_in_files(false);
+    editor.poll_find_in_files();
+    let tab = editor.find_results_tab().unwrap();
+    assert!(editor.open_result_in_tab(tab, point));
+    assert_eq!(editor.group_count(), 1);
+}

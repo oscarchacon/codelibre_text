@@ -15,6 +15,7 @@
 //! | [`groups`] | the window's layout, focusing a group, moving views between groups |
 //! | [`saving`] | save, save as, save all |
 //! | [`editing`] | text commands, go to line, paste |
+//! | [`undo`] | undo / redo on the documents' own history, where an undo step ends |
 //! | [`clipboard_history`] | what was copied, for Paste from History |
 //! | [`jump_history`] | Jump Back / Jump Forward: where the selections were (`add_jump_record`) |
 //! | [`snippets`] | `insert_snippet` and visiting its fields with Tab |
@@ -70,6 +71,7 @@ pub mod search;
 pub mod session;
 pub mod side_bar;
 pub mod snippets;
+pub mod undo;
 pub mod windows;
 
 pub use editor::{Editor, EditorState, Gateways};

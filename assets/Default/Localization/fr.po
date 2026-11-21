@@ -1501,3 +1501,55 @@ msgstr "Déjà à la position la plus récente"
 #: crates/use_cases/src/jump_history.rs
 msgid "Already at the earliest position"
 msgstr "Déjà à la position la plus ancienne"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Use Buffer: show the results in a tab"
+msgstr "Utiliser un tampon : afficher les résultats dans un onglet"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr "Replier les attributs des balises"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Selected Tabs"
+msgstr "Fermer les onglets sélectionnés"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unselected Tabs"
+msgstr "Fermer les onglets non sélectionnés"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs"
+msgstr "Fermer les onglets non modifiés"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Unmodified Tabs to the Right"
+msgstr "Fermer les onglets non modifiés à droite"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs With Deleted Files"
+msgstr "Fermer les onglets des fichiers supprimés"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs Below"
+msgstr "Fermer les onglets en dessous"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs Below"
+msgstr "Fermer les onglets non modifiés en dessous"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Copy File Path"
+msgstr "Copier le chemin du fichier"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reveal in Side Bar"
+msgstr "Afficher dans la barre latérale"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reopen File as Text"
+msgstr "Rouvrir le fichier comme texte"

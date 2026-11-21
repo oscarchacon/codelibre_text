@@ -242,7 +242,7 @@ impl Editor {
     }
 
     /// The pieces of the lines `lines` and their scopes, in chars of the whole document.
-    fn line_tokens(&self, doc: &Document, lines: std::ops::Range<usize>) -> Vec<ScopedRange> {
+    pub(crate) fn line_tokens(&self, doc: &Document, lines: std::ops::Range<usize>) -> Vec<ScopedRange> {
         let first_byte = if lines.start == 0 {
             0
         } else {

@@ -8,6 +8,7 @@ use crate::selection::Selection;
 use crate::text::{
     byte_to_char, char_to_byte, is_word_char, line_end, line_start, selected_text, word_at,
 };
+use crate::view_geometry::ViewGeometry;
 
 /// Byte range of the whole lines touched by the selection (without the last newline).
 /// A selection that ends at column 0 does not include that last line, as in Sublime.
@@ -1398,6 +1399,42 @@ fn replace_char_ranges(
     carets
 }
 
+/// [`move_to`] in a view that wraps lines: `bol` and `eol` go to the ends of the row drawn
+/// (`bol` on a line's first row does as on a line). Without wrap, the same as [`move_to`].
+pub fn move_to_in_view(
+    text: &str,
+    selection: Selection,
+    to: &str,
+    extend: bool,
+    geometry: &ViewGeometry,
+) -> Option<Selection> {
+    let row = geometry.wrapped_row(text, selection.head);
+    match (to, row) {
+        ("bol", Some((start, _))) if !is_line_start(text, start) => {
+            Some(moved(selection, start, extend))
+        }
+        ("eol", Some((start, end))) => Some(moved(selection, row_end(text, start, end), extend)),
+        _ => move_to(text, selection, to, extend),
+    }
+}
+
+/// Whether the char `point` starts a line.
+fn is_line_start(text: &str, point: usize) -> bool {
+    point == 0 || text.chars().nth(point - 1) == Some('\n')
+}
+
+/// Where a caret at the end of a row stays on it: a wrapped row (not its line's last) ends at the
+/// space it broke after, which is where the next row begins, so the caret goes before that space.
+fn row_end(text: &str, start: usize, end: usize) -> usize {
+    let line_goes_on = text.chars().nth(end).is_some_and(|c| c != '\n');
+    let space_before = end > start && text.chars().nth(end - 1).is_some_and(char::is_whitespace);
+    if line_goes_on && space_before {
+        end - 1
+    } else {
+        end
+    }
+}
+
 /// Sublime's `move_to`: where the selection's moving end goes for `to` (`bol` is the first char of
 /// the line, or its start when already there). `None` for targets not supported.
 pub fn move_to(text: &str, selection: Selection, to: &str, extend: bool) -> Option<Selection> {
@@ -1435,9 +1472,35 @@ pub struct MoveBy {
     pub stops: Stops,
     /// Lines that `pages` moves (the lines the view shows).
     pub page_lines: usize,
-    /// `separators`: the chars that are punctuation for `stops` and sub-words (else the usual
-    /// word chars: letters, digits, `_`).
-    pub separators: Option<String>,
+    /// What separates words and sub-words for `stops` and sub-words.
+    pub separators: Separators,
+    /// Sublime's `move_to_limit_on_up_down`: `lines` from the first line up (or the last down)
+    /// goes to the start (end) of the text; else the caret stays.
+    pub limit_on_up_down: bool,
+}
+
+/// What separates words and sub-words: Sublime's `word_separators` and `sub_word_separators`
+/// settings (or the `separators` / `sub_word_separators` a command or `find_by_class` gives).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Separators {
+    /// The chars that are punctuation: other chars that are not blanks are word chars. `None`:
+    /// the usual word chars (letters, digits, `_`).
+    pub word: Option<String>,
+    /// The chars inside a word that separate its sub-words. `None`: `_`, Sublime's default.
+    pub sub_word: Option<String>,
+}
+
+impl Separators {
+    fn word(&self) -> Option<&str> {
+        self.word.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn is_sub_word(&self, c: char) -> bool {
+        match self.sub_word.as_deref() {
+            Some(separators) => separators.contains(c),
+            None => c == '_',
+        }
+    }
 }
 
 /// Where `move {"by": "stops"}` may stop, as Sublime's arguments of the same names say.
@@ -1474,19 +1537,23 @@ impl Stops {
     /// Whether the boundary between `before` and `after` (`None` at an end of the text) is a stop.
     /// `separators`, when given, are the chars that are punctuation (Sublime's `word_separators`):
     /// other chars that are not blanks are word chars.
-    fn at(&self, before: Option<char>, after: Option<char>, separators: Option<&str>) -> bool {
-        let class = |c: Option<char>| c.map(|c| class_with(c, separators));
+    fn at(&self, before: Option<char>, after: Option<char>, separators: &Separators) -> bool {
+        let class = |c: Option<char>| c.map(|c| class_with(c, separators.word()));
         let (b, a) = (class(before), class(after));
         let line_begin = matches!(b, None | Some(CharClass::Newline));
         let line_end = matches!(a, None | Some(CharClass::Newline));
         let begins = |kind: CharClass| a == Some(kind) && b != Some(kind);
         let ends = |kind: CharClass| b == Some(kind) && a != Some(kind);
         // Inside a word: "camelCase" and "snake_case" have sub-word boundaries.
+        let is_sub = |c: Option<char>| c.is_some_and(|c| separators.is_sub_word(c));
         let sub_word = match (before, after) {
             (Some(x), Some(y)) if b == Some(CharClass::Word) && a == Some(CharClass::Word) => {
+                let (x_sub, y_sub) = (separators.is_sub_word(x), separators.is_sub_word(y));
                 (x.is_lowercase() && y.is_uppercase())
-                    || (x == '_') != (y == '_')
-                    || (x.is_alphabetic() != y.is_alphabetic() && x != '_' && y != '_')
+                    || x_sub != y_sub
+                    || (x.is_alphanumeric()
+                        && y.is_alphanumeric()
+                        && x.is_alphabetic() != y.is_alphabetic())
             }
             _ => false,
         };
@@ -1494,9 +1561,8 @@ impl Stops {
             || (self.word_end && ends(CharClass::Word))
             || (self.punct_begin && begins(CharClass::Punctuation))
             || (self.punct_end && ends(CharClass::Punctuation))
-            || (self.sub_word_begin
-                && (begins(CharClass::Word) || (sub_word && after != Some('_'))))
-            || (self.sub_word_end && (ends(CharClass::Word) || (sub_word && before != Some('_'))))
+            || (self.sub_word_begin && (begins(CharClass::Word) || (sub_word && !is_sub(after))))
+            || (self.sub_word_end && (ends(CharClass::Word) || (sub_word && !is_sub(before))))
             || (self.line_begin && line_begin)
             || (self.line_end && line_end)
             || (self.empty_line && line_begin && line_end)
@@ -1509,7 +1575,7 @@ fn next_stop(
     position: usize,
     forward: bool,
     stops: &Stops,
-    separators: Option<&str>,
+    separators: &Separators,
 ) -> usize {
     let chars: Vec<char> = text.chars().collect();
     let boundary = |p: usize| {
@@ -1529,7 +1595,7 @@ fn next_stop(
 }
 
 /// `view.classify(point)`: the `CLASS_*` flags of the boundary at `point` (chars).
-pub fn classify(text: &str, point: usize, separators: Option<&str>) -> u32 {
+pub fn classify(text: &str, point: usize, separators: &Separators) -> u32 {
     let before = point.checked_sub(1).and_then(|i| text.chars().nth(i));
     let after = text.chars().nth(point);
     (0..9)
@@ -1545,7 +1611,7 @@ pub fn find_by_class(
     point: usize,
     forward: bool,
     classes: u32,
-    separators: Option<&str>,
+    separators: &Separators,
 ) -> usize {
     next_stop(
         text,
@@ -1584,10 +1650,9 @@ pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selecti
         }
         "characters" if forward => (head + 1).min(text.chars().count()),
         "characters" => head.saturating_sub(1),
-        "lines" => line_above_or_below(text, head, forward),
-        "pages" => {
-            (0..how.page_lines.max(1)).fold(head, |at, _| line_above_or_below(text, at, forward))
-        }
+        "lines" => line_above_or_below(text, head, forward, how.limit_on_up_down),
+        "pages" => (0..how.page_lines.max(1))
+            .fold(head, |at, _| line_above_or_below(text, at, forward, true)),
         "words" => word_boundary(text, head, forward, !forward),
         "word_ends" => word_boundary(text, head, forward, forward),
         "subwords" | "subword_ends" => {
@@ -1602,9 +1667,9 @@ pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selecti
                 line_end: forward,
                 ..Stops::default()
             };
-            next_stop(text, head, forward, &stops, how.separators.as_deref())
+            next_stop(text, head, forward, &stops, &how.separators)
         }
-        "stops" => next_stop(text, head, forward, &how.stops, how.separators.as_deref()),
+        "stops" => next_stop(text, head, forward, &how.stops, &how.separators),
         _ => return None,
     };
     Some(moved(selection, target, how.extend))
@@ -1619,18 +1684,24 @@ fn moved(selection: Selection, head: usize, extend: bool) -> Selection {
 }
 
 /// The same column of the next or previous line; the end or start of the text from the last or first.
-fn line_above_or_below(text: &str, position: usize, forward: bool) -> usize {
+/// The point on the next (or previous) line at the same column. From the last (or first) line,
+/// the end (or start) of the text with `to_limit`, else `position` itself.
+fn line_above_or_below(text: &str, position: usize, forward: bool, to_limit: bool) -> usize {
     let head = char_to_byte(text, position);
     let (start, end) = (line_start(text, head), line_end(text, head));
     let column = text[start..head].chars().count();
     let line = if forward {
         if end == text.len() {
-            return text.chars().count();
+            return if to_limit {
+                text.chars().count()
+            } else {
+                position
+            };
         }
         end + 1
     } else {
         if start == 0 {
-            return 0;
+            return if to_limit { 0 } else { position };
         }
         line_start(text, start - 1)
     };
@@ -1712,19 +1783,32 @@ pub enum CaretMotion {
 }
 
 /// Moves every caret one step; a non-empty selection collapses to its start (Left) or end (Right).
-pub fn move_carets(text: &str, selections: &[Selection], motion: CaretMotion) -> Vec<Selection> {
+/// The ends of a line are those of the row drawn when the view wraps lines (`geometry`).
+pub fn move_carets(
+    text: &str,
+    selections: &[Selection],
+    motion: CaretMotion,
+    geometry: &ViewGeometry,
+) -> Vec<Selection> {
     let len = text.chars().count();
     selections
         .iter()
         .map(|s| {
             let head = char_to_byte(text, s.head);
+            let row = geometry.wrapped_row(text, s.head);
             Selection::caret(match motion {
                 CaretMotion::Left if s.is_empty() => s.head.saturating_sub(1),
                 CaretMotion::Left => s.start(),
                 CaretMotion::Right if s.is_empty() => (s.head + 1).min(len),
                 CaretMotion::Right => s.end(),
-                CaretMotion::LineStart => byte_to_char(text, line_start(text, head)),
-                CaretMotion::LineEnd => byte_to_char(text, line_end(text, head)),
+                CaretMotion::LineStart => match row {
+                    Some((start, _)) => start,
+                    None => byte_to_char(text, line_start(text, head)),
+                },
+                CaretMotion::LineEnd => match row {
+                    Some((start, end)) => row_end(text, start, end),
+                    None => byte_to_char(text, line_end(text, head)),
+                },
             })
         })
         .collect()

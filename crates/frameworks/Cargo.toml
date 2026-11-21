@@ -40,9 +40,9 @@ clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
-# Attaches to the terminal that started the GUI program (main.rs)
+# Attaches to the terminal that started the GUI program (main.rs); asks for Break (input.rs)
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse"] }
 
 # The menu in the macOS menu bar (views/native_menu.rs); `objc2` tells a click from a key equivalent
 [target.'cfg(target_os = "macos")'.dependencies]

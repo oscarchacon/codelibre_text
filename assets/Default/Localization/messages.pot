@@ -12,6 +12,7 @@ msgstr ""
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Side Bar.sublime-menu
 #: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
 #: crates/interface_adapters/src/presenters/editor.rs
 msgid "New File"
 msgstr ""
@@ -26,6 +27,7 @@ msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
 msgid "Open File…"
 msgstr ""
 
@@ -106,18 +108,21 @@ msgstr ""
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
 #: assets/Default/Widget Context.sublime-menu
+#: assets/Default/Console Input Widget Context.sublime-menu
 msgid "Cut"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
 #: assets/Default/Widget Context.sublime-menu
+#: assets/Default/Console Input Widget Context.sublime-menu
 msgid "Copy"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
 #: assets/Default/Widget Context.sublime-menu
+#: assets/Default/Console Input Widget Context.sublime-menu
 msgid "Paste"
 msgstr ""
 
@@ -231,6 +236,10 @@ msgid "Fold Level 9"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Convert Case"
 msgstr ""
 
@@ -287,6 +296,7 @@ msgstr ""
 #: assets/Default/Main.sublime-menu
 #: assets/Default/Context.sublime-menu
 #: assets/Default/Widget Context.sublime-menu
+#: assets/Default/Console Input Widget Context.sublime-menu
 msgid "Select All"
 msgstr ""
 
@@ -357,6 +367,7 @@ msgid "Find in Files…"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+#: crates/use_cases/src/find_in_files.rs
 msgid "Find Results"
 msgstr ""
 
@@ -965,6 +976,7 @@ msgid "Delete File"
 msgstr ""
 
 #: assets/Default/Side Bar.sublime-menu
+#: assets/Default/Image Context.sublime-menu
 msgid "Open Containing Folder…"
 msgstr ""
 
@@ -986,15 +998,61 @@ msgid "Remove Folder from Project"
 msgstr ""
 
 #: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
 msgid "Close"
 msgstr ""
 
 #: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
 msgid "Close Others"
 msgstr ""
 
 #: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Selected Tabs"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unselected Tabs"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
 msgid "Close Tabs to the Right"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Unmodified Tabs to the Right"
+msgstr ""
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs With Deleted Files"
+msgstr ""
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs Below"
+msgstr ""
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs Below"
+msgstr ""
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Copy File Path"
+msgstr ""
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reveal in Side Bar"
+msgstr ""
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reopen File as Text"
 msgstr ""
 
 #: crates/use_cases/src/builds.rs
@@ -1041,6 +1099,7 @@ msgstr[1] ""
 msgid "Clipboard unavailable: {error}"
 msgstr ""
 
+#: crates/use_cases/src/context_menus.rs
 #: crates/use_cases/src/documents.rs
 msgid "{path} looks like a binary file"
 msgstr ""
@@ -1501,6 +1560,10 @@ msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Whole word"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Use Buffer: show the results in a tab"
 msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs

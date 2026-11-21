@@ -163,3 +163,118 @@ fn the_plugins_are_asked_with_the_filled_arguments_and_commands_that_want_it_get
         "found without its event"
     );
 }
+
+#[test]
+fn a_tab_closes_the_unmodified_tabs_and_those_of_deleted_files() {
+    let (_world, mut editor) = four_files();
+    // b and d are modified.
+    for name in ["b.txt", "d.txt"] {
+        let id = editor
+            .state()
+            .documents
+            .iter()
+            .find(|d| d.name() == name)
+            .unwrap()
+            .id;
+        editor.text_for_editing(id).unwrap().push('!');
+    }
+    editor.close_by_index(&Command::with_args(
+        "close_unmodified_to_right_by_index",
+        json!({ "group": 0, "index": 1 }),
+    ));
+    assert_eq!(names_in(&editor, 0), ["a.txt", "b.txt", "d.txt"], "c went");
+    editor.close_by_index(&Command::with_args(
+        "close_unmodified",
+        json!({ "group": 0, "index": 0 }),
+    ));
+    assert_eq!(names_in(&editor, 0), ["b.txt", "d.txt"]);
+
+    let (world, mut editor) = four_files();
+    world.disk.remove_dir("/p/c.txt");
+    editor.close_by_index(&Command::with_args(
+        "close_deleted_files",
+        json!({ "group": 0 }),
+    ));
+    assert_eq!(
+        names_in(&editor, 0),
+        ["a.txt", "b.txt", "d.txt"],
+        "c is no longer on disk"
+    );
+}
+
+#[test]
+fn close_selected_and_unselected_are_the_tab_clicked_and_the_others() {
+    let (_world, mut editor) = four_files();
+    editor.close_by_index(&Command::with_args(
+        "close_selected",
+        json!({ "group": 0, "index": 0 }),
+    ));
+    assert_eq!(names_in(&editor, 0), ["b.txt", "c.txt", "d.txt"]);
+    editor.close_by_index(&Command::with_args(
+        "close_unselected",
+        json!({ "group": 0, "index": 2 }),
+    ));
+    assert_eq!(names_in(&editor, 0), ["d.txt"]);
+}
+
+#[test]
+fn an_image_s_menu_copies_its_path_opens_its_folder_and_reopens_it_as_text() {
+    let world = World::new()
+        .with_file("/p/logo.gif", "GIF89a text")
+        .with_file("/p/photo.png", vec![0x89, b'P', b'N', b'G', 0, 0, 0, 1]);
+    let mut editor = world.editor();
+    open(&mut editor, "/p/logo.gif");
+    let image = editor.active_document().unwrap().id;
+    assert_eq!(
+        editor.active_document().unwrap().sheet,
+        entities::document::SheetKind::Image
+    );
+
+    editor.copy_file_path();
+    assert_eq!(
+        *world.clipboard.borrow(),
+        Ok(PathBuf::from("/p/logo.gif").display().to_string())
+    );
+
+    editor.open_package_folder("$file_path", "$file_name");
+    assert_eq!(
+        *world.selected_files.borrow(),
+        [PathBuf::from("/p/logo.gif")],
+        "the window's variables, as Sublime expands them"
+    );
+
+    editor.reopen_as_text();
+    let doc = editor.active_document().unwrap();
+    assert_eq!(doc.sheet, entities::document::SheetKind::Text);
+    assert_eq!(doc.text, "GIF89a text");
+    assert_ne!(doc.id, image, "a new view in its place");
+    assert_eq!(names_in(&editor, 0), ["logo.gif"]);
+
+    open(&mut editor, "/p/photo.png");
+    editor.reopen_as_text();
+    assert_eq!(
+        editor.active_document().unwrap().sheet,
+        entities::document::SheetKind::Image,
+        "a binary file stays a picture"
+    );
+}
+
+#[test]
+fn a_console_line_is_echoed_and_runs_in_the_plugin_host() {
+    let world = World::new().with_plugins(&[], &[]);
+    let mut editor = world.editor();
+    world.plugins.then([
+        PluginMessage::Log("2\n".into()),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.run_console_line("1 + 1", &mut |_: &mut Editor, _: &Command| {});
+    assert_eq!(*world.plugins.console_lines.borrow(), ["1 + 1"]);
+    let console = &editor.state().console;
+    assert!(console.ends_with(">>> 1 + 1\n2\n"), "{console:?}");
+    editor.run_console_line("  ", &mut |_: &mut Editor, _: &Command| {});
+    assert_eq!(
+        world.plugins.console_lines.borrow().len(),
+        1,
+        "nothing to run"
+    );
+}

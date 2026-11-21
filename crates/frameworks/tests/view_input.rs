@@ -1,13 +1,12 @@
 //! Views driven by synthetic input in a real `egui::Context`, without a window.
 
 use codelibre_text::views::theme::Chrome;
-use codelibre_text::views::{editor_view, input_panel, output_panel, quick_panel};
+use codelibre_text::views::{input_panel, output_panel, quick_panel};
 use egui::{
     CentralPanel, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect,
     Vec2,
 };
 use entities::minihtml::{Line, Span};
-use entities::selection::Selection;
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::view_models::{
     CommandInputViewModel, InputPanelViewModel, OutputPanelViewModel, QuickPanelItemViewModel,
@@ -61,6 +60,7 @@ fn button(pos: Pos2, pressed: bool) -> Event {
 
 fn panel() -> OutputPanelViewModel {
     OutputPanelViewModel {
+        console_input: None,
         id: 42,
         name: "exec".into(),
         text: "compiling\na.py:2:5 boom\na.py:3:1 second\n".into(),
@@ -76,38 +76,6 @@ fn panel() -> OutputPanelViewModel {
         take_focus: false,
         caret: None,
     }
-}
-
-#[test]
-fn an_external_plugin_edit_can_be_undone_by_the_text_widget() {
-    let ctx = Context::default();
-    let id = editor_view::widget_id(42);
-    let mut text = "before".to_string();
-    let _ = ctx.run(input(Vec::new()), |ctx| {
-        ctx.memory_mut(|memory| memory.request_focus(id));
-        CentralPanel::default().show(ctx, |ui| {
-            egui::TextEdit::multiline(&mut text).id(id).show(ui);
-        });
-    });
-
-    text = "after".into();
-    editor_view::add_undo_boundary(&ctx, 42, "before".into(), Selection::caret(6));
-    let _ = ctx.run(
-        input(vec![Event::Key {
-            key: Key::Z,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::COMMAND,
-        }]),
-        |ctx| {
-            CentralPanel::default().show(ctx, |ui| {
-                egui::TextEdit::multiline(&mut text).id(id).show(ui);
-            });
-        },
-    );
-
-    assert_eq!(text, "before");
 }
 
 #[test]

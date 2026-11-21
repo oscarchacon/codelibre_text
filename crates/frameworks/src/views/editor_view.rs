@@ -42,25 +42,6 @@ pub enum EditorText<'a> {
     ReadOnly(&'a str),
 }
 
-/// Adds the state before an out-of-widget plugin edit as a hard undo boundary. egui owns the
-/// actual history, but use cases mutate the text before the next `TextEdit` frame.
-pub fn add_undo_boundary(
-    ctx: &egui::Context,
-    document: DocumentId,
-    text: String,
-    selection: Selection,
-) {
-    let id = widget_id(document);
-    let mut state = TextEditState::load(ctx, id).unwrap_or_default();
-    let mut undoer = state.undoer();
-    undoer.add_undo(&(
-        CCursorRange::two(CCursor::new(selection.anchor), CCursor::new(selection.head)),
-        text,
-    ));
-    state.set_undoer(undoer);
-    state.store(ctx, id);
-}
-
 /// Which command-made selection each document's widget has already applied.
 #[derive(Default)]
 pub struct SelectionSync {
@@ -295,6 +276,12 @@ pub fn show(
                 }
                 if selection != model.selection || output.response.changed() {
                     events.push(UiEvent::SelectionChanged(model.document, selection));
+                }
+                if output.response.double_clicked() {
+                    if let Some(pointer) = output.response.interact_pointer_pos() {
+                        let at = output.galley.cursor_from_pos(pointer - output.galley_pos);
+                        events.push(UiEvent::TextDoubleClicked(model.document, at.ccursor.index));
+                    }
                 }
                 if output.response.changed() && !typed.is_empty() {
                     events.push(UiEvent::TextTyped(
@@ -895,7 +882,7 @@ fn has_icons(model: &EditorViewModel) -> bool {
     model
         .regions
         .iter()
-        .any(|r| !r.icon.is_empty() && !r.ranges.is_empty())
+        .any(|r| !r.icon.is_empty() && !r.scope.is_empty() && !r.ranges.is_empty())
 }
 
 /// The side of a gutter icon: a bit less than a line, as Sublime's 16 px icons in 19 px lines.
@@ -927,10 +914,12 @@ fn paint_region_icons(
     let x = gutter.left() + char_width * 0.3 + size / 2.0;
     let radius = (row_height * 0.22).max(2.0);
     for (regions, &color) in model.regions.iter().zip(region_colors) {
-        if regions.icon.is_empty() {
+        // Sublime 4215 draws no icon for a region set without a scope (checked by running it).
+        if regions.icon.is_empty() || regions.scope.is_empty() {
             continue;
         }
-        // A picture is tinted with the region's color, as Sublime does (white icons take it).
+        // A picture is tinted with its scope's foreground (the scheme's when the scope has no
+        // rule; `invalid` takes its foreground, not its background), as Sublime does.
         let texture = regions
             .icon_image
             .as_ref()
@@ -1788,16 +1777,20 @@ impl Colors {
 }
 
 /// An HTML sheet (the plugin's minihtml) or an image sheet (the picture, at its size, smaller to
-/// fit the tab), in the color scheme's colors, where a text sheet shows its text.
+/// fit the tab), in the color scheme's colors, where a text sheet shows its text. An image sheet
+/// has its menu (`Image Context.sublime-menu`).
 pub fn show_sheet(
     ui: &mut egui::Ui,
     model: &EditorViewModel,
     sheet: &SheetViewModel,
     engine: &SharedSyntaxEngine,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
 ) {
     let colors = Colors::from_scheme(&engine.borrow_mut().scheme(&model.color_scheme).settings);
     ui.painter()
         .rect_filled(ui.available_rect_before_wrap(), 0.0, colors.background);
+    let whole = ui.available_rect_before_wrap();
     egui::ScrollArea::both()
         .id_salt(("sheet_scroll", model.document))
         .auto_shrink([false, false])
@@ -1831,4 +1824,16 @@ pub fn show_sheet(
                 });
             }
         });
+    // Over the picture, after it, so its right click reaches the menu.
+    if let SheetViewModel::Image { .. } = sheet {
+        let area = ui.interact(
+            whole,
+            ui.id().with(("image_sheet", model.document)),
+            egui::Sense::CLICK,
+        );
+        let target = ContextMenuTarget::Image {
+            document: model.document,
+        };
+        context_menu::attach(&area, target, menu, events);
+    }
 }

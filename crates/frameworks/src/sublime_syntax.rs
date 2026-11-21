@@ -5,9 +5,9 @@
 //!   merged in. A child's context replaces the parent's of the same name, unless it starts with
 //!   `meta_prepend: true` / `meta_append: true`: then its patterns go before / after the parent's,
 //!   and its `meta_*` keys override the parent's. Other top-level keys are the child's own.
-//! - `branch_point` / `branch` / `fail`: syntect cannot go back in the text, so a `branch` pushes
-//!   its first context and a `fail` pops. The first alternative is the usual case; text where
-//!   Sublime would try the next one is highlighted as the first one says.
+//!
+//! `branch_point` / `branch` / `fail` need nothing here: our syntect (`vendor/syntect`) reads them and
+//! goes back to the branch point on a `fail`, as Sublime does.
 //!
 //! A file that uses none of them goes to syntect untouched. The others are written back in YAML's
 //! flow style, which syntect's YAML reader reads like the original.
@@ -39,7 +39,7 @@ impl SyntaxFiles {
     }
 
     /// The text syntect reads for `resource`: `None` when the file can go as it is, else the
-    /// definition with its parents merged in and its branches rewritten.
+    /// definition with its parents merged in.
     pub fn for_syntect(&mut self, resource: &str) -> Result<Option<String>, String> {
         let Some(text) = self.texts.get(resource) else {
             return Err(format!("{resource}: not found"));
@@ -47,12 +47,7 @@ impl SyntaxFiles {
         if !uses_version_2(text) {
             return Ok(None);
         }
-        let mut definition = self.resolve(resource, 0)?;
-        if let Some(Yaml::Hash(contexts)) = definition.get_mut(&key("contexts")) {
-            for (_, context) in contexts.iter_mut() {
-                rewrite_patterns(context);
-            }
-        }
+        let definition = self.resolve(resource, 0)?;
         let mut out = String::new();
         write_flow(&Yaml::Hash(definition), &mut out);
         Ok(Some(out))
@@ -129,8 +124,6 @@ fn parent_resource(child: &str, parent: &str) -> String {
 fn uses_version_2(text: &str) -> bool {
     [
         "extends",
-        "branch_point",
-        "fail:",
         "meta_prepend",
         "meta_append",
     ]
@@ -247,45 +240,6 @@ fn strip_merge_keys(definition: &mut Hash) {
             if let Yaml::Array(entries) = context {
                 *entries = without_merge_keys(std::mem::take(entries));
             }
-        }
-    }
-}
-
-/// Every pattern of a context (and of the anonymous contexts inside it): `branch` becomes a push
-/// of its first context, `fail` a pop.
-fn rewrite_patterns(context: &mut Yaml) {
-    let Yaml::Array(entries) = context else {
-        return;
-    };
-    for entry in entries {
-        let Yaml::Hash(pattern) = entry else { continue };
-        pattern.remove(&key("branch_point"));
-        if let Some(branch) = pattern.remove(&key("branch")) {
-            let first = match branch {
-                Yaml::Array(alternatives) => alternatives.into_iter().next(),
-                other => Some(other),
-            };
-            if let Some(first) = first {
-                pattern.insert(key("push"), first);
-            }
-        }
-        if pattern.remove(&key("fail")).is_some() {
-            pattern.insert(key("pop"), Yaml::Boolean(true));
-        }
-        for action in ["push", "set", "embed"] {
-            let Some(target) = pattern.get_mut(&key(action)) else {
-                continue;
-            };
-            // An anonymous context (a list of patterns), or a list of contexts (names or anonymous).
-            let anonymous = matches!(&*target, Yaml::Array(items) if items.iter().all(|i| matches!(i, Yaml::Hash(_))));
-            if anonymous {
-                rewrite_patterns(target);
-            } else if let Yaml::Array(items) = target {
-                items.iter_mut().for_each(rewrite_patterns);
-            }
-        }
-        if let Some(prototype) = pattern.get_mut(&key("with_prototype")) {
-            rewrite_patterns(prototype);
         }
     }
 }
