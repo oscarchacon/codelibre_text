@@ -774,6 +774,8 @@ pub struct PluginScript {
     pub events: RefCell<Vec<(String, DocumentId)>>,
     /// The `callback` requests (a panel's answers): (callback id, name, arguments).
     pub callbacks: RefCell<Vec<(u64, String, Value)>>,
+    /// The lines typed in the console, in order.
+    pub console_lines: RefCell<Vec<String>>,
     /// The `query` requests (`on_query_context`, `on_text_command`…): (event, view, arguments).
     pub queries: RefCell<Vec<(String, Option<DocumentId>, Value)>>,
     /// The editor's answers to the `Call` messages, in order.
@@ -849,6 +851,11 @@ impl PluginHostGateway for FakePluginHost {
             .callbacks
             .borrow_mut()
             .push((id, name.to_string(), args.clone()));
+        Ok(())
+    }
+
+    fn console(&mut self, code: &str) -> Result<(), String> {
+        self.0.console_lines.borrow_mut().push(code.to_string());
         Ok(())
     }
 

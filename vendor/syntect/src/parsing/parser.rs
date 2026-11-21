@@ -18,6 +18,7 @@ use crate::parsing::syntax_set::{SyntaxReference, SyntaxSet};
 use fnv::FnvHasher;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 /// Errors that can occur while parsing.
 #[derive(Debug, thiserror::Error)]
@@ -61,7 +62,60 @@ pub struct ParseState {
     // See issue #101. Contains indices of frames pushed by `with_prototype`s.
     // Doesn't look at `with_prototype`s below top of stack.
     proto_starts: Vec<usize>,
+    // codelibre_text patch: Sublime 4's `branch_point`s still open, oldest first.
+    branches: Vec<BranchPoint>,
+    // The alternatives the next line takes at its branch points, after a `fail` on a later line
+    // sent the parsing back to it: (byte, branch point, alternative).
+    forced: Vec<(usize, String, usize)>,
+    // A `fail` went back to a branch point of an earlier line: how many lines back, and the state
+    // to parse that line again with (see `take_rewind`).
+    rewind: Option<(usize, Box<ParseState>)>,
+    // While a line is parsed: its start state, and the alternatives forced or taken in it so far.
+    line_start: Option<Arc<ParseState>>,
+    line_forced: Vec<(usize, String, usize)>,
 }
+
+/// codelibre_text patch: where a `branch` was taken, to go back there when a `fail` names it.
+#[derive(Debug, Clone)]
+struct BranchPoint {
+    name: String,
+    pattern: Box<MatchPattern>,
+    alternative: usize,
+    // The stack and `proto_starts` before the branch was taken.
+    stack: Vec<StateLevel>,
+    proto_starts: Vec<usize>,
+    // Where it matched in its line, and how many ops that line had before it.
+    regions: Region,
+    ops_len: usize,
+    // Lines parsed since its own (0: this line).
+    lines_ago: usize,
+    // The state its line started with (shared: copying a state copies its branch points, which must
+    // not copy every earlier line's state each time), and the alternatives taken in that line before it.
+    line_start: Arc<ParseState>,
+    forced_before: Vec<(usize, String, usize)>,
+}
+
+// Two branch points are the same when they share their line's start state (compared by address:
+// comparing it would compare every earlier line's state, and the cache compares states a lot).
+impl PartialEq for BranchPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.alternative == other.alternative
+            && self.lines_ago == other.lines_ago
+            && self.ops_len == other.ops_len
+            && self.stack == other.stack
+            && self.proto_starts == other.proto_starts
+            && self.regions == other.regions
+            && self.forced_before == other.forced_before
+            && Arc::ptr_eq(&self.line_start, &other.line_start)
+            && self.pattern == other.pattern
+    }
+}
+
+impl Eq for BranchPoint {}
+
+/// How many lines back a `fail` can go (Sublime's limit).
+const MAX_BRANCH_LINES: usize = 128;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct StateLevel {
@@ -187,7 +241,30 @@ impl ParseState {
             stack: vec![start_state],
             first_line: true,
             proto_starts: Vec::new(),
+            branches: Vec::new(),
+            forced: Vec::new(),
+            rewind: None,
+            line_start: None,
+            line_forced: Vec::new(),
         }
+    }
+
+    /// codelibre_text patch: after `parse_line`, whether a `fail` sent the parsing back to a branch
+    /// point of an earlier line: how many lines back, and the state to parse that line (and the
+    /// ones after it) again with. What `parse_line` returned for this line is then not to be used.
+    pub fn take_rewind(&mut self) -> Option<(usize, ParseState)> {
+        self.rewind.take().map(|(back, state)| (back, *state))
+    }
+
+    /// codelibre_text patch: whether the next line takes another alternative than the first at a
+    /// branch point, because a `fail` further on said so. An edit after it may change that.
+    pub fn has_forced_branches(&self) -> bool {
+        !self.forced.is_empty()
+    }
+
+    /// codelibre_text patch: the next line takes the first alternatives again (to parse it anew).
+    pub fn clear_forced_branches(&mut self) {
+        self.forced.clear();
     }
 
     /// Parses a single line of the file. Because of the way regex engines work you unfortunately
@@ -217,6 +294,28 @@ impl ParseState {
         if self.stack.is_empty() {
             return Err(ParsingError::MissingMainContext);
         }
+        // codelibre_text patch: what a later `fail` needs to come back to this line.
+        self.rewind = None;
+        self.line_forced = std::mem::take(&mut self.forced);
+        // A copy of the stack (and of the open branch points): cheap next to parsing the line.
+        let mut start = self.clone();
+        start.line_forced.clear();
+        self.line_start = Some(Arc::new(start));
+        for branch in &mut self.branches {
+            branch.lines_ago += 1;
+        }
+        self.branches.retain(|b| b.lines_ago <= MAX_BRANCH_LINES);
+        let result = self.parse_line_tokens(line, syntax_set);
+        self.line_start = None;
+        self.line_forced.clear();
+        result
+    }
+
+    fn parse_line_tokens(
+        &mut self,
+        line: &str,
+        syntax_set: &SyntaxSet,
+    ) -> Result<Vec<(usize, ScopeStackOp)>, ParsingError> {
         let mut match_start = 0;
         let mut res = Vec::new();
 
@@ -318,7 +417,9 @@ impl ParseState {
                 // e.g. non-consuming "set" could also result in a loop.
                 let context = reg_match.context;
                 let match_pattern = context.match_at(reg_match.pat_index)?;
-                if let MatchOperation::Push(_) = match_pattern.operation {
+                if let MatchOperation::Push(_) | MatchOperation::Branch { .. } =
+                    match_pattern.operation
+                {
                     *non_consuming_push_at = (match_end, self.stack.len() + 1);
                 }
             }
@@ -335,7 +436,14 @@ impl ParseState {
                 let id = &self.stack[self.stack.len() - 1].context;
                 syntax_set.get_context(id)?
             };
+            let failed = match &reg_match.context.match_at(reg_match.pat_index)?.operation {
+                MatchOperation::Fail(name) => Some(name.clone()),
+                _ => None,
+            };
             self.exec_pattern(line, &reg_match, level_context, syntax_set, ops)?;
+            if let Some(name) = failed {
+                return self.fail(&name, line, syntax_set, start, search_cache, non_consuming_push_at, ops);
+            }
 
             Ok(true)
         } else {
@@ -407,8 +515,10 @@ impl ParseState {
                             && !consuming
                             && matches!(match_pat.operation, MatchOperation::Pop);
 
-                        let push_too_deep = matches!(match_pat.operation, MatchOperation::Push(_))
-                            && self.stack.len() >= 100;
+                        let push_too_deep = matches!(
+                            match_pat.operation,
+                            MatchOperation::Push(_) | MatchOperation::Branch { .. }
+                        ) && self.stack.len() >= 100;
 
                         if push_too_deep {
                             return Ok(None);
@@ -475,7 +585,7 @@ impl ParseState {
             // this is necessary to avoid infinite looping on dumb patterns
             let does_something = match match_pat.operation {
                 MatchOperation::None => match_start != match_end,
-                MatchOperation::Push(_) => self.stack.len() < 100,
+                MatchOperation::Push(_) | MatchOperation::Branch { .. } => self.stack.len() < 100,
                 _ => true,
             };
             if can_cache && does_something {
@@ -500,16 +610,119 @@ impl ParseState {
         syntax_set: &'a SyntaxSet,
         ops: &mut Vec<(usize, ScopeStackOp)>,
     ) -> Result<bool, ParsingError> {
-        let (match_start, match_end) = reg_match.regions.pos(0).unwrap();
-        let context = reg_match.context;
-        let pat = context.match_at(reg_match.pat_index)?;
-        // println!("running pattern {:?} on '{}' at {}, operation {:?}", pat.regex_str, line, match_start, pat.operation);
+        let pat = reg_match.context.match_at(reg_match.pat_index)?;
+        self.exec_match(line, pat, &reg_match.regions, level_context, syntax_set, ops)
+    }
+
+    /// codelibre_text patch: a `fail` of the branch point `name`. Its next alternative is tried from
+    /// where it matched: in this line at once (what was parsed after it is dropped), or, when it
+    /// was on an earlier line, by asking for those lines to be parsed again (`take_rewind`), and
+    /// this line stops here. Without such a branch point, or with no alternative left, nothing
+    /// happens. Returns whether the line goes on.
+    #[allow(clippy::too_many_arguments)]
+    fn fail(
+        &mut self,
+        name: &str,
+        line: &str,
+        syntax_set: &SyntaxSet,
+        start: &mut usize,
+        search_cache: &mut SearchCache,
+        non_consuming_push_at: &mut (usize, usize),
+        ops: &mut Vec<(usize, ScopeStackOp)>,
+    ) -> Result<bool, ParsingError> {
+        let Some(index) = self.branches.iter().rposition(|b| b.name == name) else {
+            return Ok(true);
+        };
+        // It and the branch points taken after it are over.
+        let branch = self.branches.remove(index);
+        self.branches.truncate(index);
+        let count = match &branch.pattern.operation {
+            MatchOperation::Branch { alternatives, .. } => alternatives.len(),
+            _ => 0,
+        };
+        let next = branch.alternative + 1;
+        if next >= count {
+            return Ok(true);
+        }
+        let (match_start, match_end) = branch.regions.pos(0).unwrap();
+        let mut forced = branch.forced_before.clone();
+        forced.push((match_start, name.to_string(), next));
+        if branch.lines_ago > 0 {
+            let mut state = Arc::unwrap_or_clone(branch.line_start);
+            state.forced = forced;
+            self.rewind = Some((branch.lines_ago, Box::new(state)));
+            return Ok(false);
+        }
+        // In this line: back to the state before the branch, then its next alternative.
+        self.stack = branch.stack;
+        self.proto_starts = branch.proto_starts;
+        ops.truncate(branch.ops_len);
+        search_cache.clear();
+        *non_consuming_push_at = (usize::MAX, 0);
+        self.line_forced = forced;
+        *start = match_end;
+        let level_context = {
+            let id = &self.stack[self.stack.len() - 1].context;
+            syntax_set.get_context(id)?
+        };
+        self.exec_match(
+            line,
+            &branch.pattern,
+            &branch.regions,
+            level_context,
+            syntax_set,
+            ops,
+        )?;
+        Ok(true)
+    }
+
+    /// Runs a pattern that matched at `regions`. A `branch` pushes the alternative this line
+    /// takes there (the first, unless a `fail` sent the parsing back), and is remembered.
+    fn exec_match(
+        &mut self,
+        line: &str,
+        pat: &MatchPattern,
+        regions: &Region,
+        level_context: &Context,
+        syntax_set: &SyntaxSet,
+        ops: &mut Vec<(usize, ScopeStackOp)>,
+    ) -> Result<bool, ParsingError> {
+        let (match_start, match_end) = regions.pos(0).unwrap();
+        let branch_op;
+        let operation = match &pat.operation {
+            MatchOperation::Branch { name, alternatives } if !alternatives.is_empty() => {
+                let alternative = self
+                    .line_forced
+                    .iter()
+                    .rev()
+                    .find(|(at, n, _)| *at == match_start && n == name)
+                    .map_or(0, |forced| forced.2)
+                    .min(alternatives.len() - 1);
+                if let Some(line_start) = &self.line_start {
+                    self.branches.push(BranchPoint {
+                        name: name.clone(),
+                        pattern: Box::new(pat.clone()),
+                        alternative,
+                        stack: self.stack.clone(),
+                        proto_starts: self.proto_starts.clone(),
+                        regions: regions.clone(),
+                        ops_len: ops.len(),
+                        lines_ago: 0,
+                        line_start: line_start.clone(),
+                        forced_before: self.line_forced.clone(),
+                    });
+                }
+                branch_op = MatchOperation::Push(vec![alternatives[alternative].clone()]);
+                &branch_op
+            }
+            other => other,
+        };
 
         self.push_meta_ops(
             true,
             match_start,
             level_context,
-            &pat.operation,
+            operation,
             syntax_set,
             ops,
         )?;
@@ -523,7 +736,7 @@ impl ParseState {
             // we don't have to handle a capture matching multiple times, Sublime doesn't
             let mut map: Vec<((usize, i32), ScopeStackOp)> = Vec::new();
             for &(cap_index, ref scopes) in capture_map.iter() {
-                if let Some((cap_start, cap_end)) = reg_match.regions.pos(cap_index) {
+                if let Some((cap_start, cap_end)) = regions.pos(cap_index) {
                     // marking up empty captures causes pops to be sorted wrong
                     if cap_start == cap_end {
                         continue;
@@ -551,12 +764,16 @@ impl ParseState {
             false,
             match_end,
             level_context,
-            &pat.operation,
+            operation,
             syntax_set,
             ops,
         )?;
 
-        self.perform_op(line, &reg_match.regions, pat, syntax_set)
+        let changed = self.perform_op(line, regions, pat, operation, syntax_set)?;
+        // A branch point whose alternative was popped is over.
+        let depth = self.stack.len();
+        self.branches.retain(|b| b.stack.len() < depth);
+        Ok(changed)
     }
 
     fn push_meta_ops(
@@ -666,7 +883,7 @@ impl ParseState {
                     }
                 }
             }
-            MatchOperation::None => (),
+            MatchOperation::None | MatchOperation::Branch { .. } | MatchOperation::Fail(_) => (),
         }
 
         Ok(())
@@ -678,9 +895,10 @@ impl ParseState {
         line: &str,
         regions: &Region,
         pat: &MatchPattern,
+        operation: &MatchOperation,
         syntax_set: &SyntaxSet,
     ) -> Result<bool, ParsingError> {
-        let (ctx_refs, old_proto_ids) = match pat.operation {
+        let (ctx_refs, old_proto_ids) = match *operation {
             MatchOperation::Push(ref ctx_refs) => (ctx_refs, None),
             MatchOperation::Set(ref ctx_refs) => {
                 // a `with_prototype` stays active when the context is `set`
@@ -692,7 +910,10 @@ impl ParseState {
                 self.stack.pop();
                 return Ok(true);
             }
-            MatchOperation::None => return Ok(false),
+            // A branch was turned into the push of its alternative; a fail changes nothing here.
+            MatchOperation::None | MatchOperation::Branch { .. } | MatchOperation::Fail(_) => {
+                return Ok(false)
+            }
         };
         for (i, r) in ctx_refs.iter().enumerate() {
             let mut proto_ids = if i == 0 {

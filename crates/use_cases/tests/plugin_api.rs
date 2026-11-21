@@ -343,9 +343,10 @@ fn inserting_erasing_and_replacing_move_the_selections() {
 }
 
 #[test]
-fn text_edits_from_plugin_api_keep_the_previous_state_for_widget_undo() {
+fn a_plugin_edit_is_undone_with_the_selection_it_had() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "before");
+    editor.close_undo_steps();
     let view = view_id(&editor);
     editor.sync_selection_from_view(view, Selection::caret(3));
 
@@ -358,45 +359,36 @@ fn text_edits_from_plugin_api_keep_the_previous_state_for_widget_undo() {
     .unwrap();
 
     assert_eq!(active_text(&editor), "after");
-    let window = editor.current_window();
+    assert!(editor.undo());
+    assert_eq!(active_text(&editor), "before");
     assert_eq!(
-        editor.take_plugin_edit_undo_boundaries(window),
-        vec![use_cases::editor::PluginEditUndoBoundary {
-            window: 1,
-            document: view,
-            text: "before".into(),
-            selection: Selection::caret(3),
-        }]
+        editor.active_document().unwrap().selection(),
+        Selection::caret(3)
     );
+    assert!(editor.redo());
+    assert_eq!(active_text(&editor), "after");
 }
 
 #[test]
-fn several_plugin_edits_before_the_widget_draws_are_one_undo_step() {
+fn a_plugin_s_edits_in_one_frame_are_one_undo_step() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "abc");
+    editor.close_undo_steps();
     let view = view_id(&editor);
 
     call(&world, &mut editor, "view_insert", json!([view, 3, "d"])).unwrap();
     call(&world, &mut editor, "view_insert", json!([view, 4, "e"])).unwrap();
     call(&world, &mut editor, "view_erase", json!([view, 0, 1])).unwrap();
-
     assert_eq!(active_text(&editor), "bcde");
-    let boundaries = editor.take_plugin_edit_undo_boundaries(editor.current_window());
-    assert_eq!(
-        boundaries.len(),
-        1,
-        "one boundary per document until the widget takes it"
-    );
-    assert_eq!(boundaries[0].text, "abc", "the state before the first edit");
-
+    // The frame ends; the next edit is another step.
+    editor.close_plugin_undo_steps();
     call(&world, &mut editor, "view_insert", json!([view, 0, "a"])).unwrap();
-    let boundaries = editor.take_plugin_edit_undo_boundaries(editor.current_window());
-    assert_eq!(
-        boundaries.len(),
-        1,
-        "a new step once the last one was taken"
-    );
-    assert_eq!(boundaries[0].text, "bcde");
+    assert_eq!(active_text(&editor), "abcde");
+
+    assert!(editor.undo());
+    assert_eq!(active_text(&editor), "bcde", "the last frame's edit");
+    assert!(editor.undo());
+    assert_eq!(active_text(&editor), "abc", "the first frame's three at once");
 }
 
 #[test]
@@ -474,9 +466,10 @@ fn plugins_read_and_change_what_the_window_shows() {
 }
 
 #[test]
-fn plugin_edits_from_another_window_queue_undo_for_the_owning_window() {
+fn plugin_edits_in_another_window_are_undone_there() {
     let world = plugin_world();
     let mut editor = editor_with(&world, "before");
+    editor.close_undo_steps();
     let view = view_id(&editor);
     editor.new_window();
 
@@ -491,10 +484,8 @@ fn plugin_edits_from_another_window_queue_undo_for_the_owning_window() {
     assert_eq!(editor.current_window(), 2);
     assert!(editor.switch_to_window(1));
     assert_eq!(active_text(&editor), "after");
-    let boundaries = editor.take_plugin_edit_undo_boundaries(1);
-    assert_eq!(boundaries.len(), 1);
-    assert_eq!(boundaries[0].document, view);
-    assert_eq!(boundaries[0].text, "before");
+    assert!(editor.undo());
+    assert_eq!(active_text(&editor), "before");
 }
 
 #[test]

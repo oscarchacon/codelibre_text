@@ -42,35 +42,54 @@ fn text_after(command: Command, text: &str, selection: Selection) -> String {
 }
 
 #[test]
-fn editing_commands_add_the_pre_edit_text_to_the_widget_undo_history() {
+fn each_command_is_one_undo_step_and_undo_runs_at_once() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
-    let id = editor.active_document().unwrap().id;
 
     run(&mut editor, &mut view, &cmd("left_delete"));
-    poll_plugins(&mut editor, &mut view);
+    run(&mut editor, &mut view, &cmd("left_delete"));
+    assert_eq!(active_text(&editor), "hel");
 
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "hell", "one command taken back");
+    assert!(
+        view.take_requests().is_empty(),
+        "nothing left for the widget"
+    );
+    run(&mut editor, &mut view, &cmd("soft_undo"));
+    assert_eq!(active_text(&editor), "hello");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::caret(5)
+    );
+    run(&mut editor, &mut view, &cmd("redo"));
     assert_eq!(active_text(&editor), "hell");
-    assert!(matches!(
-        view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "hello" && *selection == Selection::caret(5)
-    ));
 }
 
 #[test]
-fn editing_commands_run_during_plugin_events_add_undo_boundaries_too() {
+fn undo_runs_during_plugin_events_too() {
     let world = World::new();
     let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
-    let id = editor.active_document().unwrap().id;
+    run(&mut editor, &mut view, &cmd("left_delete"));
 
-    assert!(run_during_event(&mut editor, &cmd("left_delete")));
-    poll_plugins(&mut editor, &mut view);
+    assert!(run_during_event(&mut editor, &cmd("undo")));
+    assert_eq!(active_text(&editor), "hello", "at once, not a frame later");
+    assert!(run_during_event(&mut editor, &cmd("redo_or_repeat")));
+    assert_eq!(active_text(&editor), "hell");
+}
 
+#[test]
+fn a_focused_field_undoes_its_own_typing() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "hello", Selection::caret(5));
+    run(&mut editor, &mut view, &cmd("left_delete"));
+    view.field_has_focus = true;
+
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "hell", "the text keeps its edit");
     assert!(matches!(
         view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "hello" && *selection == Selection::caret(5)
+        [ViewRequest::WidgetEdit(WidgetEdit::Undo)]
     ));
 }
 
@@ -302,6 +321,37 @@ fn closing_a_normal_quick_panel_changes_no_setting() {
 }
 
 // ----- find panel ----------------------------------------------------------------------------------
+
+#[test]
+fn show_panel_use_buffer_sends_the_results_to_a_tab() {
+    let world = World::new();
+    world.disk.put("/p/a.txt", "a foo\n");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "find_in_files", "use_buffer": true }),
+        ),
+    );
+    assert!(editor.find_use_buffer());
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    run(&mut editor, &mut view, &cmd("find_all"));
+    editor.poll_find_in_files();
+    assert!(editor.shown_output_panel().is_none());
+    assert_eq!(
+        editor.active_document().map(|d| d.id),
+        editor.find_results_tab()
+    );
+    assert!(active_text(&editor).contains("/p/a.txt:\n    1: a foo\n"));
+    run(&mut editor, &mut view, &cmd("next_result"));
+    assert_eq!(active_text(&editor), "a foo\n");
+}
 
 #[test]
 fn find_in_files_searches_into_the_results_panel() {
@@ -1028,23 +1078,12 @@ fn goto_line_is_one_based() {
 // ----- widget edits --------------------------------------------------------------------------------
 
 #[test]
-fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
+fn select_all_and_clipboard_commands_are_left_to_the_text_widget() {
     let world = World::new().with_preferences(json!({ "copy_with_empty_selection": false }));
     *world.clipboard.borrow_mut() = Ok("clip".into());
     let mut editor = world.editor();
     let mut view = ViewState::default();
-    for name in [
-        "undo",
-        "soft_undo",
-        "redo",
-        "redo_or_repeat",
-        "soft_redo",
-        "select_all",
-        "copy",
-        "cut",
-        "paste",
-        "paste_and_indent",
-    ] {
+    for name in ["select_all", "copy", "cut", "paste", "paste_and_indent"] {
         run(&mut editor, &mut view, &cmd(name));
     }
     let edits: Vec<WidgetEdit> = view
@@ -1059,11 +1098,6 @@ fn undo_redo_and_clipboard_commands_are_left_to_the_text_widget() {
     assert_eq!(
         edits,
         vec![
-            Undo,
-            Undo,
-            Redo,
-            Redo,
-            Redo,
             SelectAll,
             Copy,
             Cut,
@@ -1275,10 +1309,9 @@ fn listeners_rewrite_commands_before_they_run_and_hear_about_them_after() {
 }
 
 #[test]
-fn listener_replacements_keep_the_original_state_in_widget_undo_history() {
+fn a_listener_s_replacement_is_undone_to_the_original_text() {
     let world = World::new().with_plugins(&[], &["on_text_command", "on_post_text_command"]);
     let (mut editor, mut view) = setup(&world, "abc", Selection::new(0, 3));
-    let id = editor.active_document().unwrap().id;
     world.plugins.then([
         PluginMessage::Answer(json!(["upper_case", null])),
         PluginMessage::Answer(Value::Null),
@@ -1288,11 +1321,16 @@ fn listener_replacements_keep_the_original_state_in_widget_undo_history() {
     poll_plugins(&mut editor, &mut view);
 
     assert_eq!(active_text(&editor), "ABC");
-    assert!(matches!(
-        view.take_requests().as_slice(),
-        [ViewRequest::WidgetUndoBoundary { document, text, selection }]
-            if *document == id && text == "abc" && *selection == Selection::new(0, 3)
-    ));
+    world.plugins.then([
+        PluginMessage::Answer(Value::Null),
+        PluginMessage::Answer(Value::Null),
+    ]);
+    run(&mut editor, &mut view, &cmd("undo"));
+    assert_eq!(active_text(&editor), "abc");
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 3)
+    );
 }
 
 #[test]
@@ -1613,6 +1651,148 @@ fn a_listener_s_output_panel_is_shown_during_the_event() {
     poll_plugins(&mut editor, &mut view);
     assert!(!view.find_panel.visible);
     assert_eq!(editor.shown_output_panel().unwrap().name, "tool");
+}
+
+#[test]
+fn a_listener_s_find_panel_is_shown_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("show_panel", json!({ "panel": "output.exec" })),
+    );
+    world.plugins.then([
+        plugin_call(
+            "run_command",
+            json!(["window", id, "show_panel", { "panel": "replace", "regex": true }]),
+        ),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(json!("replace"))),
+        "shown before the listener asks"
+    );
+    assert!(editor.state().find.regex, "its arguments are taken at once");
+    assert!(
+        editor.shown_output_panel().is_none(),
+        "it takes the output panel's place"
+    );
+    // The view's part, next frame: what the view reports before it does is not taken.
+    assert!(!view.find_panel.visible);
+    editor.sync_find_panel(None);
+    assert_eq!(editor.find_panel_shown(), Some("replace"));
+    poll_plugins(&mut editor, &mut view);
+    assert!(view.find_panel.visible && view.find_panel.replace_mode);
+    assert_eq!(editor.find_panel_shown(), Some("replace"));
+    // From then on the view's report counts again.
+    view.find_panel.visible = false;
+    editor.sync_find_panel(view.find_panel_name());
+    assert_eq!(editor.find_panel_shown(), None);
+}
+
+#[test]
+fn a_listener_s_hide_panel_closes_the_input_panel_during_the_event() {
+    let world = listening_world(&["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.txt");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.meanwhile([plugin_call(
+        "window_show_input_panel",
+        json!([1, "Name:", "x", 7, false]),
+    )]);
+    poll_plugins(&mut editor, &mut view);
+    assert!(view.input_panel.is_some());
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "hide_panel", null])),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(Value::Null)),
+        "closed before the listener asks"
+    );
+    assert!(editor.plugin_input_panel().is_none());
+    assert!(
+        world.plugins.callbacks.borrow().is_empty(),
+        "its on_cancel waits until the event is over"
+    );
+    world.plugins.then([PluginMessage::Done { error: None }]);
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        *world.plugins.callbacks.borrow(),
+        vec![(7, "cancel".to_string(), json!([]))]
+    );
+    assert!(view.input_panel.is_none());
+}
+
+#[test]
+fn a_listener_s_build_runs_during_the_event() {
+    let world = build_world().with_plugins(&[], &["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.py");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "build", null])),
+        plugin_call("window_active_panel", json!([1])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert_eq!(world.processes.started.borrow().len(), 1, "started at once");
+    assert_eq!(
+        world.plugins.replies.borrow().last(),
+        Some(&Ok(json!("output.exec")))
+    );
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        world.processes.started.borrow().len(),
+        1,
+        "not started again"
+    );
+}
+
+#[test]
+fn a_listener_s_build_picker_waits_for_the_next_frame() {
+    let world = build_world()
+        .with_resource(
+            "Packages/U/Other.sublime-build",
+            r#"{ "selector": "source.python", "cmd": ["other"] }"#,
+        )
+        .with_plugins(&[], &["on_post_save"]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    editor.set_event_command_runner(run_during_event);
+    open(&mut editor, "/p/a.py");
+    let id = editor.active_document().unwrap().id;
+    world.plugins.then([
+        plugin_call("run_command", json!(["window", id, "build", null])),
+        PluginMessage::Done { error: None },
+    ]);
+    editor.text_for_editing(id).unwrap().push('!');
+    assert!(editor.save_active(false));
+    assert!(view.quick_panel.is_none());
+    poll_plugins(&mut editor, &mut view);
+    assert_eq!(
+        view.quick_panel.as_ref().map(|p| p.kind),
+        Some(SearchKind::BuildSystems)
+    );
+    assert!(world.processes.started.borrow().is_empty());
 }
 
 #[test]
@@ -2250,4 +2430,43 @@ fn a_plugin_side_bar_command_replaces_the_built_in_one() {
     );
     assert!(world.disk.trashed.borrow().is_empty());
     assert_eq!(world.plugins.runs.borrow()[0].1, "delete_file");
+}
+
+#[test]
+fn reveal_in_side_bar_opens_the_folders_down_to_the_file_and_selects_it() {
+    let world = World::new();
+    world.disk.put("/p/sub/deep/a.txt", "a");
+    world.disk.put("/elsewhere/b.txt", "b");
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    view.show_side_bar = false;
+    open(&mut editor, "/p/sub/deep/a.txt");
+    run(&mut editor, &mut view, &cmd("reveal_in_side_bar"));
+    assert!(view.show_side_bar);
+    for folder in ["/p", "/p/sub", "/p/sub/deep"] {
+        assert!(
+            view.expanded_folders.contains(&PathBuf::from(folder)),
+            "{folder}"
+        );
+    }
+    let file = PathBuf::from("/p/sub/deep/a.txt");
+    assert_eq!(view.side_bar_selection, std::slice::from_ref(&file));
+    let presented = interface_adapters::presenters::side_bar::present(&editor, &mut view);
+    let row = presented
+        .folders
+        .iter()
+        .find(|row| row.path == file)
+        .unwrap();
+    assert!(row.reveal && row.selected, "scrolled to, once");
+    let again = interface_adapters::presenters::side_bar::present(&editor, &mut view);
+    assert!(!again.folders.iter().any(|row| row.reveal));
+
+    open(&mut editor, "/elsewhere/b.txt");
+    run(&mut editor, &mut view, &cmd("reveal_in_side_bar"));
+    assert_eq!(
+        view.side_bar_selection,
+        [file],
+        "not in the window's folders"
+    );
 }

@@ -99,6 +99,16 @@ impl ViewGeometry {
         )
     }
 
+    /// The row drawn that holds `point` (a char range without its line break), when the view
+    /// wraps lines; `None` when it does not (a row is then the whole line). A point where a
+    /// wrapped row ends and the next begins belongs to the next.
+    pub fn wrapped_row(&self, text: &str, point: usize) -> Option<(usize, usize)> {
+        self.wrap_columns.filter(|&l| l > 0)?;
+        let rows = self.rows(text);
+        let row = rows.iter().rposition(|&(start, _)| start <= point)?;
+        rows.get(row).copied()
+    }
+
     /// The (row, column) a point is drawn at, rows counting wrapped ones.
     fn visual_position(&self, text: &str, point: usize) -> (usize, usize) {
         let rows = self.rows(text);

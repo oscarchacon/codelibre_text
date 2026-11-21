@@ -17,6 +17,7 @@ use use_cases::search::{CandidateTarget, SearchKind};
 use use_cases::Editor;
 
 use super::command_controller;
+use crate::presenters;
 use crate::view_state::{ViewRequest, ViewState, WidgetEdit};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +53,20 @@ pub enum UiEvent {
     KeepTab(usize),
 
     ToggleFolder(PathBuf),
+    /// The console's input field changed.
+    ConsoleInputChanged(String),
+    /// Enter in the console's field: its line runs as Python.
+    ConsoleInputEntered,
+    /// Up (`true`) or Down in the console's field: the previous or next line run.
+    ConsoleHistory(bool),
+    /// A row of the side bar's tree clicked: it alone is selected; with `toggle` (Ctrl, Cmd on
+    /// macOS) it joins or leaves the selection; with `range` (Shift) the rows from the last
+    /// one clicked to it are.
+    SideBarSelect {
+        path: PathBuf,
+        toggle: bool,
+        range: bool,
+    },
     OpenFile(PathBuf),
     /// A file clicked once in the side bar: a preview (a double click opens it for good).
     PreviewFile(PathBuf),
@@ -113,6 +128,8 @@ pub enum UiEvent {
     ReplacementChanged(String),
     /// Find in Files' "Where" field changed.
     FindWhereChanged(String),
+    /// Find in Files' "Use Buffer" toggle: its results in a tab.
+    FindUseBufferChanged(bool),
     /// Find in Files' Find button (or Enter in its fields).
     FindAll,
     FindNext,
@@ -129,6 +146,9 @@ pub enum UiEvent {
     TextEdited(DocumentId),
     /// A click, or the start of a drag, in the text widget (before its `SelectionChanged`).
     TextClicked(DocumentId),
+    /// A double click on the char at this point of a tab's text (a result opens, in a view
+    /// with results).
+    TextDoubleClicked(DocumentId, usize),
     /// The user moved the caret or selection in the text widget.
     SelectionChanged(DocumentId, Selection),
     /// The text widget typed these characters (after `TextEdited` and `SelectionChanged`): they
@@ -185,6 +205,18 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 Some(edit) => view.request(ViewRequest::FieldEdit { field, edit }),
                 None => view.queue_command(command),
             },
+            // An image's entries are about the picture clicked (in a group not focused too).
+            Some(ContextMenuTarget::Image { document }) => {
+                let index = editor
+                    .state()
+                    .documents
+                    .iter()
+                    .position(|d| d.id == document);
+                if let Some(index) = index {
+                    editor.activate(index);
+                }
+                view.queue_command(command);
+            }
             _ => view.queue_command(command),
         },
         UiEvent::MenuOpen(open) => {
@@ -249,6 +281,39 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
                 view.expanded_folders.insert(folder);
             }
         }
+        UiEvent::ConsoleInputChanged(text) => {
+            view.console_input = text;
+            view.console_history_at = None;
+        }
+        UiEvent::ConsoleInputEntered => {
+            let code = std::mem::take(&mut view.console_input);
+            view.console_history_at = None;
+            if !code.trim().is_empty() && view.console_history.last() != Some(&code) {
+                view.console_history.push(code.clone());
+            }
+            editor.run_console_line(&code, &mut |editor: &mut Editor, command: &Command| {
+                command_controller::run(editor, view, command)
+            });
+            view.console_focus_requested = true;
+        }
+        UiEvent::ConsoleHistory(back) => {
+            let count = view.console_history.len();
+            let at = match (view.console_history_at, back) {
+                (None, true) => count.checked_sub(1),
+                (None, false) => None,
+                (Some(at), true) => Some(at.saturating_sub(1)),
+                (Some(at), false) => (at + 1 < count).then_some(at + 1),
+            };
+            view.console_history_at = at;
+            view.console_input = at
+                .and_then(|at| view.console_history.get(at).cloned())
+                .unwrap_or_default();
+        }
+        UiEvent::SideBarSelect {
+            path,
+            toggle,
+            range,
+        } => select_in_side_bar(editor, view, path, toggle, range),
         UiEvent::OpenFile(path) => {
             if editor.open_file(&path) {
                 if let Some(id) = editor.active_document().map(|d| d.id) {
@@ -399,6 +464,7 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::FindOptionsChanged(options) => editor.set_find_options(options),
         UiEvent::ReplacementChanged(replacement) => editor.set_replacement(replacement),
         UiEvent::FindWhereChanged(text) => editor.set_find_where(text),
+        UiEvent::FindUseBufferChanged(on) => editor.set_find_use_buffer(on),
         UiEvent::FindAll => view.queue_command(Command::new("find_all")),
         UiEvent::FindNext => view.queue_command(Command::new("find_next")),
         UiEvent::FindPrevious => view.queue_command(Command::new("find_prev")),
@@ -427,6 +493,11 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
 
         UiEvent::TextEdited(document) => editor.note_text_edited(document),
         UiEvent::TextClicked(_) => editor.note_text_clicked(),
+        UiEvent::TextDoubleClicked(document, point) => {
+            if editor.open_result_in_tab(document, point) {
+                view.focus_editor = true;
+            }
+        }
         UiEvent::SelectionChanged(document, selection) => {
             editor.blur_output_panel();
             view.focused_output_panel = None;
@@ -465,4 +536,34 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::AboutClosed => view.show_about = false,
         UiEvent::LoadErrorsClosed => view.show_load_errors = false,
     }
+}
+
+/// [`UiEvent::SideBarSelect`]: the side bar's selection after a click on `path`.
+fn select_in_side_bar(
+    editor: &Editor,
+    view: &mut ViewState,
+    path: PathBuf,
+    toggle: bool,
+    range: bool,
+) {
+    if range {
+        let anchor = view.side_bar_anchor.clone().unwrap_or_else(|| path.clone());
+        let rows = presenters::side_bar::visible_paths(editor, view);
+        let at = |p: &PathBuf| rows.iter().position(|row| row == p);
+        if let (Some(from), Some(to)) = (at(&anchor), at(&path)) {
+            let (from, to) = (from.min(to), from.max(to));
+            view.side_bar_selection = rows[from..=to].to_vec();
+            return;
+        }
+    }
+    if toggle {
+        if let Some(i) = view.side_bar_selection.iter().position(|p| *p == path) {
+            view.side_bar_selection.remove(i);
+        } else {
+            view.side_bar_selection.push(path.clone());
+        }
+    } else {
+        view.side_bar_selection = vec![path.clone()];
+    }
+    view.side_bar_anchor = Some(path);
 }

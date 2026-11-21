@@ -38,6 +38,7 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<FindPanelVie
         case_sensitive: find.case_sensitive,
         whole_word: find.whole_word,
         wrap: find.wrap,
+        use_buffer: editor.find_use_buffer(),
         status,
         has_error,
         focus_requested: std::mem::take(&mut view.find_panel.focus_requested),

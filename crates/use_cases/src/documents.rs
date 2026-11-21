@@ -521,7 +521,7 @@ impl Editor {
     /// The view reports that the text widget changed the text.
     pub fn note_text_edited(&mut self, id: DocumentId) {
         if let Some(index) = self.index_of(id) {
-            self.state.documents[index].note_text_changed();
+            self.state.documents[index].note_typed_change();
         }
     }
 

@@ -9,6 +9,7 @@ JSON object per line (see ``codelibre_rpc.py`` and ``docs/plugins.md``):
     editor -> host   {"op": "event", "name": "on_modified", "view": id}
     editor -> host   {"op": "callback", "id": n, "name": "select", "args": [index]}   (a panel's answer)
     editor -> host   {"op": "query", "name": "on_query_context", "view": id, "window": 1, "args": [...]}
+    editor -> host   {"op": "console", "code": "sublime.version()"}   (a line typed in the console)
                      (also "command_states", "command_input", "settings_changed", "on_init", "on_exit")
     host -> editor   {"op": "answer", "value": true / ["command", {args}] / null}       (ends a query)
     host -> editor   {"op": "call", "id": n, "fn": "view_insert", "args": [...]}     (any number of times)
@@ -402,6 +403,37 @@ def query(message):
     return {"op": "answer", "value": value}
 
 
+_console_namespace = None
+
+
+def console(message):
+    """A line typed in the console's input, run as Sublime's console runs it: as Python in one
+    namespace kept from line to line (``sublime`` and ``sublime_plugin`` imported), an
+    expression's value printed (its ``repr``, not ``None``), a traceback printed. All of it goes
+    to the console, so the request itself succeeds."""
+    global _console_namespace
+    if _console_namespace is None:
+        _console_namespace = {"__name__": "__console__", "__builtins__": __builtins__,
+                              "sublime": sublime, "sublime_plugin": sublime_plugin}
+    code = message.get("code") or ""
+    try:
+        try:
+            expression = compile(code, "<console>", "eval")
+        except SyntaxError:
+            exec(compile(code, "<console>", "exec"), _console_namespace)
+        else:
+            value = eval(expression, _console_namespace)
+            if value is not None:
+                _console_namespace["_"] = value
+                print(repr(value))
+    except BaseException:
+        # From the line typed on: this function's frame is not the user's.
+        kind, value, frames = sys.exc_info()
+        traceback.print_exception(kind, value, frames.tb_next)
+    finish_command()
+    return {"op": "done", "error": None}
+
+
 def finish_command():
     sublime._cleared_selections.clear()
 
@@ -418,6 +450,8 @@ def handle(message):
         codelibre_rpc.send(callback(message))
     elif op == "query":
         codelibre_rpc.send(query(message))
+    elif op == "console":
+        codelibre_rpc.send(console(message))
     elif op == "wake":
         pass
     elif op == "exit":

@@ -33,6 +33,9 @@ pub type SharedSyntaxEngine = Rc<RefCell<SyntaxEngine>>;
 const DEFAULT_SCHEME: &str = "Monokai";
 /// Files larger than this are shown without highlighting.
 const MAX_HIGHLIGHT_BYTES: usize = 4 * 1024 * 1024;
+/// How many times one update may go back to an earlier line for a `fail` (each goes back 128 lines at
+/// most); past it, the lines keep the alternative they took.
+const MAX_REWINDS: usize = 10_000;
 
 pub struct SyntaxEngine {
     paths: PackagePaths,
@@ -736,7 +739,7 @@ impl HighlightCache {
         }
 
         let new_lines: Vec<&str> = text.split_inclusive('\n').collect();
-        let unchanged = self
+        let mut unchanged = self
             .lines
             .iter()
             .zip(&new_lines)
@@ -744,6 +747,13 @@ impl HighlightCache {
             .count();
         if unchanged == new_lines.len() && unchanged == self.lines.len() {
             return;
+        }
+        // A line that took another alternative than the first because of a `fail` further on (128
+        // lines at most) decides again when a line after it changes: it is parsed again from there.
+        if let Some(forced) = (unchanged.saturating_sub(128)..unchanged)
+            .find(|&j| self.lines[j].state_before.0.has_forced_branches())
+        {
+            unchanged = forced;
         }
 
         let highlighter = Highlighter::new(theme);
@@ -755,12 +765,20 @@ impl HighlightCache {
             old.get(unchanged),
             unchanged.checked_sub(1).and_then(|i| old.get(i)),
         ) {
-            (Some(line), _) => line.state_before.clone(),
+            (Some(line), _) => {
+                let mut state = line.state_before.clone();
+                state.0.clear_forced_branches();
+                state
+            }
             (None, Some(previous)) => {
                 // Appending after the last cached line: continue from its end state.
                 let mut s = previous.state_before.clone();
                 match guard(|| highlight_line(&previous.text, &mut s, syntaxes, &highlighter)) {
-                    Ok(_) => s,
+                    Ok(_) => {
+                        // Parsed as before: a rewind it asks for was already done then.
+                        s.0.take_rewind();
+                        s
+                    }
                     Err(message) => {
                         failed = true;
                         failures.push(format!(
@@ -779,7 +797,12 @@ impl HighlightCache {
 
         // Lines after the edit keep their old index shifted by the number of added/removed lines.
         let shift = new_lines.len() as isize - old.len() as isize;
-        for (i, &line_text) in new_lines.iter().enumerate().skip(unchanged) {
+        let mut i = unchanged;
+        // A `fail` can send the parsing back to an earlier line; the alternatives it then takes
+        // only move forward, but a bound keeps a broken syntax from spinning.
+        let mut rewinds = 0;
+        while i < new_lines.len() {
+            let line_text = new_lines[i];
             let old_index = i as isize - shift;
             if !failed && old_index >= unchanged as isize {
                 if let Some(old_line) = old.get(old_index as usize) {
@@ -806,6 +829,19 @@ impl HighlightCache {
                     }
                 }
             };
+            // A `fail` went back to a branch point of an earlier line: from that line again,
+            // with the state syntect gives for it.
+            if let Some((back, parse_state)) = state.0.take_rewind() {
+                if back <= lines.len() && rewinds < MAX_REWINDS {
+                    rewinds += 1;
+                    let target = i - back;
+                    let highlight = lines[target].state_before.1.clone();
+                    lines.truncate(target);
+                    state = (parse_state, highlight);
+                    i = target;
+                    continue;
+                }
+            }
             lines.push(CachedLine {
                 text: line_text.to_string(),
                 state_before,
@@ -813,6 +849,7 @@ impl HighlightCache {
                 symbol,
                 scopes,
             });
+            i += 1;
         }
         self.lines = lines;
     }

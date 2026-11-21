@@ -14,11 +14,6 @@ use crate::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 /// Commands the text widget already does when it receives the key itself.
 /// Bindings to them let the key through instead of running the command.
 const WIDGET_COMMANDS: &[&str] = &[
-    "undo",
-    "redo",
-    "redo_or_repeat",
-    "soft_undo",
-    "soft_redo",
     "copy",
     "cut",
     "paste",
@@ -168,6 +163,16 @@ fn bound_command(
         .active_document()
         .is_some_and(|d| !d.extra_selections().is_empty());
     let in_widget = view.text_has_focus && !several;
+    // Up / Down on the first / last row: the widget would go to the start / end of the text.
+    if in_widget
+        && command.name == "move"
+        && command.str_arg("by") == "lines"
+        && editor.caret_stays_on_up_down(command.bool_arg("forward", true))
+    {
+        editor.note_command(&command.name);
+        view.last_command = Some(command.name);
+        return KeyHandling::Consumed;
+    }
     let replay = widget_replay(&command);
     let own_key = replay
         .as_ref()

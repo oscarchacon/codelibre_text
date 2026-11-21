@@ -48,11 +48,17 @@ pub struct ContextMenus {
     pub side_bar: Vec<MenuItem>,
     /// `Side Bar Mount Point.sublime-menu`: added after the side bar's for a top folder.
     pub mount_point: Vec<MenuItem>,
-    /// `Tab Context.sublime-menu`: a tab (also an open file of the side bar).
+    /// `Tab Context.sublime-menu`: a tab.
     pub tab: Vec<MenuItem>,
+    /// `Tab Sidebar Context.sublime-menu`: an open file of the side bar (its tab's commands).
+    pub tab_side_bar: Vec<MenuItem>,
     /// `Widget Context.sublime-menu`: a one-line field (the find, replace and where fields, the
     /// input panel).
     pub widget: Vec<MenuItem>,
+    /// `Console Input Widget Context.sublime-menu`: the console's input field.
+    pub console_input: Vec<MenuItem>,
+    /// `Image Context.sublime-menu`: an image sheet.
+    pub image: Vec<MenuItem>,
 }
 
 /// What a context menu was opened on: it picks the menu and fills its commands' arguments.
@@ -71,11 +77,22 @@ pub enum ContextMenuTarget {
         is_dir: bool,
         root: bool,
     },
+    /// Several files and folders selected in the side bar (Ctrl / Shift + click), each with
+    /// whether it is a folder: the side bar's menu, for all of them.
+    SideBarSelection { entries: Vec<(PathBuf, bool)> },
     /// A tab: its group and its index among the group's tabs.
     Tab { group: usize, index: usize },
-    /// A one-line field, named by its widget id (`find_input`, `replace_input`…).
+    /// An open file of the side bar: its tab, as [`Self::Tab`].
+    SideBarTab { group: usize, index: usize },
+    /// A one-line field, named by its widget id (`find_input`, `replace_input`…;
+    /// [`CONSOLE_INPUT`] has its own menu).
     Widget { field: String },
+    /// An image sheet: the picture's document. Its commands run with it active.
+    Image { document: DocumentId },
 }
+
+/// The widget id of the console's input field.
+pub const CONSOLE_INPUT: &str = "console_input";
 
 impl ContextMenuTarget {
     /// The items of the menu this target opens.
@@ -89,8 +106,12 @@ impl ContextMenuTarget {
                 }
                 items
             }
+            Self::SideBarSelection { .. } => menus.side_bar.clone(),
             Self::Tab { .. } => menus.tab.clone(),
+            Self::SideBarTab { .. } => menus.tab_side_bar.clone(),
+            Self::Widget { field } if field == CONSOLE_INPUT => menus.console_input.clone(),
             Self::Widget { .. } => menus.widget.clone(),
+            Self::Image { .. } => menus.image.clone(),
         }
     }
 
@@ -103,20 +124,12 @@ impl ContextMenuTarget {
         };
         let mut args = args.clone();
         match self {
-            Self::Text { .. } | Self::Widget { .. } => {}
+            Self::Text { .. } | Self::Widget { .. } | Self::Image { .. } => {}
             Self::SideBar { path, is_dir, .. } => {
-                let path = Value::String(path.display().to_string());
-                for (key, wanted) in [("files", !is_dir), ("dirs", *is_dir), ("paths", true)] {
-                    if let Some(value) = args.get_mut(key) {
-                        *value = Value::Array(if wanted {
-                            vec![path.clone()]
-                        } else {
-                            Vec::new()
-                        });
-                    }
-                }
+                fill_paths(&mut args, &[(path.clone(), *is_dir)]);
             }
-            Self::Tab { group, index } => {
+            Self::SideBarSelection { entries } => fill_paths(&mut args, entries),
+            Self::Tab { group, index } | Self::SideBarTab { group, index } => {
                 for (key, value) in [("group", group), ("index", index)] {
                     if let Some(arg) = args.get_mut(key) {
                         *arg = Value::from(*value);
@@ -125,6 +138,26 @@ impl ContextMenuTarget {
             }
         }
         Command::with_args(&command.name, Value::Object(args))
+    }
+}
+
+/// The side bar's `files` (the files of `entries`), `dirs` (its folders) and `paths` (all), each
+/// only when the menu's command gives it.
+fn fill_paths(args: &mut serde_json::Map<String, Value>, entries: &[(PathBuf, bool)]) {
+    for (key, wanted) in [
+        ("files", Some(false)),
+        ("dirs", Some(true)),
+        ("paths", None),
+    ] {
+        if let Some(value) = args.get_mut(key) {
+            *value = Value::Array(
+                entries
+                    .iter()
+                    .filter(|(_, is_dir)| wanted.is_none_or(|dir| dir == *is_dir))
+                    .map(|(path, _)| Value::String(path.display().to_string()))
+                    .collect(),
+            );
+        }
     }
 }
 

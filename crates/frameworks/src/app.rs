@@ -44,6 +44,8 @@ struct WindowUi {
     injected_event_count: usize,
     /// Keys the macOS menu bar took as key equivalents, given back to the keymap next frame.
     replayed_keys: Vec<Event>,
+    /// Ctrl+Break, which egui has no key for.
+    break_key: input::BreakKey,
     title: String,
     /// Its first frame asks the system for the focus.
     shown: bool,
@@ -189,11 +191,14 @@ impl App {
 
     /// Key presses go through the keymap; bound keys are removed so widgets do not see them.
     fn dispatch_keys(&mut self, ctx: &egui::Context, window: &mut WindowUi) {
-        let view = &mut window.view;
         let events = ctx.input(|i| i.events.clone());
         let real_events = events.len().saturating_sub(window.injected_event_count);
         let mut consumed = Vec::new();
         let mut last_combos = Vec::new();
+        if let Some(combo) = window.break_key.poll(ctx) {
+            keyboard_controller::key_pressed(&mut self.editor, &mut window.view, &[combo]);
+        }
+        let view = &mut window.view;
         for (index, event) in events.iter().enumerate().take(real_events) {
             match event {
                 Event::Key {
@@ -358,13 +363,6 @@ impl App {
                     window.pending_widget_events.push(input(edit));
                     ctx.request_repaint();
                 }
-                ViewRequest::WidgetUndoBoundary {
-                    document,
-                    text,
-                    selection,
-                } => {
-                    editor_view::add_undo_boundary(ctx, document, text, selection);
-                }
             }
         }
     }
@@ -470,6 +468,7 @@ impl App {
             .map(|d| editor_view::widget_id(d.id));
         let focused = ctx.memory(|m| m.focused());
         window.view.text_has_focus = text_area.is_some() && focused == text_area;
+        window.view.field_has_focus = focused.is_some() && !window.view.text_has_focus;
         // The focus went to another group (a key, a plugin): its text takes the keyboard from the
         // text of the group that had it.
         if focused.is_some() && !window.view.text_has_focus {
@@ -951,7 +950,7 @@ fn show_group(
     if let Some(sheet) = &model.sheet {
         egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            editor_view::show_sheet(ui, model, sheet, engine);
+            editor_view::show_sheet(ui, model, sheet, engine, menu, events);
         });
         return;
     }

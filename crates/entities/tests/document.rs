@@ -359,7 +359,7 @@ fn replace_range_moves_the_selections_like_sublime() {
     let mut doc = from_bytes(b"abcdef");
     doc.set_selections(
         Selection::caret(4),
-        [Selection::caret(1), Selection::new(2, 5)],
+        [Selection::caret(2), Selection::new(5, 6)],
     );
     assert!(doc.replace_range(4, 4, "XY"));
     assert_eq!(doc.text, "abcdXYef");
@@ -370,15 +370,24 @@ fn replace_range_moves_the_selections_like_sublime() {
     );
     assert_eq!(
         doc.extra_selections(),
-        &[Selection::caret(1), Selection::new(2, 7)]
+        &[Selection::caret(2), Selection::new(7, 8)]
     );
-
     doc.replace_range(1, 3, "");
     assert_eq!(doc.text, "adXYef");
+    assert_eq!(doc.selection(), Selection::caret(4));
     assert_eq!(
         doc.extra_selections(),
-        &[Selection::caret(1), Selection::new(1, 5)],
+        &[Selection::caret(1), Selection::new(5, 6)],
         "positions inside go to the end"
+    );
+
+    let mut doc = from_bytes(b"abcdef");
+    doc.set_selection(Selection::new(2, 5));
+    doc.replace_range(4, 4, "XY");
+    assert_eq!(
+        doc.selection(),
+        Selection::new(2, 7),
+        "a selection around the insertion grows"
     );
 
     let mut doc = from_bytes(b"hello");
@@ -640,4 +649,40 @@ fn folds_merge_move_with_edits_and_unfold_where_touched() {
     assert!(doc.folds().is_empty());
     assert!(doc.fold(&[(0, 2)]));
     assert_eq!(doc.unfold_all(), vec![(0, 2)]);
+}
+
+#[test]
+fn overlapping_selections_become_one_and_the_primary_holds_its_own() {
+    let mut doc = from_bytes(b"abcdefghij");
+    doc.set_selections(
+        Selection::caret(3),
+        [
+            Selection::new(1, 4),
+            Selection::new(6, 8),
+            Selection::new(7, 9),
+        ],
+    );
+    assert_eq!(
+        doc.selection(),
+        Selection::new(1, 4),
+        "the caret went into (1, 4)"
+    );
+    assert_eq!(doc.extra_selections(), &[Selection::new(6, 9)]);
+}
+
+#[test]
+fn carets_that_meet_in_an_edit_become_one() {
+    let mut doc = from_bytes(b"a,b,c");
+    doc.set_selections(Selection::caret(2), [Selection::caret(1)]);
+    // Each deletes the char before it: "," and "a"; the carets meet at 0.
+    assert!(doc.edit_all(|text, selections| {
+        for s in selections.iter().rev() {
+            let at = s.head - 1;
+            text.replace_range(at..at + 1, "");
+        }
+        vec![Selection::caret(0), Selection::caret(0)]
+    }));
+    assert_eq!(doc.text, "b,c");
+    assert_eq!(doc.selection(), Selection::caret(0));
+    assert!(doc.extra_selections().is_empty());
 }

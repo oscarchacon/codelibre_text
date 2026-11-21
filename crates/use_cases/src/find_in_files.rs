@@ -4,11 +4,13 @@
 //! search runs in the background ([`FileSearchGateway`](crate::gateways::FileSearchGateway)) and
 //! its results go to the output panel `find_results` as Sublime writes them, with Sublime's
 //! `result_file_regex` / `result_line_regex`: `next_result` (F4) and a double click go to them.
-//! Replacing searches first, then asks, then replaces in each file's tab (left unsaved, as
-//! Sublime does).
+//! With "Use Buffer" on they go to a "Find Results" tab instead (each search added at its end,
+//! the matches outlined). Replacing searches first, then asks, then replaces in each file's tab
+//! (left unsaved, as Sublime does).
 
 use std::path::{Path, PathBuf};
 
+use entities::document::{DocumentId, RegionSet};
 use entities::find::{self, FindOptions};
 use entities::find_in_files::{
     add_where_entry, format_file, parse_where, shorten_line, where_snippet_text, FileHits,
@@ -16,7 +18,7 @@ use entities::find_in_files::{
 };
 use entities::selection::Selection;
 use entities::text::{byte_to_char, char_to_byte};
-use serde_json::{json, Map};
+use serde_json::{json, Map, Value};
 
 use crate::editor::Editor;
 use crate::gateways::{
@@ -26,17 +28,27 @@ use crate::gateways::{
 
 /// The output panel Find in Files writes to (Sublime's name).
 pub const FIND_RESULTS_PANEL: &str = "find_results";
+/// The region set outlining the matches in the tab.
+pub const FIND_RESULTS_MATCHES: &str = "find_results_matches";
+/// Sublime's `sublime.DRAW_NO_FILL`.
+const DRAW_NO_FILL: u64 = 32;
 
 #[derive(Default)]
 pub struct FindInFilesState {
     /// The panel's "Where" field.
     where_text: String,
+    /// "Use Buffer": the results go to a tab instead of the panel.
+    use_buffer: bool,
+    /// The "Find Results" tab, while it is open.
+    tab: Option<DocumentId>,
     running: Option<Search>,
     /// The options of the last search: going to one of its results selects the match.
     last_options: Option<FindOptions>,
 }
 
 struct Search {
+    /// Where the results go: the tab's view, or the panel (`None`).
+    tab: Option<DocumentId>,
     options: FindOptions,
     /// Replace with this once the search ends.
     replace: Option<String>,
@@ -74,6 +86,32 @@ impl Editor {
     /// `clear_location`.
     pub fn clear_where(&mut self) {
         self.set_find_where(String::new());
+    }
+
+    /// "Use Buffer": Find in Files writes to a "Find Results" tab instead of the panel.
+    pub fn find_use_buffer(&self) -> bool {
+        self.state.find_in_files.use_buffer
+    }
+
+    pub fn set_find_use_buffer(&mut self, on: bool) {
+        self.state.find_in_files.use_buffer = on;
+    }
+
+    /// The "Find Results" tab, while it is open.
+    pub fn find_results_tab(&self) -> Option<DocumentId> {
+        let id = self.state.find_in_files.tab?;
+        self.state
+            .documents
+            .iter()
+            .any(|d| d.id == id)
+            .then_some(id)
+    }
+
+    /// Whether `id` is a view Find in Files writes to (its panel's or its tab's): going to one of
+    /// its results selects the match.
+    pub(crate) fn is_find_results_view(&self, id: DocumentId) -> bool {
+        self.find_output_panel(FIND_RESULTS_PANEL) == Some(id)
+            || self.find_results_tab() == Some(id)
     }
 
     pub fn is_finding_in_files(&self) -> bool {
@@ -122,9 +160,15 @@ impl Editor {
             max_file_size: settings.usize("find_in_files_max_file_size", 104_857_600) as u64,
             open_texts,
         };
-        self.open_find_results_panel();
+        let tab = if self.find_use_buffer() {
+            Some(self.open_find_results_tab())
+        } else {
+            self.open_find_results_panel();
+            None
+        };
         self.state.find_in_files.last_options = Some(options.clone());
         self.state.find_in_files.running = Some(Search {
+            tab,
             options,
             replace: replace.then(|| self.state.replacement.clone()),
             files_with_matches: Vec::new(),
@@ -138,10 +182,10 @@ impl Editor {
 
     /// `cancel_find`: stops the search running.
     pub fn cancel_find_in_files(&mut self) {
-        if self.state.find_in_files.running.take().is_some() {
+        if let Some(search) = self.state.find_in_files.running.take() {
             self.gateways.file_search.cancel();
             let text = self.tr("Find in Files cancelled").to_string();
-            self.append_find_results(&format!("{text}\n"));
+            self.write_results(search.tab, &format!("{text}\n"));
             self.notify(text);
         }
     }
@@ -258,15 +302,10 @@ impl Editor {
     /// Empties `find_results` (or makes it), sets it up for results and shows it.
     fn open_find_results_panel(&mut self) {
         let id = self.create_output_panel(FIND_RESULTS_PANEL, false);
-        self.state.plugins.view_settings.insert(
-            id,
-            Map::from_iter([
-                ("result_file_regex".to_string(), json!(RESULT_FILE_REGEX)),
-                ("result_line_regex".to_string(), json!(RESULT_LINE_REGEX)),
-                ("result_base_dir".to_string(), json!("")),
-                ("word_wrap".to_string(), json!(false)),
-            ]),
-        );
+        self.state
+            .plugins
+            .view_settings
+            .insert(id, results_settings());
         if let Some(doc) = self.any_document_mut(id) {
             doc.read_only = true;
         }
@@ -274,9 +313,94 @@ impl Editor {
         self.remember_results_panel(FIND_RESULTS_PANEL);
     }
 
+    /// "Use Buffer": the "Find Results" tab (made the first time, a blank line added to it after
+    /// an earlier search), shown; its view id.
+    fn open_find_results_tab(&mut self) -> DocumentId {
+        let id = match self.find_results_tab() {
+            Some(id) => {
+                let ends_open = self
+                    .any_document(id)
+                    .is_some_and(|d| !d.text.is_empty() && !d.text.ends_with("\n\n"));
+                if ends_open {
+                    let _ = self.append_text(id, "\n", true);
+                }
+                self.activate_document(id);
+                id
+            }
+            None => {
+                let name = self.tr("Find Results").to_string();
+                self.open_scratch(&name, "", "Plain Text", false);
+                let id = self.active_document().map(|d| d.id).expect("just opened");
+                self.state.find_in_files.tab = Some(id);
+                id
+            }
+        };
+        self.state
+            .plugins
+            .view_settings
+            .insert(id, results_settings());
+        if let Some(doc) = self.any_document_mut(id) {
+            doc.scratch = true;
+        }
+        self.remember_results_tab(id);
+        id
+    }
+
     fn append_find_results(&mut self, text: &str) {
-        if let Some(id) = self.find_output_panel(FIND_RESULTS_PANEL) {
-            let _ = self.append_text(id, text, true);
+        let tab = self
+            .state
+            .find_in_files
+            .running
+            .as_ref()
+            .and_then(|s| s.tab);
+        self.write_results(tab, text);
+    }
+
+    /// Adds `text` to the tab `tab`, or to the panel. In the tab, the matches of the lines with
+    /// one (`  12: `) are outlined.
+    fn write_results(&mut self, tab: Option<DocumentId>, text: &str) {
+        let Some(id) = tab.or_else(|| self.find_output_panel(FIND_RESULTS_PANEL)) else {
+            return;
+        };
+        let Some(start) = self.any_document(id).map(|d| d.char_count()) else {
+            return;
+        };
+        if self.append_text(id, text, true).is_err() || tab.is_none() {
+            return;
+        }
+        let Some(Ok(Some(pattern))) = self
+            .state
+            .find_in_files
+            .running
+            .as_ref()
+            .map(|s| s.options.pattern())
+        else {
+            return;
+        };
+        let mut found = Vec::new();
+        let mut line_start = 0;
+        for line in text.split_inclusive('\n') {
+            if let Some(prefix) = match_line_prefix(line) {
+                let content = line[prefix..].trim_end_matches(['\n', '\r']);
+                for m in pattern.find_iter(content).filter(|m| !m.is_empty()) {
+                    let at = |byte: usize| start + byte_to_char(text, line_start + prefix + byte);
+                    found.push((at(m.start()), at(m.end())));
+                }
+            }
+            line_start += line.len();
+        }
+        if found.is_empty() {
+            return;
+        }
+        if let Some(doc) = self.any_document_mut(id) {
+            let mut regions = doc.regions(FIND_RESULTS_MATCHES);
+            regions.extend(found);
+            doc.add_regions(RegionSet {
+                key: FIND_RESULTS_MATCHES.to_string(),
+                regions,
+                flags: DRAW_NO_FILL,
+                ..RegionSet::default()
+            });
         }
     }
 
@@ -379,7 +503,7 @@ impl Editor {
                 &[("files", &files)],
             ),
         };
-        self.append_find_results(&format!("{summary}\n"));
+        self.write_results(search.tab, &format!("{summary}\n"));
         self.notify(summary);
         if let Some(replacement) = search.replace {
             if search.matches > 0 && self.confirm_replace_in_files(search.matches, files) {
@@ -431,4 +555,25 @@ impl Editor {
             &[],
         ));
     }
+}
+
+/// The view settings of a view Find in Files writes to: its results are places in files.
+fn results_settings() -> Map<String, Value> {
+    Map::from_iter([
+        ("result_file_regex".to_string(), json!(RESULT_FILE_REGEX)),
+        ("result_line_regex".to_string(), json!(RESULT_LINE_REGEX)),
+        ("result_base_dir".to_string(), json!("")),
+        ("word_wrap".to_string(), json!(false)),
+    ])
+}
+
+/// In a line of Find Results, the length of `  12: ` when the line is a match.
+fn match_line_prefix(line: &str) -> Option<usize> {
+    let digits = line.trim_start_matches(' ');
+    let spaces = line.len() - digits.len();
+    let number = digits.len()
+        - digits
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .len();
+    (spaces > 0 && number > 0 && digits[number..].starts_with(": ")).then_some(spaces + number + 2)
 }

@@ -334,6 +334,11 @@ impl Editor {
     /// `open_dir {"dir", "file"}`, e.g. Preferences > Browse Packages. With `file` (a name in
     /// `dir`) that exists, the folder opens with it selected.
     pub fn open_package_folder(&mut self, dir: &str, file: &str) {
+        // `$file_path` / `$file_name` (the image's menu) are the window's variables, as in Sublime.
+        let variables = self.build_variables();
+        let dir = entities::build::expand_variables(dir, &variables);
+        let file = entities::build::expand_variables(file, &variables);
+        let (dir, file) = (dir.as_str(), file.as_str());
         let path = self.gateways.resources.paths().expand(dir);
         let selected = Some(path.join(file))
             .filter(|f| !file.is_empty() && self.gateways.file_system.exists(f));

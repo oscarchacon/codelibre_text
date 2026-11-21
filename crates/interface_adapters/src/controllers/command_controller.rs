@@ -49,14 +49,8 @@ pub fn poll_plugins(editor: &mut Editor, view: &mut ViewState) {
     // After the commands and edits of the frame, as Sublime's listener hears them.
     editor.poll_jump_history();
     show_plugin_panels(editor, view);
-    let current_window = editor.current_window();
-    for boundary in editor.take_plugin_edit_undo_boundaries(current_window) {
-        view.request(ViewRequest::WidgetUndoBoundary {
-            document: boundary.document,
-            text: boundary.text,
-            selection: boundary.selection,
-        });
-    }
+    // What plugins edited outside a command this frame is one undo step.
+    editor.close_plugin_undo_steps();
 }
 
 /// Shows the quick / input panels plugins asked for. A plugin's quick panel replaces whatever
@@ -413,6 +407,11 @@ const WINDOW_COMMANDS: &[&str] = &[
     "close_by_index",
     "close_others_by_index",
     "close_to_right_by_index",
+    "close_selected",
+    "close_unselected",
+    "close_unmodified",
+    "close_unmodified_to_right_by_index",
+    "close_deleted_files",
     "remove_folder",
     "open_containing_folder",
     "new_file_at",
@@ -470,9 +469,10 @@ pub fn run(editor: &mut Editor, view: &mut ViewState, command: &Command) {
 fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     let widget_edits = view.widget_edits_requested();
     editor.note_command(&command.name);
-    let undo_before = plugin_edit_undo_snapshot(editor, &command);
+    // The command's edits are one undo step: what came before is closed, and so is it.
+    editor.close_undo_steps();
     run_command(editor, view, &command);
-    editor.record_plugin_edit_undo(undo_before);
+    editor.close_undo_steps();
     view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;
@@ -486,22 +486,6 @@ fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
         });
     } else {
         editor.plugin_command_ran(&command, target);
-    }
-}
-
-/// Built-in editing commands bypass the text widget, so preserve their old text in its history.
-/// Direct `sublime_api` edits are tracked inside the use case API boundary.
-fn plugin_edit_undo_snapshot(
-    editor: &mut Editor,
-    command: &Command,
-) -> Vec<use_cases::editor::PluginEditUndoBoundary> {
-    if EDITING_COMMANDS.contains(&command.name.as_str()) {
-        let document = editor.active_document().map(|document| document.id);
-        document.map_or_else(Vec::new, |document| {
-            editor.plugin_edit_undo_snapshot(document)
-        })
-    } else {
-        Vec::new()
     }
 }
 
@@ -588,10 +572,18 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             command.bool_arg("encoded_position", false),
         ),
         "open_dir" => editor.open_package_folder(command.str_arg("dir"), command.str_arg("file")),
-        "close_by_index" | "close_others_by_index" | "close_to_right_by_index" => {
-            editor.close_by_index(command)
-        }
+        "close_by_index"
+        | "close_others_by_index"
+        | "close_to_right_by_index"
+        | "close_selected"
+        | "close_unselected"
+        | "close_unmodified"
+        | "close_unmodified_to_right_by_index"
+        | "close_deleted_files" => editor.close_by_index(command),
         "remove_folder" => editor.remove_folders(command),
+        "copy_path" => editor.copy_file_path(),
+        "force_reopen_as" if command.str_arg("type") == "text" => editor.reopen_as_text(),
+        "reveal_in_side_bar" => reveal_in_side_bar(editor, view),
         "open_containing_folder" => editor.open_containing_folder(command),
         // Sublime's side bar commands, unless a plugin (SideBarEnhancements, FileManager) defines them.
         name if side_bar::SIDE_BAR_COMMANDS.contains(&name)
@@ -738,8 +730,14 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     editor.use_selection_as_query_if_single_line();
                     apply_find_panel_args(editor, command);
                 }
-                "console" if toggle => editor.toggle_console(),
-                "console" => editor.show_console(),
+                "console" if toggle => {
+                    editor.toggle_console();
+                    view.console_focus_requested = true;
+                }
+                "console" => {
+                    editor.show_console();
+                    view.console_focus_requested = true;
+                }
                 other => editor
                     .notify(editor.tr_args("Panel not supported: {name}", &[("name", &other)])),
             }
@@ -885,10 +883,17 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         }
         "set_max_columns" => editor.set_max_columns(command.usize_arg("columns", 4)),
         // ----- done by the text widget itself --------------------------------------------------
-        "undo" | "soft_undo" => view.request(ViewRequest::WidgetEdit(WidgetEdit::Undo)),
-        "redo" | "redo_or_repeat" | "soft_redo" => {
-            view.request(ViewRequest::WidgetEdit(WidgetEdit::Redo))
+        // A one-line field (find, replace, the input panel) undoes its own typing; the text, its
+        // history (`Editor::undo`).
+        name if UNDO_COMMANDS.contains(&name) && view.field_has_focus => {
+            let undo = matches!(name, "undo" | "soft_undo");
+            view.request(ViewRequest::WidgetEdit(if undo {
+                WidgetEdit::Undo
+            } else {
+                WidgetEdit::Redo
+            }))
         }
+        name if UNDO_COMMANDS.contains(&name) => run_undo_command(editor, command),
         "select_all" => view.request(ViewRequest::WidgetEdit(WidgetEdit::SelectAll)),
         // With nothing selected, copy and cut take the whole line (`copy_with_empty_selection`).
         "copy" | "cut" if editor.copies_whole_line() => {
@@ -1055,6 +1060,7 @@ const EDITOR_COMMANDS: &[&str] = &[
     "unfold",
     "unfold_all",
     "fold_by_level",
+    "fold_tag_attributes",
     "fold_all",
     "increase_font_size",
     "decrease_font_size",
@@ -1085,6 +1091,7 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "unfold_all" => editor.unfold_all(),
         "fold_by_level" => editor.fold_by_level(command.usize_arg("level", 1)),
         "fold_all" => editor.fold_by_level(1),
+        "fold_tag_attributes" => editor.fold_tag_attributes(),
         "increase_font_size" => editor.change_font_size(1.0),
         "decrease_font_size" => editor.change_font_size(-1.0),
         "reset_font_size" => editor.reset_font_size(),
@@ -1166,15 +1173,16 @@ fn run_document_command(editor: &mut Editor, command: &Command) {
 /// Whether a built-in command can run in the middle of a use case (it needs no view state).
 fn runs_during_event(name: &str) -> bool {
     EDITING_COMMANDS.contains(&name)
+        || UNDO_COMMANDS.contains(&name)
         || EDITOR_COMMANDS.contains(&name)
         || DOCUMENT_COMMANDS.contains(&name)
 }
 
 /// Runs a built-in command a listener asked for during an event, at once when it needs no view
-/// state: a formatter's command in `on_pre_save` must reach the file being saved. Output panels,
-/// the console and `exec` do their editor's part at once ([`panel_part_during_event`]). The
-/// others (the find and input panels, `build`, the widget's undo and redo) answer false and wait
-/// for the next frame, which runs them on the view that asked.
+/// state: a formatter's command in `on_pre_save` must reach the file being saved. The panels
+/// (find, output, the console, the input panel they replace), `exec` and `build` do their
+/// editor's part at once ([`panel_part_during_event`]). The others answer false and wait for the
+/// next frame, which runs them on the view that asked.
 pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     let at_once = |name: &str| runs_during_event(name) || PANEL_COMMANDS.contains(&name);
     if !at_once(&command.name) {
@@ -1192,15 +1200,17 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
         }
         return true;
     }
-    let undo_before = plugin_edit_undo_snapshot(editor, &rewritten);
+    editor.close_undo_steps();
     if EDITING_COMMANDS.contains(&rewritten.name.as_str()) {
         run_editing_command(editor, &rewritten);
+    } else if UNDO_COMMANDS.contains(&rewritten.name.as_str()) {
+        run_undo_command(editor, &rewritten);
     } else if DOCUMENT_COMMANDS.contains(&rewritten.name.as_str()) {
         run_document_command(editor, &rewritten);
     } else {
         run_editor_command(editor, &rewritten);
     }
-    editor.record_plugin_edit_undo(undo_before);
+    editor.close_undo_steps();
     editor.plugin_command_ran(
         &rewritten,
         hook_target(editor, &rewritten.name).unwrap_or(CommandTarget::View),
@@ -1208,19 +1218,54 @@ pub fn run_during_event(editor: &mut Editor, command: &Command) -> bool {
     true
 }
 
+/// Undo and redo, on the documents' own history: at once, also during an event.
+const UNDO_COMMANDS: &[&str] = &["undo", "soft_undo", "redo", "redo_or_repeat", "soft_redo"];
+
+fn run_undo_command(editor: &mut Editor, command: &Command) {
+    match command.name.as_str() {
+        "undo" | "soft_undo" => editor.undo(),
+        _ => editor.redo(),
+    };
+}
+
 /// The panel and build commands whose part in the editor runs during an event.
-const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec"];
+const PANEL_COMMANDS: &[&str] = &["show_panel", "hide_panel", "exec", "build"];
+
+/// The find panels `show_panel` opens, and the name `window.active_panel()` gives each.
+fn find_panel_name(panel: &str) -> Option<&'static str> {
+    match panel {
+        "find" | "incremental_find" => Some("find"),
+        "replace" => Some("replace"),
+        "find_in_files" => Some("find_in_files"),
+        _ => None,
+    }
+}
 
 /// The editor's part of a panel command run during an event, at once: a plugin that shows
-/// `output.exec` in `on_post_save` and writes to it, or asks `window.active_panel()`, finds it
-/// shown. The view's part (the find or input panel closed, the focus) follows next frame as the
-/// same command, which shows again what is already shown. False when it must all wait (the find
-/// panel, an unknown panel, a plugin's own `exec`).
+/// `output.exec` or the find panel in `on_post_save`, or hides them, and then asks
+/// `window.active_panel()` or writes to the panel finds it done; the input panel they replace is
+/// gone (its `on_cancel` runs next frame). The view's part (which panel it draws, the focus)
+/// follows next frame as the same command, which shows again what is already shown. `build`
+/// runs its target the same way (`exec` at once); its picker (a quick panel, the view's) waits.
+/// False when it must all wait (an unknown panel, a plugin's own `exec`, the build picker).
 fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
     match command.name.as_str() {
         "show_panel" => {
             let panel = command.str_arg("panel");
             let toggle = command.bool_arg("toggle", false);
+            if let Some(name) = find_panel_name(panel) {
+                if toggle && editor.find_panel_shown() == Some(name) {
+                    editor.show_find_panel_ahead(None);
+                } else {
+                    editor.cancel_plugin_input_panel_later();
+                    editor.hide_output_panel();
+                    editor.show_find_panel_ahead(Some(name));
+                    editor.use_selection_as_query_if_single_line();
+                    apply_find_panel_args(editor, command);
+                }
+                editor.queue_plugin_command(command.clone());
+                return true;
+            }
             if panel == "console" {
                 if toggle {
                     editor.toggle_console();
@@ -1239,28 +1284,74 @@ fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
             if !editor.show_output_panel(name) {
                 return false;
             }
-            // It takes the find panel's place (closed next frame).
-            editor.sync_find_panel(None);
+            // It takes the place of the find and input panels (closed next frame).
+            editor.show_find_panel_ahead(None);
+            editor.cancel_plugin_input_panel_later();
             let show = serde_json::json!({ "panel": panel });
             editor.queue_plugin_command(Command::with_args("show_panel", show));
             true
         }
         "hide_panel" => {
             editor.hide_output_panel();
-            editor.sync_find_panel(None);
+            editor.show_find_panel_ahead(None);
+            editor.cancel_plugin_input_panel_later();
             editor.queue_plugin_command(Command::new("hide_panel"));
             true
         }
         "exec" if editor.plugin_command_kind("exec").is_none() => {
             if editor.exec(&command.args) && editor.show_output_panel("exec") {
-                editor.sync_find_panel(None);
+                editor.show_find_panel_ahead(None);
+                editor.cancel_plugin_input_panel_later();
                 let show = serde_json::json!({ "panel": "output.exec" });
                 editor.queue_plugin_command(Command::with_args("show_panel", show));
             }
             true
         }
+        "build" if command.bool_arg("select", false) => false,
+        "build" => {
+            match editor.plan_build(command.str_arg("file"), command.str_arg("variant")) {
+                // Its target (`exec`, or a plugin's command, which waits) as a listener's own.
+                BuildPlan::Run(target) => {
+                    if !run_during_event(editor, &target) {
+                        editor.queue_plugin_command(target);
+                    }
+                }
+                // Several builds apply: the picker, next frame.
+                BuildPlan::Choose => editor.queue_plugin_command(command.clone()),
+                BuildPlan::Nothing => {}
+            }
+            true
+        }
         _ => false,
     }
+}
+
+/// `reveal_in_side_bar`: the side bar shows, with the folders down to the active file open,
+/// that file selected and scrolled to. A file outside the window's folders is not in the side bar.
+fn reveal_in_side_bar(editor: &Editor, view: &mut ViewState) {
+    let Some(path) = editor.active_document().and_then(|d| d.path.clone()) else {
+        return;
+    };
+    let Some(root) = editor
+        .state()
+        .folders
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned()
+    else {
+        return;
+    };
+    view.show_side_bar = true;
+    for folder in path.ancestors().skip(1) {
+        if !folder.starts_with(&root) {
+            break;
+        }
+        view.expanded_folders.insert(folder.to_path_buf());
+    }
+    view.side_bar_selection = vec![path.clone()];
+    view.side_bar_anchor = Some(path.clone());
+    view.side_bar_reveal = Some(path);
 }
 
 /// What Tab does in the text: a tab (or spaces, or indentation) at every selection.
@@ -1319,14 +1410,17 @@ fn find_in_files(editor: &mut Editor, view: &mut ViewState, replace: bool) {
     }
 }
 
-/// `show_panel`'s `where` (Find in Files) and the options `regex`, `case_sensitive` and
-/// `whole_word`, when given.
+/// `show_panel`'s `where` and `use_buffer` (Find in Files) and the options `regex`,
+/// `case_sensitive` and `whole_word`, when given.
 fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
     if let Some(place) = command.args.get("where").and_then(|v| v.as_str()) {
         editor.set_find_where(place.to_string());
     }
-    let mut options = editor.state().find.clone();
     let flag = |key: &str| command.args.get(key).and_then(|v| v.as_bool());
+    if let Some(on) = flag("use_buffer") {
+        editor.set_find_use_buffer(on);
+    }
+    let mut options = editor.state().find.clone();
     options.regex = flag("regex").unwrap_or(options.regex);
     options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
     options.whole_word = flag("whole_word").unwrap_or(options.whole_word);
