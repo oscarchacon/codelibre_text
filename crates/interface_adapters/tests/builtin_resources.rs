@@ -19,6 +19,10 @@ fn every_builtin_json_resource_is_valid() {
                 "Preferences.sublime-settings",
                 builtin_resources::PREFERENCES,
             ),
+            (
+                "Preferences (OSX).sublime-settings",
+                builtin_resources::OSX_PREFERENCES,
+            ),
         ])
     {
         sublime_json::parse(source).unwrap_or_else(|e| panic!("{name}: {e}"));

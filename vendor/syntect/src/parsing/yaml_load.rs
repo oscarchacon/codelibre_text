@@ -313,6 +313,25 @@ impl SyntaxDefinition {
                 .backref_regex
                 .search(&regex_str, 0, regex_str.len(), None);
             MatchOperation::Pop
+        } else if let (Ok(name), Ok(y)) = (
+            get_key(map, "branch_point", |x| x.as_str()),
+            get_key(map, "branch", Some),
+        ) {
+            // codelibre_text patch: each alternative is one context, named or anonymous.
+            let items = match y.as_vec() {
+                Some(items) if !items.is_empty() && items[0].as_hash().is_none() => items.clone(),
+                _ => vec![y.clone()],
+            };
+            let alternatives = items
+                .iter()
+                .map(|x| SyntaxDefinition::parse_reference(x, state, contexts, namer, false))
+                .collect::<Result<Vec<_>, _>>()?;
+            MatchOperation::Branch {
+                name: name.to_string(),
+                alternatives,
+            }
+        } else if let Ok(name) = get_key(map, "fail", |x| x.as_str()) {
+            MatchOperation::Fail(name.to_string())
         } else if let Ok(y) = get_key(map, "push", Some) {
             MatchOperation::Push(SyntaxDefinition::parse_pushargs(y, state, contexts, namer)?)
         } else if let Ok(y) = get_key(map, "set", Some) {

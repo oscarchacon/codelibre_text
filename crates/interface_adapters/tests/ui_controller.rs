@@ -1027,3 +1027,102 @@ fn the_clipboard_entries_of_a_field_s_context_menu_go_to_the_field() {
         "a package's entry runs"
     );
 }
+
+#[test]
+fn clicks_in_the_side_bar_select_one_row_ctrl_adds_and_shift_selects_a_range() {
+    let world = World::new();
+    for file in ["/p/a.txt", "/p/b.txt", "/p/c.txt", "/p/sub/d.txt"] {
+        world.disk.put(file, "x");
+    }
+    let mut editor = world.editor();
+    editor.add_folder(PathBuf::from("/p"));
+    let mut view = ViewState::default();
+    view.expanded_folders.insert(PathBuf::from("/p"));
+    let rows = interface_adapters::presenters::side_bar::visible_paths(&editor, &mut view);
+    let at = |name: &str| rows.iter().position(|p| p.ends_with(name)).unwrap();
+    let click = |editor: &mut Editor, view: &mut ViewState, name: &str, toggle, range| {
+        let path = rows[at(name)].clone();
+        handle(
+            editor,
+            view,
+            UiEvent::SideBarSelect {
+                path,
+                toggle,
+                range,
+            },
+        );
+    };
+    let names = |view: &ViewState| -> Vec<String> {
+        view.side_bar_selection
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    };
+    click(&mut editor, &mut view, "a.txt", false, false);
+    assert_eq!(names(&view), ["a.txt"]);
+    click(&mut editor, &mut view, "c.txt", true, false);
+    assert_eq!(names(&view), ["a.txt", "c.txt"], "Ctrl adds");
+    click(&mut editor, &mut view, "a.txt", true, false);
+    assert_eq!(names(&view), ["c.txt"], "and takes away");
+    click(&mut editor, &mut view, "a.txt", false, false);
+    click(&mut editor, &mut view, "c.txt", false, true);
+    let (from, to) = (at("a.txt").min(at("c.txt")), at("a.txt").max(at("c.txt")));
+    assert_eq!(
+        view.side_bar_selection,
+        rows[from..=to],
+        "Shift: the rows between"
+    );
+    let presented = interface_adapters::presenters::side_bar::present(&editor, &mut view);
+    let selected = presented.folders.iter().filter(|row| row.selected).count();
+    assert_eq!(selected, to - from + 1);
+}
+
+#[test]
+fn the_console_s_field_runs_its_line_and_keeps_a_history() {
+    let world = World::new().with_plugins(&[], &[]);
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    for line in ["1 + 1", "x = 3"] {
+        handle(
+            &mut editor,
+            &mut view,
+            UiEvent::ConsoleInputChanged(line.into()),
+        );
+        world.plugins.then([PluginMessage::Done { error: None }]);
+        handle(&mut editor, &mut view, UiEvent::ConsoleInputEntered);
+    }
+    assert_eq!(*world.plugins.console_lines.borrow(), ["1 + 1", "x = 3"]);
+    assert_eq!(view.console_input, "", "the field is emptied");
+    assert!(view.console_focus_requested, "and keeps the focus");
+    handle(&mut editor, &mut view, UiEvent::ConsoleHistory(true));
+    assert_eq!(view.console_input, "x = 3");
+    handle(&mut editor, &mut view, UiEvent::ConsoleHistory(true));
+    assert_eq!(view.console_input, "1 + 1");
+    handle(&mut editor, &mut view, UiEvent::ConsoleHistory(true));
+    assert_eq!(view.console_input, "1 + 1", "the oldest stays");
+    handle(&mut editor, &mut view, UiEvent::ConsoleHistory(false));
+    assert_eq!(view.console_input, "x = 3");
+    handle(&mut editor, &mut view, UiEvent::ConsoleHistory(false));
+    assert_eq!(view.console_input, "", "past the newest: an empty line");
+}
+
+#[test]
+fn an_image_s_menu_runs_its_entries_with_the_image_active() {
+    let world = World::new()
+        .with_file("/p/a.txt", "a")
+        .with_file("/p/pic.png", "png");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    open(&mut editor, "/p/pic.png");
+    let image = editor.active_document().unwrap().id;
+    open(&mut editor, "/p/a.txt");
+    let target = entities::menu::ContextMenuTarget::Image { document: image };
+    handle(&mut editor, &mut view, UiEvent::ContextMenu(Some(target)));
+    handle(
+        &mut editor,
+        &mut view,
+        UiEvent::RunCommand(Command::new("copy_path")),
+    );
+    assert_eq!(editor.active_document().unwrap().id, image);
+    assert_eq!(queued(&mut view), [Command::new("copy_path")]);
+}

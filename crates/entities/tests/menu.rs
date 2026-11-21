@@ -65,7 +65,7 @@ mod context_menus {
     use std::path::PathBuf;
 
     use entities::command::Command;
-    use entities::menu::{fill_menu, ContextMenuTarget, ContextMenus, MenuItem};
+    use entities::menu::{fill_menu, ContextMenuTarget, ContextMenus, MenuItem, CONSOLE_INPUT};
     use serde_json::json;
 
     fn entry(command: &str, args: serde_json::Value) -> MenuItem {
@@ -162,6 +162,70 @@ mod context_menus {
         assert_eq!(
             filled[0].children[0].command.as_ref().unwrap().args,
             json!({ "paths": ["/p/a"] })
+        );
+    }
+
+    #[test]
+    fn a_selection_in_the_side_bar_fills_all_its_files_and_folders() {
+        let target = ContextMenuTarget::SideBarSelection {
+            entries: vec![
+                (PathBuf::from("/p/a.txt"), false),
+                (PathBuf::from("/p/sub"), true),
+                (PathBuf::from("/p/b.txt"), false),
+            ],
+        };
+        let filled = target.fill(&Command::with_args(
+            "x",
+            json!({ "files": [], "dirs": [], "paths": [] }),
+        ));
+        assert_eq!(
+            filled.args,
+            json!({
+                "files": ["/p/a.txt", "/p/b.txt"],
+                "dirs": ["/p/sub"],
+                "paths": ["/p/a.txt", "/p/sub", "/p/b.txt"],
+            })
+        );
+        let menus = ContextMenus {
+            side_bar: vec![entry("a", json!({}))],
+            mount_point: vec![entry("remove_folder", json!({ "dirs": [] }))],
+            ..ContextMenus::default()
+        };
+        assert_eq!(target.items(&menus).len(), 1, "no mount point entries");
+    }
+
+    #[test]
+    fn open_files_images_and_the_console_s_field_have_their_own_menus() {
+        let menus = ContextMenus {
+            tab: vec![entry("tab", json!({}))],
+            tab_side_bar: vec![entry("close_by_index", json!({ "group": -1, "index": -1 }))],
+            widget: vec![entry("widget", json!({}))],
+            console_input: vec![entry("console", json!({}))],
+            image: vec![entry("copy_path", json!({}))],
+            ..ContextMenus::default()
+        };
+        let caption = |target: &ContextMenuTarget| target.items(&menus)[0].caption.clone();
+        let open_file = ContextMenuTarget::SideBarTab { group: 0, index: 3 };
+        assert_eq!(caption(&open_file), "close_by_index");
+        assert_eq!(
+            fill_menu(&open_file.items(&menus), &open_file)[0]
+                .command
+                .as_ref()
+                .unwrap()
+                .args,
+            json!({ "group": 0, "index": 3 })
+        );
+        let console = ContextMenuTarget::Widget {
+            field: CONSOLE_INPUT.into(),
+        };
+        assert_eq!(caption(&console), "console");
+        let find = ContextMenuTarget::Widget {
+            field: "find_input".into(),
+        };
+        assert_eq!(caption(&find), "widget");
+        assert_eq!(
+            caption(&ContextMenuTarget::Image { document: 4 }),
+            "copy_path"
         );
     }
 }

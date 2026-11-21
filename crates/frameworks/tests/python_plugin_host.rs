@@ -3086,3 +3086,32 @@ class ProbeSheetsCommand(sublime_plugin.WindowCommand):
     command_controller::choose_plugin_popup_menu(&mut editor, &mut view, Some(1));
     assert_eq!(status(&editor), "chosen 1", "{}", editor.state().console);
 }
+
+#[test]
+fn the_console_runs_python_lines_in_one_namespace() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some((mut host, _)) = host_with(dir.path(), &[]) else {
+        return;
+    };
+    let mut log = String::new();
+    let mut line = |host: &mut PythonPluginHost, code: &str| {
+        host.console(code).unwrap();
+        assert_eq!(next(host, &mut log), PluginMessage::Done { error: None });
+    };
+    line(&mut host, "x = 20 + 1");
+    line(&mut host, "x * 2");
+    line(&mut host, "print('hi')");
+    line(&mut host, "None");
+    line(&mut host, "int(sublime.version()) > 4000");
+    line(&mut host, "_");
+    line(&mut host, "1 / 0");
+    assert!(
+        log.starts_with("42\nhi\nTrue\nTrue\nTraceback"),
+        "values as a REPL prints them, a traceback for an error:\n{log}"
+    );
+    assert!(log.contains("ZeroDivisionError"), "{log}");
+    assert!(
+        !log.contains("plugin_host.py"),
+        "only the line's frames:\n{log}"
+    );
+}

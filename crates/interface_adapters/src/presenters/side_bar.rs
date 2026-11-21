@@ -47,16 +47,46 @@ pub fn present(editor: &Editor, view: &mut ViewState) -> SideBarViewModel {
                 is_root: true,
             },
             active: false,
+            selected: false,
+            reveal: false,
         });
         if expanded {
             add_children(editor, view, root, 1, active_path.as_deref(), &mut folders);
         }
+    }
+    for row in &mut folders {
+        row.selected = view.side_bar_selection.contains(&row.path);
+        row.reveal = view.side_bar_reveal.as_ref() == Some(&row.path);
+    }
+    // The view scrolls to the revealed row once.
+    if folders.iter().any(|row| row.reveal) {
+        view.side_bar_reveal = None;
     }
     SideBarViewModel {
         open_files,
         groups,
         folders,
     }
+}
+
+/// The files and folders the side bar's tree shows, top to bottom (for Shift + click).
+pub fn visible_paths(editor: &Editor, view: &mut ViewState) -> Vec<PathBuf> {
+    let mut rows = Vec::new();
+    for root in &editor.state().folders {
+        rows.push(TreeRowViewModel {
+            depth: 0,
+            name: String::new(),
+            path: root.clone(),
+            kind: TreeRowKind::File,
+            active: false,
+            selected: false,
+            reveal: false,
+        });
+        if view.expanded_folders.contains(root) {
+            add_children(editor, view, root, 1, None, &mut rows);
+        }
+    }
+    rows.into_iter().map(|row| row.path).collect()
 }
 
 fn add_children(
@@ -84,6 +114,8 @@ fn add_children(
                     is_root: false,
                 },
                 active: false,
+                selected: false,
+                reveal: false,
             });
             if expanded {
                 add_children(editor, view, &path, depth + 1, active_path, rows);
@@ -95,6 +127,8 @@ fn add_children(
                 active: active_path == Some(path.as_path()),
                 path,
                 kind: TreeRowKind::File,
+                selected: false,
+                reveal: false,
             });
         }
     }

@@ -1501,3 +1501,55 @@ msgstr "Ya está en la posición más reciente"
 #: crates/use_cases/src/jump_history.rs
 msgid "Already at the earliest position"
 msgstr "Ya está en la posición más antigua"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Use Buffer: show the results in a tab"
+msgstr "Usar búfer: mostrar los resultados en una pestaña"
+
+#: assets/Default/Main.sublime-menu
+msgid "Fold Tag Attributes"
+msgstr "Plegar atributos de etiquetas"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Selected Tabs"
+msgstr "Cerrar las pestañas seleccionadas"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unselected Tabs"
+msgstr "Cerrar las pestañas no seleccionadas"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs"
+msgstr "Cerrar las pestañas sin cambios"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Close Unmodified Tabs to the Right"
+msgstr "Cerrar las pestañas sin cambios a la derecha"
+
+#: assets/Default/Tab Context.sublime-menu
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs With Deleted Files"
+msgstr "Cerrar las pestañas de archivos borrados"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Tabs Below"
+msgstr "Cerrar las pestañas de abajo"
+
+#: assets/Default/Tab Sidebar Context.sublime-menu
+msgid "Close Unmodified Tabs Below"
+msgstr "Cerrar las pestañas sin cambios de abajo"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Copy File Path"
+msgstr "Copiar la ruta del archivo"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reveal in Side Bar"
+msgstr "Mostrar en la barra lateral"
+
+#: assets/Default/Image Context.sublime-menu
+msgid "Reopen File as Text"
+msgstr "Reabrir el archivo como texto"

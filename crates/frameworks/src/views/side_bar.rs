@@ -54,10 +54,10 @@ pub fn show(
                     if response.middle_clicked() {
                         events.push(UiEvent::CloseTab(file.index));
                     }
-                    // An open file has its tab's menu, as in Sublime.
+                    // An open file has its tab's menu (`Tab Sidebar Context`), as in Sublime.
                     context_menu::attach(
                         &response,
-                        ContextMenuTarget::Tab {
+                        ContextMenuTarget::SideBarTab {
                             group: file.group,
                             index: file.tab,
                         },
@@ -70,31 +70,63 @@ pub fn show(
 
             if !side_bar.folders.is_empty() {
                 section_header(ui, chrome, text.tr("FOLDERS"));
+                let selected: Vec<(std::path::PathBuf, bool)> = side_bar
+                    .folders
+                    .iter()
+                    .filter(|entry| entry.selected)
+                    .map(|entry| {
+                        let is_dir = matches!(entry.kind, TreeRowKind::Folder { .. });
+                        (entry.path.clone(), is_dir)
+                    })
+                    .collect();
                 for entry in &side_bar.folders {
                     let folder = match entry.kind {
                         TreeRowKind::Folder { expanded, .. } => Some(expanded),
                         TreeRowKind::File => None,
                     };
-                    let response = row(ui, chrome, entry.depth, folder, &entry.name, entry.active);
-                    // A file: one click previews it, two open it, as in Sublime.
+                    let highlighted = entry.active || entry.selected;
+                    let response = row(ui, chrome, entry.depth, folder, &entry.name, highlighted);
+                    if entry.reveal {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    let modifiers = ui.input(|i| i.modifiers);
+                    let (toggle, range) = (modifiers.command, modifiers.shift);
+                    // A file: one click previews it, two open it, as in Sublime. Ctrl (Cmd) or
+                    // Shift + click only selects.
                     if response.double_clicked() {
                         if let TreeRowKind::File = entry.kind {
                             events.push(UiEvent::OpenFile(entry.path.clone()));
                         }
                     } else if response.clicked() {
-                        events.push(match entry.kind {
-                            TreeRowKind::Folder { .. } => UiEvent::ToggleFolder(entry.path.clone()),
-                            TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
+                        events.push(UiEvent::SideBarSelect {
+                            path: entry.path.clone(),
+                            toggle,
+                            range,
                         });
+                        if !toggle && !range {
+                            events.push(match entry.kind {
+                                TreeRowKind::Folder { .. } => {
+                                    UiEvent::ToggleFolder(entry.path.clone())
+                                }
+                                TreeRowKind::File => UiEvent::PreviewFile(entry.path.clone()),
+                            });
+                        }
                     }
                     let (is_dir, root) = match entry.kind {
                         TreeRowKind::Folder { is_root, .. } => (true, is_root),
                         TreeRowKind::File => (false, false),
                     };
-                    let target = ContextMenuTarget::SideBar {
-                        path: entry.path.clone(),
-                        is_dir,
-                        root,
+                    // A row of a selection of several: the menu is for all of them.
+                    let target = if entry.selected && selected.len() > 1 {
+                        ContextMenuTarget::SideBarSelection {
+                            entries: selected.clone(),
+                        }
+                    } else {
+                        ContextMenuTarget::SideBar {
+                            path: entry.path.clone(),
+                            is_dir,
+                            root,
+                        }
                     };
                     context_menu::attach(&response, target, menu, events);
                 }

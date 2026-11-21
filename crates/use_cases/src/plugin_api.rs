@@ -137,17 +137,13 @@ impl Editor {
     ) -> Result<Value, String> {
         // Every view of a buffer shows the same text when a plugin looks.
         self.sync_clones();
-        let undo_before = if matches!(function, "view_insert" | "view_erase" | "view_replace") {
-            args.first()
-                .and_then(Value::as_u64)
-                .map(|id| self.plugin_edit_undo_snapshot(id))
-        } else {
-            None
-        };
         let result = self.plugin_call_in_window(function, args, run_command);
         self.sync_clones();
-        if let Some(before) = undo_before {
-            self.record_plugin_edit_undo(before);
+        // Its edits outside a command are one undo step a frame (inside one, the command's).
+        if matches!(function, "view_insert" | "view_erase" | "view_replace") {
+            if let Some(id) = args.first().and_then(Value::as_u64) {
+                self.note_plugin_edit(id);
+            }
         }
         result
     }
@@ -895,6 +891,18 @@ impl Editor {
             "view_assign_syntax" => Some(self.gateways.syntaxes.resolve(a.str(1)?)),
             _ => None,
         };
+        // The view's `word_separators` / `sub_word_separators`, unless the plugin gives its own.
+        let separators = match function {
+            "view_classify" | "view_find_by_class" => {
+                let settings = self.settings_of(a.u64(0)?);
+                Some(crate::editing::separators_of(&settings, |key| match key {
+                    "separators" => a.str(4).ok(),
+                    _ => a.str(5).ok(),
+                }))
+            }
+            _ => None,
+        };
+        let separators = separators.unwrap_or_default();
         let doc = self
             .any_document_mut(a.u64(0)?)
             .ok_or("the view is closed")?;
@@ -1102,17 +1110,14 @@ impl Editor {
                 word_at(&doc.text, point(1)?).start(),
                 word_at(&doc.text, point(2)?).end(),
             ),
-            "view_classify" => json!(classify(&doc.text, point(1)?, None)),
-            "view_find_by_class" => {
-                let separators = a.str(4).ok().filter(|s| !s.is_empty());
-                json!(find_by_class(
-                    &doc.text,
-                    point(1)?,
-                    a.bool(2),
-                    a.u64(3)? as u32,
-                    separators
-                ))
-            }
+            "view_classify" => json!(classify(&doc.text, point(1)?, &separators)),
+            "view_find_by_class" => json!(find_by_class(
+                &doc.text,
+                point(1)?,
+                a.bool(2),
+                a.u64(3)? as u32,
+                &separators
+            )),
             "view_rowcol" => {
                 let (row, col) = line_col(&doc.text, point(1)?);
                 json!([row, col])

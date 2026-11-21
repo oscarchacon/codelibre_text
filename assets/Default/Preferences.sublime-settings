@@ -31,6 +31,20 @@
 	// Wrap long lines
 	"word_wrap": false,
 
+	// Characters that are considered to separate words (moving by sub-words, `view.classify`)
+	"word_separators": "./\\()\"'-:,.;<>~!@#$%^&*|+=[]{}`~?",
+
+	// Characters that are considered to separate sub-words
+	"sub_word_separators": "_",
+
+	// Up on the first line (or Down on the last) moves the caret to the start (end) of the text;
+	// when false it stays. True on macOS (Preferences (OSX).sublime-settings), as in Sublime Text.
+	"move_to_limit_on_up_down": false,
+
+	// Open a result of the Find Results tab ("Use Buffer") beside it: in the next group, or a
+	// second column when the window has one.
+	"find_in_files_side_by_side": false,
+
 	// Show line numbers in the gutter
 	"line_numbers": true,
 

@@ -401,6 +401,31 @@ impl Editor {
         }
     }
 
+    /// Closes the plugin's input panel during an event (a listener showed the find panel or hid
+    /// the panels): gone at once for `window.active_panel()`, its `on_cancel` runs at the next
+    /// [`poll_plugins`](Self::poll_plugins), outside the event. An io panel closes without a call,
+    /// as with Esc. An input handler's field is the palette's, which the view closes next frame.
+    pub fn cancel_plugin_input_panel_later(&mut self) {
+        let panels = &mut self.state.plugin_panels;
+        if panels
+            .input_panel
+            .as_ref()
+            .is_none_or(|p| p.input.is_some())
+        {
+            return;
+        }
+        let Some(panel) = panels.input_panel.take() else {
+            return;
+        };
+        self.state.plugins.view_settings.remove(&panel.document.id);
+        if panel.builtin.is_none() && panel.io.is_none() {
+            self.state
+                .plugins
+                .pending_callbacks
+                .push((panel.callback, "cancel".into(), json!([])));
+        }
+    }
+
     /// The user pressed Enter in the plugin's input panel (`done`), or closed it. An io panel
     /// (`create_io_panel`) calls `on_input` and stays open; Esc closes it without a call.
     pub fn finish_plugin_input_panel(&mut self, done: bool, run_command: &mut CommandRunner) {

@@ -137,6 +137,16 @@ pub enum MatchOperation {
     Set(Vec<ContextReference>),
     Pop,
     None,
+    /// codelibre_text patch: Sublime 4's `branch_point` / `branch`. Pushes one of the alternatives (the
+    /// first, or the next one after a `fail` went back to this branch point). Added last, so the
+    /// binary dumps syntect ships still read.
+    Branch {
+        name: String,
+        alternatives: Vec<ContextReference>,
+    },
+    /// codelibre_text patch: Sublime 4's `fail`: back to the branch point of that name, to try its next
+    /// alternative. Without one (or with none left) it does nothing.
+    Fail(String),
 }
 
 impl<'a> Iterator for MatchIter<'a> {

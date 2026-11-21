@@ -75,3 +75,14 @@ fn a_gutter_button_folds_the_block_its_line_heads_and_opens_it_again() {
     editor.toggle_fold_at_line(id, 2);
     assert_eq!(folds(&editor), vec![(8, 19)]);
 }
+
+#[test]
+fn fold_tag_attributes_needs_tag_scopes() {
+    // The fake syntaxes have no tags: nothing folds (the rule itself is tested in entities, and
+    // on the real HTML syntax in frameworks/tests/syntax_engine.rs).
+    let world = World::new();
+    let mut editor = world.editor();
+    editor.insert_at_selections("<div class=\"a\">x</div>\n");
+    editor.fold_tag_attributes();
+    assert!(folds(&editor).is_empty());
+}

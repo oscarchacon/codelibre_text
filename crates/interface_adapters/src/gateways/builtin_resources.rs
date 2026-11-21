@@ -35,6 +35,9 @@ pub const SIDE_BAR_MENU: &str = asset!("Side Bar.sublime-menu");
 pub const MOUNT_POINT_MENU: &str = asset!("Side Bar Mount Point.sublime-menu");
 pub const TAB_CONTEXT_MENU: &str = asset!("Tab Context.sublime-menu");
 pub const WIDGET_CONTEXT_MENU: &str = asset!("Widget Context.sublime-menu");
+pub const TAB_SIDEBAR_CONTEXT_MENU: &str = asset!("Tab Sidebar Context.sublime-menu");
+pub const CONSOLE_INPUT_CONTEXT_MENU: &str = asset!("Console Input Widget Context.sublime-menu");
+pub const IMAGE_CONTEXT_MENU: &str = asset!("Image Context.sublime-menu");
 /// Every built-in menu with its file name.
 pub const MENUS: &[(&str, &str)] = &[
     ("Main.sublime-menu", MAIN_MENU),
@@ -43,8 +46,16 @@ pub const MENUS: &[(&str, &str)] = &[
     ("Side Bar Mount Point.sublime-menu", MOUNT_POINT_MENU),
     ("Tab Context.sublime-menu", TAB_CONTEXT_MENU),
     ("Widget Context.sublime-menu", WIDGET_CONTEXT_MENU),
+    ("Tab Sidebar Context.sublime-menu", TAB_SIDEBAR_CONTEXT_MENU),
+    (
+        "Console Input Widget Context.sublime-menu",
+        CONSOLE_INPUT_CONTEXT_MENU,
+    ),
+    ("Image Context.sublime-menu", IMAGE_CONTEXT_MENU),
 ];
 pub const PREFERENCES: &str = asset!("Preferences.sublime-settings");
+/// What macOS changes of [`PREFERENCES`], as Sublime's `Preferences (OSX).sublime-settings`.
+pub const OSX_PREFERENCES: &str = asset!("Preferences (OSX).sublime-settings");
 
 /// Built-in `.sublime-color-scheme` files, by name.
 pub const COLOR_SCHEMES: &[(&str, &str)] = &[

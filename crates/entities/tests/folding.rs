@@ -61,3 +61,64 @@ fn the_gutter_s_fold_buttons_go_on_the_lines_that_head_a_block() {
     );
     assert!(fold_headers("", 0, 0, 4).is_empty());
 }
+
+/// A text and its tokens as `(text, scope)` pieces, for `tag_attribute_folds`.
+fn tokens(pieces: &[(&str, &'static str)]) -> (String, Vec<(usize, usize, &'static str)>) {
+    let mut text = String::new();
+    let mut out = Vec::new();
+    for (piece, scope) in pieces {
+        let start = text.chars().count();
+        text.push_str(piece);
+        out.push((start, text.chars().count(), *scope));
+    }
+    (text, out)
+}
+
+const TAG: &str = "text.xml meta.tag.xml";
+const NAME: &str = "text.xml meta.tag.xml entity.name.tag.namespace.xml";
+const LOCAL: &str = "text.xml meta.tag.xml entity.name.tag.localname.xml";
+const SEP: &str = "text.xml meta.tag.xml entity.name.tag.xml punctuation.separator.namespace.xml";
+const BEGIN: &str = "text.xml meta.tag.xml punctuation.definition.tag.begin.xml";
+const END: &str = "text.xml meta.tag.xml punctuation.definition.tag.end.xml";
+const ATTR: &str = "text.xml meta.tag.xml entity.other.attribute-name.xml";
+
+#[test]
+fn tag_attributes_fold_from_the_name_to_the_closing_bracket() {
+    // `<x:y z:w='1'  >q</x:y>`: Sublime 4215 folds ` z:w='1'  ` (the name is in pieces).
+    let (text, pieces) = tokens(&[
+        ("<", BEGIN),
+        ("x", NAME),
+        (":", SEP),
+        ("y", LOCAL),
+        (" ", TAG),
+        ("z:w", ATTR),
+        ("='1'  ", TAG),
+        (">", END),
+        ("q", "text.xml"),
+        ("</", BEGIN),
+        ("x:y", LOCAL),
+        (">", END),
+    ]);
+    let folds = entities::folding::tag_attribute_folds(&text, &pieces);
+    assert_eq!(folds, [(4, 14)]);
+    assert_eq!(&text[4..14], " z:w='1'  ");
+}
+
+#[test]
+fn tags_without_attributes_processing_instructions_and_other_scopes_have_no_fold() {
+    let preprocessor = "text.xml meta.tag.preprocessor.xml entity.name.tag.xml";
+    let (text, pieces) = tokens(&[
+        ("<", BEGIN),
+        ("p", LOCAL),
+        (" ", TAG),
+        (">", END),
+        ("<?", "text.xml meta.tag.preprocessor.xml punctuation.definition.tag.begin.xml"),
+        ("xml", preprocessor),
+        (" version=\"1.0\"", "text.xml meta.tag.preprocessor.xml"),
+        ("?>", "text.xml meta.tag.preprocessor.xml punctuation.definition.tag.end.xml"),
+        // CSS names tags too, outside any `meta.tag`.
+        ("div", "source.css meta.selector.css entity.name.tag.css"),
+        (" { color: red }", "source.css meta.property-list.css"),
+    ]);
+    assert!(entities::folding::tag_attribute_folds(&text, &pieces).is_empty());
+}

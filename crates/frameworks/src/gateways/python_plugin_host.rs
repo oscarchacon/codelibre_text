@@ -363,6 +363,10 @@ impl PluginHostGateway for PythonPluginHost {
         self.send(json!({ "op": "callback", "id": id, "name": name, "args": args }))
     }
 
+    fn console(&mut self, code: &str) -> Result<(), String> {
+        self.send(json!({ "op": "console", "code": code }))
+    }
+
     fn query(&mut self, name: &str, view: Option<DocumentId>, args: &Value) -> Result<(), String> {
         self.send(json!({ "op": "query", "name": name, "view": view, "window": 1, "args": args }))
     }

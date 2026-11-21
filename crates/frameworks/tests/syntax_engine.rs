@@ -593,3 +593,125 @@ fn the_gateway_delegates_to_the_shared_engine() {
         "same engine as the view"
     );
 }
+
+/// `fold_tag_attributes` on the HTML syntax's scopes folds what Sublime 4215 folds there (its
+/// answer for this text, checked by running it).
+#[test]
+fn tag_attribute_folds_follow_the_html_scopes_as_sublime_folds_them() {
+    let (_dir, mut engine) = engine();
+    let text = "<div class=\"a\" id=\"b\">x</div>\n<img src=\"x\" />\n<p>t</p>\n<a\n  href=\"y\">l</a>\n<!-- <b c=\"d\"> -->\n<br/>\n<input disabled>\n";
+    let mut tokens = Vec::new();
+    let mut line_start = 0;
+    for (line, line_text) in text.split_inclusive('\n').enumerate() {
+        for span in engine.line_scopes(1, text, "HTML", line) {
+            let chars = |byte: usize| line_start + line_text[..byte].chars().count();
+            tokens.push((chars(span.range.start), chars(span.range.end), span.scope));
+        }
+        line_start += line_text.chars().count();
+    }
+    let pieces: Vec<(usize, usize, &str)> =
+        tokens.iter().map(|(a, b, s)| (*a, *b, s.as_str())).collect();
+    let folds = entities::folding::tag_attribute_folds(text, &pieces);
+    let folded: Vec<String> = folds
+        .iter()
+        .map(|&(a, b)| text.chars().skip(a).take(b - a).collect())
+        .collect();
+    assert_eq!(
+        folded,
+        [" class=\"a\" id=\"b\"", " src=\"x\" ", "\n  href=\"y\"", " disabled"],
+        "{tokens:#?}"
+    );
+    assert_eq!(folds[0], (4, 21), "Sublime's places");
+}
+
+const BRANCH_SYNTAX: &str = r#"%YAML 1.2
+---
+name: Branchy
+file_extensions: [branchy]
+scope: source.branchy
+contexts:
+  main:
+    - match: '(?=\[)'
+      branch_point: list
+      branch: [list, index]
+    - match: '(?=\w)'
+      branch_point: call
+      branch: [call, variable]
+  call:
+    - match: '\w+(?=\()'
+      scope: entity.name.function
+      pop: true
+    - match: '\w+'
+      fail: call
+  variable:
+    - match: '\w+'
+      scope: variable.other
+      pop: true
+  list:
+    - match: '\['
+      set: list-body
+  list-body:
+    - match: '\]\s*='
+      scope: keyword.operator.assignment
+      pop: true
+    - match: '\]'
+      fail: list
+    - match: '\w+'
+      scope: variable.destructured
+  index:
+    - match: '\['
+      set: index-body
+  index-body:
+    - match: '\]'
+      pop: true
+    - match: '\w+'
+      scope: variable.indexed
+"#;
+
+fn scope_of(spans: &[use_cases::gateways::ScopeSpan], line: &str, word: &str) -> String {
+    let at = line.find(word).unwrap();
+    spans
+        .iter()
+        .find(|s| s.range.contains(&at))
+        .map(|s| s.scope.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_fail_in_the_same_line_takes_the_next_alternative() {
+    let (dir, mut engine) = engine();
+    write(&dir, "Branchy/Branchy.sublime-syntax", BRANCH_SYNTAX);
+    let mut errors = Vec::new();
+    engine.reload(false, &mut errors);
+    assert!(errors.is_empty(), "{errors:?}");
+    let text = "foo(\nbar\n";
+    let all = engine.document_scopes(1, text, "Branchy");
+    assert!(scope_of(&all[0], "foo(", "foo").ends_with("entity.name.function"));
+    assert!(
+        scope_of(&all[1], "bar", "bar").ends_with("variable.other"),
+        "`call` failed, `variable` took it: {all:?}"
+    );
+}
+
+#[test]
+fn a_fail_goes_back_to_a_branch_point_on_an_earlier_line() {
+    let (dir, mut engine) = engine();
+    write(&dir, "Branchy/Branchy.sublime-syntax", BRANCH_SYNTAX);
+    let mut errors = Vec::new();
+    engine.reload(false, &mut errors);
+    // `[a,` then `b] =`: a destructuring, as the first alternative says.
+    let all = engine.document_scopes(1, "[a,\nb] =\n", "Branchy");
+    assert!(scope_of(&all[0], "[a,", "a").ends_with("variable.destructured"));
+    assert!(scope_of(&all[1], "b] =", "b").ends_with("variable.destructured"));
+    // `[a,` then `b]` with no `=`: the `fail` on line 2 sends the parsing back to line 1.
+    let all = engine.document_scopes(2, "[a,\nb]\nc\n", "Branchy");
+    assert!(
+        scope_of(&all[0], "[a,", "a").ends_with("variable.indexed"),
+        "line 1 parsed again with `index`: {all:?}"
+    );
+    assert!(scope_of(&all[1], "b]", "b").ends_with("variable.indexed"));
+    assert!(scope_of(&all[2], "c", "c").ends_with("variable.other"), "{all:?}");
+    // Typing the `=` later: the lines go back to the first alternative.
+    let all = engine.document_scopes(2, "[a,\nb] =\nc\n", "Branchy");
+    assert!(scope_of(&all[0], "[a,", "a").ends_with("variable.destructured"), "{all:?}");
+}

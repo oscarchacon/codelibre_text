@@ -45,6 +45,10 @@ pub struct TreeRowViewModel {
     pub path: PathBuf,
     pub kind: TreeRowKind,
     pub active: bool,
+    /// Selected in the side bar (a click, Ctrl / Shift + click): its menu is for all of them.
+    pub selected: bool,
+    /// `reveal_in_side_bar` asked to show this row: the view scrolls to it (once).
+    pub reveal: bool,
 }
 
 pub struct SideBarViewModel {
@@ -177,6 +181,9 @@ pub struct InputPanelViewModel {
 pub struct OutputPanelViewModel {
     pub id: DocumentId,
     pub name: String,
+    /// The console's input field (Python): its text, and whether it takes the focus now. `None`
+    /// for other panels.
+    pub console_input: Option<(String, bool)>,
     /// The end of the panel's text (at most [`presenters::output_panel::MAX_LINES`] lines).
     ///
     /// [`presenters::output_panel::MAX_LINES`]: crate::presenters::output_panel::MAX_LINES
@@ -228,6 +235,8 @@ pub struct FindPanelViewModel {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub wrap: bool,
+    /// Find in Files' "Use Buffer": the results go to a tab.
+    pub use_buffer: bool,
     /// e.g. `4 matches`, or the regex error.
     pub status: String,
     pub has_error: bool,
