@@ -56,6 +56,25 @@ pub struct ScreenPoint {
     pub column: usize,
 }
 
+/// Where `point` (a char index) is on screen, `past_end` columns further right (the pointer past
+/// the end of its line). Tabs count up to the next multiple of the tab size.
+pub fn screen_point(text: &str, point: usize, past_end: usize, tab_size: usize) -> ScreenPoint {
+    let (line, column) = line_col(text, point);
+    let first = line_to_char(text, line);
+    let before: String = text.chars().skip(first).take(column).collect();
+    ScreenPoint {
+        line,
+        column: visual_width(&before, tab_size.max(1)) + past_end,
+    }
+}
+
+/// The char of line `line` at screen column `column`: the line's end past it, the nearer side
+/// inside a tab.
+pub fn point_at_column(text: &str, line: usize, column: usize, tab_size: usize) -> usize {
+    let row = text.split('\n').nth(line).unwrap_or("");
+    line_to_char(text, line) + char_at_column(row, column, tab_size.max(1))
+}
+
 /// A column drag (`drag_select {by: "columns"}`) from `anchor` to `head`: one selection per line
 /// between them, from the anchor's column to the head's, ordered from the anchor's line to the
 /// head's (the last is where the pointer is, the primary one). Lines that end before the

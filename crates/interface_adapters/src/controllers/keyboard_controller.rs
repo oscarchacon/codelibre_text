@@ -173,6 +173,11 @@ fn bound_command(
         view.last_command = Some(command.name);
         return KeyHandling::Consumed;
     }
+    // Up / Down, Page Up / Down and the other caret keys (Shift, Ctrl…) move every selection.
+    if several && view.text_has_focus && matches!(command.name.as_str(), "move" | "move_to") {
+        view.queue_command(command);
+        return KeyHandling::Consumed;
+    }
     let replay = widget_replay(&command);
     let own_key = replay
         .as_ref()
@@ -331,13 +336,19 @@ pub fn clipboard_shortcut(editor: &mut Editor, view: &mut ViewState, command: &s
     }
 }
 
-/// Copy, cut and paste of a whole line (nothing selected, `copy_with_empty_selection`) are done by
-/// the use cases, not the text widget, but only while the text has the focus.
+/// Copy, cut and paste of a whole line (nothing selected, `copy_with_empty_selection`) and paste
+/// into several selections are done by the use cases, not the text widget, but only while the
+/// text has the focus.
 fn takes_over_from_widget(editor: &mut Editor, view: &ViewState, command: &str) -> bool {
     view.text_has_focus
         && match command {
             "copy" | "cut" => editor.copies_whole_line(),
-            "paste" => editor.pastes_whole_line(),
+            "paste" => {
+                editor.pastes_whole_line()
+                    || editor
+                        .active_document()
+                        .is_some_and(|d| !d.extra_selections().is_empty())
+            }
             _ => false,
         }
 }
