@@ -1,6 +1,8 @@
 //! Tests for `entities::drag_select`.
 
-use entities::drag_select::{column_selections, drag_selection, DragUnit, ScreenPoint};
+use entities::drag_select::{
+    column_selections, drag_selection, screen_point, DragUnit, ScreenPoint,
+};
 use entities::selection::Selection;
 
 fn at(line: usize, column: usize) -> ScreenPoint {
@@ -123,4 +125,13 @@ fn lines_past_the_end_of_the_text_are_its_last_line() {
         pairs(&column_selections(text, at(0, 1), at(9, 2), 4)),
         [(1, 2), (5, 6)]
     );
+}
+
+#[test]
+fn a_screen_point_counts_tabs_to_the_next_stop_and_the_columns_past_the_end() {
+    let text = "ab\n\tcd";
+    assert_eq!(screen_point(text, 1, 0, 4), at(0, 1));
+    assert_eq!(screen_point(text, 2, 3, 4), at(0, 5));
+    assert_eq!(screen_point(text, 4, 0, 4), at(1, 4));
+    assert_eq!(screen_point(text, 5, 0, 4), at(1, 5));
 }

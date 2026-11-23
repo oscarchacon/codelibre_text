@@ -78,8 +78,10 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   them pass through (`WIDGET_COMMANDS` in `keyboard_controller.rs`) unless a plugin listens to text commands (see the
   next bullet); a binding of another key to deleting, typing or moving the caret is replayed as the widget's own key
   (`bound_command` / `widget_replay`), so its undo keeps it. egui sends Ctrl+C/X/V as `Event::Copy/Cut/Paste`
-  (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over only for
-  whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`).
+  (no key event): `app.rs::dispatch_keys` asks `keyboard_controller::clipboard_shortcut`, which takes them over for
+  whole-line copy/paste (`copy_with_empty_selection`, needs `ViewState::text_has_focus`) and with several selections:
+  then `Editor::copy_selections` / `paste_at_selections` / `copy_whole_line` do them (`entities::clipboard`: one line
+  per selection, a paste of as many lines as selections shares them out, carets alone copy their whole lines).
 - Undo is ours, not the widget's: each `Document` keeps a history of what each edit changed (`entities::undo`;
   the widget's in-place edits are diffed against a kept copy, `Document::note_typed_change`). `undo` / `redo` are use
   cases (`use_cases/src/undo.rs`), at once; `command_controller` closes a step before and after every command, and
@@ -91,9 +93,12 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Multiple selections (Ctrl+D, Alt+F3 `find_all_under`, Ctrl+Alt+Up/Down `select_lines`, Ctrl+Shift+L
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
-  → `Document::edit_all`. Any other caret move (click, Up/Down, a command's `set_selection`) drops the extras.
+  → `Document::edit_all`; with extras, caret keys no binding takes (Up/Down, Page Up/Down, Shift…) are `move` / `move_to` on all of them (`command_controller::moves_every_selection`, each keeping a goal column: `Document::goal_column`, Sublime's `xpos`). Any other caret move (a plain click, a command's `set_selection`) drops the extras.
   `set_selections` merges overlapping ones as Sublime does (`selection::add_region` / `subtract_region`; mouse
-  drags' selections: `entities::drag_select`).
+  drags' selections: `entities::drag_select`). Mouse gestures (Ctrl/Cmd + click, Alt + click, column drags:
+  `mouse_controller::drag_gesture`, a table of Sublime's default mousemaps, not read from packages) are
+  `views/drag_select.rs`: it puts the widget's state back while one goes on and sends `UiEvent::DragSelect` →
+  `Editor::drag_select` (the selections at the press are kept in `EditorState::drag_base`).
 - Right clicks: egui's text fields put the caret at any button's press, so each field is shown between
   `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output
   panel's menu runs its entries on the panel (`Editor::run_in_panel_view`); a field's (`Widget Context.sublime-menu`)
@@ -147,7 +152,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
-- `docs/roadmap.md` — what to do next, in order (multiple cursors first, phase by phase; phase 1 done).
+- `docs/roadmap.md` — what to do next, in order (multiple cursors first, phase by phase; phases 1–4 done).
 - `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
@@ -168,7 +173,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multiple cursors via mouse (no Ctrl+click or column selection), Up/Down or copy of all selections, multi-selected
+The multiple-selection keys `find_under_expand_skip` / `unselect_others` (multiple cursors phase 5 in `docs/roadmap.md`), multi-selected
 tabs (`close_selected` closes the tab clicked), and by design no Python 3.3 or 3.8 host: every plugin runs on the
 bundled 3.13 (the console runs Python there too).
 Highlighting is skipped above 4 MB.

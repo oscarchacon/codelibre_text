@@ -10,7 +10,7 @@ use entities::menu::ContextMenuTarget;
 use entities::selection::Selection;
 use entities::text_commands::CaretMotion;
 use serde_json::Value;
-use use_cases::editing::TextCommand;
+use use_cases::editing::{DragSelect, TextCommand};
 use use_cases::editor::CloseChoice;
 use use_cases::plugin_popups::HoverZone;
 use use_cases::search::{CandidateTarget, SearchKind};
@@ -176,6 +176,11 @@ pub enum UiEvent {
         forward: bool,
     },
     MoveCarets(CaretMotion),
+    /// A mouse gesture that makes several selections (Ctrl + click, a column drag…), on every
+    /// frame its button is down (see `mouse_controller`).
+    DragSelect(DocumentId, DragSelect),
+    /// The button of that gesture went up.
+    DragSelectEnded,
 
     CloseDialogAnswered(CloseChoice),
     AboutClosed,
@@ -526,6 +531,13 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
         UiEvent::TypedAtSelections(text) => editor.insert_at_selections(&text),
         UiEvent::DeleteAtSelections { forward } => editor.delete_at_selections(forward),
         UiEvent::MoveCarets(motion) => editor.move_carets(motion),
+        UiEvent::DragSelect(document, drag) => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
+            editor.drag_select(document, drag);
+        }
+        UiEvent::DragSelectEnded => editor.end_drag_select(),
 
         UiEvent::CloseDialogAnswered(choice) => {
             if editor.resolve_pending_close(choice) {

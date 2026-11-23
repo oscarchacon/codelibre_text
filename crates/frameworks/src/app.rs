@@ -219,8 +219,12 @@ impl App {
                             if command_controller::hooked_widget_input(
                                 &mut self.editor,
                                 view,
-                                command,
+                                command.clone(),
                                 replay,
+                            ) || command_controller::moves_every_selection(
+                                &self.editor,
+                                view,
+                                &command,
                             ) {
                                 consumed.push(index);
                             }
