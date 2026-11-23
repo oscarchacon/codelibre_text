@@ -121,19 +121,26 @@ impl Checks {
     }
 
     fn click(&mut self, x: f32, y: f32) {
+        self.click_with(Modifiers::NONE, PointerButton::Primary, x, y);
+    }
+
+    /// A click with these keys held.
+    fn click_with(&mut self, modifiers: Modifiers, button: PointerButton, x: f32, y: f32) {
         let pos = Pos2::new(x, y);
         let input = self.harness.input_mut();
         input.events.push(Event::PointerMoved(pos));
         self.step();
+        self.harness.input_mut().modifiers = modifiers;
         for pressed in [true, false] {
             self.harness.input_mut().events.push(Event::PointerButton {
                 pos,
-                button: PointerButton::Primary,
+                button,
                 pressed,
-                modifiers: Modifiers::NONE,
+                modifiers,
             });
             self.step();
         }
+        self.harness.input_mut().modifiers = Modifiers::NONE;
         self.settle(3);
     }
 
@@ -180,19 +187,31 @@ impl Checks {
     }
 
     fn drag(&mut self, from: (f32, f32), to: (f32, f32)) {
+        self.drag_with(Modifiers::NONE, PointerButton::Primary, from, to);
+    }
+
+    /// A drag with these keys held.
+    fn drag_with(
+        &mut self,
+        modifiers: Modifiers,
+        button: PointerButton,
+        from: (f32, f32),
+        to: (f32, f32),
+    ) {
         let (from, to) = (Pos2::new(from.0, from.1), Pos2::new(to.0, to.1));
         self.harness
             .input_mut()
             .events
             .push(Event::PointerMoved(from));
         self.step();
-        let button = |pos, pressed| Event::PointerButton {
+        self.harness.input_mut().modifiers = modifiers;
+        let event = |pos, pressed| Event::PointerButton {
             pos,
-            button: PointerButton::Primary,
+            button,
             pressed,
-            modifiers: Modifiers::NONE,
+            modifiers,
         };
-        self.harness.input_mut().events.push(button(from, true));
+        self.harness.input_mut().events.push(event(from, true));
         self.step();
         for step in 1..=8 {
             let pos = from + (to - from) * (step as f32 / 8.0);
@@ -202,7 +221,9 @@ impl Checks {
                 .push(Event::PointerMoved(pos));
             self.step();
         }
-        self.harness.input_mut().events.push(button(to, false));
+        self.harness.input_mut().events.push(event(to, false));
+        self.step();
+        self.harness.input_mut().modifiers = Modifiers::NONE;
         self.settle(3);
     }
 
@@ -483,4 +504,106 @@ fn undo_as_drawn() {
     checks.shot("u05_line_deleted");
     checks.key(Modifiers::COMMAND, Key::Z);
     checks.shot("u06_line_back");
+}
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn multiple_cursors_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let code = files.path().join("code.py");
+    std::fs::write(&code, SOURCE).unwrap();
+    let mut checks = start(data.path(), vec![code]);
+    // Ctrl + click (Cmd on macOS) adds carets: at the ends of lines 3, 4 and 5.
+    checks.click(500.0, 104.0);
+    checks.key(Modifiers::NONE, Key::End);
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 500.0, 121.0);
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 500.0, 138.0);
+    checks.shot("m01_carets_added");
+    checks.type_text(" # x");
+    checks.shot("m02_typed_at_every_caret");
+    // Alt + click (Shift + Cmd on macOS) takes the one on line 4 away.
+    let subtract = if cfg!(target_os = "macos") {
+        Modifiers::COMMAND | Modifiers::SHIFT
+    } else {
+        Modifiers::ALT
+    };
+    checks.click_with(subtract, PointerButton::Primary, 500.0, 121.0);
+    checks.shot("m03_caret_taken_away");
+    checks.key(Modifiers::NONE, Key::Escape);
+    // A column drag (Shift + Alt, Alt on macOS) over lines 7 to 9, then typing in it.
+    let column = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::ALT | Modifiers::SHIFT
+    };
+    checks.drag_with(
+        column,
+        PointerButton::Primary,
+        (315.0, 172.0),
+        (330.0, 206.0),
+    );
+    checks.shot("m04_column_selected");
+    checks.type_text("Z");
+    checks.shot("m05_typed_in_the_column");
+    // Ctrl + double click adds a word.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.click(320.0, 240.0);
+    let pos = Pos2::new(340.0, 70.0);
+    checks
+        .harness
+        .input_mut()
+        .events
+        .push(Event::PointerMoved(pos));
+    checks.step();
+    checks.harness.input_mut().modifiers = Modifiers::COMMAND;
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            checks
+                .harness
+                .input_mut()
+                .events
+                .push(Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::COMMAND,
+                });
+        }
+        checks.step();
+    }
+    checks.harness.input_mut().modifiers = Modifiers::NONE;
+    checks.shot("m06_word_added");
+    // Down and Shift + Down move every caret (multiple cursors, phase 3).
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.click(330.0, 104.0);
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 330.0, 138.0);
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.shot("m07_carets_moved_down");
+    checks.key(Modifiers::SHIFT, Key::ArrowDown);
+    checks.shot("m08_selections_extended_down");
+    checks.type_text("Y");
+    checks.shot("m09_typed_after_moving");
+    // Copy a column of two selections (lines 6 and 7) and paste it at two carets: a line each
+    // (multiple cursors, phase 4). This goes through the system's clipboard.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.drag_with(
+        column,
+        PointerButton::Primary,
+        (314.0, 155.0),
+        (350.0, 172.0),
+    );
+    checks.harness.input_mut().events.push(Event::Copy);
+    checks.step();
+    checks.shot("m10_column_copied");
+    checks.click(500.0, 70.0);
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 500.0, 87.0);
+    checks
+        .harness
+        .input_mut()
+        .events
+        .push(Event::Paste(String::new()));
+    checks.step();
+    checks.shot("m11_pasted_a_line_at_each_caret");
 }

@@ -188,6 +188,8 @@ pub struct EditorState {
     /// Views a plugin edited outside a command since the last frame: their edits are one undo
     /// step (see [`Editor::close_plugin_undo_steps`]).
     pub(crate) plugin_edited_views: Vec<DocumentId>,
+    /// The selections a mouse drag adds to or takes from (see `Editor::drag_select`).
+    pub(crate) drag_base: Option<crate::editing::DragBase>,
 }
 
 pub struct Editor {
@@ -257,6 +259,7 @@ impl Editor {
                 installed_packages: Vec::new(),
                 installed_packages_changed: None,
                 plugin_edited_views: Vec::new(),
+                drag_base: None,
                 ignored_packages: None,
                 unpacking: false,
                 loaded_while_unpacking: false,

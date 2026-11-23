@@ -489,6 +489,20 @@ fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     }
 }
 
+/// A caret key no binding took (Up / Down, Page Up / Down, with Shift…) while there are several
+/// selections: the widget would move the primary one only and drop the others, so `move` /
+/// `move_to` move them all. Whether it took the key.
+pub fn moves_every_selection(editor: &Editor, view: &mut ViewState, command: &Command) -> bool {
+    let several = editor
+        .active_document()
+        .is_some_and(|doc| !doc.extra_selections().is_empty());
+    if !several || !matches!(command.name.as_str(), "move" | "move_to") {
+        return false;
+    }
+    view.queue_command(command.clone());
+    true
+}
+
 /// Asks `on_text_command` about what the text widget is about to do by itself — typing,
 /// deleting or moving the caret — and takes the input when a listener exists. `command` is the
 /// command the hooks hear; `replay` is the input the widget gets when nobody replaces it (so
@@ -899,6 +913,10 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "copy" | "cut" if editor.copies_whole_line() => {
             editor.copy_whole_line(command.name == "cut")
         }
+        // The widget knows only the primary selection: with several, the use cases copy them all.
+        "copy" | "cut" if has_several_selections(editor) && !view.field_has_focus => {
+            editor.copy_selections(command.name == "cut")
+        }
         "copy" => {
             editor.remember_copied_selections();
             view.request(ViewRequest::WidgetEdit(WidgetEdit::Copy));
@@ -913,11 +931,13 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             .get("index")
             .and_then(serde_json::Value::as_u64)
         {
-            Some(index) => {
-                if let Some(text) = editor.take_clipboard_history_entry(index as usize) {
-                    view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));
+            Some(index) => match editor.take_clipboard_history_entry(index as usize) {
+                Some(text) if has_several_selections(editor) && !view.field_has_focus => {
+                    editor.paste_text_at_selections(&text)
                 }
-            }
+                Some(text) => view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text))),
+                None => {}
+            },
             None if editor.clipboard_history().is_empty() => {}
             None => {
                 cancel_quick_panel(editor, view);
@@ -926,6 +946,9 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
             }
         },
         "paste" | "paste_and_indent" if editor.pastes_whole_line() => editor.paste_whole_line(),
+        "paste" | "paste_and_indent" if has_several_selections(editor) && !view.field_has_focus => {
+            editor.paste_at_selections()
+        }
         "paste" | "paste_and_indent" => {
             if let Some(text) = editor.clipboard_text() {
                 view.request(ViewRequest::WidgetEdit(WidgetEdit::Paste(text)));
@@ -1464,4 +1487,11 @@ fn run_macro(editor: &mut Editor, file: &str) {
         }
     };
     editor.run_text_command(command);
+}
+
+/// Whether the active document has more than one selection (the text widget knows one).
+fn has_several_selections(editor: &Editor) -> bool {
+    editor
+        .active_document()
+        .is_some_and(|doc| !doc.extra_selections().is_empty())
 }

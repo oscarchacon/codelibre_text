@@ -1,11 +1,11 @@
-# Roadmap: what to do next (2026-11-21)
+# Roadmap: what to do next (2026-11-23)
 
 Plugins and Package Control are done (`docs/plugins.md`: phases A, B and C). This is the order the rest of the
 pending work should go in, most visible in daily use first. The full list of missing commands and settings is
 `docs/sublime-gap-analysis.md`; check `docs/sublime-native-commands.md` for a command's arguments before writing it,
 and ask Sublime itself where it documents nothing (`docs/plugins.md`, "Checking against Sublime itself").
 
-## 1. Multiple cursors (in progress)
+## 1. Multiple cursors (in progress: phases 1 to 4 done)
 
 The most Sublime-like feature still missing ("Not implemented" in CLAUDE.md). Today `Document` keeps the primary
 selection (the only one egui's `TextEdit` knows) and `extra_selections`, painted by `editor_view.rs`; typing,
@@ -30,22 +30,32 @@ are those of Sublime's mousemaps (`Default (Linux|Windows|OSX).sublime-mousemap`
   - `drag_select::drag_selection` (by characters, words, lines) and `column_selections` (screen columns, tabs to
     the next tab stop; lines ending before the column's left side are left out unless all do, then each gets a
     caret at its end).
-- [ ] **Phase 2 — The mouse**: a `UiEvent::DragSelect { document, from, to, mode }` → `Editor::drag_select`
-  (`use_cases/src/editing.rs`), which replaces, adds (`add_region`) or subtracts (`subtract_region`) the drag's
-  selections, the ones of the drag so far replaced on every move. `editor_view.rs` reads the modifiers at the press
-  and, for these gestures, keeps the press from the `TextEdit` (else it moves its caret and
-  `sync_selection_from_view` drops the extras) and turns the pointer into a char (`galley.cursor_from_pos`) or a
-  screen point (x / `em_width`, y / `line_height`, folds and wrapping counted). The modifiers per platform come from
-  a table (better: read the mousemaps, which also lets packages bind them). To check against Sublime then: a
-  zero-width column drag over an empty line (Sublime cannot be driven by a plugin here; try with `ydotool` on
-  Wayland). GUI script: Ctrl+click, column drag, typing at every line, with pictures.
-- [ ] **Phase 3 — Moving every caret**: with extra selections, Up / Down, Page Up / Down and their Shift / Ctrl
-  variants go to the `move` / `move_to` use cases (they already move every selection, `editing.rs`) instead of the
-  widget (`keyboard_controller.rs`: today Up / Down pass through and the widget drops the extras). Each selection
-  needs a goal column (Sublime's `xpos`) so that crossing a short line does not lose it; carets that meet merge.
-- [ ] **Phase 4 — Clipboard**: with extra selections, `copy` / `cut` join the selections' texts with newlines (whole
-  lines with `copy_with_empty_selection`), through `ClipboardGateway`, not the widget; `paste` puts one line in each
-  selection when the clipboard has as many lines as there are selections, else the whole text in each.
+- [x] **Phase 2 — The mouse** (2026-11-23): `UiEvent::DragSelect` → `Editor::drag_select`
+  (`use_cases/src/editing.rs`) replaces, adds (`add_region`) or subtracts (`subtract_region`) the drag's
+  selections from those at the press (`EditorState::drag_base`), the drag's so far replaced on every move; taking
+  out the last selection leaves them as they were. `mouse_controller::drag_gesture` is the gestures' table per
+  platform; `views/drag_select.rs` counts the clicks (double / triple: words / lines), puts the `TextEdit`'s state
+  back after it is shown while a gesture goes on, and turns the pointer into a char plus the columns past its
+  line's end (`entities::drag_select::screen_point` adds the tabs). GUI script: `multiple_cursors_as_drawn`.
+  Left for later: reading the packages' `.sublime-mousemap` instead of the table; columns on wrapped lines count
+  from the line's start, not the row's; checking a zero-width column drag over an empty line against Sublime
+  (it cannot be driven by a plugin here; try with `ydotool` on Wayland).
+- [x] **Phase 3 — Moving every caret** (2026-11-23): with extra selections, caret keys go to `move` / `move_to`
+  instead of the widget: bound ones in `keyboard_controller::bound_command`, unbound ones (Up / Down, Page Up / Down
+  and Shift + them) through `command_controller::moves_every_selection` (`app.rs::dispatch_keys`).
+  `move {by: lines | pages}` is `text_commands::move_vertically`: a screen column (tabs to the next stop) each
+  selection keeps across shorter lines, `Document::goal_column` (Sublime's `xpos`, forgotten at any other
+  selection change); carets that meet merge. GUI script: `multiple_cursors_as_drawn` (m07–m09).
+  Left for later: goal columns over wrapped lines count from the line's start, not the row's.
+- [x] **Phase 4 — Clipboard** (2026-11-23): with extra selections, `copy` / `cut` / `paste` / `paste_from_history`
+  are the use cases (`Editor::copy_selections`, `paste_at_selections`, `copy_whole_line`, `paste_whole_line`)
+  through `ClipboardGateway`, not the widget (`command_controller`, and `keyboard_controller::clipboard_shortcut`
+  for Ctrl+V); the rules are `entities::clipboard`. Copy joins the selected texts with newlines (carets left out);
+  with only carets and `copy_with_empty_selection`, each caret's line once, and their paste goes above each caret's
+  line (a line each when the counts match); `paste` puts one line in each selection when the clipboard has as many
+  lines as there are selections, else the whole text in each. One undo step each. With a single selection the
+  widget still does them (its IME, its replays). GUI script: `multiple_cursors_as_drawn` (m10, m11).
+  Left for later: Sublime may remember how many selections were copied instead of counting lines; check it.
 - [ ] **Phase 5 — Keys**: `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`,
   `select_to_left/right` in both keymaps. Then update "Not implemented" in CLAUDE.md / AGENTS.md.
 

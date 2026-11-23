@@ -32,7 +32,7 @@ use use_cases::plugin_popups::HoverZone;
 use crate::input;
 use crate::syntax_engine::{to_color32, SharedSyntaxEngine};
 use crate::views::minihtml_view::{self, show_html, HtmlColors};
-use crate::views::{context_menu, minimap};
+use crate::views::{context_menu, drag_select, minimap};
 
 /// Sublime font sizes are points; egui sizes are pixels at 96 dpi.
 const POINTS_TO_PIXELS: f32 = 4.0 / 3.0;
@@ -237,6 +237,7 @@ pub fn show(
                     None => &mut read_only_text,
                 };
                 let before_right_press = context_menu::state_before_right_press(&ctx, id);
+                let before_drag = drag_select::state_before(&ctx, id);
                 let output = TextEdit::multiline(buffer)
                     .id(id)
                     .font(font.clone())
@@ -260,6 +261,31 @@ pub fn show(
                 // A right click keeps the selection (its menu's Copy is about it), as in Sublime.
                 let kept =
                     context_menu::keep_selection(&ctx, id, &output.response, before_right_press);
+                // Ctrl + click, Alt + click, column drags…: several selections, the use cases'.
+                let layer = ui.layer_id();
+                let text_area = output.response.rect.intersect(viewport);
+                let in_text = |pos: egui::Pos2| {
+                    text_area.contains(pos)
+                        && pos.x >= viewport.left() + gutter_width
+                        && ctx.layer_id_at(pos) == Some(layer)
+                };
+                let dragged = drag_select::follow(
+                    &ctx,
+                    &drag_select::Text {
+                        id,
+                        document: model.document,
+                        galley: &output.galley,
+                        origin: output.galley_pos,
+                        char_width,
+                    },
+                    before_drag,
+                    in_text,
+                    events,
+                );
+                if dragged.is_some() && !model.active {
+                    events.push(UiEvent::FocusGroup(model.group));
+                }
+                let kept = kept.or(dragged);
                 let selection = kept
                     .or(output.cursor_range.map(|r| r.as_ccursor_range()))
                     .map(|r| Selection::new(r.secondary.index, r.primary.index))

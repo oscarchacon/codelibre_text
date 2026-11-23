@@ -6,6 +6,7 @@
 
 pub mod context_menu;
 pub mod dialogs;
+pub mod drag_select;
 pub mod editor_view;
 pub mod find_panel;
 pub mod input_panel;
