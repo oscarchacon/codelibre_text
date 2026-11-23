@@ -2470,3 +2470,22 @@ fn reveal_in_side_bar_opens_the_folders_down_to_the_file_and_selects_it() {
         "not in the window's folders"
     );
 }
+
+#[test]
+fn with_several_selections_copy_and_paste_are_the_use_cases_not_the_widget() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "one\ntwo", Selection::new(0, 7));
+    run(&mut editor, &mut view, &cmd("split_selection_into_lines"));
+    view.take_requests();
+    run(&mut editor, &mut view, &cmd("copy"));
+    assert_eq!(*world.clipboard.borrow(), Ok("one\ntwo".to_string()));
+    *world.clipboard.borrow_mut() = Ok("A\nB".into());
+    run(&mut editor, &mut view, &cmd("paste"));
+    assert_eq!(active_text(&editor), "A\nB");
+    assert!(
+        view.take_requests()
+            .iter()
+            .all(|r| !matches!(r, ViewRequest::WidgetEdit(_))),
+        "the text widget did nothing"
+    );
+}

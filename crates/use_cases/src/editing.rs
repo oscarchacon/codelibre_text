@@ -1,11 +1,14 @@
 //! Use cases: text commands on the active document.
 
+use entities::clipboard;
 use entities::command::Command;
 use entities::document::DocumentId;
+use entities::drag_select as ds;
+use entities::selection;
 use entities::selection::Selection;
 use entities::settings::Settings;
 use entities::text::{byte_to_char, char_to_byte, line_end, line_start};
-use entities::text::{line_to_char, selected_text, word_at};
+use entities::text::{line_to_char, word_at};
 use entities::text_commands::{self as tc, CaretMotion, Case, LineOrder, TrimOptions};
 
 use crate::editor::Editor;
@@ -201,6 +204,31 @@ impl Editor {
                     }),
                     limit_on_up_down: settings.bool("move_to_limit_on_up_down", false),
                 };
+                if name == "move" && matches!(target.as_str(), "lines" | "pages") {
+                    // Every caret keeps the screen column it aimed for (Sublime's `xpos`).
+                    let step = tc::VerticalMove {
+                        lines: if target == "lines" { 1 } else { how.page_lines },
+                        forward: how.forward,
+                        extend,
+                        to_limit: target == "pages" || how.limit_on_up_down,
+                        tab_size: settings.usize("tab_size", 4).max(1),
+                    };
+                    let mut goals = Vec::new();
+                    let mut moved: Vec<Selection> = std::iter::once(doc.selection())
+                        .chain(doc.extra_selections().iter().copied())
+                        .map(|selection| {
+                            let goal = doc.goal_column(selection);
+                            let (moved, goal) =
+                                tc::move_vertically(&doc.text, selection, goal, &step);
+                            goals.push((moved, goal));
+                            moved
+                        })
+                        .collect();
+                    let primary = moved.remove(0);
+                    doc.set_selections(primary, moved);
+                    doc.set_goal_columns(goals);
+                    return Ok(());
+                }
                 let geometry = *doc.geometry();
                 let motion = |text: &str, selection: Selection| match name {
                     "move" => tc::move_by(text, selection, &how),
@@ -425,43 +453,47 @@ impl Editor {
     }
 
     /// With `copy_with_empty_selection` (on by default, as in Sublime), copy and cut with nothing
-    /// selected take the whole line.
+    /// selected (at any caret) take the carets' whole lines.
     pub fn copies_whole_line(&self) -> bool {
-        self.view_settings().bool("copy_with_empty_selection", true)
-            && self
-                .active_document()
-                .is_some_and(|d| d.selection().is_empty() && d.extra_selections().is_empty())
+        self.view_settings().bool("copy_with_empty_selection", true) && self.nothing_selected()
     }
 
-    /// `copy` / `cut` of the caret's line (see [`Self::copies_whole_line`]).
+    /// Whether every selection of the active document is a caret.
+    fn nothing_selected(&self) -> bool {
+        self.active_document().is_some_and(|d| {
+            d.selection().is_empty() && d.extra_selections().iter().all(|s| s.is_empty())
+        })
+    }
+
+    /// `copy` / `cut` of the carets' lines, each once (see [`Self::copies_whole_line`]); `cut`
+    /// deletes them.
     pub fn copy_whole_line(&mut self, cut: bool) {
         let Some(doc) = self.active_document() else {
             return;
         };
-        let caret = char_to_byte(&doc.text, doc.selection().head);
-        let (start, end) = (line_start(&doc.text, caret), line_end(&doc.text, caret));
-        let line = format!("{}\n", &doc.text[start..end]);
-        if let Err(e) = self.gateways.clipboard.write_text(&line) {
+        let Some(copied) = clipboard::copied(&doc.text, &doc.selections(), true) else {
+            return;
+        };
+        if let Err(e) = self.gateways.clipboard.write_text(&copied.text) {
             self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
             return;
         }
-        self.push_clipboard_history(&line);
-        self.state.line_clipboard = Some(line);
+        self.push_clipboard_history(&copied.text);
+        self.state.line_clipboard = Some(copied.text);
         if cut {
-            self.run_text_command(TextCommand::DeleteLine);
+            if let Some(doc) = self.active_document_mut() {
+                doc.edit_all(clipboard::delete_full_lines);
+            }
         }
     }
 
-    /// Pasting a line copied with nothing selected inserts it above the caret's line, as in
-    /// Sublime. Returns false when the paste is an ordinary one (left to the text widget).
+    /// Pasting lines copied with nothing selected puts them above the carets' lines, as in
+    /// Sublime. Returns false when the paste is an ordinary one.
     pub fn pastes_whole_line(&mut self) -> bool {
         let Some(line) = self.state.line_clipboard.clone() else {
             return false;
         };
-        let empty_selection = self
-            .active_document()
-            .is_some_and(|d| d.selection().is_empty() && d.extra_selections().is_empty());
-        empty_selection
+        self.nothing_selected()
             && self
                 .gateways
                 .clipboard
@@ -469,44 +501,36 @@ impl Editor {
                 .is_ok_and(|text| text == line)
     }
 
-    /// `paste` of a whole line (see [`Self::pastes_whole_line`]); the caret stays where it was.
+    /// `paste` of whole lines (see [`Self::pastes_whole_line`]): above each caret's line, one line
+    /// each when there are as many as carets; the carets stay where they were.
     pub fn paste_whole_line(&mut self) {
-        let Some(line) = self.state.line_clipboard.clone() else {
+        let Some(lines) = self.state.line_clipboard.clone() else {
             return;
         };
         if let Some(doc) = self.active_document_mut() {
-            let caret = char_to_byte(&doc.text, doc.selection().head);
-            let start = byte_to_char(&doc.text, line_start(&doc.text, caret));
-            doc.replace_range(start, start, &line);
+            doc.edit_all(|text, selections| {
+                let pieces = clipboard::line_pieces(&lines, selections.len());
+                clipboard::insert_above_lines(text, selections, &pieces)
+            });
         }
     }
 
-    /// `copy` / `cut` without the text widget, for a plugin's command during an event (the widget
-    /// does them otherwise): the selections, one per line, go to the clipboard and its history;
-    /// `cut` deletes them. With nothing selected it does nothing (see [`Self::copy_whole_line`]).
+    /// `copy` / `cut` without the text widget (with several selections, or for a plugin's command
+    /// during an event): the selections, one per line, go to the clipboard and its history; `cut`
+    /// deletes them. With nothing selected it does nothing (see [`Self::copy_whole_line`]).
     pub fn copy_selections(&mut self, cut: bool) {
         let Some(doc) = self.active_document() else {
             return;
         };
-        let selections: Vec<Selection> = doc
-            .selections()
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect();
-        if selections.is_empty() {
+        let Some(copied) = clipboard::copied(&doc.text, &doc.selections(), false) else {
             return;
-        }
-        let text = selections
-            .iter()
-            .map(|&s| selected_text(&doc.text, s))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Err(e) = self.gateways.clipboard.write_text(&text) {
+        };
+        if let Err(e) = self.gateways.clipboard.write_text(&copied.text) {
             self.notify(self.tr_args("Clipboard unavailable: {error}", &[("error", &e)]));
             return;
         }
         self.state.line_clipboard = None;
-        self.push_clipboard_history(&text);
+        self.push_clipboard_history(&copied.text);
         if cut {
             if let Some(doc) = self.active_document_mut() {
                 doc.edit_all(|text, selections| tc::replace_selections(text, selections, ""));
@@ -514,14 +538,22 @@ impl Editor {
         }
     }
 
-    /// `paste` without the text widget, for a plugin's command during an event: the clipboard's
-    /// text replaces every selection.
+    /// `paste` without the text widget (with several selections, or for a plugin's command during
+    /// an event): one line of the clipboard in each selection when it has as many lines as there
+    /// are selections, else all of it in each.
     pub fn paste_at_selections(&mut self) {
-        let Some(text) = self.clipboard_text() else {
-            return;
-        };
+        if let Some(text) = self.clipboard_text() {
+            self.paste_text_at_selections(&text);
+        }
+    }
+
+    /// [`Self::paste_at_selections`] of `text` (an entry of Paste from History).
+    pub fn paste_text_at_selections(&mut self, text: &str) {
         if let Some(doc) = self.active_document_mut() {
-            doc.edit_all(|content, selections| tc::replace_selections(content, selections, &text));
+            doc.edit_all(|content, selections| {
+                let pieces = clipboard::paste_pieces(text, selections.len());
+                tc::replace_selections_each(content, selections, &pieces)
+            });
         }
     }
 
@@ -553,5 +585,164 @@ pub(crate) fn separators_of<'a>(
     tc::Separators {
         word: pick("separators", "word_separators"),
         sub_word: pick("sub_word_separators", "sub_word_separators"),
+    }
+}
+
+/// What a mouse drag selects (Sublime's `drag_select` `by`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DragBy {
+    /// From the press to the pointer.
+    #[default]
+    Characters,
+    /// Whole words (a double click).
+    Words,
+    /// Whole lines (a triple click).
+    Lines,
+    /// A column: one selection per line between the press and the pointer.
+    Columns,
+}
+
+/// How a drag's selections go with those there were when the button went down (Sublime's
+/// `drag_select` `additive` / `subtractive`; neither replaces them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DragCombine {
+    #[default]
+    Replace,
+    Add,
+    Subtract,
+}
+
+/// A place the pointer is at in a view's text: the char nearest to it and, for a column drag,
+/// how many columns past the end of its line the pointer is (0 over the text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DragPoint {
+    pub point: usize,
+    pub past_end: usize,
+}
+
+impl DragPoint {
+    pub fn at(point: usize) -> Self {
+        Self { point, past_end: 0 }
+    }
+}
+
+/// A mouse drag in a view's text, from where the button went down (`anchor`) to where the pointer
+/// is now (`head`). `pressed` is its first frame: the selections there are then are the ones the
+/// drag adds to or takes from until the button goes up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DragSelect {
+    pub anchor: DragPoint,
+    pub head: DragPoint,
+    pub by: DragBy,
+    pub combine: DragCombine,
+    pub pressed: bool,
+}
+
+/// The selections of the view a drag is in when its button went down.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DragBase {
+    pub document: DocumentId,
+    pub primary: Selection,
+    pub selections: Vec<Selection>,
+}
+
+impl Editor {
+    /// A mouse drag (Ctrl + click, Alt + click, a column…: Sublime's `drag_select`): the drag's
+    /// selections so far replace, join or are taken out of the view's selections at the press.
+    /// The one under the pointer becomes the primary selection. Taking out every selection leaves
+    /// them as they were, as Sublime keeps at least one.
+    pub fn drag_select(&mut self, id: DocumentId, drag: DragSelect) {
+        let tab_size = self.settings_of(id).usize("tab_size", 4);
+        if drag.pressed {
+            self.note_text_clicked();
+        }
+        let Some(index) = self.index_of(id) else {
+            return;
+        };
+        let doc = &mut self.state.documents[index];
+        if drag.pressed {
+            doc.close_undo_step();
+            self.state.drag_base = Some(DragBase {
+                document: id,
+                primary: doc.selection(),
+                selections: doc.selections(),
+            });
+        }
+        let base = match &self.state.drag_base {
+            Some(base) if base.document == id => base.clone(),
+            _ => DragBase {
+                document: id,
+                primary: doc.selection(),
+                selections: doc.selections(),
+            },
+        };
+        let text = &doc.text;
+        let dragged: Vec<Selection> = match drag.by {
+            DragBy::Columns => ds::column_selections(
+                text,
+                ds::screen_point(text, drag.anchor.point, drag.anchor.past_end, tab_size),
+                ds::screen_point(text, drag.head.point, drag.head.past_end, tab_size),
+                tab_size,
+            ),
+            by => {
+                let unit = match by {
+                    DragBy::Words => ds::DragUnit::Words,
+                    DragBy::Lines => ds::DragUnit::Lines,
+                    _ => ds::DragUnit::Characters,
+                };
+                vec![ds::drag_selection(
+                    text,
+                    drag.anchor.point,
+                    drag.head.point,
+                    unit,
+                )]
+            }
+        };
+        let Some(&last) = dragged.last() else {
+            return;
+        };
+        let (primary, others) = match drag.combine {
+            DragCombine::Replace => (last, dragged),
+            DragCombine::Add => {
+                let mut set = base.selections;
+                let mut at = 0;
+                for &selection in &dragged {
+                    at = selection::add_region(&mut set, selection);
+                }
+                (set.remove(at), set)
+            }
+            DragCombine::Subtract => {
+                let set = dragged.iter().fold(base.selections, |set, &s| {
+                    selection::subtract_region(&set, s)
+                });
+                if set.is_empty() {
+                    (base.primary, Vec::new())
+                } else {
+                    let primary = set
+                        .iter()
+                        .copied()
+                        .find(|&s| s == base.primary)
+                        .unwrap_or(set[set.len() - 1]);
+                    (primary, set)
+                }
+            }
+        };
+        let others: Vec<Selection> = others.into_iter().filter(|&s| s != primary).collect();
+        let unchanged = doc.selection() == primary && {
+            let mut now = doc.extra_selections().to_vec();
+            let mut then = others.clone();
+            now.sort_by_key(|s| (s.start(), s.end()));
+            then.sort_by_key(|s| (s.start(), s.end()));
+            now == then
+        };
+        if !unchanged {
+            doc.set_selections(primary, others);
+            self.unfold_around_carets(id);
+        }
+    }
+
+    /// The button of a drag went up.
+    pub fn end_drag_select(&mut self) {
+        self.state.drag_base = None;
     }
 }

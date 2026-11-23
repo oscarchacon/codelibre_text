@@ -1264,3 +1264,51 @@ fn sub_words_are_separated_by_the_sub_word_separators() {
         "a sub-word begins after the `-`"
     );
 }
+
+fn vertical(lines: usize, forward: bool, extend: bool) -> VerticalMove {
+    VerticalMove {
+        lines,
+        forward,
+        extend,
+        to_limit: false,
+        tab_size: 4,
+    }
+}
+
+#[test]
+fn moving_vertically_keeps_the_goal_column_across_a_shorter_line() {
+    let text = "abcdef\nab\nabcdef";
+    let (down, goal) = move_vertically(text, Selection::caret(5), None, &vertical(1, true, false));
+    assert_eq!((down, goal), (Selection::caret(9), 5));
+    let (again, goal) = move_vertically(text, down, Some(goal), &vertical(1, true, false));
+    assert_eq!((again, goal), (Selection::caret(15), 5));
+}
+
+#[test]
+fn moving_vertically_counts_tabs_as_screen_columns() {
+    let text = "\tx\nabcdefgh";
+    // After the tab is column 4: the fifth char below.
+    let (down, goal) = move_vertically(text, Selection::caret(1), None, &vertical(1, true, false));
+    assert_eq!((down, goal), (Selection::caret(7), 4));
+    let (up, _) = move_vertically(text, down, None, &vertical(1, false, false));
+    assert_eq!(up, Selection::caret(1));
+}
+
+#[test]
+fn moving_vertically_past_the_ends_stays_or_goes_to_the_limit() {
+    let text = "ab\ncd";
+    let (stays, _) = move_vertically(text, Selection::caret(4), None, &vertical(1, true, false));
+    assert_eq!(stays, Selection::caret(4));
+    let to_limit = VerticalMove {
+        to_limit: true,
+        ..vertical(1, true, false)
+    };
+    let (end, _) = move_vertically(text, Selection::caret(4), None, &to_limit);
+    assert_eq!(end, Selection::caret(5));
+    let page = VerticalMove {
+        to_limit: true,
+        ..vertical(5, false, true)
+    };
+    let (start, _) = move_vertically(text, Selection::caret(4), None, &page);
+    assert_eq!(start, Selection::new(4, 0));
+}

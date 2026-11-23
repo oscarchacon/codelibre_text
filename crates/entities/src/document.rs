@@ -98,6 +98,9 @@ pub struct Document {
     /// Increases whenever the selection is changed by a command (not by the user typing),
     /// so the view knows it has to move its caret.
     selection_revision: u64,
+    /// The screen column each selection aimed for at the last Up / Down (Sublime's `xpos`), and
+    /// the selection revision it is good for: any other selection change forgets it.
+    goal_columns: (u64, Vec<(Selection, usize)>),
     /// Increases with every change to the text (Sublime's `view.change_count()`).
     change_count: u64,
     /// Regions plugins mark (`view.add_regions`), in the order they were added.
@@ -250,6 +253,7 @@ impl Document {
             selection: Selection::caret(0),
             extra_selections: Vec::new(),
             selection_revision: 1,
+            goal_columns: (0, Vec::new()),
             change_count: 0,
             region_sets: Vec::new(),
             phantoms: Vec::new(),
@@ -813,6 +817,20 @@ impl Document {
         );
         self.set_selection(primary);
         self.extra_selections = extra;
+    }
+
+    /// The screen column `selection`'s caret aimed for when the last Up / Down left it there; None
+    /// when the selections changed since in any other way.
+    pub fn goal_column(&self, selection: Selection) -> Option<usize> {
+        let (revision, goals) = &self.goal_columns;
+        (*revision == self.selection_revision)
+            .then(|| goals.iter().find(|(s, _)| *s == selection).map(|&(_, c)| c))
+            .flatten()
+    }
+
+    /// Records the columns the selections just moved up or down aim for (`goal_column`).
+    pub fn set_goal_columns(&mut self, goals: Vec<(Selection, usize)>) {
+        self.goal_columns = (self.selection_revision, goals);
     }
 
     /// Drops the extra selections, keeping the primary one (Sublime's `single_selection`).
