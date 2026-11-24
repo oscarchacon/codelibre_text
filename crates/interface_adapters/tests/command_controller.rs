@@ -560,13 +560,19 @@ fn find_under_searches_the_word_at_the_caret() {
 #[test]
 fn slurp_find_string_and_find_under_expand() {
     let world = World::new();
-    let (mut editor, mut view) = setup(&world, "ab ab", Selection::new(0, 2));
+    let (mut editor, mut view) = setup(&world, "ab ab ab", Selection::new(0, 2));
     run(&mut editor, &mut view, &cmd("slurp_find_string"));
     assert_eq!(editor.state().find.query, "ab");
     run(&mut editor, &mut view, &cmd("find_under_expand"));
     assert_eq!(
         editor.active_document().unwrap().selections(),
         vec![Selection::new(0, 2), Selection::new(3, 5)]
+    );
+    run(&mut editor, &mut view, &cmd("find_under_expand_skip"));
+    assert_eq!(
+        editor.active_document().unwrap().selections(),
+        vec![Selection::new(0, 2), Selection::new(6, 8)],
+        "the newest selection (3..5) is left out for the next occurrence"
     );
     run(&mut editor, &mut view, &cmd("single_selection"));
     assert!(editor

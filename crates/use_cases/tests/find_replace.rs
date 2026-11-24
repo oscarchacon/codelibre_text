@@ -3,7 +3,7 @@
 use entities::find::FindOptions;
 use entities::selection::Selection;
 use test_support::{active_text, status, World};
-use use_cases::editing::TextCommand;
+use use_cases::editing::{DragBy, DragCombine, DragPoint, DragSelect, TextCommand};
 use use_cases::Editor;
 
 fn editor_with(world: &World, text: &str, selection: Selection) -> Editor {
@@ -133,6 +133,209 @@ fn ctrl_d_selects_the_word_then_adds_the_next_occurrences() {
     );
 }
 
+/// Selections as (anchor, head) pairs.
+type Ranges = &'static [(usize, usize)];
+
+/// A text, its selections, the steps run (`d`, `k`) and the selections after each step.
+type StepsCase = (&'static str, Ranges, &'static str, &'static [Ranges]);
+
+/// `text` with `selections` added in this order (the first one as a plain selection, the others
+/// as Ctrl + clicks / drags would add them), then `steps` run: `d` is Ctrl+D, `k` Ctrl+K Ctrl+D.
+/// Returns the selections (anchor, head) after each step.
+fn run_steps(text: &str, selections: &[(usize, usize)], steps: &str) -> Vec<Vec<(usize, usize)>> {
+    let world = World::new();
+    let (a, b) = selections[0];
+    let mut editor = editor_with(&world, text, Selection::new(a, b));
+    let id = editor.active_document().unwrap().id;
+    for &(a, b) in &selections[1..] {
+        let drag = DragSelect {
+            anchor: DragPoint::at(a),
+            head: DragPoint::at(b),
+            by: DragBy::Characters,
+            combine: DragCombine::Add,
+            pressed: true,
+        };
+        editor.drag_select(id, drag);
+        editor.end_drag_select();
+    }
+    steps
+        .chars()
+        .map(|step| {
+            match step {
+                'd' => editor.select_word_or_next_occurrence(),
+                'k' => editor.skip_to_next_occurrence(),
+                other => panic!("unknown step {other}"),
+            }
+            let doc = editor.active_document().unwrap();
+            doc.selections()
+                .iter()
+                .map(|s| (s.anchor, s.head))
+                .collect()
+        })
+        .collect()
+}
+
+/// Ctrl+D and Ctrl+K Ctrl+D as Sublime 4215 answered them (a plugin running
+/// `find_under_expand` / `find_under_expand_skip` on scratch views, 2026-11-24).
+#[test]
+fn ctrl_d_and_ctrl_k_ctrl_d_do_what_sublime_does() {
+    let cases: &[StepsCase] = &[
+        // A caret: its word, then skipped for the next one; skips go on from the last selection.
+        (
+            "x = x + x + x",
+            &[(0, 0)],
+            "kkdkkk",
+            &[
+                &[(4, 5)],
+                &[(8, 9)],
+                &[(8, 9), (12, 13)],
+                &[(0, 1), (8, 9)],
+                &[(0, 1), (12, 13)],
+                &[(0, 1), (4, 5)],
+            ],
+        ),
+        // Every occurrence selected: the last one is only taken away...
+        ("ab ab", &[(0, 2)], "dk", &[&[(0, 2), (3, 5)], &[(0, 2)]]),
+        // ...unless it is the only selection.
+        ("ab cd", &[(0, 2)], "k", &[&[(0, 2)]]),
+        // The last by position, not the newest: Ctrl+D wrapped to 0, Ctrl+K Ctrl+D takes 12 away.
+        (
+            "x = x + x + x",
+            &[(8, 9)],
+            "ddkk",
+            &[
+                &[(8, 9), (12, 13)],
+                &[(0, 1), (8, 9), (12, 13)],
+                &[(0, 1), (4, 5), (8, 9)],
+                &[(0, 1), (4, 5), (12, 13)],
+            ],
+        ),
+        (
+            "x = x + x + x",
+            &[(8, 9), (0, 1)],
+            "d",
+            &[&[(0, 1), (8, 9), (12, 13)]],
+        ),
+        (
+            "x = x + x + x",
+            &[(8, 9), (0, 1)],
+            "kd",
+            &[&[(0, 1), (12, 13)], &[(0, 1), (4, 5), (12, 13)]],
+        ),
+        // The last selection's text is looked for, not the primary one's.
+        (
+            "ab cd ab cd",
+            &[(3, 5), (0, 2)],
+            "d",
+            &[&[(0, 2), (3, 5), (9, 11)]],
+        ),
+        ("ab cd ab cd", &[(3, 5), (0, 2)], "k", &[&[(0, 2), (9, 11)]]),
+        // A reversed selection; the occurrence found is forward.
+        (
+            "ab ab ab",
+            &[(2, 0)],
+            "kdk",
+            &[&[(3, 5)], &[(3, 5), (6, 8)], &[(0, 2), (3, 5)]],
+        ),
+        ("ab ab ab", &[(0, 2), (5, 3)], "k", &[&[(0, 2), (6, 8)]]),
+        // Part of a word matches inside words; a caret's word only whole words.
+        ("foo foobar foo", &[(0, 2)], "kk", &[&[(4, 6)], &[(11, 13)]]),
+        ("ab abc ab", &[(1, 1)], "k", &[&[(7, 9)]]),
+        // Carets select their words first: Ctrl+D adds nothing then, Ctrl+K Ctrl+D goes on.
+        (
+            "ab cd ab",
+            &[(1, 1), (4, 4)],
+            "dd",
+            &[&[(0, 2), (3, 5)], &[(0, 2), (3, 5)]],
+        ),
+        (
+            "ab cd ab cd",
+            &[(0, 2), (4, 4)],
+            "dd",
+            &[&[(0, 2), (3, 5)], &[(0, 2), (3, 5), (9, 11)]],
+        ),
+        ("ab cd ab cd", &[(1, 1), (3, 5)], "d", &[&[(0, 2), (3, 5)]]),
+        ("ab cd ab cd", &[(1, 1), (4, 4)], "k", &[&[(0, 2), (9, 11)]]),
+        ("ab cd ab cd", &[(0, 2), (4, 4)], "k", &[&[(0, 2), (9, 11)]]),
+        ("ab ab ab", &[(0, 2), (4, 4)], "k", &[&[(0, 2), (6, 8)]]),
+        ("ab cd ab cd", &[(1, 1), (6, 8)], "k", &[&[(0, 2)]]),
+        (
+            "ab cd ab cd ab",
+            &[(1, 1), (6, 8)],
+            "k",
+            &[&[(0, 2), (12, 14)]],
+        ),
+        // A caret between words selects the blanks around it; at the end, the word before.
+        ("a  b  c", &[(2, 2)], "dd", &[&[(1, 3)], &[(1, 3), (4, 6)]]),
+        ("a  b", &[(2, 2)], "k", &[&[(1, 3)]]),
+        ("ab ab", &[(5, 5)], "d", &[&[(3, 5)]]),
+        ("a.b a.b", &[(1, 1)], "d", &[&[(0, 1)]]),
+        // A caret off words takes Sublime's `view.word`, then looks for whole words: `\b`
+        // around punctuation finds nothing, around blanks between words it does.
+        ("x = x", &[(2, 2)], "d", &[&[(1, 3)]]),
+        ("a += b += c", &[(3, 3)], "dd", &[&[(2, 4)], &[(2, 4)]]),
+        ("x =  y =  z", &[(3, 3)], "dd", &[&[(2, 5)], &[(2, 5)]]),
+        (
+            "a    b    c",
+            &[(3, 3)],
+            "dd",
+            &[&[(1, 5)], &[(1, 5), (6, 10)]],
+        ),
+        (
+            "a...b...c",
+            &[(2, 2)],
+            "dd",
+            &[&[(1, 4)], &[(1, 4), (5, 8)]],
+        ),
+        ("a, b, c", &[(2, 2)], "dd", &[&[(1, 3)], &[(1, 3), (4, 6)]]),
+        (
+            "ab \ncd \nef",
+            &[(3, 3)],
+            "dd",
+            &[&[(2, 4)], &[(2, 4), (6, 8)]],
+        ),
+        ("a\n\nb", &[(2, 2)], "d", &[&[(2, 2)]]),
+        ("a-b-c", &[(1, 1)], "dd", &[&[(0, 1)], &[(0, 1)]]),
+        ("x = x = x", &[(2, 2)], "kk", &[&[(1, 3)], &[(1, 3)]]),
+        (
+            "f(a, b) f(a, b)",
+            &[(1, 1)],
+            "dd",
+            &[&[(0, 1)], &[(0, 1), (8, 9)]],
+        ),
+        // A selection made by hand matches inside words.
+        (
+            "ab abc ab",
+            &[(0, 2)],
+            "dd",
+            &[&[(0, 2), (3, 5)], &[(0, 2), (3, 5), (7, 9)]],
+        ),
+        ("a += b += c", &[(2, 4)], "d", &[&[(2, 4), (7, 9)]]),
+        ("x + y + z", &[(1, 4)], "d", &[&[(1, 4), (5, 8)]]),
+        ("ab-ab-ab", &[(2, 3)], "d", &[&[(2, 3), (5, 6)]]),
+    ];
+    for (text, selections, steps, expected) in cases {
+        let expected: Vec<Vec<(usize, usize)>> = expected.iter().map(|s| s.to_vec()).collect();
+        assert_eq!(
+            run_steps(text, selections, steps),
+            expected,
+            "{text:?} from {selections:?}, steps {steps}"
+        );
+    }
+}
+
+#[test]
+fn the_selection_ctrl_k_ctrl_d_finds_is_the_primary_one() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "x = x + x", Selection::new(0, 1));
+    editor.skip_to_next_occurrence();
+    assert_eq!(
+        selection(&editor),
+        Selection::new(4, 5),
+        "the view follows it"
+    );
+}
+
 #[test]
 fn ctrl_d_from_a_word_matches_whole_words_and_case() {
     let world = World::new();
@@ -143,14 +346,14 @@ fn ctrl_d_from_a_word_matches_whole_words_and_case() {
 }
 
 #[test]
-fn ctrl_d_from_part_of_a_word_matches_inside_words() {
+fn ctrl_d_from_a_selection_matches_inside_words() {
     let world = World::new();
     let mut editor = editor_with(&world, "foo foobar", Selection::new(0, 3));
     editor.select_word_or_next_occurrence();
     assert_eq!(
         selection(&editor),
-        Selection::new(0, 3),
-        "a whole-word selection skips foobar"
+        Selection::new(4, 7),
+        "a selection made by hand is not a whole word, even when it is one (Sublime 4215)"
     );
     let mut editor = editor_with(&world, "fo foobar", Selection::new(0, 1));
     editor.select_word_or_next_occurrence();
@@ -292,11 +495,59 @@ fn find_all_under_with_a_partial_selection_matches_inside_words() {
 #[test]
 fn find_all_under_without_a_word_does_nothing() {
     let world = World::new();
-    let mut editor = editor_with(&world, "a  b", Selection::caret(2));
+    let mut editor = editor_with(&world, "a\n\nb", Selection::caret(2));
     editor.select_all_occurrences();
-    assert!(editor
-        .active_document()
-        .unwrap()
-        .extra_selections()
-        .is_empty());
+    assert_eq!(selection(&editor), Selection::caret(2), "an empty line");
+}
+
+/// Alt+F3 as Sublime 4215 answered it (2026-11-24): a selection made by hand matches inside
+/// words; a caret's word only whole words, so `+=` under a caret finds nothing.
+#[test]
+fn find_all_under_does_what_sublime_does() {
+    let cases: &[(&str, Selection, Ranges)] = &[
+        ("ab abc ab", Selection::new(0, 2), &[(0, 2), (3, 5), (7, 9)]),
+        ("ab abc ab", Selection::caret(1), &[(0, 2), (7, 9)]),
+        ("a += b += c", Selection::caret(3), &[(3, 3)]),
+        ("a += b += c", Selection::new(2, 4), &[(2, 4), (7, 9)]),
+    ];
+    let world = World::new();
+    for &(text, start, expected) in cases {
+        let mut editor = editor_with(&world, text, start);
+        editor.select_all_occurrences();
+        let got: Vec<(usize, usize)> = editor
+            .active_document()
+            .unwrap()
+            .selections()
+            .iter()
+            .map(|s| (s.anchor, s.head))
+            .collect();
+        assert_eq!(got, expected, "{text:?} from {start:?}");
+    }
+}
+
+/// Ctrl+D from carets makes the view's occurrences whole words until another command runs, as
+/// in Sublime 4215: a plugin or a hand selecting again keeps it; `move`, `select_all` or
+/// `find_all_under` end it; `single_selection` does not.
+#[test]
+fn whole_word_occurrences_last_until_another_command() {
+    let world = World::new();
+    let ctrl_d_on_plus_equals = |between: &[&str]| {
+        let mut editor = editor_with(&world, "a += b += c", Selection::caret(3));
+        editor.note_command("find_under_expand");
+        editor.select_word_or_next_occurrence();
+        assert_eq!(selection(&editor), Selection::new(2, 4));
+        for name in between {
+            editor.note_command(name);
+        }
+        let id = editor.active_document().unwrap().id;
+        editor.sync_selection_from_view(id, Selection::new(2, 4));
+        editor.note_command("find_under_expand");
+        editor.select_word_or_next_occurrence();
+        editor.active_document().unwrap().selections().len()
+    };
+    assert_eq!(ctrl_d_on_plus_equals(&[]), 1, "still whole words: no match");
+    assert_eq!(ctrl_d_on_plus_equals(&["single_selection"]), 1);
+    assert_eq!(ctrl_d_on_plus_equals(&["move"]), 2, "a plain search again");
+    assert_eq!(ctrl_d_on_plus_equals(&["select_all"]), 2);
+    assert_eq!(ctrl_d_on_plus_equals(&["find_all_under"]), 2);
 }

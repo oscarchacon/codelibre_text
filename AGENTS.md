@@ -152,7 +152,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
-- `docs/roadmap.md` — what to do next, in order (multiple cursors first, phase by phase; phases 1–4 done).
+- `docs/roadmap.md` — what to do next, in order (multiple cursors done; multi-selected tabs and the find panel toggles next).
 - `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
@@ -173,7 +173,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-The multiple-selection keys `find_under_expand_skip` / `unselect_others` (multiple cursors phase 5 in `docs/roadmap.md`), multi-selected
-tabs (`close_selected` closes the tab clicked), and by design no Python 3.3 or 3.8 host: every plugin runs on the
+Multi-selected tabs (`unselect_others`, `select_to_left/right`…, `docs/roadmap.md` 1b; `close_selected` closes the tab clicked),
+and by design no Python 3.3 or 3.8 host: every plugin runs on the
 bundled 3.13 (the console runs Python there too).
 Highlighting is skipped above 4 MB.

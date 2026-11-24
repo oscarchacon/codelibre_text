@@ -5,7 +5,7 @@ pending work should go in, most visible in daily use first. The full list of mis
 `docs/sublime-gap-analysis.md`; check `docs/sublime-native-commands.md` for a command's arguments before writing it,
 and ask Sublime itself where it documents nothing (`docs/plugins.md`, "Checking against Sublime itself").
 
-## 1. Multiple cursors (in progress: phases 1 to 4 done)
+## 1. Multiple cursors (done, 2026-11-24)
 
 The most Sublime-like feature still missing ("Not implemented" in CLAUDE.md). Today `Document` keeps the primary
 selection (the only one egui's `TextEdit` knows) and `extra_selections`, painted by `editor_view.rs`; typing,
@@ -56,8 +56,30 @@ are those of Sublime's mousemaps (`Default (Linux|Windows|OSX).sublime-mousemap`
   lines as there are selections, else the whole text in each. One undo step each. With a single selection the
   widget still does them (its IME, its replays). GUI script: `multiple_cursors_as_drawn` (m10, m11).
   Left for later: Sublime may remember how many selections were copied instead of counting lines; check it.
-- [ ] **Phase 5 — Keys**: `find_under_expand_skip` (Ctrl+K Ctrl+D), `unselect_others`, `unselect_current`,
-  `select_to_left/right` in both keymaps. Then update "Not implemented" in CLAUDE.md / AGENTS.md.
+- [x] **Phase 5 — Keys** (2026-11-24): `find_under_expand_skip` (Ctrl+K Ctrl+D, Cmd+K Cmd+D;
+  `Editor::skip_to_next_occurrence`, Find > Quick Skip Next / Quick Add Next). Checked against Sublime 4215 (a
+  plugin in a portable copy running both commands on scratch views; the answers are the tables in
+  `use_cases/tests/find_replace.rs` and `entities/tests/text.rs`), which also corrected Ctrl+D:
+  - Carets first select their word: Sublime's `view.word` (`text::view_word_at`: the word, else the runs of
+    blanks / punctuation on each side and a single line break; nothing on an empty line). Ctrl+D then adds nothing.
+  - Then both work on the **last selection by position** (not the newest) and look for its text after it,
+    wrapping around. Ctrl+D adds the occurrence; Ctrl+K Ctrl+D replaces the last selection with it, or, when every
+    occurrence is selected, only takes it away (unless it is the only selection).
+  - Whole words only after Ctrl+D started from carets (`EditorState::whole_word_occurrences`, with `\b`, so
+    `+=` from a caret finds nothing), until another command runs (`move`, `select_all`, `find_all_under`… but not
+    `single_selection`; `Editor::note_command_for_occurrences`). A selection made by hand matches inside words.
+    `find_all_under` (Alt+F3): whole words only from a caret.
+  Left for later: Sublime's exact rule for which commands end the whole words.
+  `unselect_others`, `unselect_current`, `unselect_to_left/right` and `select_to_left/right` were listed here, but
+  in Sublime's `Default` they are tab commands (Selection > Tab Selection, Ctrl+J chords): see "Multi-selected tabs"
+  below.
+
+## 1b. Multi-selected tabs
+
+Sublime 4 selects several tabs (Ctrl / Shift + click on a tab) and shows them side by side. Commands: `unselect_others`
+(Ctrl+J Ctrl+Up), `unselect_to_left/right` (Ctrl+J Ctrl+Left/Right), `unselect_current`, `select_to_left/right`
+(Ctrl+J Ctrl+Shift+Left/Right), `focus_to_left/right` (Ctrl+J Ctrl+Page Up/Down), `focus_by_index`; and
+`close_selected` / `close_unselected` then mean the selected tabs (today, the tab clicked).
 
 ## 2. Find panel toggles
 
