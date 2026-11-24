@@ -607,3 +607,30 @@ fn multiple_cursors_as_drawn() {
     checks.step();
     checks.shot("m11_pasted_a_line_at_each_caret");
 }
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn quick_add_and_skip_next_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let code = files.path().join("skip.py");
+    std::fs::write(&code, "x = x + x + x\n").unwrap();
+    let mut checks = start(data.path(), vec![code]);
+    // Ctrl+D (Cmd+D) twice: the first x, then the second one.
+    checks.click(299.0, 70.0);
+    checks.key(Modifiers::COMMAND, Key::D);
+    checks.key(Modifiers::COMMAND, Key::D);
+    checks.shot("k01_two_added");
+    // Ctrl+K Ctrl+D: the last one (the second x) gives way to the third.
+    checks.key(Modifiers::COMMAND, Key::K);
+    checks.key(Modifiers::COMMAND, Key::D);
+    checks.shot("k02_second_skipped_for_the_third");
+    // Again: the third gives way to the fourth.
+    checks.key(Modifiers::COMMAND, Key::K);
+    checks.key(Modifiers::COMMAND, Key::D);
+    checks.shot("k03_third_skipped_for_the_fourth");
+    // Typing goes to the first and the fourth x.
+    checks.type_text("Z");
+    checks.shot("k04_typed_at_first_and_fourth");
+}

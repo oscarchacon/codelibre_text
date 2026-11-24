@@ -87,6 +87,7 @@ impl Editor {
         let jumps = &mut self.state.jumps;
         jumps.history.record_command(name);
         jumps.noted = true;
+        self.note_command_for_occurrences(name);
     }
 
     /// A click (or the start of a drag) in the text: the place it selects is a record of its own.

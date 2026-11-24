@@ -7,7 +7,7 @@ use std::ops::Range;
 use entities::document::DocumentId;
 use entities::find::{self, FindOptions};
 use entities::selection::Selection;
-use entities::text::{selected_text, word_at};
+use entities::text::{selected_text, view_word_at, word_at};
 
 use crate::editor::Editor;
 
@@ -84,44 +84,128 @@ impl Editor {
         true
     }
 
-    /// `find_under_expand` (Ctrl+D): selects the word under the caret, then adds the next
-    /// occurrence of the selected text as another selection. Like Sublime, the search is case
-    /// sensitive, and a selection that is a whole word only matches whole words.
+    /// `find_under_expand` (Ctrl+D), as Sublime 4215 does it: with carets, each caret selects its
+    /// word (`view_word_at`), nothing is added, and the view's occurrences are whole words from
+    /// then on (see [`Self::note_command_for_occurrences`]); else the next occurrence of the last
+    /// selection's text (by position, not the newest) after it, wrapping around, is added as the
+    /// primary selection. The search is case sensitive.
     pub fn select_word_or_next_occurrence(&mut self) {
+        let Some(id) = self.active_document().map(|d| d.id) else {
+            return;
+        };
+        if self.select_words_at_carets(id) {
+            return;
+        }
+        let whole_word = self.state.whole_word_occurrences == Some(id);
         let Some(doc) = self.active_document_mut() else {
             return;
         };
-        let selection = doc.selection();
-        if selection.is_empty() {
-            let word = word_at(&doc.text, selection.head);
-            if !word.is_empty() {
-                doc.set_selection(word);
-            }
-            return;
-        }
-        let Ok(Some(pattern)) = occurrence_options(&doc.text, selection).pattern() else {
+        let selections = doc.selections();
+        let Some(&last) = selections.last() else {
             return;
         };
-        if let Some(next) = find::next_unselected(&pattern, &doc.text, selection, &doc.selections())
-        {
+        let Ok(Some(pattern)) = occurrence_options(&doc.text, last, whole_word).pattern() else {
+            return;
+        };
+        if let Some(next) = find::next_unselected(&pattern, &doc.text, last, &selections) {
             doc.add_selection(next);
         }
     }
 
-    /// `find_all_under` (Alt+F3): selects every occurrence of the selection, or of the word under
-    /// the caret, with the same matching rules as `find_under_expand`.
+    /// `find_under_expand_skip` (Ctrl+K Ctrl+D), as Sublime 4215 does it: carets select their
+    /// words first (as Ctrl+D's do); then the last selection (by position) gives way to the next
+    /// occurrence of its text that is not selected, wrapping around. When there is none it is only
+    /// taken away, unless it is the only selection.
+    pub fn skip_to_next_occurrence(&mut self) {
+        let Some(id) = self.active_document().map(|d| d.id) else {
+            return;
+        };
+        self.select_words_at_carets(id);
+        let whole_word = self.state.whole_word_occurrences == Some(id);
+        let Some(doc) = self.active_document_mut() else {
+            return;
+        };
+        let mut others = doc.selections();
+        let Some(last) = others.pop() else {
+            return;
+        };
+        let Ok(Some(pattern)) = occurrence_options(&doc.text, last, whole_word).pattern() else {
+            return;
+        };
+        let all = doc.selections();
+        match find::next_unselected(&pattern, &doc.text, last, &all) {
+            Some(next) => doc.set_selections(next, others),
+            None => {
+                if let Some(primary) = others.pop() {
+                    doc.set_selections(primary, others);
+                }
+            }
+        }
+    }
+
+    /// Ctrl+D's first step: every caret selects its word (`view_word_at`), and the view's
+    /// occurrences are whole words from then on. True when there was a caret.
+    fn select_words_at_carets(&mut self, id: DocumentId) -> bool {
+        let Some(doc) = self.active_document_mut() else {
+            return false;
+        };
+        let primary = doc.selection();
+        let extra = doc.extra_selections().to_vec();
+        if !primary.is_empty() && extra.iter().all(|s| !s.is_empty()) {
+            return false;
+        }
+        let text = &doc.text;
+        let word = |s: Selection| {
+            if s.is_empty() {
+                view_word_at(text, s.head)
+            } else {
+                s
+            }
+        };
+        let primary = word(primary);
+        let extra: Vec<Selection> = extra.into_iter().map(word).collect();
+        doc.set_selections(primary, extra);
+        self.state.whole_word_occurrences = Some(id);
+        true
+    }
+
+    /// Every command that runs (and the widget's own keys and clicks) ends the whole-word
+    /// occurrences Ctrl+D started from carets, but for these, as in Sublime 4215 (a `move`,
+    /// `select_all` or `find_all_under` ends them; `single_selection` or the palette does not;
+    /// nor does a plugin setting the selections). Sublime's exact rule is not known.
+    pub fn note_command_for_occurrences(&mut self, name: &str) {
+        const KEEP: &[&str] = &[
+            "find_under_expand",
+            "find_under_expand_skip",
+            "single_selection",
+            "show_overlay",
+            "hide_overlay",
+        ];
+        if !KEEP.contains(&name) {
+            self.state.whole_word_occurrences = None;
+        }
+    }
+
+    /// `find_all_under` (Alt+F3), as Sublime 4215 does it: every occurrence of the primary
+    /// selection, or, from a caret, of its word (`view_word_at`) as a whole word (so `+=` under
+    /// the caret finds nothing and the caret stays). Case sensitive.
     pub fn select_all_occurrences(&mut self) {
         let Some(doc) = self.active_document_mut() else {
             return;
         };
         let mut selection = doc.selection();
-        if selection.is_empty() {
-            selection = word_at(&doc.text, selection.head);
+        let from_caret = selection.is_empty();
+        if from_caret {
+            selection = view_word_at(&doc.text, selection.head);
         }
-        let Ok(Some(pattern)) = occurrence_options(&doc.text, selection).pattern() else {
+        let Ok(Some(pattern)) = occurrence_options(&doc.text, selection, from_caret).pattern()
+        else {
             return;
         };
         let matches = find::find_all_selections(&pattern, &doc.text);
+        if matches.is_empty() {
+            return;
+        }
         // The primary selection stays where it was, so the view does not jump.
         let primary = matches
             .iter()
@@ -226,13 +310,13 @@ impl Editor {
 }
 
 /// How `find_under_expand` and `find_all_under` look for the selected text: case sensitive, and
-/// only whole words when the selection is a whole word.
-fn occurrence_options(text: &str, selection: Selection) -> FindOptions {
-    let word = word_at(text, selection.start());
+/// whole words (`\b`, so a selection that starts or ends with no word character matches
+/// nothing) only when the selection came from a caret.
+fn occurrence_options(text: &str, selection: Selection, whole_word: bool) -> FindOptions {
     FindOptions {
         query: selected_text(text, selection).to_string(),
         case_sensitive: true,
-        whole_word: word.start() == selection.start() && word.end() == selection.end(),
+        whole_word,
         ..FindOptions::default()
     }
 }

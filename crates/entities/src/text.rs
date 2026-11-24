@@ -66,6 +66,59 @@ pub fn word_at(text: &str, position: usize) -> Selection {
     Selection::new(start, end)
 }
 
+/// Sublime's `view.word(point)` (checked against 4215), which `find_under_expand` selects for a
+/// caret: the word around it; else, on each side, the run of the next character's kind (spaces
+/// and tabs, or punctuation) or a single line break, so `x |= y` gives ` =`; empty between two
+/// line breaks (an empty line) or at the text's ends next to one.
+pub fn view_word_at(text: &str, position: usize) -> Selection {
+    let word = word_at(text, position);
+    if !word.is_empty() {
+        return word;
+    }
+    #[derive(PartialEq)]
+    enum Kind {
+        Word,
+        Blank,
+        LineBreak,
+        Punctuation,
+    }
+    let kind = |c: char| match c {
+        ' ' | '\t' => Kind::Blank,
+        '\n' => Kind::LineBreak,
+        c if is_word_char(c) => Kind::Word,
+        _ => Kind::Punctuation,
+    };
+    let chars: Vec<char> = text.chars().collect();
+    let position = position.min(chars.len());
+    let before = position.checked_sub(1).map(|i| kind(chars[i]));
+    let after = chars.get(position).map(|&c| kind(c));
+    let breaks = |k: &Option<Kind>| matches!(k, None | Some(Kind::LineBreak));
+    if breaks(&before) && breaks(&after) {
+        return Selection::caret(position);
+    }
+    let mut start = position;
+    match before {
+        Some(Kind::LineBreak) => start -= 1,
+        Some(k) => {
+            while start > 0 && kind(chars[start - 1]) == k {
+                start -= 1;
+            }
+        }
+        None => {}
+    }
+    let mut end = position;
+    match after {
+        Some(Kind::LineBreak) => end += 1,
+        Some(k) => {
+            while end < chars.len() && kind(chars[end]) == k {
+                end += 1;
+            }
+        }
+        None => {}
+    }
+    Selection::new(start, end)
+}
+
 /// The selected substring.
 pub fn selected_text(text: &str, selection: Selection) -> &str {
     &text[char_to_byte(text, selection.start())..char_to_byte(text, selection.end())]
