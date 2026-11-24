@@ -1075,6 +1075,7 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
 const EDITOR_COMMANDS: &[&str] = &[
     "slurp_find_string",
     "find_under_expand",
+    "find_under_expand_skip",
     "find_all_under",
     "select_lines",
     "split_selection_into_lines",
@@ -1105,6 +1106,7 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
     match command.name.as_str() {
         "slurp_find_string" => editor.use_selection_as_query(false),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
+        "find_under_expand_skip" => editor.skip_to_next_occurrence(),
         "find_all_under" => editor.select_all_occurrences(),
         "select_lines" => editor.add_carets_on_next_line(command.bool_arg("forward", true)),
         "split_selection_into_lines" => editor.split_selection_into_lines(),

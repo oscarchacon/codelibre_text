@@ -100,6 +100,9 @@ pub struct EditorState {
     /// The interface language (see [`crate::localization`]).
     pub translations: Rc<Translations>,
     pub find: FindOptions,
+    /// The view whose Ctrl+D started from carets: its occurrences are whole words until another
+    /// command runs (`Editor::note_command_for_occurrences`).
+    pub whole_word_occurrences: Option<DocumentId>,
     pub replacement: String,
     pub find_error: Option<String>,
     pub status: Option<StatusMessage>,
@@ -216,6 +219,7 @@ impl Editor {
                 load_errors: Vec::new(),
                 translations: Rc::default(),
                 find: FindOptions::default(),
+                whole_word_occurrences: None,
                 replacement: String::new(),
                 find_error: None,
                 status: None,

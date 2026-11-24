@@ -112,6 +112,7 @@ pub(crate) const PANEL_TEXT_COMMANDS: &[&str] = &[
     "insert_snippet",
     "goto_line",
     "find_under_expand",
+    "find_under_expand_skip",
     "find_all_under",
     "select_lines",
     "split_selection_into_lines",

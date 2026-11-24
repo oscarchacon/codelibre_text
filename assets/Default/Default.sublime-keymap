@@ -43,6 +43,7 @@
 	{ "keys": ["ctrl+shift+f3"], "command": "find_under_prev" },
 	{ "keys": ["ctrl+e"], "command": "slurp_find_string" },
 	{ "keys": ["ctrl+d"], "command": "find_under_expand" },
+	{ "keys": ["ctrl+k", "ctrl+d"], "command": "find_under_expand_skip" },
 	{ "keys": ["alt+f3"], "command": "find_all_under" },
 	{ "keys": ["ctrl+alt+up"], "command": "select_lines", "args": { "forward": false } },
 	{ "keys": ["ctrl+alt+down"], "command": "select_lines", "args": { "forward": true } },
