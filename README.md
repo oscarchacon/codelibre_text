@@ -39,7 +39,7 @@
   case conversion, sort/unique/reverse lines, trim trailing whitespace, tabs <-> spaces
 - Expand selection (to line, word, brackets, indentation, smart)
 - Find & replace panel: regex, case sensitive, whole word, wrap, match highlighting
-- Multiple selections: `Ctrl+D`, `Alt+F3` (find all), `Ctrl+Alt+Up/Down` (add line), `Ctrl+Shift+L`
+- Multiple selections: `Ctrl+D`, `Ctrl+K Ctrl+D` (skip to the next), `Alt+F3` (find all), `Ctrl+Alt+Up/Down` (add line), `Ctrl+Shift+L`
   (split into lines). Typing, Backspace/Delete, Enter, Tab, paste and Left/Right/Home/End act on every
   selection; `Escape` goes back to one
 - Files: UTF-8 (with/without BOM) and Latin-1, CRLF/LF preserved, reload on external changes
@@ -97,6 +97,7 @@ is installed, its `Packages` folder is read as well (`"import_sublime_packages":
 | Ctrl+P / Ctrl+G / Ctrl+R | Goto Anything / Line / Symbol |
 | Ctrl+F / Ctrl+H / F3 / Shift+F3 | Find / Replace / Next / Previous |
 | Ctrl+D / Alt+F3 / Ctrl+F3 | Add next occurrence / Select all occurrences / Quick find |
+| Ctrl+K Ctrl+D | Skip the newest selection for the next occurrence |
 | Ctrl+Alt+Up / Down, Ctrl+Shift+L | Add a selection on the line above / below, Split selection into lines |
 | Escape | Back to a single selection |
 | Ctrl+/ / Ctrl+Shift+/ | Toggle line / block comment |
@@ -203,7 +204,8 @@ git tag -f macos-test && git push --atomic -f origin develop macos-test
 
 CodeLibre Text grows feature by feature. Next up, roughly in this order:
 
-- [ ] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
+- [x] More multiple-cursor commands (Ctrl+click, column selection, Up/Down with several carets, `find_under_expand_skip`)
+- [ ] Multi-selected tabs (`unselect_others`, `select_to_left/right`…)
 - [ ] Find panel toggles and Find in Files
 - [x] Python plugins phase A: the plugin host and its API
 - [x] Python plugins phase B core: events (`EventListener`, `ViewEventListener`, `TextChangeListener`), real `set_timeout` / `set_timeout_async`, quick / input panels, dialogs, resources, output panels and build systems, projects, command input handlers, command metadata, completions, popups, phantoms, regions and annotations, statuses, split layouts (groups), clones and windows

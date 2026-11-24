@@ -251,6 +251,14 @@ msgid "Quick Find All"
 msgstr "Schnellsuche (alle)"
 
 #: assets/Default/Main.sublime-menu
+msgid "Quick Add Next"
+msgstr "Nächstes Vorkommen hinzufügen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Quick Skip Next"
+msgstr "Überspringen und nächstes auswählen"
+
+#: assets/Default/Main.sublime-menu
 msgid "Use Selection for Find"
 msgstr "Auswahl als Suchbegriff verwenden"
 
