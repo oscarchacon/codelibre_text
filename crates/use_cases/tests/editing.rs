@@ -2,6 +2,7 @@
 
 use entities::selection::Selection;
 use entities::text_commands::{Case, LineOrder};
+use entities::view_geometry::ViewGeometry;
 use serde_json::json;
 use test_support::{active_text, open, status, World};
 use use_cases::editing::{DragBy, DragCombine, DragPoint, DragSelect, TextCommand};
@@ -390,10 +391,12 @@ fn a_column_drag_past_the_ends_of_the_lines_puts_carets_at_their_ends() {
         anchor: DragPoint {
             point: 2,
             past_end: 4,
+            ..DragPoint::default()
         },
         head: DragPoint {
             point: 6,
             past_end: 3,
+            ..DragPoint::default()
         },
         by: DragBy::Columns,
         combine: DragCombine::Replace,
@@ -437,6 +440,64 @@ fn up_and_down_move_every_caret_keeping_its_column() {
         editor.active_document().unwrap().selection(),
         Selection::caret(22)
     );
+}
+
+/// The view wraps its lines at `columns`, as it reports when `word_wrap` is on.
+fn wrap_at(editor: &mut Editor, columns: usize) {
+    let id = editor.active_document().unwrap().id;
+    editor.sync_view_geometry(
+        id,
+        ViewGeometry {
+            wrap_columns: Some(columns),
+            ..ViewGeometry::default()
+        },
+    );
+}
+
+#[test]
+fn up_and_down_go_by_the_rows_of_wrapped_lines() {
+    let world = World::new();
+    // Rows at 10 columns: "aaaa bbbb " (0..10), "cccc dddd" (10..19), then "xy" (20..22).
+    let mut editor = editor_with_carets(&world, "aaaa bbbb cccc dddd\nxy", &[2, 7]);
+    wrap_at(&mut editor, 10);
+    editor.run_view_command_on_active(&move_lines(true, false));
+    assert_eq!(all_selections(&editor), vec![(12, 12), (17, 17)]);
+    editor.run_view_command_on_active(&move_lines(true, false));
+    assert_eq!(all_selections(&editor), vec![(22, 22)]);
+}
+
+#[test]
+fn a_column_drag_over_a_wrapped_line_selects_on_each_row() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "aaaa bbbb cccc dddd\nxy", 0);
+    wrap_at(&mut editor, 10);
+    let id = editor.active_document().unwrap().id;
+    let head = DragPoint {
+        point: 10,
+        past_end: 2,
+        after_row: true,
+    };
+    let column = DragSelect {
+        anchor: DragPoint::at(2),
+        head,
+        by: DragBy::Columns,
+        combine: DragCombine::Replace,
+        pressed: true,
+    };
+    // From column 2 of the first row to past its end (column 12): one row only, up to before the
+    // space it broke after.
+    editor.drag_select(id, column);
+    assert_eq!(all_selections(&editor), vec![(2, 9)]);
+    // Down to the second row's column 4.
+    editor.drag_select(
+        id,
+        DragSelect {
+            head: DragPoint::at(14),
+            pressed: false,
+            ..column
+        },
+    );
+    assert_eq!(all_selections(&editor), vec![(2, 4), (12, 14)]);
 }
 
 #[test]

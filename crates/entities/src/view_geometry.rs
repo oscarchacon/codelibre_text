@@ -121,7 +121,7 @@ impl ViewGeometry {
     }
 
     /// The rows drawn, as char ranges without their line break: a line each, or more with wrap.
-    fn rows(&self, text: &str) -> Vec<(usize, usize)> {
+    pub fn rows(&self, text: &str) -> Vec<(usize, usize)> {
         let mut rows = Vec::new();
         let mut line_start = 0;
         let mut line: Vec<char> = Vec::new();

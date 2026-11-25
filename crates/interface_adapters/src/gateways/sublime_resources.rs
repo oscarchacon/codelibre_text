@@ -10,6 +10,7 @@ use entities::keymap::{Binding, KeyCombo, Keymap};
 use entities::localization::{normalize_language_code, Catalog, Language};
 use entities::menu::{merge_menu, ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
+use entities::mousemap::{MouseBinding, MouseModifiers, Mousemap};
 use entities::settings::SettingsLayers;
 use serde_json::{Map, Value};
 use use_cases::gateways::{platform_name, PackagePaths, ResourceGateway, UiResources};
@@ -164,6 +165,16 @@ impl ResourceGateway for SublimeResourceGateway {
             }
         }
 
+        let platform_mousemap = format!("Default ({}).sublime-mousemap", platform_name());
+        let mut mousemap = Mousemap::default();
+        for (origin, text) in self.sources(include_sublime, builtin_resources::MOUSEMAP, |n| {
+            n == "Default.sublime-mousemap" || n == platform_mousemap
+        }) {
+            if let Err(e) = add_mouse_bindings(&mut mousemap, &text) {
+                errors.push(format!("{origin}: {e}"));
+            }
+        }
+
         let mut menu = |builtin: &str, file: &str| {
             let mut menu = Vec::new();
             for (origin, text) in self.sources(include_sublime, builtin, |n| n == file) {
@@ -225,6 +236,7 @@ impl ResourceGateway for SublimeResourceGateway {
 
         UiResources {
             keymap,
+            mousemap,
             main_menu,
             context_menus,
             palette,
@@ -308,6 +320,11 @@ impl ResourceGateway for SublimeResourceGateway {
             .is_some_and(|e| e == "sublime-keymap")
         {
             Some(builtin_resources::KEYMAP.to_string())
+        } else if let Some((_, text)) = builtin_resources::MOUSEMAPS
+            .iter()
+            .find(|(name, _)| *name == file_name)
+        {
+            Some(text.to_string())
         } else {
             None
         }
@@ -485,6 +502,47 @@ fn parse_binding(item: &Value) -> Option<Binding> {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default(),
+    })
+}
+
+/// Adds the bindings of a `.sublime-mousemap` file to `mousemap`, after those it has.
+pub fn add_mouse_bindings(mousemap: &mut Mousemap, text: &str) -> Result<(), String> {
+    if let Value::Array(items) = sublime_json::parse(text).map_err(|e| e.to_string())? {
+        items
+            .iter()
+            .filter_map(parse_mouse_binding)
+            .for_each(|b| mousemap.add(b));
+    }
+    Ok(())
+}
+
+/// `{"button": "button1", "count": 2, "modifiers": ["ctrl"], "press_command": "drag_select",
+/// "press_args": {...}, "command": "...", "args": {...}}`. Left out: bindings with a `context`
+/// (only the scroll bar's have one) or that hold another button (Sublime's chords).
+fn parse_mouse_binding(item: &Value) -> Option<MouseBinding> {
+    if item.get("context").is_some() {
+        return None;
+    }
+    let modifiers = match item.get("modifiers") {
+        Some(Value::Array(names)) => {
+            MouseModifiers::parse(names.iter().map(|n| n.as_str().unwrap_or("?")))?
+        }
+        _ => MouseModifiers::default(),
+    };
+    let press_command = command_from(item.get("press_command"), item.get("press_args"));
+    let command = command_from(item.get("command"), item.get("args"));
+    if press_command.is_none() && command.is_none() {
+        return None;
+    }
+    Some(MouseBinding {
+        button: item.get("button")?.as_str()?.to_lowercase(),
+        count: item
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|c| u32::try_from(c).ok()),
+        modifiers,
+        press_command,
+        command,
     })
 }
 

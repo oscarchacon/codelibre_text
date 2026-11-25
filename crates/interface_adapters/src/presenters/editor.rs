@@ -165,6 +165,7 @@ pub fn present_document(
             always_show_viewport: settings.bool("always_show_minimap_viewport", false),
             draw_border: settings.bool("draw_minimap_border", false),
         }),
+        mousemap: editor.state().mousemap.clone(),
     })
 }
 

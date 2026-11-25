@@ -11,7 +11,7 @@ edition 2021, egui/eframe 0.31, syntect 5 (`default-fancy`). Read `docs/architec
 - `crates/frameworks` — package `codelibre_text` = library (`lib.rs`: `compose()` composition root, egui views, `app.rs` loop,
   syntect engine, OS/library gateways) + thin `main.rs` (CLI + window).
 - `crates/test_support` — test doubles only (dev-dependency): `World` implements every gateway in memory.
-- `assets/Default/` — built-in keymap, main and context menus, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
+- `assets/Default/` — built-in keymaps, mousemaps (`Default (<platform>).sublime-mousemap`), main and context menus, palette, preferences, color schemes, and `Localization/` (`messages.pot` + one
   gettext `.po` per interface language, parsed by `gateways/po_file.rs`) (`include_str!` in `interface_adapters/src/gateways/builtin_resources.rs`).
 - `assets/python/` — the Python plugin host, our own `sublime` / `sublime_plugin` modules and `Default/` (the modules
   of Sublime's `Default` packages import; Sublime's is not loaded) (`include_str!` in
@@ -93,11 +93,12 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
 - Multiple selections (Ctrl+D, Alt+F3 `find_all_under`, Ctrl+Alt+Up/Down `select_lines`, Ctrl+Shift+L
   `split_selection_into_lines`; commands set them with `Document::set_selections`): the widget only knows the primary one (`Document::selection`); `extra_selections` are painted
   by `editor_view.rs`, whose typing/delete/caret keys become `UiEvent::{TypedAtSelections, DeleteAtSelections, MoveCarets}`
-  → `Document::edit_all`; with extras, caret keys no binding takes (Up/Down, Page Up/Down, Shift…) are `move` / `move_to` on all of them (`command_controller::moves_every_selection`, each keeping a goal column: `Document::goal_column`, Sublime's `xpos`). Any other caret move (a plain click, a command's `set_selection`) drops the extras.
+  → `Document::edit_all`; with extras, caret keys no binding takes (Up/Down, Page Up/Down, Shift…) are `move` / `move_to` on all of them (`command_controller::moves_every_selection`, each keeping a goal column: `Document::goal_column`, Sublime's `xpos`). Up/Down and column drags go by the rows drawn (`drag_select::Rows` from `ViewGeometry`: a wrapped line has several, columns count from the row's start). Any other caret move (a plain click, a command's `set_selection`) drops the extras.
   `set_selections` merges overlapping ones as Sublime does (`selection::add_region` / `subtract_region`; mouse
   drags' selections: `entities::drag_select`). Mouse gestures (Ctrl/Cmd + click, Alt + click, column drags:
-  `mouse_controller::drag_gesture`, a table of Sublime's default mousemaps, not read from packages) are
-  `views/drag_select.rs`: it puts the widget's state back while one goes on and sends `UiEvent::DragSelect` →
+  `mouse_controller::press_action`, by the mousemaps: ours, then every package's, `User` last; `entities::mousemap`) are
+  `views/drag_select.rs` (also the bound commands: side buttons `prev_view` / `next_view`, a release `command` after the
+  widget's click): it puts the widget's state back while one goes on and sends `UiEvent::DragSelect` →
   `Editor::drag_select` (the selections at the press are kept in `EditorState::drag_base`).
 - Right clicks: egui's text fields put the caret at any button's press, so each field is shown between
   `context_menu::state_before_right_press` and `keep_selection` (the menu's Copy keeps its selection). An output

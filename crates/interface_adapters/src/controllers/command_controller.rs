@@ -471,8 +471,11 @@ fn run_rewritten(editor: &mut Editor, view: &mut ViewState, command: Command) {
     editor.note_command(&command.name);
     // The command's edits are one undo step: what came before is closed, and so is it.
     editor.close_undo_steps();
+    // The views it changes end their whole-word occurrences (Ctrl+D's), as Sublime records it.
+    let occurrences = editor.occurrence_views(&command.name);
     run_command(editor, view, &command);
     editor.close_undo_steps();
+    editor.end_changed_occurrences(occurrences);
     view.last_command = Some(command.name.clone());
     let Some(target) = hook_target(editor, &command.name) else {
         return;

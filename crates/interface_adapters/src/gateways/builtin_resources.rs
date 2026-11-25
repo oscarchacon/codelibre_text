@@ -26,6 +26,29 @@ pub const KEYMAPS: &[(&str, &str)] = &[
     ("Default.sublime-keymap", PC_KEYMAP),
     ("Default (OSX).sublime-keymap", OSX_KEYMAP),
 ];
+/// The mouse bindings of this platform, from [`MOUSEMAPS`].
+pub const MOUSEMAP: &str = if cfg!(target_os = "macos") {
+    MOUSEMAPS[2].1
+} else if cfg!(windows) {
+    MOUSEMAPS[0].1
+} else {
+    MOUSEMAPS[1].1
+};
+/// Every built-in mousemap with its file name, as Sublime's `Default (<platform>).sublime-mousemap`.
+pub const MOUSEMAPS: &[(&str, &str)] = &[
+    (
+        "Default (Windows).sublime-mousemap",
+        asset!("Default (Windows).sublime-mousemap"),
+    ),
+    (
+        "Default (Linux).sublime-mousemap",
+        asset!("Default (Linux).sublime-mousemap"),
+    ),
+    (
+        "Default (OSX).sublime-mousemap",
+        asset!("Default (OSX).sublime-mousemap"),
+    ),
+];
 pub const PALETTE_COMMANDS: &str = asset!("Default.sublime-commands");
 pub const MAIN_MENU: &str = asset!("Main.sublime-menu");
 /// Right-click menus: the text, a side bar entry, a top folder of the side bar (added after the

@@ -27,6 +27,7 @@ use entities::keymap::{Binding, Keymap};
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
+use entities::mousemap::Mousemap;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{json, Map, Value};
@@ -423,6 +424,7 @@ impl ResourceGateway for FakeResources {
         }
         UiResources {
             keymap,
+            mousemap: Mousemap::default(),
             main_menu: self.0.menu.borrow().clone(),
             context_menus: self.0.context_menus.borrow().clone(),
             palette: self.0.palette.borrow().clone(),
