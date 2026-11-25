@@ -4,12 +4,30 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use entities::document::DocumentId;
+use entities::document::{Document, DocumentId, RegionSet};
 use entities::find::{self, FindOptions};
 use entities::selection::Selection;
 use entities::text::{selected_text, view_word_at, word_at};
 
 use crate::editor::Editor;
+
+/// What makes Sublime record a command in a view's history: its text, selections and regions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OccurrenceView {
+    change_count: u64,
+    selections: Vec<Selection>,
+    regions: Vec<RegionSet>,
+}
+
+impl OccurrenceView {
+    fn of(doc: &Document) -> Self {
+        Self {
+            change_count: doc.change_count(),
+            selections: doc.selections(),
+            regions: doc.region_sets().to_vec(),
+        }
+    }
+}
 
 /// Matches of the last search, reused while the text and the options do not change.
 pub struct FindCache {
@@ -96,7 +114,7 @@ impl Editor {
         if self.select_words_at_carets(id) {
             return;
         }
-        let whole_word = self.state.whole_word_occurrences == Some(id);
+        let whole_word = self.state.whole_word_occurrences.contains(&id);
         let Some(doc) = self.active_document_mut() else {
             return;
         };
@@ -121,7 +139,7 @@ impl Editor {
             return;
         };
         self.select_words_at_carets(id);
-        let whole_word = self.state.whole_word_occurrences == Some(id);
+        let whole_word = self.state.whole_word_occurrences.contains(&id);
         let Some(doc) = self.active_document_mut() else {
             return;
         };
@@ -165,25 +183,71 @@ impl Editor {
         let primary = word(primary);
         let extra: Vec<Selection> = extra.into_iter().map(word).collect();
         doc.set_selections(primary, extra);
-        self.state.whole_word_occurrences = Some(id);
+        if !self.state.whole_word_occurrences.contains(&id) {
+            self.state.whole_word_occurrences.push(id);
+        }
         true
     }
 
-    /// Every command that runs (and the widget's own keys and clicks) ends the whole-word
-    /// occurrences Ctrl+D started from carets, but for these, as in Sublime 4215 (a `move`,
-    /// `select_all` or `find_all_under` ends them; `single_selection` or the palette does not;
-    /// nor does a plugin setting the selections). Sublime's exact rule is not known.
+    /// A command is about to run. The whole-word occurrences Ctrl+D started from carets last, in
+    /// Sublime 4215, while the last command in a view's history is `find_under_expand` or
+    /// `find_under_expand_skip`, and it records a command that changed the view's text,
+    /// selections or regions (setting the same selections is no change), `copy` and `insert`
+    /// always. So `copy` and `insert` end the active view's here; a command run with
+    /// [`Self::occurrence_views`] noted before and [`Self::end_changed_occurrences`] after ends
+    /// those of the views it changed (window and application commands change none unless they
+    /// run a text command); what the text widget does itself ends them where it changes the text
+    /// or the caret.
     pub fn note_command_for_occurrences(&mut self, name: &str) {
-        const KEEP: &[&str] = &[
-            "find_under_expand",
-            "find_under_expand_skip",
-            "single_selection",
-            "show_overlay",
-            "hide_overlay",
-        ];
-        if !KEEP.contains(&name) {
-            self.state.whole_word_occurrences = None;
+        const ALWAYS_RECORDED: &[&str] = &["copy", "insert"];
+        if ALWAYS_RECORDED.contains(&name) {
+            if let Some(id) = self.active_document().map(|d| d.id) {
+                self.end_whole_word_occurrences(id);
+            }
         }
+    }
+
+    /// How the views with whole-word occurrences are before the command `name` runs: none for
+    /// Ctrl+D and Ctrl+K Ctrl+D, which keep them whatever they change.
+    pub fn occurrence_views(&self, name: &str) -> Vec<(DocumentId, OccurrenceView)> {
+        if matches!(name, "find_under_expand" | "find_under_expand_skip") {
+            return Vec::new();
+        }
+        self.state
+            .whole_word_occurrences
+            .iter()
+            .filter_map(|&id| Some((id, OccurrenceView::of(self.any_document(id)?))))
+            .collect()
+    }
+
+    /// Ends the whole-word occurrences of the views that changed since `before`.
+    pub fn end_changed_occurrences(&mut self, before: Vec<(DocumentId, OccurrenceView)>) {
+        for (id, before) in before {
+            let after = self.any_document(id).map(OccurrenceView::of);
+            if after.as_ref() != Some(&before) {
+                self.end_whole_word_occurrences(id);
+            }
+        }
+    }
+
+    /// Does what the text widget does by itself at every selection (typing, deleting, moving the
+    /// carets): a command Sublime records when it changes the active view, which then loses its
+    /// whole-word occurrences.
+    pub(crate) fn as_widget_command(&mut self, edit: impl FnOnce(&mut Self)) {
+        let before = self
+            .active_document()
+            .map(|d| (d.id, OccurrenceView::of(d)));
+        edit(self);
+        if let Some((id, before)) = before {
+            if self.any_document(id).map(OccurrenceView::of).as_ref() != Some(&before) {
+                self.end_whole_word_occurrences(id);
+            }
+        }
+    }
+
+    /// Ctrl+D's next occurrences in this view are found by a plain search again.
+    pub fn end_whole_word_occurrences(&mut self, id: DocumentId) {
+        self.state.whole_word_occurrences.retain(|&view| view != id);
     }
 
     /// `find_all_under` (Alt+F3), as Sublime 4215 does it: every occurrence of the primary

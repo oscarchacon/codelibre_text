@@ -2,6 +2,7 @@
 
 use egui::{Key, Modifiers};
 use entities::keymap::KeyCombo;
+use entities::mousemap::MouseModifiers;
 use serde_json::{json, Value};
 
 /// The names Sublime gives the modifier keys held (`ctrl`, `alt`, `shift`, `super`): Cmd is `super`
@@ -19,6 +20,17 @@ pub fn modifier_names(modifiers: Modifiers) -> Vec<String> {
     .filter(|(_, pressed)| *pressed)
     .map(|(name, _)| name.to_string())
     .collect()
+}
+
+/// The modifier keys held as the mousemaps name them (see [`modifier_names`]).
+pub fn mouse_modifiers(modifiers: Modifiers) -> MouseModifiers {
+    let macos = cfg!(target_os = "macos");
+    MouseModifiers {
+        ctrl: modifiers.ctrl || (modifiers.command && !macos),
+        alt: modifiers.alt,
+        shift: modifiers.shift,
+        super_key: modifiers.mac_cmd || (modifiers.command && macos),
+    }
 }
 
 /// Sublime's event object for quick-panel selections and command input handlers.

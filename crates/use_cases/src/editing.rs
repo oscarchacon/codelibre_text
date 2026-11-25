@@ -214,13 +214,14 @@ impl Editor {
                         to_limit: target == "pages" || how.limit_on_up_down,
                         tab_size: settings.usize("tab_size", 4).max(1),
                     };
+                    let rows = ds::Rows::of(&doc.text, doc.geometry());
                     let mut goals = Vec::new();
                     let mut moved: Vec<Selection> = std::iter::once(doc.selection())
                         .chain(doc.extra_selections().iter().copied())
                         .map(|selection| {
                             let goal = doc.goal_column(selection);
                             let (moved, goal) =
-                                tc::move_vertically(&doc.text, selection, goal, &step);
+                                tc::move_vertically(&doc.text, &rows, selection, goal, &step);
                             goals.push((moved, goal));
                             moved
                         })
@@ -347,16 +348,22 @@ impl Editor {
         } else {
             insert.to_string()
         };
-        if let Some(doc) = self.active_document_mut() {
-            doc.edit_all(|text, selections| tc::replace_selections(text, selections, &insert));
-        }
+        self.as_widget_command(|editor| {
+            if let Some(doc) = editor.active_document_mut() {
+                doc.edit_all(|text, selections| tc::replace_selections(text, selections, &insert));
+            }
+        });
     }
 
     /// Backspace (Delete when `forward`) at every selection.
     pub fn delete_at_selections(&mut self, forward: bool) {
-        if let Some(doc) = self.active_document_mut() {
-            doc.edit_all(|text, selections| tc::delete_at_selections(text, selections, forward));
-        }
+        self.as_widget_command(|editor| {
+            if let Some(doc) = editor.active_document_mut() {
+                doc.edit_all(|text, selections| {
+                    tc::delete_at_selections(text, selections, forward)
+                });
+            }
+        });
     }
 
     /// Up (or Down, `forward`) from the first row drawn (or the last) with
@@ -390,11 +397,15 @@ impl Editor {
 
     /// Arrow keys, Home and End while there are several selections: every caret moves.
     pub fn move_carets(&mut self, motion: CaretMotion) {
-        if let Some(doc) = self.active_document_mut() {
-            doc.close_undo_step();
-            let geometry = *doc.geometry();
-            doc.edit_all(|text, selections| tc::move_carets(text, selections, motion, &geometry));
-        }
+        self.as_widget_command(|editor| {
+            if let Some(doc) = editor.active_document_mut() {
+                doc.close_undo_step();
+                let geometry = *doc.geometry();
+                doc.edit_all(|text, selections| {
+                    tc::move_carets(text, selections, motion, &geometry)
+                });
+            }
+        });
     }
 
     /// `select_lines` (Ctrl+Alt+Up/Down): adds a caret on the line above or below the selections.
@@ -614,16 +625,22 @@ pub enum DragCombine {
 }
 
 /// A place the pointer is at in a view's text: the char nearest to it and, for a column drag,
-/// how many columns past the end of its line the pointer is (0 over the text).
+/// how many columns past the end of its row the pointer is (0 over the text).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DragPoint {
     pub point: usize,
     pub past_end: usize,
+    /// The pointer is at or past the end of a row the view wrapped: `point` is that row's end,
+    /// which is also where the next row begins.
+    pub after_row: bool,
 }
 
 impl DragPoint {
     pub fn at(point: usize) -> Self {
-        Self { point, past_end: 0 }
+        Self {
+            point,
+            ..Self::default()
+        }
     }
 }
 
@@ -679,12 +696,18 @@ impl Editor {
         };
         let text = &doc.text;
         let dragged: Vec<Selection> = match drag.by {
-            DragBy::Columns => ds::column_selections(
-                text,
-                ds::screen_point(text, drag.anchor.point, drag.anchor.past_end, tab_size),
-                ds::screen_point(text, drag.head.point, drag.head.past_end, tab_size),
-                tab_size,
-            ),
+            DragBy::Columns => {
+                let rows = ds::Rows::of(text, doc.geometry());
+                let at = |p: DragPoint| {
+                    let screen_point = if p.after_row {
+                        ds::screen_point_after_row
+                    } else {
+                        ds::screen_point
+                    };
+                    screen_point(text, &rows, p.point, p.past_end, tab_size)
+                };
+                ds::column_selections(text, &rows, at(drag.anchor), at(drag.head), tab_size)
+            }
             by => {
                 let unit = match by {
                     DragBy::Words => ds::DragUnit::Words,
@@ -738,6 +761,7 @@ impl Editor {
         };
         if !unchanged {
             doc.set_selections(primary, others);
+            self.end_whole_word_occurrences(id);
             self.unfold_around_carets(id);
         }
     }

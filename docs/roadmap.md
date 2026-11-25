@@ -37,16 +37,34 @@ are those of Sublime's mousemaps (`Default (Linux|Windows|OSX).sublime-mousemap`
   platform; `views/drag_select.rs` counts the clicks (double / triple: words / lines), puts the `TextEdit`'s state
   back after it is shown while a gesture goes on, and turns the pointer into a char plus the columns past its
   line's end (`entities::drag_select::screen_point` adds the tabs). GUI script: `multiple_cursors_as_drawn`.
-  Left for later: reading the packages' `.sublime-mousemap` instead of the table; columns on wrapped lines count
-  from the line's start, not the row's; checking a zero-width column drag over an empty line against Sublime
-  (it cannot be driven by a plugin here; try with `ydotool` on Wayland).
+  Since 2026-11-25 the gestures come from the mousemaps, not a table: ours
+  (`assets/Default/Default (Windows|Linux|OSX).sublime-mousemap`, Sublime's without what we lack), then
+  every package's `Default.sublime-mousemap` / `Default (<platform>).sublime-mousemap`, `User` last
+  (`entities::mousemap`, `mouse_controller::press_action`). A `drag_select` press makes the selections unless the
+  widget does (replacing by characters / words / lines, `extend`); other `press_command`s run at the press and a
+  `command` when the button goes up, after the widget's click (Ctrl + click → `goto_definition` works); the side
+  buttons switch tabs. `context_menu` stays the views' own.
+  Since 2026-11-25 column drags go by the rows drawn (`entities::drag_select::Rows`, from the view's
+  `ViewGeometry`): a wrapped line gives a selection per row, columns count from the row's start, and past a wrapped
+  row's end the pointer stays on it (`DragPoint::after_row`, `screen_point_after_row`). GUI script:
+  `multiple_cursors_over_wrapped_lines_as_drawn`.
+  Left for later: the scroll wheel's bindings (`scroll_up` / `scroll_down`: Ctrl + wheel font size), chords
+  (another button held), `context`, the scroll bar's mousemaps, `paste_selection_clipboard` (Linux middle click),
+  bindings outside a view's text; checking a zero-width column drag over an empty line, and column drags over
+  wrapped lines, against Sublime (they cannot be driven by a plugin here; try with `ydotool` on Wayland).
 - [x] **Phase 3 — Moving every caret** (2026-11-23): with extra selections, caret keys go to `move` / `move_to`
   instead of the widget: bound ones in `keyboard_controller::bound_command`, unbound ones (Up / Down, Page Up / Down
   and Shift + them) through `command_controller::moves_every_selection` (`app.rs::dispatch_keys`).
   `move {by: lines | pages}` is `text_commands::move_vertically`: a screen column (tabs to the next stop) each
   selection keeps across shorter lines, `Document::goal_column` (Sublime's `xpos`, forgotten at any other
   selection change); carets that meet merge. GUI script: `multiple_cursors_as_drawn` (m07–m09).
-  Left for later: goal columns over wrapped lines count from the line's start, not the row's.
+  Since 2026-11-25 they move by the rows drawn, the goal column counted from the row's start, as Sublime 4215 does
+  (a portable copy with a probe plugin: `word_wrap`, `wrap_width` 20; its answers are in
+  `moving_vertically_goes_by_the_rows_of_wrapped_lines_as_sublime_does`). Two differences, both from how the view
+  draws: past a wrapped row's end Sublime puts the caret where the next row begins (drawn at the row's end, the row
+  remembered), egui would draw it at the next row's start, so ours stays before the space the row broke after; and
+  Sublime indents a wrapped line's rows (`indent_subsequent_lines`), the view does not. GUI script:
+  `multiple_cursors_over_wrapped_lines_as_drawn`.
 - [x] **Phase 4 — Clipboard** (2026-11-23): with extra selections, `copy` / `cut` / `paste` / `paste_from_history`
   are the use cases (`Editor::copy_selections`, `paste_at_selections`, `copy_whole_line`, `paste_whole_line`)
   through `ClipboardGateway`, not the widget (`command_controller`, and `keyboard_controller::clipboard_shortcut`
@@ -65,11 +83,21 @@ are those of Sublime's mousemaps (`Default (Linux|Windows|OSX).sublime-mousemap`
   - Then both work on the **last selection by position** (not the newest) and look for its text after it,
     wrapping around. Ctrl+D adds the occurrence; Ctrl+K Ctrl+D replaces the last selection with it, or, when every
     occurrence is selected, only takes it away (unless it is the only selection).
-  - Whole words only after Ctrl+D started from carets (`EditorState::whole_word_occurrences`, with `\b`, so
-    `+=` from a caret finds nothing), until another command runs (`move`, `select_all`, `find_all_under`… but not
-    `single_selection`; `Editor::note_command_for_occurrences`). A selection made by hand matches inside words.
+  - Whole words only after Ctrl+D started from carets (`EditorState::whole_word_occurrences`, each view its own,
+    with `\b`, so `+=` from a caret finds nothing). A selection made by hand matches inside words.
     `find_all_under` (Alt+F3): whole words only from a caret.
-  Left for later: Sublime's exact rule for which commands end the whole words.
+  - Since 2026-11-25 Sublime's rule for when they end (two probe plugins in a portable copy, 40 commands): while
+    the last command in the view's history (`command_history(0)`) is `find_under_expand` or
+    `find_under_expand_skip`. It records a command only when it changes the view's text, selections or regions
+    (`move`, `select_lines`, `set_mark`, `single_selection` with several selections, a plugin's command setting
+    the selection), and `copy` and `insert` (even empty) always; commands that change nothing (`scroll_lines`,
+    `single_selection` with one, `toggle_setting`, `fold`, `clear_fields`, an empty or unknown command), window and
+    application commands (`show_overlay`, `toggle_side_bar`…) and another view's commands keep them; so does a
+    plugin setting the selection outside a command. Ours: `command_controller::run_rewritten` and
+    `Editor::plugin_run_command` compare the views before and after (`Editor::occurrence_views`,
+    `end_changed_occurrences`); `copy` / `insert` end them in `note_command_for_occurrences`; the widget's own edits,
+    caret keys and clicks (`note_text_edited`, `sync_selection_from_view` when it moved, the multi-selection edits,
+    `drag_select`) end them. Tests: `ctrl_d_whole_words_*` in `interface_adapters/tests/command_controller.rs`.
   `unselect_others`, `unselect_current`, `unselect_to_left/right` and `select_to_left/right` were listed here, but
   in Sublime's `Default` they are tab commands (Selection > Tab Selection, Ctrl+J chords): see "Multi-selected tabs"
   below.

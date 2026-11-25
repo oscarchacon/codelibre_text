@@ -1,5 +1,6 @@
 //! Tests for `entities::text_commands` (Sublime's text commands as pure functions).
 
+use entities::drag_select::Rows;
 use entities::selection::Selection;
 use entities::text::selected_text;
 use entities::text_commands::*;
@@ -1275,12 +1276,73 @@ fn vertical(lines: usize, forward: bool, extend: bool) -> VerticalMove {
     }
 }
 
+/// Where Down after Down (or Up after Up) takes a caret, keeping its goal column.
+fn vertical_trail(text: &str, rows: &Rows, from: usize, forward: bool, steps: usize) -> Vec<usize> {
+    let mut at = (Selection::caret(from), None);
+    (0..steps)
+        .map(|_| {
+            let (moved, goal) =
+                move_vertically(text, rows, at.0, at.1, &vertical(1, forward, false));
+            at = (moved, Some(goal));
+            moved.head
+        })
+        .collect()
+}
+
+#[test]
+fn moving_vertically_goes_by_the_rows_of_wrapped_lines_as_sublime_does() {
+    // Sublime 4215's answers (a scratch view with `word_wrap` and `wrap_width` 20): rows 0..20,
+    // 20..40 and 40..52 of the first line, "xy", then rows 56..67, 67..78 and 78..93.
+    let text = "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kk\n\
+                xy\n\
+                0123456789 0123456789 0123456789 0123\n\
+                end";
+    let rows = Rows::of(
+        text,
+        &ViewGeometry {
+            wrap_columns: Some(20),
+            ..ViewGeometry::default()
+        },
+    );
+    assert_eq!(
+        vertical_trail(text, &rows, 7, true, 7),
+        [27, 47, 55, 63, 74, 85, 97]
+    );
+    // Past the end of a wrapped row Sublime goes to where the next row begins (67, 78), drawn at
+    // the end of the row, and remembers the row; egui draws that point at the next row's start,
+    // so here a caret stays on the row: before the space it broke after (66, 77).
+    assert_eq!(
+        vertical_trail(text, &rows, 15, true, 6),
+        [35, 52, 55, 66, 77, 93]
+    );
+    assert_eq!(vertical_trail(text, &rows, 19, true, 4), [39, 52, 55, 66]);
+    assert_eq!(
+        vertical_trail(text, &rows, 97, false, 7),
+        [81, 70, 59, 55, 43, 23, 3]
+    );
+    // Without wrap, a row is a line.
+    let lines = Rows::lines(text);
+    assert_eq!(vertical_trail(text, &lines, 7, true, 3), [55, 63, 97]);
+}
+
 #[test]
 fn moving_vertically_keeps_the_goal_column_across_a_shorter_line() {
     let text = "abcdef\nab\nabcdef";
-    let (down, goal) = move_vertically(text, Selection::caret(5), None, &vertical(1, true, false));
+    let (down, goal) = move_vertically(
+        text,
+        &Rows::lines(text),
+        Selection::caret(5),
+        None,
+        &vertical(1, true, false),
+    );
     assert_eq!((down, goal), (Selection::caret(9), 5));
-    let (again, goal) = move_vertically(text, down, Some(goal), &vertical(1, true, false));
+    let (again, goal) = move_vertically(
+        text,
+        &Rows::lines(text),
+        down,
+        Some(goal),
+        &vertical(1, true, false),
+    );
     assert_eq!((again, goal), (Selection::caret(15), 5));
 }
 
@@ -1288,27 +1350,51 @@ fn moving_vertically_keeps_the_goal_column_across_a_shorter_line() {
 fn moving_vertically_counts_tabs_as_screen_columns() {
     let text = "\tx\nabcdefgh";
     // After the tab is column 4: the fifth char below.
-    let (down, goal) = move_vertically(text, Selection::caret(1), None, &vertical(1, true, false));
+    let (down, goal) = move_vertically(
+        text,
+        &Rows::lines(text),
+        Selection::caret(1),
+        None,
+        &vertical(1, true, false),
+    );
     assert_eq!((down, goal), (Selection::caret(7), 4));
-    let (up, _) = move_vertically(text, down, None, &vertical(1, false, false));
+    let (up, _) = move_vertically(
+        text,
+        &Rows::lines(text),
+        down,
+        None,
+        &vertical(1, false, false),
+    );
     assert_eq!(up, Selection::caret(1));
 }
 
 #[test]
 fn moving_vertically_past_the_ends_stays_or_goes_to_the_limit() {
     let text = "ab\ncd";
-    let (stays, _) = move_vertically(text, Selection::caret(4), None, &vertical(1, true, false));
+    let (stays, _) = move_vertically(
+        text,
+        &Rows::lines(text),
+        Selection::caret(4),
+        None,
+        &vertical(1, true, false),
+    );
     assert_eq!(stays, Selection::caret(4));
     let to_limit = VerticalMove {
         to_limit: true,
         ..vertical(1, true, false)
     };
-    let (end, _) = move_vertically(text, Selection::caret(4), None, &to_limit);
+    let (end, _) = move_vertically(
+        text,
+        &Rows::lines(text),
+        Selection::caret(4),
+        None,
+        &to_limit,
+    );
     assert_eq!(end, Selection::caret(5));
     let page = VerticalMove {
         to_limit: true,
         ..vertical(5, false, true)
     };
-    let (start, _) = move_vertically(text, Selection::caret(4), None, &page);
+    let (start, _) = move_vertically(text, &Rows::lines(text), Selection::caret(4), None, &page);
     assert_eq!(start, Selection::new(4, 0));
 }

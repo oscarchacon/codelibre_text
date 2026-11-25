@@ -15,6 +15,7 @@ use entities::keymap::Keymap;
 use entities::localization::{Catalog, Language};
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
+use entities::mousemap::Mousemap;
 use entities::settings::SettingsLayers;
 use entities::symbol::Symbol;
 use serde_json::{Map, Value};
@@ -220,9 +221,10 @@ pub trait ErrorLogGateway {
     fn path(&self) -> PathBuf;
 }
 
-/// Key bindings, menus and command palette entries read from packages.
+/// Key and mouse bindings, menus and command palette entries read from packages.
 pub struct UiResources {
     pub keymap: Keymap,
+    pub mousemap: Mousemap,
     pub main_menu: Vec<MenuItem>,
     /// The right-click menus (`Context`, `Side Bar`, `Side Bar Mount Point`, `Tab Context`).
     pub context_menus: ContextMenus,
