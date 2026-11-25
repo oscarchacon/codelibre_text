@@ -582,6 +582,148 @@ fn slurp_find_string_and_find_under_expand() {
         .is_empty());
 }
 
+const OCCURRENCES_TEXT: &str = "ab abc ab\nsecond line\nthird line";
+
+/// After Ctrl+D from a caret, whether the first view's next occurrences are still whole words
+/// (Sublime's probe then selected the first "ab" again from the plugin, with no command, and
+/// ran Ctrl+D: it added the last "ab" with whole words, "abc"'s with a plain search).
+fn occurrences_mode(editor: &mut Editor, _view: &mut ViewState) -> &'static str {
+    let first = editor.state().documents[0].id;
+    if editor.state().whole_word_occurrences.contains(&first) {
+        "whole"
+    } else {
+        "plain"
+    }
+}
+
+/// Ctrl+D on the caret in the first "ab" (it selects it, whole words from then on), then
+/// `commands`: whether the occurrences are still whole words.
+fn occurrences_after(commands: &[Command]) -> &'static str {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    assert_eq!(
+        editor.active_document().unwrap().selection(),
+        Selection::new(0, 2)
+    );
+    for command in commands {
+        run(&mut editor, &mut view, command);
+    }
+    occurrences_mode(&mut editor, &mut view)
+}
+
+/// Sublime 4215's answers (a probe plugin in a portable copy): Ctrl+D's whole words last while
+/// the view's last recorded command is Ctrl+D (or Ctrl+K Ctrl+D), and it records a command that
+/// changes the view's text, selections or regions, `copy` and `insert` always.
+#[test]
+fn ctrl_d_whole_words_last_until_a_command_changes_the_view() {
+    let right = cmd_with("move", json!({ "by": "characters", "forward": true }));
+    for (commands, mode) in [
+        (vec![], "whole"),
+        (vec![right.clone()], "plain"),
+        (vec![cmd_with("move_to", json!({ "to": "eol" }))], "plain"),
+        (vec![cmd("find_all_under")], "plain"),
+        (
+            vec![cmd_with("select_lines", json!({ "forward": true }))],
+            "plain",
+        ),
+        (vec![cmd("copy")], "plain"),
+        (
+            vec![cmd_with("insert", json!({ "characters": "" }))],
+            "plain",
+        ),
+        // One selection: nothing to change.
+        (vec![cmd("single_selection")], "whole"),
+        (vec![cmd("find_under_expand_skip")], "whole"),
+        (
+            vec![cmd_with("scroll_lines", json!({ "amount": 1.0 }))],
+            "whole",
+        ),
+        (vec![cmd("swap_line_up")], "whole"),
+        (vec![cmd("clear_fields")], "whole"),
+        (vec![cmd("unfold_all")], "whole"),
+        (
+            vec![cmd_with(
+                "toggle_setting",
+                json!({ "setting": "word_wrap" }),
+            )],
+            "whole",
+        ),
+        // Window commands change no view.
+        (
+            vec![cmd_with(
+                "show_overlay",
+                json!({ "overlay": "command_palette" }),
+            )],
+            "whole",
+        ),
+        (vec![cmd("hide_overlay")], "whole"),
+        (
+            vec![cmd("toggle_side_bar"), cmd("toggle_side_bar")],
+            "whole",
+        ),
+    ] {
+        let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(occurrences_after(&commands), mode, "after {names:?}");
+    }
+}
+
+#[test]
+fn ctrl_d_whole_words_are_each_view_s_own() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    // Another view's commands, then back.
+    run(&mut editor, &mut view, &cmd("new_file"));
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("insert", json!({ "characters": "xyz" })),
+    );
+    run(&mut editor, &mut view, &cmd("prev_view"));
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "whole");
+
+    // Two selections: `single_selection` changes them, and so ends the whole words.
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    assert_eq!(editor.active_document().unwrap().selections().len(), 2);
+    run(&mut editor, &mut view, &cmd("single_selection"));
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "plain");
+}
+
+#[test]
+fn the_text_widget_s_own_edits_and_caret_moves_end_ctrl_d_whole_words() {
+    let world = World::new();
+    // The widget moves the caret: the view reports it.
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(5));
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "plain");
+    // The view reporting the same selection is no move.
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    editor.sync_selection_from_view(id, Selection::new(0, 2));
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "whole");
+    // Typing in the widget.
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    editor.note_text_edited(id);
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "plain");
+    // `select_all` with one selection is the widget's: the view reports what it selected.
+    let (mut editor, mut view) = setup(&world, OCCURRENCES_TEXT, Selection::caret(1));
+    run(&mut editor, &mut view, &cmd("find_under_expand"));
+    run(&mut editor, &mut view, &cmd("select_all"));
+    assert!(matches!(
+        view.take_requests().as_slice(),
+        [ViewRequest::WidgetEdit(_)]
+    ));
+    let all = OCCURRENCES_TEXT.chars().count();
+    editor.sync_selection_from_view(id, Selection::new(0, all));
+    assert_eq!(occurrences_mode(&mut editor, &mut view), "plain");
+}
+
 #[test]
 fn replace_commands() {
     let world = World::new();

@@ -1,30 +1,35 @@
-//! The mouse gestures in the text that make several selections (Ctrl + click, Alt + click, column
-//! drags…, see `mouse_controller`). The text widget only knows one selection and would move its
-//! caret at the press, so while such a gesture goes on its state is put back after it is shown
-//! (as `context_menu::keep_selection` does for a right click) and the gesture goes to the use
-//! cases as `UiEvent::DragSelect`, every frame the pointer moves, until the button goes up.
+//! Presses in the text that the mousemaps bind (see `mouse_controller`): the gestures that make
+//! several selections (Ctrl + click, Alt + click, column drags…) and the commands bound to a
+//! button (the side buttons switch tabs). The text widget only knows one selection and would move
+//! its caret at the press, so while such a gesture goes on its state is put back after it is
+//! shown (as `context_menu::keep_selection` does for a right click) and the gesture goes to the
+//! use cases as `UiEvent::DragSelect`, every frame the pointer moves, until the button goes up.
 
 use egui::text::CCursorRange;
 use egui::text_edit::TextEditState;
 use egui::{Id, PointerButton, Pos2};
+use entities::command::Command;
 use entities::document::DocumentId;
-use interface_adapters::controllers::mouse_controller::{
-    drag_gesture, MouseButton, MousePlatform, MousePress,
-};
+use entities::mousemap::Mousemap;
+use interface_adapters::controllers::mouse_controller::{press_action, MouseButton, MousePress};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use use_cases::editing::{DragBy, DragCombine, DragPoint, DragSelect};
+
+use crate::input::mouse_modifiers;
 
 /// Presses closer in time than this (seconds) and space (points) count as a double click.
 const MULTI_CLICK_TIME: f64 = 0.4;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
 
-/// A gesture going on in a view.
-#[derive(Clone, Copy)]
+/// A press bound by the mousemaps, while its button is down.
+#[derive(Clone)]
 struct Gesture {
     anchor: DragPoint,
     head: DragPoint,
-    by: DragBy,
-    combine: DragCombine,
+    /// The selections it makes; `None`: the widget's (a plain click whose release runs a command).
+    drag: Option<(DragBy, DragCombine)>,
+    /// Run when the button goes up.
+    release: Option<Command>,
 }
 
 /// The last press in a view: when, where and how many in a row.
@@ -46,10 +51,7 @@ fn press(ctx: &egui::Context) -> Option<(PointerButton, Pos2)> {
         i.events.iter().find_map(|event| match *event {
             egui::Event::PointerButton {
                 pos,
-                button:
-                    button @ (PointerButton::Primary
-                    | PointerButton::Secondary
-                    | PointerButton::Middle),
+                button,
                 pressed: true,
                 ..
             } => Some((button, pos)),
@@ -67,22 +69,26 @@ pub fn state_before(ctx: &egui::Context, id: Id) -> Option<TextEditState> {
         .flatten()
 }
 
-/// Where the pointer is in the text: the char nearest to it and the columns past its line's end.
+/// Where the pointer is in the text: the char nearest to it and the columns past its row's end
+/// (at the end of a wrapped row, its end is the next row's start: `after_row` tells them apart).
 fn drag_point(galley: &egui::Galley, origin: Pos2, pointer: Pos2, char_width: f32) -> DragPoint {
     let cursor = galley.cursor_from_pos(pointer - origin);
     let row = galley.rows.get(cursor.rcursor.row);
     let last_of_line =
         row.is_some_and(|r| r.ends_with_newline) || cursor.rcursor.row + 1 >= galley.rows.len();
+    let at_end = row.is_some_and(|r| cursor.rcursor.column >= r.char_count_excluding_newline());
     let past_end = match row {
-        Some(row) if last_of_line && char_width > 0.0 => ((pointer.x - origin.x - row.rect.right())
-            / char_width)
-            .round()
-            .max(0.0) as usize,
+        Some(row) if (last_of_line || at_end) && char_width > 0.0 => {
+            ((pointer.x - origin.x - row.rect.right()) / char_width)
+                .round()
+                .max(0.0) as usize
+        }
         _ => 0,
     };
     DragPoint {
         point: cursor.ccursor.index,
         past_end,
+        after_row: at_end && !last_of_line,
     }
 }
 
@@ -110,41 +116,65 @@ pub struct Text<'a> {
     pub galley: &'a egui::Galley,
     pub origin: Pos2,
     pub char_width: f32,
+    pub mousemap: &'a Mousemap,
+}
+
+/// What [`follow`] leaves to the view.
+#[derive(Default)]
+pub struct Followed {
+    /// The selection the widget goes on with while a gesture makes the selections.
+    pub selection: Option<CCursorRange>,
+    /// The command of a button that went up, to run once the widget's click is told (a
+    /// `goto_definition` on Ctrl + click is about the caret the click put).
+    pub release: Option<Command>,
+}
+
+/// The mousemaps' button of an egui one.
+fn mouse_button(button: PointerButton) -> MouseButton {
+    match button {
+        PointerButton::Primary => MouseButton::Primary,
+        PointerButton::Secondary => MouseButton::Secondary,
+        PointerButton::Middle => MouseButton::Middle,
+        PointerButton::Extra1 => MouseButton::Back,
+        PointerButton::Extra2 => MouseButton::Forward,
+    }
 }
 
 /// After the text widget is shown: starts, follows or ends a gesture, and gives the widget its
-/// state from before (`before`) while one goes on; the selection to go on with then. `in_text`
-/// tells whether a point is over the text (not the gutter or another view).
+/// state from before (`before`) while one makes the selections. `in_text` tells whether a point
+/// is over the text (not the gutter or another view).
 pub fn follow(
     ctx: &egui::Context,
     text: &Text,
     before: Option<TextEditState>,
     in_text: impl Fn(Pos2) -> bool,
     events: &mut Vec<UiEvent>,
-) -> Option<CCursorRange> {
+) -> Followed {
     let key = gesture_id(text.id);
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let at = |pos: Pos2| drag_point(text.galley, text.origin, pos, text.char_width);
     let mut gesture = ctx.data(|d| d.get_temp::<Gesture>(key));
     let new_press = press(ctx).filter(|&(_, pos)| in_text(pos));
     // A gesture whose button went up while the view was not shown (another tab came to the
-    // front), or one a new press replaces, is over: it must not move the selections now.
+    // front), or one a new press replaces, is over: it must not move the selections (nor run
+    // its command) now.
     let released_now = ctx.input(|i| i.pointer.any_released());
     let down_now = ctx.input(|i| i.pointer.any_down());
-    if gesture.is_some() && (new_press.is_some() || (!down_now && !released_now)) {
-        ctx.data_mut(|d| d.remove::<Gesture>(key));
-        events.push(UiEvent::DragSelectEnded);
-        gesture = None;
+    if let Some(old) = &gesture {
+        if new_press.is_some() || (!down_now && !released_now) {
+            ctx.data_mut(|d| d.remove::<Gesture>(key));
+            if old.drag.is_some() {
+                events.push(UiEvent::DragSelectEnded);
+            }
+            gesture = None;
+        }
     }
     let mut pressed = false;
     if gesture.is_none() {
-        let (button, pos) = new_press?;
-        let modifiers = ctx.input(|i| i.modifiers);
-        let button = match button {
-            PointerButton::Secondary => MouseButton::Secondary,
-            PointerButton::Middle => MouseButton::Middle,
-            _ => MouseButton::Primary,
+        let Some((button, pos)) = new_press else {
+            return Followed::default();
         };
+        let button = mouse_button(button);
         let clicks = if button == MouseButton::Primary {
             count_clicks(ctx, text.id, pos)
         } else {
@@ -152,45 +182,60 @@ pub fn follow(
         };
         let press = MousePress {
             button,
-            shift: modifiers.shift,
-            alt: modifiers.alt,
-            command: modifiers.command,
+            modifiers: mouse_modifiers(ctx.input(|i| i.modifiers)),
             clicks,
         };
-        let (by, combine) = drag_gesture(press, MousePlatform::current())?;
+        let Some(action) = press_action(text.mousemap, press) else {
+            return Followed::default();
+        };
+        if let Some(command) = action.press {
+            events.push(UiEvent::RunCommand(command));
+        }
         let point = at(pos);
         gesture = Some(Gesture {
             anchor: point,
             head: point,
-            by,
-            combine,
+            drag: action.drag,
+            release: action.release,
         });
         pressed = true;
     }
-    let mut gesture = gesture?;
+    let Some(mut gesture) = gesture else {
+        return Followed::default();
+    };
     let down = ctx.input(|i| i.pointer.any_down());
     let head = pointer.map_or(gesture.head, at);
-    if pressed || head != gesture.head {
-        gesture.head = head;
-        events.push(UiEvent::DragSelect(
-            text.document,
-            DragSelect {
-                anchor: gesture.anchor,
-                head,
-                by: gesture.by,
-                combine: gesture.combine,
-                pressed,
-            },
-        ));
+    if let Some((by, combine)) = gesture.drag {
+        if pressed || head != gesture.head {
+            events.push(UiEvent::DragSelect(
+                text.document,
+                DragSelect {
+                    anchor: gesture.anchor,
+                    head,
+                    by,
+                    combine,
+                    pressed,
+                },
+            ));
+        }
     }
+    gesture.head = head;
+    let drags = gesture.drag.is_some();
+    let mut release = None;
     if down {
         ctx.data_mut(|d| d.insert_temp(key, gesture));
     } else {
         ctx.data_mut(|d| d.remove::<Gesture>(key));
-        events.push(UiEvent::DragSelectEnded);
+        if drags {
+            events.push(UiEvent::DragSelectEnded);
+        }
+        release = gesture.release;
     }
-    let state = before?;
-    let range = state.cursor.char_range();
-    state.store(ctx, text.id);
-    range
+    // Only a gesture that makes the selections keeps the widget's from before.
+    let selection = before.filter(|_| drags).and_then(|state| {
+        let range = state.cursor.char_range();
+        state.store(ctx, text.id);
+        range
+    });
+    Followed { selection, release }
 }

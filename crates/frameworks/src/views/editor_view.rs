@@ -277,15 +277,16 @@ pub fn show(
                         galley: &output.galley,
                         origin: output.galley_pos,
                         char_width,
+                        mousemap: &model.mousemap,
                     },
                     before_drag,
                     in_text,
                     events,
                 );
-                if dragged.is_some() && !model.active {
+                if dragged.selection.is_some() && !model.active {
                     events.push(UiEvent::FocusGroup(model.group));
                 }
-                let kept = kept.or(dragged);
+                let kept = kept.or(dragged.selection);
                 let selection = kept
                     .or(output.cursor_range.map(|r| r.as_ccursor_range()))
                     .map(|r| Selection::new(r.secondary.index, r.primary.index))
@@ -308,6 +309,10 @@ pub fn show(
                         let at = output.galley.cursor_from_pos(pointer - output.galley_pos);
                         events.push(UiEvent::TextDoubleClicked(model.document, at.ccursor.index));
                     }
+                }
+                // A mouse binding's command on release, about the selection the click made.
+                if let Some(command) = dragged.release {
+                    events.push(UiEvent::RunCommand(command));
                 }
                 if output.response.changed() && !typed.is_empty() {
                     events.push(UiEvent::TextTyped(

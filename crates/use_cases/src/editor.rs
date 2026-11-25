@@ -11,6 +11,7 @@ use entities::layout::Layout;
 use entities::localization::Translations;
 use entities::menu::{ContextMenus, MenuItem, PaletteCommand};
 use entities::meta_info::MetaPreference;
+use entities::mousemap::Mousemap;
 use entities::project::Project;
 use entities::recent::RecentPaths;
 use entities::settings::{Settings, SettingsLayers};
@@ -91,6 +92,8 @@ pub struct EditorState {
     pub project: Option<Project>,
     pub settings: SettingsLayers,
     pub keymap: Keymap,
+    /// What the mouse buttons do in a view's text (shared with the views, which read it as is).
+    pub mousemap: Rc<Mousemap>,
     pub main_menu: Vec<MenuItem>,
     /// The right-click menus (see [`crate::context_menus`]).
     pub context_menus: ContextMenus,
@@ -100,9 +103,9 @@ pub struct EditorState {
     /// The interface language (see [`crate::localization`]).
     pub translations: Rc<Translations>,
     pub find: FindOptions,
-    /// The view whose Ctrl+D started from carets: its occurrences are whole words until another
-    /// command runs (`Editor::note_command_for_occurrences`).
-    pub whole_word_occurrences: Option<DocumentId>,
+    /// The views whose Ctrl+D started from carets: their occurrences are whole words until a
+    /// command changes them (`Editor::note_command_for_occurrences`), each view its own.
+    pub whole_word_occurrences: Vec<DocumentId>,
     pub replacement: String,
     pub find_error: Option<String>,
     pub status: Option<StatusMessage>,
@@ -213,13 +216,14 @@ impl Editor {
                 project: None,
                 settings: SettingsLayers::default(),
                 keymap: Keymap::default(),
+                mousemap: Rc::default(),
                 main_menu: Vec::new(),
                 context_menus: ContextMenus::default(),
                 palette: Vec::new(),
                 load_errors: Vec::new(),
                 translations: Rc::default(),
                 find: FindOptions::default(),
-                whole_word_occurrences: None,
+                whole_word_occurrences: Vec::new(),
                 replacement: String::new(),
                 find_error: None,
                 status: None,

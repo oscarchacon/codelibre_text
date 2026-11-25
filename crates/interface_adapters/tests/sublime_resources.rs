@@ -5,6 +5,7 @@ use std::path::Path;
 
 use entities::command::Command;
 use entities::keymap::KeyCombo;
+use entities::mousemap::MouseModifiers;
 use interface_adapters::gateways::sublime_resources::SublimeResourceGateway;
 use serde_json::{json, Map};
 use tempfile::TempDir;
@@ -401,6 +402,87 @@ fn broken_keymaps_are_reported() {
     let (_, errors) = ui(&packages.gateway(), false);
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("Default.sublime-keymap"));
+}
+
+// ----- mouse bindings --------------------------------------------------------------------------------
+
+/// The command a plain press of `button` runs when released, by the loaded mousemaps.
+fn released_command(resources: &UiResources, button: &str) -> Option<String> {
+    resources
+        .mousemap
+        .find(button, MouseModifiers::default(), 1)
+        .and_then(|b| b.command.as_ref())
+        .map(|c| c.name.clone())
+}
+
+#[test]
+fn package_mouse_bindings_follow_the_builtin_ones() {
+    let packages = Packages::new();
+    let (builtin, _) = ui(&packages.gateway(), false);
+    assert_eq!(
+        released_command(&builtin, "button4").as_deref(),
+        Some("prev_view")
+    );
+    packages
+        .file(
+            "MyPackage",
+            "Default.sublime-mousemap",
+            r#"[{ "button": "button4", "command": "jump_back" }]"#,
+        )
+        .file(
+            "User",
+            &format!("Default ({}).sublime-mousemap", platform_name()),
+            r#"[{ "button": "button5", "command": "jump_forward" }]"#,
+        )
+        // Another platform's file is not read.
+        .file(
+            "User",
+            "Default (Plan9).sublime-mousemap",
+            r#"[{ "button": "button4", "command": "exit" }]"#,
+        );
+    let (resources, errors) = ui(&packages.gateway(), false);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        released_command(&resources, "button4").as_deref(),
+        Some("jump_back")
+    );
+    assert_eq!(
+        released_command(&resources, "button5").as_deref(),
+        Some("jump_forward")
+    );
+    let count = |r: &UiResources| r.mousemap.bindings.len();
+    assert_eq!(count(&resources), count(&builtin) + 2);
+}
+
+#[test]
+fn sublime_texts_own_default_mousemap_is_ignored_and_broken_ones_reported() {
+    let packages = Packages::new();
+    packages
+        .sublime_file(
+            "Default",
+            &format!("Default ({}).sublime-mousemap", platform_name()),
+            r#"[{ "button": "button4", "command": "native" }]"#,
+        )
+        .file("User", "Default.sublime-mousemap", "[{ broken");
+    let (resources, errors) = ui(&packages.gateway(), true);
+    assert_eq!(
+        released_command(&resources, "button4").as_deref(),
+        Some("prev_view")
+    );
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("Default.sublime-mousemap"));
+}
+
+#[test]
+fn plugins_read_the_builtin_mousemaps() {
+    let gateway = Packages::new().gateway();
+    let name = format!("Default ({}).sublime-mousemap", platform_name());
+    let text = gateway.default_resource(&name).unwrap();
+    assert!(text.contains("drag_select"));
+    assert_eq!(
+        gateway.default_resource("Default (Plan9).sublime-mousemap"),
+        None
+    );
 }
 
 // ----- menus and the command palette ---------------------------------------------------------------
