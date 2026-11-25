@@ -1,6 +1,7 @@
 //! Use cases: load Sublime resources from packages, install Package Control.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use crate::editor::Editor;
@@ -37,6 +38,7 @@ impl Editor {
             .resources
             .load_ui_resources(include_sublime, &mut errors);
         self.state.keymap = resources.keymap;
+        self.state.mousemap = Rc::new(resources.mousemap);
         self.state.main_menu = resources.main_menu;
         self.state.context_menus = resources.context_menus;
         self.state.palette = resources.palette;

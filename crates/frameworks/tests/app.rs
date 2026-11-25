@@ -610,6 +610,61 @@ fn multiple_cursors_as_drawn() {
 
 #[test]
 #[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn multiple_cursors_over_wrapped_lines_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    std::fs::write(
+        data.path()
+            .join("Packages/User/Preferences.sublime-settings"),
+        r#"{ "word_wrap": true }"#,
+    )
+    .unwrap();
+    // A line that wraps into several rows, then a short one.
+    let words: Vec<String> = (0..60).map(|i| format!("word{i:02}")).collect();
+    let wrapped = files.path().join("wrapped.txt");
+    std::fs::write(&wrapped, format!("{}\nshort\nlast line\n", words.join(" "))).unwrap();
+    let mut checks = start(data.path(), vec![wrapped]);
+    // Two carets on the first row, then Down: each goes to the row below at its column (not to
+    // the next line), and on down the rows of the wrapped line, then to the short line.
+    checks.click(330.0, 70.0);
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 420.0, 70.0);
+    checks.shot("w01_two_carets_on_the_first_row");
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.shot("w02_down_to_the_second_row");
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.shot("w03_down_two_more_rows");
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.key(Modifiers::NONE, Key::ArrowDown);
+    checks.shot("w03b_down_to_the_short_line");
+    // A column drag over the first rows: a selection on each row, the columns of the drag.
+    checks.key(Modifiers::NONE, Key::Escape);
+    let column = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::ALT | Modifiers::SHIFT
+    };
+    checks.drag_with(
+        column,
+        PointerButton::Primary,
+        (340.0, 70.0),
+        (380.0, 104.0),
+    );
+    checks.shot("w04_column_over_rows");
+    // Past the end of the rows: up to each row's end.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.drag_with(
+        column,
+        PointerButton::Primary,
+        (340.0, 70.0),
+        (1250.0, 104.0),
+    );
+    checks.shot("w05_column_past_the_rows_ends");
+}
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
 fn quick_add_and_skip_next_as_drawn() {
     let data = tempfile::tempdir().unwrap();
     let files = tempfile::tempdir().unwrap();

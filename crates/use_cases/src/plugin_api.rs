@@ -1222,9 +1222,12 @@ impl Editor {
         if kind == "view" {
             self.state.active = self.index_of(target).ok_or("the view is closed")?;
         }
+        // A command a plugin runs is recorded in the views it changes, as a key's is.
+        let occurrences = self.occurrence_views(&command.name);
         if !self.run_plugin_command(command, run_command) {
             run_command(self, command);
         }
+        self.end_changed_occurrences(occurrences);
         if kind == "view"
             && self.active_document().is_some_and(|d| d.id == target)
             && previous < self.state.documents.len()

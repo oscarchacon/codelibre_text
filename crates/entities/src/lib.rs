@@ -22,6 +22,7 @@ pub mod localization;
 pub mod menu;
 pub mod meta_info;
 pub mod minihtml;
+pub mod mousemap;
 pub mod project;
 pub mod recent;
 pub mod selection;

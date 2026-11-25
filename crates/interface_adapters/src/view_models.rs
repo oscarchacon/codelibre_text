@@ -2,12 +2,14 @@
 
 use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use entities::command::Command;
 use entities::document::DocumentId;
 use entities::keymap::KeyCombo;
 use entities::menu::ContextMenuTarget;
 use entities::minihtml;
+use entities::mousemap::Mousemap;
 use entities::selection::Selection;
 
 pub struct TabViewModel {
@@ -316,6 +318,8 @@ pub struct EditorViewModel {
     pub auto_complete: Option<AutoCompleteViewModel>,
     /// The minimap right of the text, unless `toggle_minimap` hid it.
     pub minimap: Option<MinimapViewModel>,
+    /// The mouse bindings, for the presses in the text (`mouse_controller::press_action`).
+    pub mousemap: Rc<Mousemap>,
 }
 
 /// The minimap's settings (Sublime's `always_show_minimap_viewport` and `draw_minimap_border`).

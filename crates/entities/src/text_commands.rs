@@ -1701,8 +1701,9 @@ pub fn move_by(text: &str, selection: Selection, how: &MoveBy) -> Option<Selecti
     Some(moved(selection, target, how.extend))
 }
 
-/// Up / Down (`lines: 1`) and Page Up / Down: `move {by: "lines" | "pages"}` keeping a screen
-/// column (tabs to the next tab stop) across shorter lines, Sublime's `xpos`.
+/// Up / Down (`lines: 1`) and Page Up / Down: `move {by: "lines" | "pages"}` by the rows the view
+/// draws (a wrapped line has several), keeping a screen column from the row's start (tabs to the
+/// next tab stop) across shorter rows, Sublime's `xpos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerticalMove {
     pub lines: usize,
@@ -1713,24 +1714,26 @@ pub struct VerticalMove {
     pub tab_size: usize,
 }
 
-/// Moves `selection`'s caret `how.lines` lines up or down, to the screen column `goal` (None: the
-/// caret's own). Gives the moved selection and the column it aims for, to keep for the next move.
+/// Moves `selection`'s caret `how.lines` rows of `rows` up or down, to the screen column `goal`
+/// (None: the caret's own). Gives the moved selection and the column it aims for, to keep for
+/// the next move.
 pub fn move_vertically(
     text: &str,
+    rows: &crate::drag_select::Rows,
     selection: Selection,
     goal: Option<usize>,
     how: &VerticalMove,
 ) -> (Selection, usize) {
-    let here = crate::drag_select::screen_point(text, selection.head, 0, how.tab_size);
+    let here = crate::drag_select::screen_point(text, rows, selection.head, 0, how.tab_size);
     let goal = goal.unwrap_or(here.column);
-    let last = text.split('\n').count() - 1;
-    let line = if how.forward {
-        Some(here.line + how.lines.max(1)).filter(|&line| line <= last)
+    let last = rows.len() - 1;
+    let row = if how.forward {
+        Some(here.row + how.lines.max(1)).filter(|&row| row <= last)
     } else {
-        here.line.checked_sub(how.lines.max(1))
+        here.row.checked_sub(how.lines.max(1))
     };
-    let head = match line {
-        Some(line) => crate::drag_select::point_at_column(text, line, goal, how.tab_size),
+    let head = match row {
+        Some(row) => crate::drag_select::point_at_column(text, rows, row, goal, how.tab_size),
         None if how.to_limit && how.forward => text.chars().count(),
         None if how.to_limit => 0,
         None => selection.head,

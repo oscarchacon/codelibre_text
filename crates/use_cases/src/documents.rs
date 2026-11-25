@@ -488,7 +488,12 @@ impl Editor {
     /// The view reports where the user moved the caret.
     pub fn sync_selection_from_view(&mut self, id: DocumentId, selection: Selection) {
         if let Some(index) = self.index_of(id) {
+            let before = self.state.documents[index].selections();
             self.state.documents[index].sync_selection_from_view(selection);
+            if self.state.documents[index].selections() != before {
+                // The widget's caret keys and clicks are commands Sublime records.
+                self.end_whole_word_occurrences(id);
+            }
             self.unfold_around_carets(id);
         }
     }
@@ -522,6 +527,7 @@ impl Editor {
     pub fn note_text_edited(&mut self, id: DocumentId) {
         if let Some(index) = self.index_of(id) {
             self.state.documents[index].note_typed_change();
+            self.end_whole_word_occurrences(id);
         }
     }
 

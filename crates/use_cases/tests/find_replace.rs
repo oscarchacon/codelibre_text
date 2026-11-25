@@ -525,11 +525,11 @@ fn find_all_under_does_what_sublime_does() {
     }
 }
 
-/// Ctrl+D from carets makes the view's occurrences whole words until another command runs, as
-/// in Sublime 4215: a plugin or a hand selecting again keeps it; `move`, `select_all` or
-/// `find_all_under` end it; `single_selection` does not.
+/// Ctrl+D from carets makes the view's occurrences whole words (until a command changes the
+/// view: `command_controller`'s tests); `copy` and `insert` end them at once, as Sublime 4215
+/// always records them.
 #[test]
-fn whole_word_occurrences_last_until_another_command() {
+fn whole_word_occurrences_end_with_copy_or_insert() {
     let world = World::new();
     let ctrl_d_on_plus_equals = |between: &[&str]| {
         let mut editor = editor_with(&world, "a += b += c", Selection::caret(3));
@@ -539,15 +539,12 @@ fn whole_word_occurrences_last_until_another_command() {
         for name in between {
             editor.note_command(name);
         }
-        let id = editor.active_document().unwrap().id;
-        editor.sync_selection_from_view(id, Selection::new(2, 4));
         editor.note_command("find_under_expand");
         editor.select_word_or_next_occurrence();
         editor.active_document().unwrap().selections().len()
     };
     assert_eq!(ctrl_d_on_plus_equals(&[]), 1, "still whole words: no match");
-    assert_eq!(ctrl_d_on_plus_equals(&["single_selection"]), 1);
-    assert_eq!(ctrl_d_on_plus_equals(&["move"]), 2, "a plain search again");
-    assert_eq!(ctrl_d_on_plus_equals(&["select_all"]), 2);
-    assert_eq!(ctrl_d_on_plus_equals(&["find_all_under"]), 2);
+    assert_eq!(ctrl_d_on_plus_equals(&["show_overlay"]), 1);
+    assert_eq!(ctrl_d_on_plus_equals(&["copy"]), 2, "a plain search again");
+    assert_eq!(ctrl_d_on_plus_equals(&["insert"]), 2);
 }
