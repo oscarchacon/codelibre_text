@@ -18,7 +18,7 @@ members = [
 default-members = ["crates/frameworks"]
 
 [workspace.package]
-version = "0.1.11-alpha+1"
+version = "0.1.12-alpha"
 edition = "2021"
 license = "MIT"
 
