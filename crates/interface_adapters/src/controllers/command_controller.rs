@@ -745,7 +745,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     view.find_panel.replace_mode = panel == "replace";
                     view.find_panel.in_files = panel == "find_in_files";
                     view.find_panel.focus_requested = true;
-                    editor.use_selection_as_query_if_single_line();
+                    editor.use_selection_for_find_panel(panel == "find_in_files");
                     apply_find_panel_args(editor, command);
                 }
                 "console" if toggle => {
@@ -1082,6 +1082,9 @@ const FIND_TOGGLES: &[&str] = &[
     "toggle_case_sensitive",
     "toggle_whole_word",
     "toggle_preserve_case",
+    "toggle_wrap",
+    "toggle_in_selection",
+    "toggle_highlight",
 ];
 
 /// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
@@ -1093,6 +1096,9 @@ const EDITOR_COMMANDS: &[&str] = &[
     "toggle_case_sensitive",
     "toggle_whole_word",
     "toggle_preserve_case",
+    "toggle_wrap",
+    "toggle_in_selection",
+    "toggle_highlight",
     "find_under_expand",
     "find_under_expand_skip",
     "find_all_under",
@@ -1129,6 +1135,9 @@ fn run_editor_command(editor: &mut Editor, command: &Command) {
         "toggle_case_sensitive" => editor.toggle_find_option(FindToggle::CaseSensitive),
         "toggle_whole_word" => editor.toggle_find_option(FindToggle::WholeWord),
         "toggle_preserve_case" => editor.toggle_find_option(FindToggle::PreserveCase),
+        "toggle_wrap" => editor.toggle_find_option(FindToggle::Wrap),
+        "toggle_in_selection" => editor.toggle_find_option(FindToggle::InSelection),
+        "toggle_highlight" => editor.toggle_find_option(FindToggle::HighlightMatches),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
         "find_under_expand_skip" => editor.skip_to_next_occurrence(),
         "find_all_under" => editor.select_all_occurrences(),
@@ -1309,7 +1318,7 @@ fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
                     editor.cancel_plugin_input_panel_later();
                     editor.hide_output_panel();
                     editor.show_find_panel_ahead(Some(name));
-                    editor.use_selection_as_query_if_single_line();
+                    editor.use_selection_for_find_panel(panel == "find_in_files");
                     apply_find_panel_args(editor, command);
                 }
                 editor.queue_plugin_command(command.clone());
@@ -1474,6 +1483,9 @@ fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
     options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
     options.whole_word = flag("whole_word").unwrap_or(options.whole_word);
     options.wrap = flag("wrap").unwrap_or(options.wrap);
+    options.preserve_case = flag("preserve_case").unwrap_or(options.preserve_case);
+    options.in_selection = flag("in_selection").unwrap_or(options.in_selection);
+    options.highlight_matches = flag("highlight").unwrap_or(options.highlight_matches);
     if options != editor.state().find {
         editor.set_find_options(options);
     }

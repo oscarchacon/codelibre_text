@@ -334,3 +334,99 @@ fn escape_finds_the_text_literally() {
     replace_all(&pattern(&opts), &mut text, "x", &opts);
     assert_eq!(text, "axb(c) x");
 }
+
+#[test]
+fn the_new_toggles_flip_wrap_in_selection_and_highlighting() {
+    let mut opts = options("x");
+    assert!(opts.wrap && !opts.in_selection && opts.highlight_matches);
+    for toggle in [
+        FindToggle::Wrap,
+        FindToggle::InSelection,
+        FindToggle::HighlightMatches,
+    ] {
+        opts.toggle(toggle);
+    }
+    assert!(!opts.wrap && opts.in_selection && !opts.highlight_matches);
+}
+
+#[test]
+fn inside_keeps_the_matches_whole_in_the_area() {
+    let matches = vec![0..3, 4..7, 8..11, 12..15];
+    assert_eq!(
+        inside(matches.clone(), std::slice::from_ref(&(4..11))),
+        vec![4..7, 8..11]
+    );
+    assert_eq!(
+        inside(matches, &[0..3, 9..15]),
+        vec![0..3, 12..15],
+        "8..11 is cut"
+    );
+}
+
+#[test]
+fn find_among_goes_round_the_matches_given() {
+    let text = "foo foo foo foo";
+    let matches = [4..7, 8..11];
+    let next = |from: usize, forward: bool| {
+        find_among(&matches, text, Selection::caret(from), forward, true)
+    };
+    assert_eq!(next(0, true), Some(Selection::new(4, 7)));
+    assert_eq!(next(9, true), Some(Selection::new(4, 7)), "wraps inside");
+    assert_eq!(next(4, false), Some(Selection::new(8, 11)));
+    assert_eq!(
+        find_among(&matches, text, Selection::caret(12), true, false),
+        None
+    );
+}
+
+#[test]
+fn replace_all_in_replaces_only_inside_the_area() {
+    let opts = options("foo");
+    let mut text = "foo foo foo foo".to_string();
+    assert_eq!(
+        replace_all_in(&pattern(&opts), &mut text, "bar", &opts, 4..11),
+        2
+    );
+    assert_eq!(text, "foo bar bar foo");
+    let mut text = "foo foo".to_string();
+    assert_eq!(
+        replace_all_in(&pattern(&opts), &mut text, "bar", &opts, 1..7),
+        1
+    );
+    assert_eq!(text, "foo bar", "a match cut by the area stays");
+}
+
+#[test]
+fn replace_selected_changes_nothing_without_a_match_selected() {
+    let opts = options("foo");
+    let mut text = "foo x".to_string();
+    let p = pattern(&opts);
+    assert_eq!(
+        replace_selected(&p, &mut text, Selection::new(4, 5), "bar", &opts),
+        None
+    );
+    assert_eq!(
+        replace_selected(&p, &mut text, Selection::new(0, 3), "bar", &opts),
+        Some(Selection::caret(3))
+    );
+    assert_eq!(text, "bar x");
+}
+
+/// What Sublime 4215's Replace All made of empty regex matches.
+#[test]
+fn replace_all_replaces_empty_matches_as_sublime_does() {
+    for (query, replacement, text, expected) in [
+        ("^", "// ", "a\nb\nc", "// a\n// b\n// c"),
+        ("$", ";", "a\nb", "a;\nb;"),
+        ("x*", "-", "ab", "-a-b-"),
+        ("b*", "-", "abba", "-a-a-"),
+    ] {
+        let opts = FindOptions {
+            regex: true,
+            ..options(query)
+        };
+        let mut text = text.to_string();
+        replace_all(&pattern(&opts), &mut text, replacement, &opts);
+        assert_eq!(text, expected, "{query}");
+    }
+}

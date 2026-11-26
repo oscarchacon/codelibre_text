@@ -123,8 +123,17 @@ copy: `slurp_*`, the toggles, then `replace_all`):
 - `slurp_find_string` keeps the other options (it used to turn regex and whole word off) and escapes the text
   with regex on; `slurp_replace_string` (Ctrl+Shift+E, Find > Use Selection for Replace) takes the selection, or
   the word at the caret, as written.
-Left for later: the panel's "In selection" and "Highlight matches" options (no key binds them), and whether a
-find panel opened over a selection escapes it with regex on.
+Since 2026-11-26 also the panel's other options, Sublime's `toggle_wrap`, `toggle_in_selection` and `toggle_highlight`
+(no key binds them; `show_panel` takes `in_selection`, `preserve_case` and `highlight` too):
+- "In selection" turned on keeps the active view's selections as the area searched (`find_replace::FIND_AREA`, a
+  hidden region set, so it moves with the text; outlined while the panel shows); find next / previous wrap inside it,
+  and Find All, Replace, Replace All, the count and the highlights keep to it. Carets alone keep no area (the whole
+  text). Opening the panel over several lines with `auto_find_in_selection` (or it on already) turns it on with them.
+- "Highlight matches" off stops painting the matches; the panel still counts them.
+- Opening the panel over a single-line selection escapes it with regex on (Sublime 4215 does).
+- Replace All replaces empty regex matches too (`^`, `$`, `x*`), as Sublime 4215 does; before, `^` changed nothing.
+Left for later: when Sublime takes the area exactly (its find panel follows the selection through UI events a
+plugin cannot cause, so the probe could not tell toggle time from panel opening).
 
 ## 3. Encodings
 

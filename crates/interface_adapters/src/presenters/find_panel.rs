@@ -39,6 +39,8 @@ pub fn present(editor: &mut Editor, view: &mut ViewState) -> Option<FindPanelVie
         whole_word: find.whole_word,
         wrap: find.wrap,
         preserve_case: find.preserve_case,
+        in_selection: find.in_selection,
+        highlight_matches: find.highlight_matches,
         use_buffer: editor.find_use_buffer(),
         status,
         has_error,

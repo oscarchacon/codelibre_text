@@ -42,7 +42,7 @@ the rest of Sublime's `Default`) are pending in `docs/plugins.md`, "Known limits
 | Symbols / indexing | `goto_definition`, `goto_reference`, `goto_symbol_in_project` (Ctrl+Shift+R) | native |
 | Split layouts | ~~`set_layout`, `focus_group`, `move_to_group`, `focus_neighboring_group`, `move_to_neighboring_group`~~ (done), `new_pane`, `close_pane`, `set_max_columns`, `clone_file`, dragging the borders between groups | native / py |
 | Tabs | ~~`close_by_index`, `close_others_by_index`, `close_to_right_by_index`, `close_unmodified*`, `close_deleted_files`, `close_selected`, `close_unselected`~~ (done, 2026-11-21), `focus_by_index`, `select_last_tab`, multi-selected tabs (`unselect_others`, `unselect_current`, `unselect_to_left/right`, `select_to_left/right`, `focus_to_left/right`), ~~`toggle_tabs`~~ (done), `toggle_show_open_files` | native |
-| Find panel | ~~`toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find`~~ (done, 2026-11-26); the panel's "In selection" and "Highlight matches" options | native |
+| Find panel | ~~`toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`, `slurp_replace_string`, `cancel_find`, `toggle_wrap`, `toggle_in_selection`, `toggle_highlight`~~ (done, 2026-11-26) | native |
 | Find in Files | ~~`show_panel` `find_in_files`, `find_all` / `replace_all` in it, `cancel_find`, `add_directory`, `clear_location`, `add_where_snippet`, `find_in_folder`~~ (done, 2026-11-14), ~~results in a tab (`use_buffer`)~~ (done, 2026-11-20), ~~`find_in_files_side_by_side`~~ (done, 2026-11-21) | native / py |
 | Snippets | `expand_snippet` (~~`next_field`, `prev_field`, `clear_fields`~~ done) | native |
 | Text editing | `wrap_lines` (Alt+Q), `close_tag`, `auto_indent_tag`, `wrap_block`, `toggle_overwrite`, `scroll_lines`, `show_at_center`, ~~`paste_from_history`~~ (done), `sort_selection`, `permute_selection`, `convert_ident_case`, `arithmetic`, `rot13`, `encode_html_entities` | native / py |
@@ -68,7 +68,7 @@ the rest of Sublime's `Default`) are pending in `docs/plugins.md`, "Known limits
 - Files: `default_encoding`, `fallback_encoding`, `reload_file_on_change`, `always_prompt_for_file_reload`, `save_on_focus_lost`,
   `binary_file_patterns`, `close_windows_when_empty`, `open_files_in_new_window`.
 - Status bar: `show_encoding`, `show_line_endings`, `show_line_column`, `show_syntax`, `show_indentation`, `show_full_path`.
-- Find: `find_selected_text`, `auto_find_in_selection`, `close_find_after_replace_all`, ~~`find_in_files_side_by_side`~~ (done, 2026-11-21: a result of the Find Results tab opens in the group beside it), `find_in_files_max_result_size` (`close_find_after_find_all`, `find_in_files_context_lines` / `_context_characters` / `_max_file_size` / `_suppress_errors`: read since 2026-11-14).
+- Find: `find_selected_text`, ~~`auto_find_in_selection`~~ (done, 2026-11-26), `close_find_after_replace_all`, ~~`find_in_files_side_by_side`~~ (done, 2026-11-21: a result of the Find Results tab opens in the group beside it), `find_in_files_max_result_size` (`close_find_after_find_all`, `find_in_files_context_lines` / `_context_characters` / `_max_file_size` / `_suppress_errors`: read since 2026-11-14).
 - Feature-bound (need the feature first): `auto_complete_delay` / `_use_history` / `_cycle`, `spell_check`/`dictionary`, `mini_diff`/`git_diff_target`, `show_git_status`,
   `index_*`, `show_definitions`, `hot_exit_projects`, `remember_layout`, `vintage_*`.
 

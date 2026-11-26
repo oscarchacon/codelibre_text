@@ -424,6 +424,19 @@ fn jump_history_and_context_menus_as_drawn() {
         checks.key(Modifiers::ALT, key);
     }
     checks.key(Modifiers::NONE, Key::Escape);
+
+    // "In selection" over lines 2–5: the area is outlined and only its two "=" are highlighted.
+    checks.click(297.0, 87.0);
+    checks.click_with(Modifiers::SHIFT, PointerButton::Primary, 420.0, 138.0);
+    checks.key(Modifiers::COMMAND, Key::H);
+    checks.key(Modifiers::COMMAND, Key::A);
+    checks.type_text("=");
+    checks.click(168.0, 793.0);
+    // The caret out of it: the area stays.
+    checks.click(420.0, 206.0);
+    checks.shot("j13_in_selection");
+    checks.click(168.0, 793.0);
+    checks.key(Modifiers::NONE, Key::Escape);
 }
 
 #[test]

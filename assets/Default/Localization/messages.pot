@@ -1583,6 +1583,14 @@ msgid "Wrap"
 msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs
+msgid "In selection"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Highlight matches"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
 msgid "Preserve case"
 msgstr ""
 

@@ -910,6 +910,14 @@ msgid "Preserve case"
 msgstr "Conserver la casse"
 
 #: crates/frameworks/src/views/find_panel.rs
+msgid "In selection"
+msgstr "Dans la sélection"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Highlight matches"
+msgstr "Surligner les résultats"
+
+#: crates/frameworks/src/views/find_panel.rs
 msgid "Close (Esc)"
 msgstr "Fermer (Échap)"
 

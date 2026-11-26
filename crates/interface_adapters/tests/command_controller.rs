@@ -2669,3 +2669,32 @@ fn find_panel_toggles_and_slurp_replace_string() {
     run(&mut editor, &mut view, &cmd("replace_all"));
     assert_eq!(active_text(&editor), "bar Bar bar");
 }
+
+#[test]
+fn wrap_in_selection_and_highlight_toggles_keep_the_focus() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "foo foo foo", Selection::new(4, 11));
+    view.focus_editor = false;
+    for name in ["toggle_wrap", "toggle_in_selection", "toggle_highlight"] {
+        run(&mut editor, &mut view, &cmd(name));
+    }
+    let find = &editor.state().find;
+    assert!(!find.wrap && find.in_selection && !find.highlight_matches);
+    assert!(!view.focus_editor);
+
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "replace", "highlight": true }),
+        ),
+    );
+    assert!(editor.state().find.highlight_matches);
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    editor.set_replacement("bar".into());
+    run(&mut editor, &mut view, &cmd("replace_all"));
+    assert_eq!(active_text(&editor), "foo bar bar");
+}
