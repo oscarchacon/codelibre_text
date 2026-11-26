@@ -263,6 +263,10 @@ msgid "Use Selection for Find"
 msgstr "Usar seleção para localizar"
 
 #: assets/Default/Main.sublime-menu
+msgid "Use Selection for Replace"
+msgstr "Usar seleção para substituir"
+
+#: assets/Default/Main.sublime-menu
 msgid "View"
 msgstr "Exibir"
 
@@ -900,6 +904,18 @@ msgstr "Palavra inteira"
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Wrap"
 msgstr "Continuar do início"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Preserve case"
+msgstr "Preservar maiúsculas e minúsculas"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "In selection"
+msgstr "Na seleção"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Highlight matches"
+msgstr "Destacar ocorrências"
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Close (Esc)"

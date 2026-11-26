@@ -5,6 +5,7 @@ use entities::minihtml;
 use entities::text::line_col;
 use serde_json::{json, Value};
 use use_cases::documents::image_source;
+use use_cases::find_replace::FIND_AREA;
 use use_cases::plugin_popups::{HIDE_ON_MOUSE_MOVE, HIDE_ON_MOUSE_MOVE_AWAY};
 use use_cases::Editor;
 
@@ -60,7 +61,9 @@ pub fn present_document(
     index: usize,
 ) -> Option<EditorViewModel> {
     let active = index == editor.state().active;
-    let find_matches = if view.find_panel.visible && active {
+    // "Highlight matches" off: the panel still counts them.
+    let find_matches = if view.find_panel.visible && active && editor.state().find.highlight_matches
+    {
         editor.find_matches()
     } else {
         Vec::new()
@@ -137,6 +140,8 @@ pub fn present_document(
         regions: doc
             .region_sets()
             .iter()
+            // Find "In selection"'s area shows while the panel does.
+            .filter(|set| set.key != FIND_AREA || view.find_panel.visible)
             .filter_map(|set| present_regions(editor, set, len))
             .collect(),
         show: doc

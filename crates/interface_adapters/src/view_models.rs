@@ -237,6 +237,10 @@ pub struct FindPanelViewModel {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub wrap: bool,
+    /// Shown with the replace field.
+    pub preserve_case: bool,
+    pub in_selection: bool,
+    pub highlight_matches: bool,
     /// Find in Files' "Use Buffer": the results go to a tab.
     pub use_buffer: bool,
     /// e.g. `4 matches`, or the regex error.

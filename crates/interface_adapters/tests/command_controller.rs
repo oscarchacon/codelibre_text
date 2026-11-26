@@ -2637,3 +2637,64 @@ fn with_several_selections_copy_and_paste_are_the_use_cases_not_the_widget() {
         "the text widget did nothing"
     );
 }
+
+#[test]
+fn find_panel_toggles_and_slurp_replace_string() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "foo Foo bar", Selection::new(8, 11));
+    view.focus_editor = false;
+    for name in [
+        "toggle_regex",
+        "toggle_case_sensitive",
+        "toggle_whole_word",
+        "toggle_preserve_case",
+    ] {
+        run(&mut editor, &mut view, &cmd(name));
+    }
+    let find = &editor.state().find;
+    assert!(find.regex && find.case_sensitive && find.whole_word && find.preserve_case);
+    assert!(
+        !view.focus_editor,
+        "the toggles leave the focus in the panel"
+    );
+    run(&mut editor, &mut view, &cmd("toggle_regex"));
+    run(&mut editor, &mut view, &cmd("toggle_case_sensitive"));
+    run(&mut editor, &mut view, &cmd("toggle_whole_word"));
+
+    run(&mut editor, &mut view, &cmd("slurp_replace_string"));
+    assert_eq!(editor.state().replacement, "bar");
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::new(0, 3));
+    run(&mut editor, &mut view, &cmd("slurp_find_string"));
+    run(&mut editor, &mut view, &cmd("replace_all"));
+    assert_eq!(active_text(&editor), "bar Bar bar");
+}
+
+#[test]
+fn wrap_in_selection_and_highlight_toggles_keep_the_focus() {
+    let world = World::new();
+    let (mut editor, mut view) = setup(&world, "foo foo foo", Selection::new(4, 11));
+    view.focus_editor = false;
+    for name in ["toggle_wrap", "toggle_in_selection", "toggle_highlight"] {
+        run(&mut editor, &mut view, &cmd(name));
+    }
+    let find = &editor.state().find;
+    assert!(!find.wrap && find.in_selection && !find.highlight_matches);
+    assert!(!view.focus_editor);
+
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "show_panel",
+            json!({ "panel": "replace", "highlight": true }),
+        ),
+    );
+    assert!(editor.state().find.highlight_matches);
+    let mut options = editor.state().find.clone();
+    options.query = "foo".into();
+    editor.set_find_options(options);
+    editor.set_replacement("bar".into());
+    run(&mut editor, &mut view, &cmd("replace_all"));
+    assert_eq!(active_text(&editor), "foo bar bar");
+}
