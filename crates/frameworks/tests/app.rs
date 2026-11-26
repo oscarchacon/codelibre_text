@@ -410,6 +410,33 @@ fn jump_history_and_context_menus_as_drawn() {
     checks.right_click(600.0, 814.0);
     checks.click(627.0, 771.0);
     checks.shot("j11_find_field_cut");
+
+    // The replace panel shows "Preserve case"; Alt+A, Alt+C and Alt+R light it, "Case sensitive"
+    // and "Regular expression", the focus staying in the panel.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.key(Modifiers::COMMAND, Key::H);
+    checks.settle(2);
+    checks.key(Modifiers::ALT, Key::A);
+    checks.key(Modifiers::ALT, Key::C);
+    checks.key(Modifiers::ALT, Key::R);
+    checks.shot("j12_replace_panel_toggles");
+    for key in [Key::A, Key::C, Key::R] {
+        checks.key(Modifiers::ALT, key);
+    }
+    checks.key(Modifiers::NONE, Key::Escape);
+
+    // "In selection" over lines 2–5: the area is outlined and only its two "=" are highlighted.
+    checks.click(297.0, 87.0);
+    checks.click_with(Modifiers::SHIFT, PointerButton::Primary, 420.0, 138.0);
+    checks.key(Modifiers::COMMAND, Key::H);
+    checks.key(Modifiers::COMMAND, Key::A);
+    checks.type_text("=");
+    checks.click(168.0, 793.0);
+    // The caret out of it: the area stays.
+    checks.click(420.0, 206.0);
+    checks.shot("j13_in_selection");
+    checks.click(168.0, 793.0);
+    checks.key(Modifiers::NONE, Key::Escape);
 }
 
 #[test]

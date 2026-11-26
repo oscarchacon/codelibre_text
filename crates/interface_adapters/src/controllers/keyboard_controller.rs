@@ -95,8 +95,10 @@ pub fn key_pressed(
         panel_visible: view.find_panel.visible
             || view.input_panel.is_some()
             || editor.shown_output_panel().is_some(),
-        // Output panels are not focused: the caret stays in the text.
-        panel_has_focus: view.find_panel.visible || view.input_panel.is_some(),
+        // Output panels are not focused: the caret stays in the text. Nor is a panel while the
+        // text has the focus (Alt+C there is no find toggle).
+        panel_has_focus: (view.find_panel.visible || view.input_panel.is_some())
+            && !view.text_has_focus,
         panel: shown_panel(editor, view),
         num_selections: editor
             .active_document()
@@ -458,6 +460,7 @@ impl KeyContext for ViewKeyContext {
             "panel_visible" => Value::Bool(self.panel_visible),
             "panel_has_focus" => Value::Bool(self.panel_has_focus),
             "panel" => Value::String(self.panel.clone()),
+            "panel_type" => Value::String(panel_type(&self.panel).to_string()),
             "num_selections" => Value::from(self.num_selections),
             "auto_complete_visible" => Value::Bool(self.auto_complete_visible),
             "has_next_field" => Value::Bool(self.has_next_field),
@@ -476,5 +479,15 @@ impl KeyContext for ViewKeyContext {
             "not_equal" => Some(value != *operand),
             _ => None,
         }
+    }
+}
+
+/// The `panel_type` context of a `panel` name: the find, replace and Find in Files panels are
+/// all `find`; then `input` and `output`.
+fn panel_type(panel: &str) -> &str {
+    match panel {
+        "find" | "replace" | "find_in_files" => "find",
+        p if p.starts_with("output.") => "output",
+        p => p,
     }
 }
