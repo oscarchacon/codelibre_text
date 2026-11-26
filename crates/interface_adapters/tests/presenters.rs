@@ -871,6 +871,34 @@ fn find_matches_are_only_highlighted_while_the_find_panel_is_open() {
 }
 
 #[test]
+fn highlight_matches_off_hides_them_and_the_in_selection_area_shows_with_the_panel() {
+    let world = World::new();
+    let mut editor = editor_with_text(&world, "ab ab ab", Selection::new(3, 8));
+    editor.set_find_options(FindOptions {
+        query: "ab".into(),
+        in_selection: true,
+        ..Default::default()
+    });
+    let mut view = ViewState::default();
+    let area_shown = |editor: &mut Editor, view: &mut ViewState| {
+        editor_presenter::present(editor, view)
+            .unwrap()
+            .regions
+            .iter()
+            .any(|r| r.ranges.len() == 1 && r.ranges[0] == (3..8) && !r.fill)
+    };
+    assert!(!area_shown(&mut editor, &mut view), "the panel is closed");
+    view.find_panel.visible = true;
+    assert!(area_shown(&mut editor, &mut view));
+    let model = editor_presenter::present(&mut editor, &mut view).unwrap();
+    assert_eq!(model.find_matches, vec![3..5, 6..8], "only in the area");
+
+    editor.toggle_find_option(entities::find::FindToggle::HighlightMatches);
+    let model = editor_presenter::present(&mut editor, &mut view).unwrap();
+    assert!(model.find_matches.is_empty());
+}
+
+#[test]
 fn there_is_no_editor_without_documents() {
     let world = World::new();
     let mut editor = world.editor();

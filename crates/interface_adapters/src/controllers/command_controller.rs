@@ -6,6 +6,7 @@
 
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding};
+use entities::find::FindToggle;
 use entities::layout::Layout;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
@@ -744,7 +745,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
                     view.find_panel.replace_mode = panel == "replace";
                     view.find_panel.in_files = panel == "find_in_files";
                     view.find_panel.focus_requested = true;
-                    editor.use_selection_as_query_if_single_line();
+                    editor.use_selection_for_find_panel(panel == "find_in_files");
                     apply_find_panel_args(editor, command);
                 }
                 "console" if toggle => {
@@ -798,7 +799,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         // ----- find ----------------------------------------------------------------------------
         "find_next" | "find_prev" => find_next(editor, view, command.name == "find_next"),
         "find_under" | "find_under_prev" => {
-            editor.use_selection_as_query(true);
+            editor.use_selection_as_query();
             find_next(editor, view, command.name == "find_under");
         }
         "replace_next" => editor.replace_next(),
@@ -983,11 +984,13 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     }
 
     show_plugin_panels(editor, view);
-    // Whatever the command did, typing continues in the text unless a panel took the focus.
+    // Whatever the command did, typing continues in the text unless a panel took the focus
+    // (the find toggles leave it where it was: Alt+C in the find field goes on typing there).
     let output_has_focus = editor
         .shown_output_panel()
         .is_some_and(|panel| editor.is_output_panel_focused(panel.document.id));
     if view.quick_panel.is_none()
+        && !FIND_TOGGLES.contains(&command.name.as_str())
         && !view.find_panel.focus_requested
         && view.input_panel.is_none()
         && !output_has_focus
@@ -1073,10 +1076,29 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
     }
 }
 
+/// The find panel's option toggles: they keep the focus where it is.
+const FIND_TOGGLES: &[&str] = &[
+    "toggle_regex",
+    "toggle_case_sensitive",
+    "toggle_whole_word",
+    "toggle_preserve_case",
+    "toggle_wrap",
+    "toggle_in_selection",
+    "toggle_highlight",
+];
+
 /// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
 /// settings and need no view state, so they too run at once inside an event.
 const EDITOR_COMMANDS: &[&str] = &[
     "slurp_find_string",
+    "slurp_replace_string",
+    "toggle_regex",
+    "toggle_case_sensitive",
+    "toggle_whole_word",
+    "toggle_preserve_case",
+    "toggle_wrap",
+    "toggle_in_selection",
+    "toggle_highlight",
     "find_under_expand",
     "find_under_expand_skip",
     "find_all_under",
@@ -1107,7 +1129,15 @@ const EDITOR_COMMANDS: &[&str] = &[
 
 fn run_editor_command(editor: &mut Editor, command: &Command) {
     match command.name.as_str() {
-        "slurp_find_string" => editor.use_selection_as_query(false),
+        "slurp_find_string" => editor.slurp_find_string(),
+        "slurp_replace_string" => editor.slurp_replace_string(),
+        "toggle_regex" => editor.toggle_find_option(FindToggle::Regex),
+        "toggle_case_sensitive" => editor.toggle_find_option(FindToggle::CaseSensitive),
+        "toggle_whole_word" => editor.toggle_find_option(FindToggle::WholeWord),
+        "toggle_preserve_case" => editor.toggle_find_option(FindToggle::PreserveCase),
+        "toggle_wrap" => editor.toggle_find_option(FindToggle::Wrap),
+        "toggle_in_selection" => editor.toggle_find_option(FindToggle::InSelection),
+        "toggle_highlight" => editor.toggle_find_option(FindToggle::HighlightMatches),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
         "find_under_expand_skip" => editor.skip_to_next_occurrence(),
         "find_all_under" => editor.select_all_occurrences(),
@@ -1288,7 +1318,7 @@ fn panel_part_during_event(editor: &mut Editor, command: &Command) -> bool {
                     editor.cancel_plugin_input_panel_later();
                     editor.hide_output_panel();
                     editor.show_find_panel_ahead(Some(name));
-                    editor.use_selection_as_query_if_single_line();
+                    editor.use_selection_for_find_panel(panel == "find_in_files");
                     apply_find_panel_args(editor, command);
                 }
                 editor.queue_plugin_command(command.clone());
@@ -1453,6 +1483,9 @@ fn apply_find_panel_args(editor: &mut Editor, command: &Command) {
     options.case_sensitive = flag("case_sensitive").unwrap_or(options.case_sensitive);
     options.whole_word = flag("whole_word").unwrap_or(options.whole_word);
     options.wrap = flag("wrap").unwrap_or(options.wrap);
+    options.preserve_case = flag("preserve_case").unwrap_or(options.preserve_case);
+    options.in_selection = flag("in_selection").unwrap_or(options.in_selection);
+    options.highlight_matches = flag("highlight").unwrap_or(options.highlight_matches);
     if options != editor.state().find {
         editor.set_find_options(options);
     }

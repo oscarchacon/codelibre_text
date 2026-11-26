@@ -263,6 +263,10 @@ msgid "Use Selection for Find"
 msgstr "Rechercher la sélection"
 
 #: assets/Default/Main.sublime-menu
+msgid "Use Selection for Replace"
+msgstr "Remplacer par la sélection"
+
+#: assets/Default/Main.sublime-menu
 msgid "View"
 msgstr "Affichage"
 
@@ -900,6 +904,18 @@ msgstr "Mot entier"
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Wrap"
 msgstr "Reprendre au début"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Preserve case"
+msgstr "Conserver la casse"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "In selection"
+msgstr "Dans la sélection"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Highlight matches"
+msgstr "Surligner les résultats"
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Close (Esc)"

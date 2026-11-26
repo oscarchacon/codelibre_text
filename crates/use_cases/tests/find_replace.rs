@@ -1,6 +1,6 @@
 //! Tests for the find / replace use cases (`use_cases::find_replace`).
 
-use entities::find::FindOptions;
+use entities::find::{FindOptions, FindToggle};
 use entities::selection::Selection;
 use test_support::{active_text, status, World};
 use use_cases::editing::{DragBy, DragCombine, DragPoint, DragSelect, TextCommand};
@@ -29,7 +29,7 @@ fn query(text: &str) -> FindOptions {
 fn a_single_line_selection_becomes_the_query_when_the_panel_opens() {
     let world = World::new();
     let mut editor = editor_with(&world, "cat dog", Selection::new(4, 7));
-    editor.use_selection_as_query_if_single_line();
+    editor.use_selection_for_find_panel(false);
     assert_eq!(editor.state().find.query, "dog");
 }
 
@@ -38,7 +38,7 @@ fn multi_line_selections_do_not_replace_the_query() {
     let world = World::new();
     let mut editor = editor_with(&world, "a\nb", Selection::new(0, 3));
     editor.set_find_options(query("keep"));
-    editor.use_selection_as_query_if_single_line();
+    editor.use_selection_for_find_panel(false);
     assert_eq!(editor.state().find.query, "keep");
 }
 
@@ -50,7 +50,7 @@ fn find_under_caret_selects_the_word_and_searches_it_as_a_whole_word() {
         regex: true,
         ..query("x")
     });
-    editor.use_selection_as_query(true);
+    editor.use_selection_as_query();
     let find = &editor.state().find;
     assert_eq!(find.query, "bar");
     assert!(find.whole_word && !find.regex);
@@ -61,7 +61,7 @@ fn find_under_caret_selects_the_word_and_searches_it_as_a_whole_word() {
 fn using_an_explicit_selection_is_not_whole_word() {
     let world = World::new();
     let mut editor = editor_with(&world, "foo bar", Selection::new(0, 2));
-    editor.use_selection_as_query(true);
+    editor.use_selection_as_query();
     assert_eq!(editor.state().find.query, "fo");
     assert!(!editor.state().find.whole_word);
 }
@@ -547,4 +547,209 @@ fn whole_word_occurrences_end_with_copy_or_insert() {
     assert_eq!(ctrl_d_on_plus_equals(&["show_overlay"]), 1);
     assert_eq!(ctrl_d_on_plus_equals(&["copy"]), 2, "a plain search again");
     assert_eq!(ctrl_d_on_plus_equals(&["insert"]), 2);
+}
+
+#[test]
+fn slurp_find_string_keeps_the_options_and_escapes_with_regex_on() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "a.b axb", Selection::new(0, 3));
+    editor.set_find_options(FindOptions {
+        whole_word: true,
+        ..query("x")
+    });
+    editor.slurp_find_string();
+    let find = &editor.state().find;
+    assert_eq!(find.query, "a.b");
+    assert!(
+        find.whole_word && !find.regex,
+        "as Sublime 4215 leaves them"
+    );
+
+    editor.toggle_find_option(FindToggle::Regex);
+    editor.slurp_find_string();
+    assert_eq!(editor.state().find.query, r"a\.b");
+    assert!(editor.state().find.regex);
+}
+
+#[test]
+fn slurp_find_string_takes_and_selects_the_word_at_the_caret() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo bar", Selection::caret(5));
+    editor.slurp_find_string();
+    assert_eq!(editor.state().find.query, "bar");
+    assert!(!editor.state().find.whole_word);
+    assert_eq!(selection(&editor), Selection::new(4, 7));
+}
+
+#[test]
+fn slurp_replace_string_takes_the_selection_or_the_word_as_written() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "x$1y barbaz qux", Selection::new(0, 4));
+    editor.toggle_find_option(FindToggle::Regex);
+    editor.slurp_replace_string();
+    assert_eq!(
+        editor.state().replacement,
+        "x$1y",
+        "not escaped, even with regex on"
+    );
+
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(6));
+    editor.slurp_replace_string();
+    assert_eq!(editor.state().replacement, "barbaz");
+    assert_eq!(selection(&editor), Selection::caret(6), "the caret stays");
+}
+
+#[test]
+fn replace_all_preserves_case_when_toggled() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo Foo FOO", Selection::caret(0));
+    editor.set_find_options(query("foo"));
+    editor.set_replacement("bar".into());
+    editor.toggle_find_option(FindToggle::PreserveCase);
+    editor.replace_all();
+    assert_eq!(active_text(&editor), "bar Bar BAR");
+}
+
+fn in_selection(world: &World, text: &str, area: &[Selection]) -> Editor {
+    let mut editor = editor_with(world, text, area[0]);
+    let id = editor.active_document().unwrap().id;
+    for s in &area[1..] {
+        let drag = DragSelect {
+            anchor: DragPoint::at(s.anchor),
+            head: DragPoint::at(s.head),
+            by: DragBy::Characters,
+            combine: DragCombine::Add,
+            pressed: true,
+        };
+        editor.drag_select(id, drag);
+        editor.end_drag_select();
+    }
+    editor.set_find_options(query("foo"));
+    editor.set_replacement("bar".into());
+    editor.toggle_find_option(FindToggle::InSelection);
+    editor
+}
+
+#[test]
+fn in_selection_replaces_only_in_the_area_taken_when_turned_on() {
+    let world = World::new();
+    let mut editor = in_selection(&world, "foo foo foo foo", &[Selection::new(4, 11)]);
+    // The selection moving does not move the area.
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(0));
+    editor.replace_all();
+    assert_eq!(active_text(&editor), "foo bar bar foo");
+    assert_eq!(status(&editor), "Replaced 2 occurrences");
+}
+
+#[test]
+fn in_selection_with_several_parts_and_matches_cut_by_them() {
+    let world = World::new();
+    let area = [Selection::new(0, 3), Selection::new(9, 18)];
+    let mut editor = in_selection(&world, "foo foo foo foo foo", &area);
+    assert_eq!(editor.find_matches(), vec![0..3, 12..15]);
+    editor.replace_all();
+    assert_eq!(active_text(&editor), "bar foo foo bar foo");
+}
+
+#[test]
+fn in_selection_finds_and_replaces_next_inside_the_area_only() {
+    let world = World::new();
+    let mut editor = in_selection(&world, "foo foo foo foo foo", &[Selection::new(4, 15)]);
+    // From the end of the selection the area was taken from: round to its start.
+    assert!(editor.find_next(true));
+    assert_eq!(selection(&editor), Selection::new(4, 7));
+    editor.find_next(true);
+    assert_eq!(selection(&editor), Selection::new(8, 11));
+    editor.find_next(true);
+    assert_eq!(selection(&editor), Selection::new(12, 15));
+    editor.find_next(true);
+    assert_eq!(
+        selection(&editor),
+        Selection::new(4, 7),
+        "wraps inside the area"
+    );
+    editor.find_next(false);
+    assert_eq!(selection(&editor), Selection::new(12, 15));
+
+    editor.replace_next();
+    assert_eq!(active_text(&editor), "foo foo foo bar foo");
+    assert_eq!(
+        selection(&editor),
+        Selection::new(4, 7),
+        "the next one in the area"
+    );
+    editor.replace_next();
+    editor.replace_next();
+    assert_eq!(active_text(&editor), "foo bar bar bar foo");
+}
+
+#[test]
+fn in_selection_find_all_selects_the_matches_in_the_area() {
+    let world = World::new();
+    let mut editor = in_selection(&world, "foo foo foo foo", &[Selection::new(4, 11)]);
+    editor.select_find_matches();
+    assert_eq!(
+        editor.active_document().unwrap().selections(),
+        vec![Selection::new(4, 7), Selection::new(8, 11)]
+    );
+}
+
+#[test]
+fn the_area_moves_with_the_text_and_goes_when_turned_off() {
+    let world = World::new();
+    let mut editor = in_selection(&world, "foo foo foo", &[Selection::new(4, 11)]);
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(0));
+    editor.run_text_command(TextCommand::Insert("xx ".into()));
+    assert_eq!(editor.find_matches(), vec![7..10, 11..14]);
+    editor.toggle_find_option(FindToggle::InSelection);
+    assert_eq!(editor.find_matches().len(), 3);
+    assert!(editor
+        .active_document()
+        .unwrap()
+        .regions(use_cases::find_replace::FIND_AREA)
+        .is_empty());
+}
+
+#[test]
+fn in_selection_over_carets_alone_searches_everything() {
+    let world = World::new();
+    let mut editor = in_selection(&world, "foo foo foo", &[Selection::caret(5)]);
+    editor.replace_all();
+    assert_eq!(active_text(&editor), "bar bar bar");
+}
+
+#[test]
+fn opening_the_panel_over_a_selection_escapes_it_with_regex_on() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "axb a.b", Selection::new(4, 7));
+    editor.toggle_find_option(FindToggle::Regex);
+    editor.use_selection_for_find_panel(false);
+    assert_eq!(editor.state().find.query, r"a\.b");
+}
+
+#[test]
+fn auto_find_in_selection_searches_a_multi_line_selection() {
+    let world =
+        World::new().with_preferences(serde_json::json!({ "auto_find_in_selection": true }));
+    let mut editor = editor_with(&world, "foo\nfoo\nfoo\nfoo", Selection::new(4, 11));
+    editor.set_find_options(query("foo"));
+    editor.use_selection_for_find_panel(true);
+    assert!(!editor.state().find.in_selection, "not in Find in Files");
+    editor.use_selection_for_find_panel(false);
+    assert!(editor.state().find.in_selection);
+    assert_eq!(editor.state().find.query, "foo", "the query stays");
+    assert_eq!(editor.find_matches(), vec![4..7, 8..11]);
+}
+
+#[test]
+fn without_auto_find_in_selection_a_multi_line_selection_changes_nothing() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo\nfoo", Selection::new(0, 7));
+    editor.set_find_options(query("x"));
+    editor.use_selection_for_find_panel(false);
+    assert!(!editor.state().find.in_selection);
+    assert_eq!(editor.state().find.query, "x");
 }

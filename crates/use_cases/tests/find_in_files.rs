@@ -98,6 +98,7 @@ fn the_header_names_the_options() {
         case_sensitive: true,
         whole_word: true,
         wrap: true,
+        ..FindOptions::default()
     });
     editor.find_in_files(false);
     editor.poll_find_in_files();

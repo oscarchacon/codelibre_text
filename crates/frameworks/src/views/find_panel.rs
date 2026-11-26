@@ -24,10 +24,18 @@ pub fn show(
         case_sensitive: panel.case_sensitive,
         whole_word: panel.whole_word,
         wrap: panel.wrap,
+        preserve_case: panel.preserve_case,
+        in_selection: panel.in_selection,
+        highlight_matches: panel.highlight_matches,
     };
     let mut replacement = panel.replacement.clone();
     let mut where_text = panel.where_text.clone();
     let mut use_buffer = panel.use_buffer;
+    // The fields below the query line up after the toggles: four, In selection and Highlight
+    // matches in a view, Preserve case where it replaces.
+    let replaces = panel.replace_mode || panel.in_files;
+    let toggles = 4 + if panel.in_files { 0 } else { 2 } + usize::from(replaces);
+    let fields_indent = toggles as f32 * 32.0 + 6.0;
     // Enter searches the files in Find in Files, else goes to the next match.
     let enter_event = |backwards: bool| {
         if panel.in_files {
@@ -72,6 +80,29 @@ pub fn show(
             );
         } else {
             toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
+            toggle(
+                ui,
+                chrome,
+                &mut options.in_selection,
+                "[ ]",
+                text.tr("In selection"),
+            );
+            toggle(
+                ui,
+                chrome,
+                &mut options.highlight_matches,
+                "▒",
+                text.tr("Highlight matches"),
+            );
+        }
+        if replaces {
+            toggle(
+                ui,
+                chrome,
+                &mut options.preserve_case,
+                "AB",
+                text.tr("Preserve case"),
+            );
         }
         ui.add_space(6.0);
 
@@ -81,7 +112,7 @@ pub fn show(
             egui::TextEdit::singleline(&mut options.query)
                 .id(Id::new("find_input"))
                 .hint_text(text.tr("Find"))
-                .desired_width((ui.available_width() - 260.0).max(160.0))
+                .desired_width((ui.available_width() - 290.0).max(160.0))
                 .font(egui::TextStyle::Monospace),
         );
         if panel.focus_requested {
@@ -127,7 +158,7 @@ pub fn show(
 
     if panel.in_files {
         ui.horizontal(|ui| {
-            ui.add_space(4.0 * 32.0 + 6.0);
+            ui.add_space(fields_indent);
             let before_right_press =
                 context_menu::state_before_right_press(ui.ctx(), Id::new("where_input"));
             let field = ui.add(
@@ -156,7 +187,7 @@ pub fn show(
 
     if panel.replace_mode || panel.in_files {
         ui.horizontal(|ui| {
-            ui.add_space(4.0 * 32.0 + 6.0);
+            ui.add_space(fields_indent);
             let before_right_press =
                 context_menu::state_before_right_press(ui.ctx(), Id::new("replace_input"));
             let field = ui.add(
@@ -205,7 +236,10 @@ pub fn show(
         && options.regex == panel.regex
         && options.case_sensitive == panel.case_sensitive
         && options.whole_word == panel.whole_word
-        && options.wrap == panel.wrap;
+        && options.wrap == panel.wrap
+        && options.preserve_case == panel.preserve_case
+        && options.in_selection == panel.in_selection
+        && options.highlight_matches == panel.highlight_matches;
     if !unchanged {
         // Applied before any Find/Replace click of this frame.
         events.insert(0, UiEvent::FindOptionsChanged(options));

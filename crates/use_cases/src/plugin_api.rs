@@ -1139,6 +1139,7 @@ impl Editor {
                     case_sensitive: flags & IGNORECASE == 0,
                     whole_word: flags & WHOLEWORD != 0,
                     wrap: false,
+                    ..FindOptions::default()
                 };
                 let matches = match options.pattern()? {
                     Some(pattern) => find::find_all_selections(&pattern, &doc.text),
