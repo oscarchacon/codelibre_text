@@ -6,6 +6,7 @@
 
 use entities::command::Command;
 use entities::document::{DocumentId, LineEnding};
+use entities::find::FindToggle;
 use entities::layout::Layout;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
@@ -798,7 +799,7 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         // ----- find ----------------------------------------------------------------------------
         "find_next" | "find_prev" => find_next(editor, view, command.name == "find_next"),
         "find_under" | "find_under_prev" => {
-            editor.use_selection_as_query(true);
+            editor.use_selection_as_query();
             find_next(editor, view, command.name == "find_under");
         }
         "replace_next" => editor.replace_next(),
@@ -983,11 +984,13 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
     }
 
     show_plugin_panels(editor, view);
-    // Whatever the command did, typing continues in the text unless a panel took the focus.
+    // Whatever the command did, typing continues in the text unless a panel took the focus
+    // (the find toggles leave it where it was: Alt+C in the find field goes on typing there).
     let output_has_focus = editor
         .shown_output_panel()
         .is_some_and(|panel| editor.is_output_panel_focused(panel.document.id));
     if view.quick_panel.is_none()
+        && !FIND_TOGGLES.contains(&command.name.as_str())
         && !view.find_panel.focus_requested
         && view.input_panel.is_none()
         && !output_has_focus
@@ -1073,10 +1076,23 @@ fn run_editing_command(editor: &mut Editor, command: &Command) {
     }
 }
 
+/// The find panel's option toggles: they keep the focus where it is.
+const FIND_TOGGLES: &[&str] = &[
+    "toggle_regex",
+    "toggle_case_sensitive",
+    "toggle_whole_word",
+    "toggle_preserve_case",
+];
+
 /// Built-in commands handled by [`run_editor_command`]: they change selections, the find string or
 /// settings and need no view state, so they too run at once inside an event.
 const EDITOR_COMMANDS: &[&str] = &[
     "slurp_find_string",
+    "slurp_replace_string",
+    "toggle_regex",
+    "toggle_case_sensitive",
+    "toggle_whole_word",
+    "toggle_preserve_case",
     "find_under_expand",
     "find_under_expand_skip",
     "find_all_under",
@@ -1107,7 +1123,12 @@ const EDITOR_COMMANDS: &[&str] = &[
 
 fn run_editor_command(editor: &mut Editor, command: &Command) {
     match command.name.as_str() {
-        "slurp_find_string" => editor.use_selection_as_query(false),
+        "slurp_find_string" => editor.slurp_find_string(),
+        "slurp_replace_string" => editor.slurp_replace_string(),
+        "toggle_regex" => editor.toggle_find_option(FindToggle::Regex),
+        "toggle_case_sensitive" => editor.toggle_find_option(FindToggle::CaseSensitive),
+        "toggle_whole_word" => editor.toggle_find_option(FindToggle::WholeWord),
+        "toggle_preserve_case" => editor.toggle_find_option(FindToggle::PreserveCase),
         "find_under_expand" => editor.select_word_or_next_occurrence(),
         "find_under_expand_skip" => editor.skip_to_next_occurrence(),
         "find_all_under" => editor.select_all_occurrences(),

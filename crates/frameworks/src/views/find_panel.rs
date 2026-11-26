@@ -24,10 +24,14 @@ pub fn show(
         case_sensitive: panel.case_sensitive,
         whole_word: panel.whole_word,
         wrap: panel.wrap,
+        preserve_case: panel.preserve_case,
     };
     let mut replacement = panel.replacement.clone();
     let mut where_text = panel.where_text.clone();
     let mut use_buffer = panel.use_buffer;
+    // The fields below the query line up after the toggles (preserve case shows with replace).
+    let replaces = panel.replace_mode || panel.in_files;
+    let fields_indent = if replaces { 5.0 } else { 4.0 } * 32.0 + 6.0;
     // Enter searches the files in Find in Files, else goes to the next match.
     let enter_event = |backwards: bool| {
         if panel.in_files {
@@ -72,6 +76,15 @@ pub fn show(
             );
         } else {
             toggle(ui, chrome, &mut options.wrap, "⟲", text.tr("Wrap"));
+        }
+        if replaces {
+            toggle(
+                ui,
+                chrome,
+                &mut options.preserve_case,
+                "AB",
+                text.tr("Preserve case"),
+            );
         }
         ui.add_space(6.0);
 
@@ -127,7 +140,7 @@ pub fn show(
 
     if panel.in_files {
         ui.horizontal(|ui| {
-            ui.add_space(4.0 * 32.0 + 6.0);
+            ui.add_space(fields_indent);
             let before_right_press =
                 context_menu::state_before_right_press(ui.ctx(), Id::new("where_input"));
             let field = ui.add(
@@ -156,7 +169,7 @@ pub fn show(
 
     if panel.replace_mode || panel.in_files {
         ui.horizontal(|ui| {
-            ui.add_space(4.0 * 32.0 + 6.0);
+            ui.add_space(fields_indent);
             let before_right_press =
                 context_menu::state_before_right_press(ui.ctx(), Id::new("replace_input"));
             let field = ui.add(
@@ -205,7 +218,8 @@ pub fn show(
         && options.regex == panel.regex
         && options.case_sensitive == panel.case_sensitive
         && options.whole_word == panel.whole_word
-        && options.wrap == panel.wrap;
+        && options.wrap == panel.wrap
+        && options.preserve_case == panel.preserve_case;
     if !unchanged {
         // Applied before any Find/Replace click of this frame.
         events.insert(0, UiEvent::FindOptionsChanged(options));

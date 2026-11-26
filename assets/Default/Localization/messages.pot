@@ -371,6 +371,10 @@ msgid "Use Selection for Find"
 msgstr ""
 
 #: assets/Default/Main.sublime-menu
+msgid "Use Selection for Replace"
+msgstr ""
+
+#: assets/Default/Main.sublime-menu
 msgid "Find in Files…"
 msgstr ""
 
@@ -1576,6 +1580,10 @@ msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Wrap"
+msgstr ""
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Preserve case"
 msgstr ""
 
 #: crates/frameworks/src/views/find_panel.rs

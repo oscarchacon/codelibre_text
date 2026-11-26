@@ -227,3 +227,110 @@ fn find_all_selections_uses_char_indices() {
         vec![Selection::new(0, 1), Selection::new(3, 4)]
     );
 }
+
+#[test]
+fn toggles_flip_their_option() {
+    let mut opts = options("x");
+    for toggle in [
+        FindToggle::Regex,
+        FindToggle::CaseSensitive,
+        FindToggle::WholeWord,
+        FindToggle::PreserveCase,
+    ] {
+        opts.toggle(toggle);
+    }
+    assert!(opts.regex && opts.case_sensitive && opts.whole_word && opts.preserve_case);
+    opts.toggle(FindToggle::Regex);
+    assert!(!opts.regex && opts.case_sensitive);
+}
+
+/// What Sublime 4215 replaced with "Preserve case" on (a probe plugin in a portable copy, the
+/// replacement from `slurp_replace_string`, then `replace_all`).
+#[test]
+fn preserve_case_replaces_as_sublime_does() {
+    let cases = [
+        // No capital letter found: all lowercase, past the match's end too.
+        ("foo", "barBaz", "barbaz"),
+        ("hello world", "Goodbye MOON TAIL", "goodbye moon tail"),
+        ("a1", "B2CD", "b2cd"),
+        ("12", "AbC", "abc"),
+        ("1a", "XYZ", "xyz"),
+        // Only capitals: all uppercase, `ß` as one letter.
+        ("FOO", "barBaz", "BARBAZ"),
+        ("AB", "xyzw", "XYZW"),
+        ("A", "xyz", "XYZ"),
+        ("ÑA", "xyz", "XYZ"),
+        ("AB", "éñü", "ÉÑÜ"),
+        ("STRASSE", "straße", "STRAẞE"),
+        // Otherwise letter by letter; the rest as written.
+        ("Foo", "barBaz", "BarBaz"),
+        ("fOO", "barBaz", "bARBaz"),
+        ("fOo", "bar", "bAr"),
+        ("Foo", "BAR", "Bar"),
+        ("Ab", "XYZ", "XyZ"),
+        ("aB", "xyzw", "xYzw"),
+        ("aBcd", "xy", "xY"),
+        ("abCD", "xy", "xy"),
+        ("Ña", "xyz", "Xyz"),
+        ("A1", "xyz", "Xyz"),
+        ("1A", "xyz", "xYz"),
+        ("日A", "xyz", "xYz"),
+        ("A B", "xyzw", "XyZw"),
+        ("A_B", "wxyz", "WxYz"),
+        ("Hello World", "goodbye moon", "GoodbyE moon"),
+        ("HELLO WORLD", "goodbye moon", "GOODByE MOOn"),
+        ("Foo_Bar", "baz_qux", "Baz_Qux"),
+        ("Foo Bar", "BAZ QUUX", "Baz QuuX"),
+    ];
+    for (found, replacement, expected) in cases {
+        assert_eq!(
+            preserve_case(found, replacement),
+            expected,
+            "{found} → {replacement}"
+        );
+    }
+}
+
+#[test]
+fn replacing_with_preserve_case_keeps_each_matchs_case() {
+    let opts = FindOptions {
+        preserve_case: true,
+        ..options("foo")
+    };
+    let mut text = "foo Foo FOO fOO fOo".to_string();
+    assert_eq!(replace_all(&pattern(&opts), &mut text, "bar", &opts), 5);
+    assert_eq!(text, "bar Bar BAR bAR bAr");
+
+    let mut text = "Foo foo".to_string();
+    replace_next(
+        &pattern(&opts),
+        &mut text,
+        Selection::new(0, 3),
+        "bar",
+        &opts,
+    );
+    assert_eq!(text, "Bar foo");
+}
+
+#[test]
+fn preserve_case_applies_after_regex_groups_expand() {
+    let opts = FindOptions {
+        regex: true,
+        preserve_case: true,
+        ..options("f(o+)")
+    };
+    let mut text = "foo Foo FOO".to_string();
+    replace_all(&pattern(&opts), &mut text, r"x\1y", &opts);
+    assert_eq!(text, "xooy Xooy XOOY");
+}
+
+#[test]
+fn escape_finds_the_text_literally() {
+    let opts = FindOptions {
+        regex: true,
+        ..options(&escape("a.b(c)"))
+    };
+    let mut text = "axb(c) a.b(c)".to_string();
+    replace_all(&pattern(&opts), &mut text, "x", &opts);
+    assert_eq!(text, "axb(c) x");
+}

@@ -1,8 +1,8 @@
-//! Find and replace with Sublime's options: regex, case sensitive, whole word and wrap.
+//! Find and replace with Sublime's options: regex, case sensitive, whole word, wrap and preserve case.
 
 use std::ops::Range;
 
-use regex::{NoExpand, Regex, RegexBuilder};
+use regex::{Captures, NoExpand, Regex, RegexBuilder};
 
 use crate::selection::Selection;
 use crate::text::{byte_to_char, char_to_byte};
@@ -16,6 +16,8 @@ pub struct FindOptions {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub wrap: bool,
+    /// Replacing keeps the case of what was found ([`preserve_case`]).
+    pub preserve_case: bool,
 }
 
 impl Default for FindOptions {
@@ -26,11 +28,32 @@ impl Default for FindOptions {
             case_sensitive: false,
             whole_word: false,
             wrap: true,
+            preserve_case: false,
         }
     }
 }
 
+/// An option the find panel turns on and off (`toggle_regex`, `toggle_case_sensitive`,
+/// `toggle_whole_word`, `toggle_preserve_case`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindToggle {
+    Regex,
+    CaseSensitive,
+    WholeWord,
+    PreserveCase,
+}
+
 impl FindOptions {
+    pub fn toggle(&mut self, option: FindToggle) {
+        let value = match option {
+            FindToggle::Regex => &mut self.regex,
+            FindToggle::CaseSensitive => &mut self.case_sensitive,
+            FindToggle::WholeWord => &mut self.whole_word,
+            FindToggle::PreserveCase => &mut self.preserve_case,
+        };
+        *value = !*value;
+    }
+
     /// The search pattern, or `Ok(None)` when the query is empty.
     pub fn pattern(&self) -> Result<Option<Regex>, String> {
         if self.query.is_empty() {
@@ -157,6 +180,63 @@ fn replacement_template(replacement: &str) -> String {
     out
 }
 
+/// What one match becomes: the replacement (its groups expanded with `regex`), in the match's
+/// case with `preserve_case`.
+fn replaced_text(captures: &Captures, replacement: &str, options: &FindOptions) -> String {
+    let mut out = String::new();
+    if options.regex {
+        captures.expand(&replacement_template(replacement), &mut out);
+    } else {
+        out.push_str(replacement);
+    }
+    if options.preserve_case {
+        out = preserve_case(&captures[0], &out);
+    }
+    out
+}
+
+/// Sublime's "Preserve case" (as 4215 replaces): `found` with no capital letter makes the whole
+/// `replacement` lowercase, `found` made only of capitals makes it uppercase; otherwise each
+/// character takes the case of `found`'s character at its position (one neither upper nor lower
+/// case leaves it alone), and what goes past `found`'s end stays as written.
+pub fn preserve_case(found: &str, replacement: &str) -> String {
+    if !found.chars().any(char::is_uppercase) {
+        return replacement.chars().map(lower_char).collect();
+    }
+    if found.chars().all(char::is_uppercase) {
+        return replacement.chars().map(upper_char).collect();
+    }
+    let mut found = found.chars();
+    replacement
+        .chars()
+        .map(|c| match found.next() {
+            Some(f) if f.is_uppercase() => upper_char(c),
+            Some(f) if f.is_lowercase() => lower_char(c),
+            _ => c,
+        })
+        .collect()
+}
+
+/// A character's uppercase as one character, as Sublime maps them (`ß` → `ẞ`, not `SS`).
+fn upper_char(c: char) -> char {
+    if c == 'ß' {
+        return 'ẞ';
+    }
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(u), None) => u,
+        _ => c,
+    }
+}
+
+fn lower_char(c: char) -> char {
+    let mut lower = c.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(l), None) => l,
+        _ => c,
+    }
+}
+
 /// Replaces the selection if it is a match, then selects the next match.
 pub fn replace_next(
     pattern: &Regex,
@@ -173,15 +253,10 @@ pub fn replace_next(
             .is_some_and(|m| m.start() == start && m.end() == end);
     let mut selection = selection;
     if is_match {
-        let replaced = if options.regex {
-            let mut out = String::new();
-            if let Some(caps) = pattern.captures(&text[start..end]) {
-                caps.expand(&replacement_template(replacement), &mut out);
-            }
-            out
-        } else {
-            replacement.to_string()
-        };
+        let replaced = pattern
+            .captures(&text[start..end])
+            .map(|captures| replaced_text(&captures, replacement, options))
+            .unwrap_or_default();
         text.replace_range(start..end, &replaced);
         selection = Selection::caret(byte_to_char(text, start + replaced.len()));
     }
@@ -197,9 +272,11 @@ pub fn replace_all(
 ) -> usize {
     let count = find_all(pattern, text).len();
     if count > 0 {
-        *text = if options.regex {
+        *text = if options.regex || options.preserve_case {
             pattern
-                .replace_all(text, replacement_template(replacement).as_str())
+                .replace_all(text, |captures: &Captures| {
+                    replaced_text(captures, replacement, options)
+                })
                 .into_owned()
         } else {
             pattern
@@ -208,4 +285,9 @@ pub fn replace_all(
         };
     }
     count
+}
+
+/// `text` as a regex that finds it literally.
+pub fn escape(text: &str) -> String {
+    regex::escape(text)
 }

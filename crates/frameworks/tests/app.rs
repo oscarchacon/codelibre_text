@@ -410,6 +410,20 @@ fn jump_history_and_context_menus_as_drawn() {
     checks.right_click(600.0, 814.0);
     checks.click(627.0, 771.0);
     checks.shot("j11_find_field_cut");
+
+    // The replace panel shows "Preserve case"; Alt+A, Alt+C and Alt+R light it, "Case sensitive"
+    // and "Regular expression", the focus staying in the panel.
+    checks.key(Modifiers::NONE, Key::Escape);
+    checks.key(Modifiers::COMMAND, Key::H);
+    checks.settle(2);
+    checks.key(Modifiers::ALT, Key::A);
+    checks.key(Modifiers::ALT, Key::C);
+    checks.key(Modifiers::ALT, Key::R);
+    checks.shot("j12_replace_panel_toggles");
+    for key in [Key::A, Key::C, Key::R] {
+        checks.key(Modifiers::ALT, key);
+    }
+    checks.key(Modifiers::NONE, Key::Escape);
 }
 
 #[test]

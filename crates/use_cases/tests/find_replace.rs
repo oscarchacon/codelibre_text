@@ -1,6 +1,6 @@
 //! Tests for the find / replace use cases (`use_cases::find_replace`).
 
-use entities::find::FindOptions;
+use entities::find::{FindOptions, FindToggle};
 use entities::selection::Selection;
 use test_support::{active_text, status, World};
 use use_cases::editing::{DragBy, DragCombine, DragPoint, DragSelect, TextCommand};
@@ -50,7 +50,7 @@ fn find_under_caret_selects_the_word_and_searches_it_as_a_whole_word() {
         regex: true,
         ..query("x")
     });
-    editor.use_selection_as_query(true);
+    editor.use_selection_as_query();
     let find = &editor.state().find;
     assert_eq!(find.query, "bar");
     assert!(find.whole_word && !find.regex);
@@ -61,7 +61,7 @@ fn find_under_caret_selects_the_word_and_searches_it_as_a_whole_word() {
 fn using_an_explicit_selection_is_not_whole_word() {
     let world = World::new();
     let mut editor = editor_with(&world, "foo bar", Selection::new(0, 2));
-    editor.use_selection_as_query(true);
+    editor.use_selection_as_query();
     assert_eq!(editor.state().find.query, "fo");
     assert!(!editor.state().find.whole_word);
 }
@@ -547,4 +547,66 @@ fn whole_word_occurrences_end_with_copy_or_insert() {
     assert_eq!(ctrl_d_on_plus_equals(&["show_overlay"]), 1);
     assert_eq!(ctrl_d_on_plus_equals(&["copy"]), 2, "a plain search again");
     assert_eq!(ctrl_d_on_plus_equals(&["insert"]), 2);
+}
+
+#[test]
+fn slurp_find_string_keeps_the_options_and_escapes_with_regex_on() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "a.b axb", Selection::new(0, 3));
+    editor.set_find_options(FindOptions {
+        whole_word: true,
+        ..query("x")
+    });
+    editor.slurp_find_string();
+    let find = &editor.state().find;
+    assert_eq!(find.query, "a.b");
+    assert!(
+        find.whole_word && !find.regex,
+        "as Sublime 4215 leaves them"
+    );
+
+    editor.toggle_find_option(FindToggle::Regex);
+    editor.slurp_find_string();
+    assert_eq!(editor.state().find.query, r"a\.b");
+    assert!(editor.state().find.regex);
+}
+
+#[test]
+fn slurp_find_string_takes_and_selects_the_word_at_the_caret() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo bar", Selection::caret(5));
+    editor.slurp_find_string();
+    assert_eq!(editor.state().find.query, "bar");
+    assert!(!editor.state().find.whole_word);
+    assert_eq!(selection(&editor), Selection::new(4, 7));
+}
+
+#[test]
+fn slurp_replace_string_takes_the_selection_or_the_word_as_written() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "x$1y barbaz qux", Selection::new(0, 4));
+    editor.toggle_find_option(FindToggle::Regex);
+    editor.slurp_replace_string();
+    assert_eq!(
+        editor.state().replacement,
+        "x$1y",
+        "not escaped, even with regex on"
+    );
+
+    let id = editor.active_document().unwrap().id;
+    editor.sync_selection_from_view(id, Selection::caret(6));
+    editor.slurp_replace_string();
+    assert_eq!(editor.state().replacement, "barbaz");
+    assert_eq!(selection(&editor), Selection::caret(6), "the caret stays");
+}
+
+#[test]
+fn replace_all_preserves_case_when_toggled() {
+    let world = World::new();
+    let mut editor = editor_with(&world, "foo Foo FOO", Selection::caret(0));
+    editor.set_find_options(query("foo"));
+    editor.set_replacement("bar".into());
+    editor.toggle_find_option(FindToggle::PreserveCase);
+    editor.replace_all();
+    assert_eq!(active_text(&editor), "bar Bar BAR");
 }

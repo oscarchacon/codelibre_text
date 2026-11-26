@@ -6,6 +6,7 @@ use interface_adapters::controllers::command_controller::{poll_plugins, run};
 use interface_adapters::controllers::keyboard_controller::{
     clipboard_shortcut, key_pressed, KeyHandling,
 };
+use interface_adapters::gateways::{builtin_resources, sublime_json};
 use interface_adapters::view_state::{QuickPanel, ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::{json, Value};
 use test_support::{plugin_call, status, World};
@@ -913,4 +914,68 @@ fn up_and_down_on_the_first_and_last_rows_keep_the_caret_unless_move_to_limit_on
         !press(&mut editor, &mut view, "up"),
         "the widget goes to the start"
     );
+}
+
+#[test]
+fn find_toggles_need_the_focus_in_a_find_panel() {
+    let world = World::new().with_binding(bind(
+        &["alt+c"],
+        Command::new("toggle_case_sensitive"),
+        vec![
+            json!({ "key": "panel_type", "operand": "find" }),
+            json!({ "key": "panel_has_focus" }),
+        ],
+    ));
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    assert!(!press(&mut editor, &mut view, "alt+c"), "no panel");
+    for (replace, in_files) in [(false, false), (true, false), (false, true)] {
+        view.find_panel.visible = true;
+        view.find_panel.replace_mode = replace;
+        view.find_panel.in_files = in_files;
+        assert!(press(&mut editor, &mut view, "alt+c"));
+        assert_eq!(queued(&mut view), vec!["toggle_case_sensitive"]);
+    }
+    view.text_has_focus = true;
+    assert!(
+        !press(&mut editor, &mut view, "alt+c"),
+        "the text has the focus"
+    );
+}
+
+#[test]
+fn the_builtin_keymap_binds_the_find_toggles_in_the_find_panel() {
+    let mut world = World::new();
+    let keymap = sublime_json::parse(builtin_resources::PC_KEYMAP).unwrap();
+    for item in keymap.as_array().unwrap() {
+        let name = item["command"].as_str().unwrap();
+        if name.starts_with("toggle_") || name.starts_with("slurp_") {
+            let keys: Vec<&str> = item["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|k| k.as_str().unwrap())
+                .collect();
+            let context = item
+                .get("context")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            world = world.with_binding(bind(&keys, Command::new(name), context));
+        }
+    }
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    view.find_panel.visible = true;
+    view.find_panel.replace_mode = true;
+    for (key, command) in [
+        ("alt+r", "toggle_regex"),
+        ("alt+c", "toggle_case_sensitive"),
+        ("alt+w", "toggle_whole_word"),
+        ("alt+a", "toggle_preserve_case"),
+        ("ctrl+shift+e", "slurp_replace_string"),
+    ] {
+        assert!(press(&mut editor, &mut view, key), "{key}");
+        assert_eq!(queued(&mut view), vec![command]);
+    }
 }

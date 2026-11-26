@@ -1,4 +1,4 @@
-# Roadmap: what to do next (2026-11-23)
+# Roadmap: what to do next (2026-11-26)
 
 Plugins and Package Control are done (`docs/plugins.md`: phases A, B and C). This is the order the rest of the
 pending work should go in, most visible in daily use first. The full list of missing commands and settings is
@@ -109,10 +109,22 @@ Sublime 4 selects several tabs (Ctrl / Shift + click on a tab) and shows them si
 (Ctrl+J Ctrl+Shift+Left/Right), `focus_to_left/right` (Ctrl+J Ctrl+Page Up/Down), `focus_by_index`; and
 `close_selected` / `close_unselected` then mean the selected tabs (today, the tab clicked).
 
-## 2. Find panel toggles
+## 2. Find panel toggles (done, 2026-11-26)
 
-`toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case` (Alt+R / C / W), `cancel_find`,
-`slurp_replace_string`: the panel's buttons exist, the commands do not. Small and used all the time.
+`toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case` (Alt+R / C / W / A, on macOS
+Cmd+Alt+…, with Sublime's context: `panel_type` `find` and `panel_has_focus`, now false while the text has the
+focus) are `Editor::toggle_find_option` (`entities::find::FindToggle`); they work with the panel hidden and leave the
+focus where it is (`command_controller::FIND_TOGGLES`). The replace and Find in Files panels show a "Preserve case"
+button. `cancel_find` was already Find in Files' stop. Checked against Sublime 4215 (a probe plugin in a portable
+copy: `slurp_*`, the toggles, then `replace_all`):
+- Preserve case (`find::preserve_case`, also in Find in Files): a match with no capital letter makes the whole
+  replacement lowercase, one made only of capitals uppercase (`ß` → `ẞ`); otherwise each character takes the case of
+  the match's character at its position, and what goes past the match's end stays as written. After `\1` expands.
+- `slurp_find_string` keeps the other options (it used to turn regex and whole word off) and escapes the text
+  with regex on; `slurp_replace_string` (Ctrl+Shift+E, Find > Use Selection for Replace) takes the selection, or
+  the word at the caret, as written.
+Left for later: the panel's "In selection" and "Highlight matches" options (no key binds them), and whether a
+find panel opened over a selection escapes it with regex on.
 
 ## 3. Encodings
 

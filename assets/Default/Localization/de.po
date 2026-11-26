@@ -263,6 +263,10 @@ msgid "Use Selection for Find"
 msgstr "Auswahl als Suchbegriff verwenden"
 
 #: assets/Default/Main.sublime-menu
+msgid "Use Selection for Replace"
+msgstr "Auswahl als Ersetzung verwenden"
+
+#: assets/Default/Main.sublime-menu
 msgid "View"
 msgstr "Ansicht"
 
@@ -900,6 +904,10 @@ msgstr "Ganzes Wort"
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Wrap"
 msgstr "Am Anfang fortsetzen"
+
+#: crates/frameworks/src/views/find_panel.rs
+msgid "Preserve case"
+msgstr "Groß-/Kleinschreibung beibehalten"
 
 #: crates/frameworks/src/views/find_panel.rs
 msgid "Close (Esc)"

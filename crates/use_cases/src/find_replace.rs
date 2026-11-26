@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use entities::document::{Document, DocumentId, RegionSet};
-use entities::find::{self, FindOptions};
+use entities::find::{self, FindOptions, FindToggle};
 use entities::selection::Selection;
 use entities::text::{selected_text, view_word_at, word_at};
 
@@ -46,6 +46,49 @@ impl Editor {
         self.state.replacement = replacement;
     }
 
+    /// `toggle_regex`, `toggle_case_sensitive`, `toggle_whole_word`, `toggle_preserve_case`: they
+    /// work with the panel hidden too, as in Sublime.
+    pub fn toggle_find_option(&mut self, option: FindToggle) {
+        self.state.find.toggle(option);
+    }
+
+    /// `slurp_find_string`: the selection (or the word under the caret, then selected) becomes
+    /// the query. As Sublime 4215 does, the other options stay; with regex on the text is escaped.
+    pub fn slurp_find_string(&mut self) {
+        let Some(text) = self.slurp_selection(true) else {
+            return;
+        };
+        let find = &mut self.state.find;
+        find.query = if find.regex {
+            find::escape(&text)
+        } else {
+            text
+        };
+    }
+
+    /// `slurp_replace_string`: the selection (or the word under the caret) becomes the
+    /// replacement, as written (Sublime 4215 escapes nothing, even with regex on).
+    pub fn slurp_replace_string(&mut self) {
+        if let Some(text) = self.slurp_selection(false) {
+            self.state.replacement = text;
+        }
+    }
+
+    /// The selected text, or the word at the caret (`select_word`: also selected); `None` when
+    /// it is empty.
+    fn slurp_selection(&mut self, select_word: bool) -> Option<String> {
+        let doc = self.active_document_mut()?;
+        let mut selection = doc.selection();
+        if selection.is_empty() {
+            selection = word_at(&doc.text, selection.head);
+            if select_word {
+                doc.set_selection(selection);
+            }
+        }
+        let text = selected_text(&doc.text, selection);
+        (!text.is_empty()).then(|| text.to_string())
+    }
+
     /// Opening the find panel uses a single-line selection as the query, like Sublime.
     pub fn use_selection_as_query_if_single_line(&mut self) {
         let Some(doc) = self.active_document() else {
@@ -57,26 +100,19 @@ impl Editor {
         }
     }
 
-    /// `slurp_find_string` / `find_under`: the selection (or the word under the caret) becomes the
-    /// query. With `whole_word_if_empty`, a word taken from the caret is searched as a whole word.
-    pub fn use_selection_as_query(&mut self, whole_word_if_empty: bool) {
-        let Some(doc) = self.active_document_mut() else {
+    /// `find_under` / `find_under_prev`: the selection (or the word under the caret) becomes the
+    /// query, literal; a word taken from the caret is searched as a whole word.
+    pub fn use_selection_as_query(&mut self) {
+        let from_caret = self
+            .active_document()
+            .is_some_and(|doc| doc.selection().is_empty());
+        let Some(text) = self.slurp_selection(true) else {
             return;
         };
-        let mut selection = doc.selection();
-        let from_caret = selection.is_empty();
-        if from_caret {
-            selection = word_at(&doc.text, selection.head);
-            doc.set_selection(selection);
-        }
-        let text = selected_text(&doc.text, selection).to_string();
-        if text.is_empty() {
-            return;
-        }
         let find = &mut self.state.find;
         find.query = text;
         find.regex = false;
-        find.whole_word = from_caret && whole_word_if_empty;
+        find.whole_word = from_caret;
     }
 
     /// Selects the next (or previous) match. Returns false when the query is empty.
