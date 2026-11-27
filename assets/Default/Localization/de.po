@@ -1577,3 +1577,87 @@ msgstr "In der Seitenleiste zeigen"
 #: assets/Default/Image Context.sublime-menu
 msgid "Reopen File as Text"
 msgstr "Datei als Text erneut öffnen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Tab Selection"
+msgstr "Tab-Auswahl"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Others"
+msgstr "Andere abwählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Left"
+msgstr "Links abwählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Right"
+msgstr "Rechts abwählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Current"
+msgstr "Aktuellen abwählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Left"
+msgstr "Nach links auswählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Right"
+msgstr "Nach rechts auswählen"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Left"
+msgstr "Fokus nach links"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Right"
+msgstr "Fokus nach rechts"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 1"
+msgstr "Ausgewählten Tab 1 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 2"
+msgstr "Ausgewählten Tab 2 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 3"
+msgstr "Ausgewählten Tab 3 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 4"
+msgstr "Ausgewählten Tab 4 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 5"
+msgstr "Ausgewählten Tab 5 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 6"
+msgstr "Ausgewählten Tab 6 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 7"
+msgstr "Ausgewählten Tab 7 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 8"
+msgstr "Ausgewählten Tab 8 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 9"
+msgstr "Ausgewählten Tab 9 fokussieren"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 10"
+msgstr "Ausgewählten Tab 10 fokussieren"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Split View"
+msgstr "Geteilte Ansicht"
+
+#: crates/use_cases/src/tab_selection.rs
+msgid "Key Binding Changed\n\nThe key binding for Join Lines has changed to {primary}+Shift+J.\n\nThe binding was changed to open up {primary}+J to be used as the first key press for various new key bindings, such as Unselect to Left, Unselect to Right, Select to Left and Select to Right."
+msgstr "Tastenkürzel geändert\n\nDas Tastenkürzel für Zeilen verbinden ist jetzt {primary}+Umschalt+J.\n\nEs wurde geändert, damit {primary}+J als erste Taste mehrerer neuer Tastenkürzel dienen kann, etwa Links abwählen, Rechts abwählen, Nach links auswählen und Nach rechts auswählen."

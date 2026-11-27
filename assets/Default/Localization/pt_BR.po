@@ -1577,3 +1577,87 @@ msgstr "Mostrar na barra lateral"
 #: assets/Default/Image Context.sublime-menu
 msgid "Reopen File as Text"
 msgstr "Reabrir o arquivo como texto"
+
+#: assets/Default/Main.sublime-menu
+msgid "Tab Selection"
+msgstr "Seleção de abas"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Others"
+msgstr "Desmarcar as outras"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Left"
+msgstr "Desmarcar à esquerda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Right"
+msgstr "Desmarcar à direita"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Current"
+msgstr "Desmarcar a atual"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Left"
+msgstr "Selecionar à esquerda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Right"
+msgstr "Selecionar à direita"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Left"
+msgstr "Focar à esquerda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Right"
+msgstr "Focar à direita"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 1"
+msgstr "Focar a aba selecionada 1"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 2"
+msgstr "Focar a aba selecionada 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 3"
+msgstr "Focar a aba selecionada 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 4"
+msgstr "Focar a aba selecionada 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 5"
+msgstr "Focar a aba selecionada 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 6"
+msgstr "Focar a aba selecionada 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 7"
+msgstr "Focar a aba selecionada 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 8"
+msgstr "Focar a aba selecionada 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 9"
+msgstr "Focar a aba selecionada 9"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 10"
+msgstr "Focar a aba selecionada 10"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Split View"
+msgstr "Visão dividida"
+
+#: crates/use_cases/src/tab_selection.rs
+msgid "Key Binding Changed\n\nThe key binding for Join Lines has changed to {primary}+Shift+J.\n\nThe binding was changed to open up {primary}+J to be used as the first key press for various new key bindings, such as Unselect to Left, Unselect to Right, Select to Left and Select to Right."
+msgstr "Atalho de teclado alterado\n\nO atalho de Unir linhas mudou para {primary}+Shift+J.\n\nEle foi alterado para liberar {primary}+J como primeira tecla de vários atalhos novos, como Desmarcar à esquerda, Desmarcar à direita, Selecionar à esquerda e Selecionar à direita."

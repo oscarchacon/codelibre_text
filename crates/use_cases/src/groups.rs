@@ -50,7 +50,11 @@ impl Editor {
     pub fn set_layout(&mut self, layout: Layout) {
         let last = layout.group_count() - 1;
         for doc in &mut self.state.documents {
-            doc.group = doc.group.min(last);
+            if doc.group > last {
+                // The tabs of the groups that go join the last one, unselected.
+                doc.group = last;
+                doc.tab_selected = false;
+            }
         }
         self.state.layout = layout;
         match self.active_document().map(|d| d.group) {
@@ -81,6 +85,8 @@ impl Editor {
 
     /// Puts a document in `group` at `index` among its tabs (the end when beyond them). The
     /// focus does not change, unless the document was the active one: it takes the focus along.
+    /// The group it leaves and the one it joins keep only their active tab selected, as in
+    /// Sublime.
     pub fn set_view_index(&mut self, id: DocumentId, group: usize, index: usize) {
         if group >= self.group_count() {
             return;
@@ -88,6 +94,8 @@ impl Editor {
         let Some(from) = self.index_of(id) else {
             return;
         };
+        self.clear_tab_selection(self.state.documents[from].group);
+        self.clear_tab_selection(group);
         let active = self.active_document().map(|d| d.id);
         let mut doc = self.state.documents.remove(from);
         doc.group = group;
@@ -116,9 +124,14 @@ impl Editor {
     }
 
     /// `move_to_group`: the active document goes to the end of `group`'s tabs, and the focus
-    /// goes with it.
+    /// goes with it; with several tabs selected, they all go.
     pub fn move_active_to_group(&mut self, group: usize) {
-        if let Some(id) = self.active_document().map(|d| d.id) {
+        if group >= self.group_count() {
+            return;
+        }
+        if self.group_has_multiselect() {
+            self.move_selected_to_group(group);
+        } else if let Some(id) = self.active_document().map(|d| d.id) {
             self.set_view_index(id, group, usize::MAX);
             self.activate_document(id);
         }
@@ -128,13 +141,6 @@ impl Editor {
     pub fn move_active_to_neighboring_group(&mut self, forward: bool) {
         let group = self.state.layout.neighbor(self.state.active_group, forward);
         self.move_active_to_group(group);
-    }
-
-    /// `select_by_index` (Alt+1…): the tab at `index` of the focused group.
-    pub fn activate_in_group(&mut self, index: usize) {
-        if let Some(&at) = self.group_indexes(self.state.active_group).get(index) {
-            self.activate(at);
-        }
     }
 
     /// The `max_columns` window setting (`set_max_columns`): `new_pane` adds columns up to it,
@@ -156,10 +162,7 @@ impl Editor {
         let active = self.active_document().map(|d| d.id);
         self.set_layout(layout);
         match active.filter(|_| move_view) {
-            Some(id) => {
-                self.set_view_index(id, count - 1, usize::MAX);
-                self.activate_document(id);
-            }
+            Some(_) => self.move_active_to_group(count - 1),
             None => self.focus_group(count - 1),
         }
     }
@@ -176,6 +179,7 @@ impl Editor {
         for doc in &mut self.state.documents {
             if doc.group == group {
                 doc.group = into;
+                doc.tab_selected = false;
             } else if doc.group > group {
                 doc.group -= 1;
             }

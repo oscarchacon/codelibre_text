@@ -14,7 +14,7 @@ use interface_adapters::controllers::keyboard_controller::{self, KeyHandling};
 use interface_adapters::controllers::ui_controller::UiEvent;
 use interface_adapters::controllers::{command_controller, ui_controller};
 use interface_adapters::presenters;
-use interface_adapters::view_models::{ContextMenuViewModel, GroupViewModel};
+use interface_adapters::view_models::{ContextMenuViewModel, EditorViewModel, GroupViewModel};
 use interface_adapters::view_state::{ViewRequest, ViewState, WidgetEdit, WidgetKey};
 use serde_json::json;
 use use_cases::windows::WindowId;
@@ -473,12 +473,10 @@ impl App {
         let focused = ctx.memory(|m| m.focused());
         window.view.text_has_focus = text_area.is_some() && focused == text_area;
         window.view.field_has_focus = focused.is_some() && !window.view.text_has_focus;
-        // The focus went to another group (a key, a plugin): its text takes the keyboard from the
-        // text of the group that had it.
+        // The focus went to another view the window shows (a key, a plugin, another selected tab):
+        // its text takes the keyboard from the text that had it.
         if focused.is_some() && !window.view.text_has_focus {
-            let shown: Vec<usize> = (0..self.editor.group_count())
-                .filter_map(|g| self.editor.active_index_in_group(g))
-                .collect();
+            let shown = self.editor.shown_indexes();
             let documents = &self.editor.state().documents;
             if shown
                 .into_iter()
@@ -934,7 +932,7 @@ fn show_group(
             );
         });
 
-    let Some(model) = &group.editor else {
+    if group.editors.is_empty() {
         let rest = ui.available_rect_before_wrap();
         if ui
             .interact(rest, ui.id().with("empty_group"), egui::Sense::CLICK)
@@ -944,13 +942,64 @@ fn show_group(
         }
         ui.centered_and_justified(|ui| {
             ui.label(
-                RichText::new(hints.join("\n"))
-                    .color(chrome.fg_dim)
-                    .size(14.0),
+                RichText::new(hints.join(
+                    "
+",
+                ))
+                .color(chrome.fg_dim)
+                .size(14.0),
             );
         });
         return;
-    };
+    }
+    // Its selected tabs side by side, in tab order, with a line between them.
+    let area = ui.available_rect_before_wrap();
+    let count = group.editors.len();
+    let width = area.width() / count as f32;
+    for (position, model) in group.editors.iter().enumerate() {
+        let left = area.left() + width * position as f32;
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(left, area.top()),
+            egui::pos2(left + width, area.bottom()),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .id_salt(("selected_tab", model.document)),
+        );
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        show_document(
+            &mut child,
+            editor,
+            engine,
+            selection_sync,
+            chrome,
+            model,
+            menu,
+            events,
+        );
+        if position > 0 {
+            ui.painter().line_segment(
+                [rect.left_top(), rect.left_bottom()],
+                egui::Stroke::new(1.0_f32, chrome.border),
+            );
+        }
+    }
+    ui.allocate_rect(area, egui::Sense::hover());
+}
+
+/// One document a group shows: its text, or its sheet (an image, minihtml).
+#[allow(clippy::too_many_arguments)]
+fn show_document(
+    ui: &mut egui::Ui,
+    editor: &mut Editor,
+    engine: &SharedSyntaxEngine,
+    selection_sync: &mut SelectionSync,
+    chrome: &Chrome,
+    model: &EditorViewModel,
+    menu: Option<&ContextMenuViewModel>,
+    events: &mut Vec<UiEvent>,
+) {
     if let Some(sheet) = &model.sheet {
         egui::Frame::new().fill(chrome.editor_bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
