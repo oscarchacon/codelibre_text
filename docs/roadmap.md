@@ -1,4 +1,4 @@
-# Roadmap: what to do next (2026-11-26)
+# Roadmap: what to do next (2026-11-27)
 
 Plugins and Package Control are done (`docs/plugins.md`: phases A, B and C). This is the order the rest of the
 pending work should go in, most visible in daily use first. The full list of missing commands and settings is
@@ -102,12 +102,30 @@ are those of Sublime's mousemaps (`Default (Linux|Windows|OSX).sublime-mousemap`
   in Sublime's `Default` they are tab commands (Selection > Tab Selection, Ctrl+J chords): see "Multi-selected tabs"
   below.
 
-## 1b. Multi-selected tabs
+## 1b. Multi-selected tabs (done, 2026-11-27)
 
-Sublime 4 selects several tabs (Ctrl / Shift + click on a tab) and shows them side by side. Commands: `unselect_others`
-(Ctrl+J Ctrl+Up), `unselect_to_left/right` (Ctrl+J Ctrl+Left/Right), `unselect_current`, `select_to_left/right`
-(Ctrl+J Ctrl+Shift+Left/Right), `focus_to_left/right` (Ctrl+J Ctrl+Page Up/Down), `focus_by_index`; and
-`close_selected` / `close_unselected` then mean the selected tabs (today, the tab clicked).
+Sublime 4 selects several tabs and shows them side by side in their group (`frameworks/src/app.rs::show_group`, a line between
+them; a click in one's text focuses it, `UiEvent::FocusView`). Each group has its own selection:
+`Document::tab_selected`, which counts while the group's active tab is selected too (`use_cases/src/tab_selection.rs`;
+the rules, `entities::tab_selection`). Checked against Sublime 4215 (two probe plugins in a portable copy, six scratch
+views, `select_sheets` / `focus_view`, then each command; real keys sent with `SendKeys`):
+- `select_to_left/right` (Ctrl+J Ctrl+Shift+Left/Right) add the tab beside the outermost selected one and focus it;
+  `unselect_to_left/right` (Ctrl+J Ctrl+Left/Right) take the selected tabs on that side of the focused one,
+  `unselect_others` (Ctrl+J Ctrl+Up) all but it; `unselect_current` gives the focus to the next selected tab to the
+  right, else to the left (closing the focused tab does the same); `focus_to_left/right` (Ctrl+J Ctrl+Page Up/Down) and
+  `focus_by_index` (Alt+1…0 with the `group_has_multiselect` context) move the focus among them, without wrapping.
+- Focusing a selected tab keeps the selection, any other drops it; `select_by_index` and `select_last_tab` (Alt+9) leave
+  one tab; `next_view` / `prev_view` first collapse to the selected tab next to the focused one that way; opening a file
+  or moving a tab (`set_view_index`) leaves one; `move_to_group` / `new_pane` take every selected tab along.
+- `close_selected` / `close_unselected` close the group's selected tabs or the others, whichever tab was clicked.
+- Ctrl (Cmd) + click on a tab adds it or takes it away, Shift + click selects from the focused tab to it (not checked
+  against Sublime: a plugin cannot click). The tab menu's Split View is `clone_file {add_to_selection}`.
+- Join Lines moved to Ctrl+Shift+J (Cmd+Shift+J), as in Sublime 4, so Ctrl+J starts the chords; Ctrl+J Ctrl+J
+  (`primary_j_changed`) says so.
+- API: `window.selected_sheets()`, `selected_sheets_in_group`, `select_sheets`, `sheet.is_selected()`.
+GUI script: `multi_selected_tabs_as_drawn`. Left for later: the session does not keep the selection, a dragged tab
+goes alone, and which tab takes the focus after `close_selected` (Sublime: the nearest tab left of the focused one;
+ours: the group's most recently used).
 
 ## 2. Find panel toggles (done, 2026-11-26)
 

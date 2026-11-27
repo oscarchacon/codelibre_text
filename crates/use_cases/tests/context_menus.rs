@@ -202,19 +202,34 @@ fn a_tab_closes_the_unmodified_tabs_and_those_of_deleted_files() {
     );
 }
 
+/// Sublime 4215 closes the group's selected tabs (or the others) whichever tab was clicked.
 #[test]
-fn close_selected_and_unselected_are_the_tab_clicked_and_the_others() {
+fn close_selected_and_unselected_are_the_selected_tabs_and_the_others() {
     let (_world, mut editor) = four_files();
+    let id = |editor: &Editor, i: usize| editor.state().documents[i].id;
+    let (b, d) = (id(&editor, 1), id(&editor, 3));
+    editor.select_documents(&[b, d]);
+    editor.close_by_index(&Command::with_args(
+        "close_unselected",
+        json!({ "group": 0, "index": 0 }),
+    ));
+    assert_eq!(names_in(&editor, 0), ["b.txt", "d.txt"]);
+
+    let (_world, mut editor) = four_files();
+    let (b, d) = (id(&editor, 1), id(&editor, 3));
+    editor.select_documents(&[b, d]);
     editor.close_by_index(&Command::with_args(
         "close_selected",
         json!({ "group": 0, "index": 0 }),
     ));
-    assert_eq!(names_in(&editor, 0), ["b.txt", "c.txt", "d.txt"]);
+    assert_eq!(names_in(&editor, 0), ["a.txt", "c.txt"]);
+
+    // With one tab selected, it is the active one.
     editor.close_by_index(&Command::with_args(
-        "close_unselected",
-        json!({ "group": 0, "index": 2 }),
+        "close_selected",
+        json!({ "group": 0, "index": 0 }),
     ));
-    assert_eq!(names_in(&editor, 0), ["d.txt"]);
+    assert_eq!(names_in(&editor, 0).len(), 1);
 }
 
 #[test]

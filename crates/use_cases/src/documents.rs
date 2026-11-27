@@ -249,11 +249,16 @@ impl Editor {
             .map(|d| d.id)
     }
 
+    /// Focuses the document at `index`. A tab its group has not selected leaves it alone (its
+    /// other selected tabs no longer are); a selected one keeps them, side by side.
     pub fn activate(&mut self, index: usize) {
         if let Some(doc) = self.state.documents.get(index) {
-            let id = doc.id;
+            let (id, group, selected) = (doc.id, doc.group, doc.tab_selected);
+            if !selected {
+                self.clear_tab_selection(group);
+            }
             self.state.active = index;
-            self.state.active_group = doc.group;
+            self.state.active_group = group;
             self.state.recently_used.retain(|d| *d != id);
             self.state.recently_used.insert(0, id);
             self.plugin_activation_events();
@@ -274,9 +279,20 @@ impl Editor {
         }
     }
 
-    /// Next / previous tab of the focused group, in tab order.
+    /// Next / previous tab of the focused group, in tab order. With several tabs selected, the
+    /// selection first collapses to the selected tab next to the focused one that way (the
+    /// focused one at the end), as in Sublime.
     pub fn cycle_documents(&mut self, forward: bool) {
-        let tabs = self.group_indexes(self.state.active_group);
+        let group = self.state.active_group;
+        let tabs = self.group_indexes(group);
+        if let Some(selection) = self
+            .tab_selection(group)
+            .filter(|selection| selection.is_multiple())
+        {
+            self.clear_tab_selection(group);
+            self.activate(tabs[selection.collapse_towards(forward)]);
+            return;
+        }
         let count = tabs.len();
         if count > 0 {
             let at = tabs
@@ -372,6 +388,8 @@ impl Editor {
             return;
         };
         let active = self.active_document().map(|d| d.id);
+        // The focused tab of several selected: the next selected one takes the focus.
+        let next_selected = self.next_selected_after_closing(id);
         let doc = self.state.documents.remove(index);
         self.gateways.syntaxes.forget(doc.id);
         if let Some(path) = doc.path {
@@ -384,6 +402,8 @@ impl Editor {
         self.plugin_event("on_close", doc.id);
         if self.state.documents.is_empty() {
             self.state.active = 0;
+        } else if let Some(next) = next_selected.filter(|_| active == Some(doc.id)) {
+            self.activate_document(next);
         } else if active == Some(doc.id) {
             // Its group keeps the focus, even when left empty.
             self.focus_group(doc.group);

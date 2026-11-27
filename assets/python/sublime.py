@@ -2242,12 +2242,12 @@ class Window:
                 for sheet_id in sublime_api.window_sheets_in_group(group, self._window_arg())]
 
     def selected_sheets(self):
-        sheet = self.active_sheet()
-        return [sheet] if sheet else []
+        """The selected sheets of the focused group (several when tabs are multi-selected)."""
+        return self.selected_sheets_in_group(self.active_group())
 
     def selected_sheets_in_group(self, group):
-        sheet = self.active_sheet_in_group(group)
-        return [sheet] if sheet else []
+        return [_make_sheet(sheet_id)
+                for sheet_id in sublime_api.window_selected_sheets_in_group(int(group), self._window_arg())]
 
     def transient_sheet_in_group(self, group):
         view = self.transient_view_in_group(group)
@@ -2262,8 +2262,10 @@ class Window:
             self.focus_view(sheet._tab())
 
     def select_sheets(self, sheets):
-        if sheets:
-            self.focus_sheet(sheets[0])
+        """Makes ``sheets`` the selected sheets of their groups (shown side by side)."""
+        ids = [sheet.id() for sheet in sheets if sheet]
+        if ids:
+            sublime_api.window_select_sheets(ids, self._window_arg())
 
     def get_sheet_index(self, sheet):
         return self.get_view_index(sheet._tab()) if sheet else (-1, -1)

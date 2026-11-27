@@ -19,6 +19,8 @@ pub struct TabViewModel {
     pub tooltip: String,
     pub dirty: bool,
     pub active: bool,
+    /// One of its group's selected tabs (shown side by side with the active one).
+    pub selected: bool,
     /// A preview (transient view): its title is in italics.
     pub transient: bool,
 }
@@ -259,7 +261,9 @@ pub struct GroupViewModel {
     /// Its tab bar is drawn (`toggle_tabs`).
     pub show_tabs: bool,
     pub tabs: Vec<TabViewModel>,
-    pub editor: Option<EditorViewModel>,
+    /// The documents it shows side by side, in tab order: its selected tabs (usually only its
+    /// active one). None when it has no documents.
+    pub editors: Vec<EditorViewModel>,
 }
 
 /// A fold arrow in the gutter: on a line (0-based) that heads a block or starts a fold.

@@ -85,7 +85,8 @@ pub fn show(
         });
 }
 
-/// `focused`: its group has the focus (its active tab is underlined in the accent color).
+/// `focused`: its group has the focus (its active tab is underlined in the accent color; its
+/// other selected tabs, in a dimmer line).
 fn tab_button(
     ui: &mut Ui,
     chrome: &Chrome,
@@ -106,7 +107,8 @@ fn tab_button(
         response.dnd_set_drag_payload(DraggedTab(index));
     }
 
-    let background = if tab.active {
+    // A selected tab (shown beside the active one) looks like the active one.
+    let background = if tab.active || tab.selected {
         chrome.editor_bg
     } else if response.hovered() {
         chrome.hover_bg
@@ -124,16 +126,25 @@ fn tab_button(
         },
         background,
     );
-    if tab.active && focused {
+    if (tab.active || tab.selected) && focused {
+        let line = if tab.active {
+            chrome.accent
+        } else {
+            chrome.accent.gamma_multiply(0.45)
+        };
         painter.line_segment(
             [
                 rect.left_top() + egui::vec2(4.0, 0.5),
                 rect.right_top() + egui::vec2(-4.0, 0.5),
             ],
-            egui::Stroke::new(2.0_f32, chrome.accent),
+            egui::Stroke::new(2.0_f32, line),
         );
     }
-    let color = if tab.active { chrome.fg } else { chrome.fg_dim };
+    let color = if tab.active || tab.selected {
+        chrome.fg
+    } else {
+        chrome.fg_dim
+    };
     // A transient view (a preview) has its title in italics, as in Sublime.
     let title = egui::RichText::new(&tab.title).font(font).color(color);
     let title = if tab.transient {
@@ -180,7 +191,18 @@ fn tab_button(
         // Double click keeps a preview open as a tab of its own.
         Some(UiEvent::KeepTab(index))
     } else if response.clicked() {
-        Some(UiEvent::ActivateTab(index))
+        // Ctrl (Cmd on macOS) + click adds or takes a tab from the selection, Shift + click
+        // selects the tabs from the focused one, as in Sublime.
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.command || modifiers.shift {
+            Some(UiEvent::SelectTab {
+                index,
+                toggle: modifiers.command,
+                range: modifiers.shift,
+            })
+        } else {
+            Some(UiEvent::ActivateTab(index))
+        }
     } else {
         None
     };

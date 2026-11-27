@@ -130,6 +130,10 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   tab instead (`Editor::find_results_tab`); a double click in any tab with those settings opens a result
   (`UiEvent::TextDoubleClicked`).
 - Python `Region` has `__len__`, so a caret is falsy: test `is None`, never `if region:`.
+- Multi-selected tabs (`use_cases/src/tab_selection.rs`, rules in `entities::tab_selection`, `docs/roadmap.md` 1b): a
+  group shows its selected tabs side by side (`GroupViewModel::editors`); `Document::tab_selected` counts only while
+  the group's active tab has it, and `Editor::activate` of an unselected tab clears its group's. Ctrl+J starts their
+  chords, so Join Lines is Ctrl+Shift+J, as in Sublime 4.
 
 ## Runtime state (Windows)
 - Packages: `%APPDATA%\codelibre_text\data\Packages` (`User` inside); Sublime's `%APPDATA%\Sublime Text\Packages`
@@ -153,7 +157,7 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   (`check_installed_packages`); `install_package_control` downloads Package Control there with `curl`.
 
 ## Pending work (read before starting new features)
-- `docs/roadmap.md` — what to do next, in order (multiple cursors and the find panel toggles done; multi-selected tabs next, then encodings).
+- `docs/roadmap.md` — what to do next, in order (multiple cursors, the find panel toggles and multi-selected tabs done; encodings next).
 - `docs/plugins.md` — Python plugins: phases A, B and C done; phase B's core (call ids, timers, view events, quick / input panels,
   dialogs, resources, scratch views, output panels and their results, build systems, the input panel's view, statuses
   and regions drawn, query_context, command hooks, input handlers, command metadata, projects); clones, windows,
@@ -174,7 +178,6 @@ Keep Clean Architecture names: Entities, Use Cases, Controllers, Presenters, Vie
   settings each reads; check it before implementing a command so its arguments match Sublime's.
 
 ## Not implemented
-Multi-selected tabs (`unselect_others`, `select_to_left/right`…, `docs/roadmap.md` 1b; `close_selected` closes the tab clicked),
-and by design no Python 3.3 or 3.8 host: every plugin runs on the
+By design no Python 3.3 or 3.8 host: every plugin runs on the
 bundled 3.13 (the console runs Python there too).
 Highlighting is skipped above 4 MB.

@@ -716,3 +716,41 @@ fn quick_add_and_skip_next_as_drawn() {
     checks.type_text("Z");
     checks.shot("k04_typed_at_first_and_fourth");
 }
+
+#[test]
+#[ignore = "draws the window with a GPU; run by hand and look at target/tmp/gui-checks"]
+fn multi_selected_tabs_as_drawn() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write_profile(data.path());
+    let paths: Vec<PathBuf> = ["one.txt", "two.txt", "three.txt", "four.txt"]
+        .iter()
+        .map(|name| {
+            let path = files.path().join(name);
+            std::fs::write(&path, format!("This is {name}\nsecond line\n")).unwrap();
+            path
+        })
+        .collect();
+    let mut checks = start(data.path(), paths);
+    checks.shot("t01_four_tabs");
+    // Ctrl+J, Ctrl+Shift+Left (select_to_left): three.txt joins, side by side, with the focus.
+    checks.key(Modifiers::COMMAND, Key::J);
+    checks.key(Modifiers::COMMAND | Modifiers::SHIFT, Key::ArrowLeft);
+    checks.shot("t02_select_to_left");
+    checks.type_text("typed in three ");
+    checks.shot("t03_typed_in_the_focused_one");
+    // A click in the other one's text gives it the focus; both stay selected.
+    checks.click(1000.0, 300.0);
+    checks.type_text("typed in four ");
+    checks.shot("t04_clicked_the_other");
+    // Ctrl + click on the first tab adds it (the side bar lists the open files at the left).
+    checks.click_with(Modifiers::COMMAND, PointerButton::Primary, 267.0, 43.0);
+    checks.shot("t05_ctrl_click_first_tab");
+    // Ctrl+J, Ctrl+Up (unselect_others): the focused one alone.
+    checks.key(Modifiers::COMMAND, Key::J);
+    checks.key(Modifiers::COMMAND, Key::ArrowUp);
+    checks.shot("t06_unselect_others");
+    // Shift + click on the last tab: every tab from the focused one to it.
+    checks.click_with(Modifiers::SHIFT, PointerButton::Primary, 555.0, 43.0);
+    checks.shot("t07_shift_click_last_tab");
+}

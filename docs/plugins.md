@@ -790,7 +790,7 @@ Goal: install and run Package Control and the popular packages (LSP, GitGutter, 
       which reopens it as text in its place unless it is binary; its entries run with the image active; Sublime
       Merge's are left out) and `Console Input Widget Context` (the console's field, `CONSOLE_INPUT`: cut, copy, paste,
       select all; there is one host, so no `console_python_version`). The tab menus have Sublime's other entries:
-      `close_selected` / `close_unselected` (tabs are not multi-selected: the tab clicked, the others),
+      `close_selected` / `close_unselected` (the group's selected tabs, the others: `docs/roadmap.md` 1b),
       `close_unmodified`, `close_unmodified_to_right_by_index`, `close_deleted_files` (`Editor::close_by_index`). Tests:
       `open_files_images_and_the_console_s_field_have_their_own_menus` (`entities/tests/menu.rs`),
       `a_tab_closes_the_unmodified_tabs_and_those_of_deleted_files`,
