@@ -253,9 +253,9 @@ pub fn show(
                     .layouter(&mut layouter)
                     .show(ui);
 
-                // A click in another group's text gives that group the focus.
+                // A click in another view's text (beside it, or in another group) gives it the focus.
                 if !model.active && (output.response.clicked() || output.response.gained_focus()) {
-                    events.push(UiEvent::FocusGroup(model.group));
+                    events.push(UiEvent::FocusView(model.document));
                 }
                 let text = output.galley.text();
                 // A right click keeps the selection (its menu's Copy is about it), as in Sublime.
@@ -284,7 +284,7 @@ pub fn show(
                     events,
                 );
                 if dragged.selection.is_some() && !model.active {
-                    events.push(UiEvent::FocusGroup(model.group));
+                    events.push(UiEvent::FocusView(model.document));
                 }
                 let kept = kept.or(dragged.selection);
                 let selection = kept
@@ -340,7 +340,7 @@ pub fn show(
                         continue;
                     }
                     if !model.active {
-                        events.push(UiEvent::FocusGroup(model.group));
+                        events.push(UiEvent::FocusView(model.document));
                     }
                     if let Some(pointer) = response.interact_pointer_pos() {
                         let at = if in_gutter {

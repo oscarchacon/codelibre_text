@@ -8,6 +8,7 @@ use entities::command::Command;
 use entities::document::{DocumentId, LineEnding};
 use entities::find::FindToggle;
 use entities::layout::Layout;
+use entities::tab_selection::TabSelectionCommand;
 use entities::text_commands::{Case, LineOrder};
 use use_cases::builds::BuildPlan;
 use use_cases::completions::AutoCompleteOptions;
@@ -381,6 +382,17 @@ const WINDOW_COMMANDS: &[&str] = &[
     "next_view_in_stack",
     "prev_view_in_stack",
     "select_by_index",
+    "select_last_tab",
+    "unselect_others",
+    "unselect_current",
+    "unselect_to_left",
+    "unselect_to_right",
+    "select_to_left",
+    "select_to_right",
+    "focus_to_left",
+    "focus_to_right",
+    "focus_by_index",
+    "primary_j_changed",
     "edit_settings",
     "reload_packages",
     "install_package_control",
@@ -645,6 +657,18 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "new_window" => {
             editor.new_window();
         }
+        "clone_file" if command.bool_arg("add_to_selection", false) => {
+            // The tab menu's Split View: the tab clicked (`group` / `index`), else the active one.
+            let group = command.usize_arg("group", editor.active_group());
+            if let Some(&at) = editor
+                .group_indexes(group)
+                .get(command.usize_arg("index", usize::MAX))
+            {
+                editor.activate(at);
+            }
+            editor.clone_into_selection();
+            view.focus_editor = true;
+        }
         "clone_file" => {
             editor.clone_active_document();
         }
@@ -855,6 +879,15 @@ fn run_command(editor: &mut Editor, view: &mut ViewState, command: &Command) {
         "next_view_in_stack" => editor.cycle_recent_documents(true),
         "prev_view_in_stack" => editor.cycle_recent_documents(false),
         "select_by_index" => editor.activate_in_group(command.usize_arg("index", 0)),
+        "select_last_tab" => editor.activate_last_in_group(),
+        name if TabSelectionCommand::from_name(name, 0).is_some() => {
+            if let Some(tabs) = TabSelectionCommand::from_name(name, command.usize_arg("index", 0))
+            {
+                editor.run_tab_selection_command(tabs);
+                view.focus_editor = true;
+            }
+        }
+        "primary_j_changed" => editor.explain_primary_j_changed(),
 
         // ----- groups --------------------------------------------------------------------------
         "set_layout" => match Layout::from_json(&command.args) {
