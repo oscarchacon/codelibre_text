@@ -1577,3 +1577,87 @@ msgstr "Afficher dans la barre latérale"
 #: assets/Default/Image Context.sublime-menu
 msgid "Reopen File as Text"
 msgstr "Rouvrir le fichier comme texte"
+
+#: assets/Default/Main.sublime-menu
+msgid "Tab Selection"
+msgstr "Sélection d’onglets"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Others"
+msgstr "Désélectionner les autres"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Left"
+msgstr "Désélectionner à gauche"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Right"
+msgstr "Désélectionner à droite"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Current"
+msgstr "Désélectionner l’actuel"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Left"
+msgstr "Sélectionner à gauche"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Right"
+msgstr "Sélectionner à droite"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Left"
+msgstr "Activer à gauche"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Right"
+msgstr "Activer à droite"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 1"
+msgstr "Activer l’onglet sélectionné 1"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 2"
+msgstr "Activer l’onglet sélectionné 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 3"
+msgstr "Activer l’onglet sélectionné 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 4"
+msgstr "Activer l’onglet sélectionné 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 5"
+msgstr "Activer l’onglet sélectionné 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 6"
+msgstr "Activer l’onglet sélectionné 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 7"
+msgstr "Activer l’onglet sélectionné 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 8"
+msgstr "Activer l’onglet sélectionné 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 9"
+msgstr "Activer l’onglet sélectionné 9"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 10"
+msgstr "Activer l’onglet sélectionné 10"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Split View"
+msgstr "Vue partagée"
+
+#: crates/use_cases/src/tab_selection.rs
+msgid "Key Binding Changed\n\nThe key binding for Join Lines has changed to {primary}+Shift+J.\n\nThe binding was changed to open up {primary}+J to be used as the first key press for various new key bindings, such as Unselect to Left, Unselect to Right, Select to Left and Select to Right."
+msgstr "Raccourci clavier modifié\n\nLe raccourci de Joindre les lignes est maintenant {primary}+Maj+J.\n\nIl a été modifié pour libérer {primary}+J comme première touche de plusieurs nouveaux raccourcis, comme Désélectionner à gauche, Désélectionner à droite, Sélectionner à gauche et Sélectionner à droite."

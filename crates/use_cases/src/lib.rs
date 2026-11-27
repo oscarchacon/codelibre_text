@@ -71,6 +71,7 @@ pub mod search;
 pub mod session;
 pub mod side_bar;
 pub mod snippets;
+pub mod tab_selection;
 pub mod undo;
 pub mod windows;
 

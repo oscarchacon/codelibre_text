@@ -434,6 +434,25 @@ impl Editor {
                     .collect();
                 Ok(json!(ids))
             }
+            "window_selected_sheets_in_group" => {
+                let ids: Vec<_> = self
+                    .selected_indexes_in_group(a.usize(0)?)
+                    .into_iter()
+                    .map(|i| self.state.documents[i].id)
+                    .collect();
+                Ok(json!(ids))
+            }
+            "window_select_sheets" => {
+                let ids: Vec<u64> = a
+                    .value(0)
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_u64)
+                    .collect();
+                self.select_documents(&ids);
+                Ok(Value::Null)
+            }
             "window_new_file" => {
                 self.new_file();
                 Ok(self.active_document().map_or(Value::Null, |d| json!(d.id)))
@@ -1164,7 +1183,7 @@ impl Editor {
     }
 
     /// A modal message for a plugin, titled with the application's name unless the plugin gives one.
-    fn plugin_dialog(
+    pub(crate) fn plugin_dialog(
         &self,
         level: MessageLevel,
         title: &str,

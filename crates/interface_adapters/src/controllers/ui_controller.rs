@@ -31,6 +31,16 @@ pub enum UiEvent {
     ContextMenu(Option<ContextMenuTarget>),
 
     ActivateTab(usize),
+    /// A tab clicked with `toggle` (Ctrl, Cmd on macOS: it joins or leaves its group's selected
+    /// tabs) or `range` (Shift: the tabs from the focused one to it are selected).
+    SelectTab {
+        index: usize,
+        toggle: bool,
+        range: bool,
+    },
+    /// The text of a view the window shows was clicked while another had the focus (a tab
+    /// selected beside the focused one, or another group's).
+    FocusView(DocumentId),
     CloseTab(usize),
     NewTab,
     /// A group of the layout was clicked (its text, its tab strip or its empty area).
@@ -244,6 +254,24 @@ pub fn handle(editor: &mut Editor, view: &mut ViewState, event: UiEvent) {
             view.focused_output_panel = None;
             view.output_panel_focus_requested = None;
             editor.activate(index);
+            view.focus_editor = true;
+        }
+        UiEvent::SelectTab {
+            index,
+            toggle,
+            range,
+        } => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
+            editor.click_tab(index, toggle, range);
+            view.focus_editor = true;
+        }
+        UiEvent::FocusView(id) => {
+            editor.blur_output_panel();
+            view.focused_output_panel = None;
+            view.output_panel_focus_requested = None;
+            editor.activate_document(id);
             view.focus_editor = true;
         }
         UiEvent::CloseTab(index) => {

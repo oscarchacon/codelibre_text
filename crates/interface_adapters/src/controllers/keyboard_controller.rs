@@ -103,6 +103,7 @@ pub fn key_pressed(
         num_selections: editor
             .active_document()
             .map_or(1, |d| d.extra_selections().len() + 1),
+        group_has_multiselect: editor.group_has_multiselect(),
         settings: editor.view_settings(),
         // The scopes come from the highlighting cache. Not while a panel takes the typing: `(` in
         // the find panel must not pair brackets in the file.
@@ -377,6 +378,8 @@ struct ViewKeyContext {
     /// The `panel` context: `find`, `replace`, `find_in_files`, `input` or `output.<name>`.
     panel: String,
     num_selections: usize,
+    /// The focused group has several tabs selected.
+    group_has_multiselect: bool,
     settings: Settings,
     /// Every selection of the active view: what `selector`, `selection_empty`,
     /// `preceding_text`, `following_text` and `text` look at. One of them must match, or all of
@@ -462,6 +465,7 @@ impl KeyContext for ViewKeyContext {
             "panel" => Value::String(self.panel.clone()),
             "panel_type" => Value::String(panel_type(&self.panel).to_string()),
             "num_selections" => Value::from(self.num_selections),
+            "group_has_multiselect" => Value::Bool(self.group_has_multiselect),
             "auto_complete_visible" => Value::Bool(self.auto_complete_visible),
             "has_next_field" => Value::Bool(self.has_next_field),
             "has_prev_field" => Value::Bool(self.has_prev_field),

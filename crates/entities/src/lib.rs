@@ -29,6 +29,7 @@ pub mod selection;
 pub mod selector;
 pub mod settings;
 pub mod symbol;
+pub mod tab_selection;
 pub mod text;
 pub mod text_commands;
 pub mod undo;

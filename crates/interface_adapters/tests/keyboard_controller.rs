@@ -979,3 +979,79 @@ fn the_builtin_keymap_binds_the_find_toggles_in_the_find_panel() {
         assert_eq!(queued(&mut view), vec![command]);
     }
 }
+
+/// Every binding of the built-in Windows / Linux keymap, with its arguments and context.
+fn with_builtin_keymap(mut world: World) -> World {
+    let keymap = sublime_json::parse(builtin_resources::PC_KEYMAP).unwrap();
+    for item in keymap.as_array().unwrap() {
+        let keys: Vec<&str> = item["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        let command = Command::with_args(
+            item["command"].as_str().unwrap(),
+            item.get("args").cloned().unwrap_or(json!({})),
+        );
+        let context = item
+            .get("context")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        world = world.with_binding(bind(&keys, command, context));
+    }
+    world
+}
+
+/// Sublime 4 moved Join Lines to Ctrl+Shift+J: Ctrl+J starts the Tab Selection chords, and
+/// Alt+number focuses a selected tab while several are selected (else it selects a tab).
+#[test]
+fn ctrl_j_starts_the_tab_selection_chords_and_alt_numbers_follow_the_selection() {
+    let mut world = World::new();
+    for name in ["a", "b", "c"] {
+        world = world.with_file(&format!("/p/{name}"), name);
+    }
+    let mut editor = with_builtin_keymap(world).editor();
+    for name in ["a", "b", "c"] {
+        test_support::open(&mut editor, &format!("/p/{name}"));
+    }
+    let mut view = ViewState::default();
+    let commands = |view: &mut ViewState| -> Vec<(String, Value)> {
+        view.take_commands()
+            .into_iter()
+            .map(|c| (c.name, c.args))
+            .collect()
+    };
+
+    assert!(press(&mut editor, &mut view, "ctrl+shift+j"));
+    assert_eq!(queued(&mut view), ["join_lines"]);
+    assert!(press(&mut editor, &mut view, "ctrl+j"));
+    assert!(
+        queued(&mut view).is_empty(),
+        "waiting for the chord's second key"
+    );
+    assert!(press(&mut editor, &mut view, "ctrl+up"));
+    assert_eq!(queued(&mut view), ["unselect_others"]);
+    press(&mut editor, &mut view, "ctrl+j");
+    press(&mut editor, &mut view, "ctrl+j");
+    assert_eq!(queued(&mut view), ["primary_j_changed"]);
+
+    press(&mut editor, &mut view, "alt+1");
+    assert_eq!(
+        commands(&mut view),
+        [("select_by_index".to_string(), json!({ "index": 0 }))]
+    );
+    let ids: Vec<u64> = editor.state().documents.iter().map(|d| d.id).collect();
+    editor.select_documents(&ids[..2]);
+    press(&mut editor, &mut view, "alt+1");
+    assert_eq!(
+        commands(&mut view),
+        [("focus_by_index".to_string(), json!({ "index": 0 }))]
+    );
+    press(&mut editor, &mut view, "alt+9");
+    assert_eq!(
+        commands(&mut view),
+        [("focus_by_index".to_string(), json!({ "index": 8 }))]
+    );
+}

@@ -1577,3 +1577,87 @@ msgstr "Mostrar en la barra lateral"
 #: assets/Default/Image Context.sublime-menu
 msgid "Reopen File as Text"
 msgstr "Reabrir el archivo como texto"
+
+#: assets/Default/Main.sublime-menu
+msgid "Tab Selection"
+msgstr "Selección de pestañas"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Others"
+msgstr "Deseleccionar las demás"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Left"
+msgstr "Deseleccionar a la izquierda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect to Right"
+msgstr "Deseleccionar a la derecha"
+
+#: assets/Default/Main.sublime-menu
+msgid "Unselect Current"
+msgstr "Deseleccionar la actual"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Left"
+msgstr "Seleccionar a la izquierda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Select to Right"
+msgstr "Seleccionar a la derecha"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Left"
+msgstr "Enfocar a la izquierda"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus to Right"
+msgstr "Enfocar a la derecha"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 1"
+msgstr "Enfocar la pestaña seleccionada 1"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 2"
+msgstr "Enfocar la pestaña seleccionada 2"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 3"
+msgstr "Enfocar la pestaña seleccionada 3"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 4"
+msgstr "Enfocar la pestaña seleccionada 4"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 5"
+msgstr "Enfocar la pestaña seleccionada 5"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 6"
+msgstr "Enfocar la pestaña seleccionada 6"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 7"
+msgstr "Enfocar la pestaña seleccionada 7"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 8"
+msgstr "Enfocar la pestaña seleccionada 8"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 9"
+msgstr "Enfocar la pestaña seleccionada 9"
+
+#: assets/Default/Main.sublime-menu
+msgid "Focus Selected Tab 10"
+msgstr "Enfocar la pestaña seleccionada 10"
+
+#: assets/Default/Tab Context.sublime-menu
+msgid "Split View"
+msgstr "Vista dividida"
+
+#: crates/use_cases/src/tab_selection.rs
+msgid "Key Binding Changed\n\nThe key binding for Join Lines has changed to {primary}+Shift+J.\n\nThe binding was changed to open up {primary}+J to be used as the first key press for various new key bindings, such as Unselect to Left, Unselect to Right, Select to Left and Select to Right."
+msgstr "Atajo de teclado cambiado\n\nEl atajo de Unir líneas ha cambiado a {primary}+Mayús+J.\n\nSe cambió para dejar {primary}+J como primera tecla de varios atajos nuevos, como Deseleccionar a la izquierda, Deseleccionar a la derecha, Seleccionar a la izquierda y Seleccionar a la derecha."

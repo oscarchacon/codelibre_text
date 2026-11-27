@@ -129,15 +129,28 @@ impl Editor {
     /// close tabs of `group`: `close_by_index` the tab at `index`, `close_others_by_index` the
     /// others, `close_to_right_by_index` those after it, `close_unmodified` the unmodified ones,
     /// `close_unmodified_to_right_by_index` the unmodified ones after it, `close_deleted_files`
-    /// those whose file is no longer on disk. With one tab selected at a time (tabs are not
-    /// multi-selected), `close_selected` is the tab clicked and `close_unselected` the others.
+    /// those whose file is no longer on disk. `close_selected` closes the group's selected tabs
+    /// and `close_unselected` the others, whichever tab was clicked (as Sublime 4215 does); the
+    /// focused one last, so the focus does not go to another of them.
     pub fn close_by_index(&mut self, command: &Command) {
         let group = command.usize_arg("group", self.state.active_group);
         let index = command.usize_arg("index", usize::MAX);
         let tabs = self.group_indexes(group);
         let unmodified = |&i: &usize| !self.state.documents[i].is_dirty();
+        let selected = self.selected_indexes_in_group(group);
         let chosen: Vec<usize> = match command.name.as_str() {
-            "close_by_index" | "close_selected" => tabs.get(index).copied().into_iter().collect(),
+            "close_by_index" => tabs.get(index).copied().into_iter().collect(),
+            "close_selected" => {
+                let focused = self.active_index_in_group(group);
+                let (focused, others): (Vec<usize>, Vec<usize>) =
+                    selected.iter().partition(|&&i| Some(i) == focused);
+                others.into_iter().chain(focused).collect()
+            }
+            "close_unselected" => tabs
+                .iter()
+                .copied()
+                .filter(|i| !selected.contains(i))
+                .collect(),
             "close_unmodified" => tabs.iter().copied().filter(unmodified).collect(),
             "close_unmodified_to_right_by_index" => tabs
                 .iter()
@@ -155,7 +168,7 @@ impl Editor {
                         .is_some_and(|path| !self.gateways.file_system.exists(path))
                 })
                 .collect(),
-            "close_others_by_index" | "close_unselected" if index < tabs.len() => tabs
+            "close_others_by_index" if index < tabs.len() => tabs
                 .iter()
                 .enumerate()
                 .filter(|&(i, _)| i != index)

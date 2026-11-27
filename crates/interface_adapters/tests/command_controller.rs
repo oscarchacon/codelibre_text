@@ -2698,3 +2698,51 @@ fn wrap_in_selection_and_highlight_toggles_keep_the_focus() {
     run(&mut editor, &mut view, &cmd("replace_all"));
     assert_eq!(active_text(&editor), "foo bar bar");
 }
+
+#[test]
+fn tab_selection_commands_split_view_and_the_join_lines_notice() {
+    let world = World::new()
+        .with_file("/p/a", "a")
+        .with_file("/p/b", "b")
+        .with_file("/p/c", "c");
+    let mut editor = world.editor();
+    let mut view = ViewState::default();
+    for file in ["/p/a", "/p/b", "/p/c"] {
+        open(&mut editor, file);
+    }
+    let selected = |editor: &Editor| -> Vec<String> {
+        editor
+            .selected_indexes_in_group(0)
+            .into_iter()
+            .map(|i| editor.state().documents[i].name())
+            .collect()
+    };
+    // The tab menu's Split View on the first tab: a clone beside it.
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with(
+            "clone_file",
+            json!({ "add_to_selection": true, "group": 0, "index": 0 }),
+        ),
+    );
+    assert_eq!(selected(&editor), ["a", "a"]);
+    run(&mut editor, &mut view, &cmd("select_to_right"));
+    assert_eq!(selected(&editor), ["a", "a", "b"]);
+    run(
+        &mut editor,
+        &mut view,
+        &cmd_with("focus_by_index", json!({ "index": 0 })),
+    );
+    assert_eq!(editor.active_document().unwrap().name(), "a");
+    run(&mut editor, &mut view, &cmd("unselect_others"));
+    assert_eq!(selected(&editor).len(), 1);
+    run(&mut editor, &mut view, &cmd("select_last_tab"));
+    assert_eq!(editor.active_document().unwrap().name(), "c");
+
+    run(&mut editor, &mut view, &cmd("primary_j_changed"));
+    let messages = world.dialogs.messages.borrow();
+    assert!(messages
+        .last()
+        .is_some_and(|m| m.text.contains("Ctrl+Shift+J") || m.text.contains("Cmd+Shift+J")));
+}

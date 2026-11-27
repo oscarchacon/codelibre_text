@@ -20,7 +20,7 @@ Classes whose registered name differs from the class: `distraction_free` → `to
 `duplicate_selections` → `duplicate_line`, `remove_all_folders` → `close_folder_list`, `global_*` → the command
 without the prefix (used when no window is open).
 
-## Not implemented in CodeLibre Text (120)
+## Not implemented in CodeLibre Text (110)
 
 | Command | Class (if different) | Arguments / settings it reads |
 |---|---|---|
@@ -57,10 +57,7 @@ without the prefix (used when no window is open).
 | `drag_select` |  | `additive` `columns` `event` `extend` `subtractive` |
 | `expand_selection_to_paragraph` |  | `markup_aware` |
 | `expand_snippet` |  |  |
-| `focus_by_index` |  |  |
 | `focus_group` |  |  |
-| `focus_to_left` |  |  |
-| `focus_to_right` |  |  |
 | `fold` |  |  |
 | `fold_all` |  |  |
 | `fold_by_level` |  |  |
@@ -114,9 +111,6 @@ without the prefix (used when no window is open).
 | `scroll_lines` |  | `amount` |
 | `select_all_bookmarks` |  |  |
 | `select_bookmark` |  |  |
-| `select_last_tab` |  |  |
-| `select_to_left` |  |  |
-| `select_to_right` |  |  |
 | `set_build_system` |  |  |
 | `set_encoding` |  |  |
 | `set_layout` |  |  |
@@ -139,13 +133,9 @@ without the prefix (used when no window is open).
 | `toggle_tabs` |  |  |
 | `unfold` |  |  |
 | `unfold_all` |  |  |
-| `unselect_current` |  |  |
-| `unselect_others` |  |  |
-| `unselect_to_left` |  |  |
-| `unselect_to_right` |  |  |
 | `wrap_lines` |  | `rulers` `wrap_width` |
 
-## Implemented — check the arguments and settings (62)
+## Implemented — check the arguments and settings (72)
 
 Supported since 2026-10-26: `expand_selection {to: smart | line_prev | line_without_eol | line_strict | brackets | indentation}`,
 `copy` / `cut` / `paste` with `copy_with_empty_selection`, `trim_trailing_white_space {only_modified, trim_on_caret}` (and on save
@@ -173,6 +163,9 @@ Still ignored:
 | `duplicate_line` | `duplicate_selections_command` |  |
 | `exit` |  |  |
 | `expand_selection` |  | `line_prev` `line_strict` `line_without_eol` `smart` |
+| `focus_by_index` |  |  |
+| `focus_to_left` |  |  |
+| `focus_to_right` |  |  |
 | `hide_overlay` |  | `cancel` |
 | `hide_panel` |  | `cancel` |
 | `increase_font_size` |  |  |
@@ -208,7 +201,10 @@ Still ignored:
 | `save` |  |  |
 | `select_all` |  |  |
 | `select_by_index` |  |  |
+| `select_last_tab` |  |  |
 | `select_lines` |  |  |
+| `select_to_left` |  |  |
+| `select_to_right` |  |  |
 | `set_file_type` |  |  |
 | `set_line_ending` |  |  |
 | `set_setting` | `set_option_command` | `is_widget` |
@@ -226,6 +222,10 @@ Still ignored:
 | `toggle_status_bar` |  |  |
 | `trim_trailing_white_space` |  | `only_modified` `trim_on_caret` |
 | `undo` |  |  |
+| `unselect_current` |  |  |
+| `unselect_others` |  |  |
+| `unselect_to_left` |  |  |
+| `unselect_to_right` |  |  |
 
 ## Internal (UI plumbing, licensing, testing) — nothing to do (29)
 

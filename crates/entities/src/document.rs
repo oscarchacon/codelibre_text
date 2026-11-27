@@ -87,6 +87,10 @@ pub struct Document {
     /// A preview (Sublime's transient view: a file clicked once in the side bar, `TRANSIENT`):
     /// the next preview in its group takes its place, until it is edited or kept.
     pub transient: bool,
+    /// Its tab is one of its group's selected tabs (Sublime 4's multi-selected tabs, shown side by
+    /// side), which only counts while the group's active tab is selected too: see
+    /// [`crate::tab_selection`].
+    pub tab_selected: bool,
     /// The buffer it shows: its own id, or that of the view it is a clone of (`clone_file`),
     /// whose text it shares (see [`Document::follow_buffer`]).
     pub buffer: DocumentId,
@@ -249,6 +253,7 @@ impl Document {
             modified_at: None,
             group: 0,
             transient: false,
+            tab_selected: false,
             buffer: id,
             selection: Selection::caret(0),
             extra_selections: Vec::new(),
